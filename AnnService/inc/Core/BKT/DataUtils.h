@@ -1,12 +1,12 @@
-#ifndef _SPACEV_BKT_DATAUTILS_H_
-#define _SPACEV_BKT_DATAUTILS_H_
+#ifndef _SPTAG_BKT_DATAUTILS_H_
+#define _SPTAG_BKT_DATAUTILS_H_
 
 #include <sys/stat.h>
 #include <atomic>
 #include "CommonUtils.h"
 #include "../../Helper/CommonHelper.h"
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT
     {
@@ -186,4 +186,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_DATAUTILS_H_
+#endif // _SPTAG_BKT_DATAUTILS_H_

@@ -2,7 +2,7 @@
 
 #include <limits>
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
 
 Client::Client(const PacketHandlerMapPtr& p_handlerMap,
@@ -44,7 +44,7 @@ Client::~Client()
 ConnectionID
 Client::ConnectToServer(const std::string& p_address,
                         const std::string& p_port,
-                        SpaceV::ErrorCode& p_ec)
+                        SPTAG::ErrorCode& p_ec)
 {
     boost::asio::ip::tcp::resolver resolver(m_ioContext);
 
@@ -90,7 +90,7 @@ Client::AsyncConnectToServer(const std::string& p_address,
     boost::asio::post(m_ioContext,
                       [this, p_address, p_port, p_callback]()
     {
-        SpaceV::ErrorCode errCode;
+        SPTAG::ErrorCode errCode;
         auto connID = ConnectToServer(p_address, p_port, errCode);
         if (bool(p_callback))
         {

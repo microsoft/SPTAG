@@ -1,10 +1,10 @@
-#ifndef _SPACEV_BKT_WORKSPACE_H_
-#define _SPACEV_BKT_WORKSPACE_H_
+#ifndef _SPTAG_BKT_WORKSPACE_H_
+#define _SPTAG_BKT_WORKSPACE_H_
 
 #include "CommonUtils.h"
 #include "Heap.h"
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT
     {
@@ -219,4 +219,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_WORKSPACE_H_
+#endif // _SPTAG_BKT_WORKSPACE_H_

@@ -1,9 +1,9 @@
-#ifndef _SPACEV_SOCKET_COMMON_H_
-#define _SPACEV_SOCKET_COMMON_H_
+#ifndef _SPTAG_SOCKET_COMMON_H_
+#define _SPTAG_SOCKET_COMMON_H_
 
 #include <cstdint>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -17,6 +17,6 @@ extern const ConnectionID c_invalidConnectionID;
 extern const ResourceID c_invalidResourceID;
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SOCKET_COMMON_H_
+#endif // _SPTAG_SOCKET_COMMON_H_

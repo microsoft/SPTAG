@@ -1,11 +1,11 @@
-#ifndef _SPACEV_AGGREGATOR_AGGREGATORSETTINGS_H_
-#define _SPACEV_AGGREGATOR_AGGREGATORSETTINGS_H_
+#ifndef _SPTAG_AGGREGATOR_AGGREGATORSETTINGS_H_
+#define _SPTAG_AGGREGATOR_AGGREGATORSETTINGS_H_
 
 #include "../Core/Common.h"
 
 #include <string>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Aggregator
 {
@@ -32,5 +32,5 @@ struct AggregatorSettings
 } // namespace AnnService
 
 
-#endif // _SPACEV_AGGREGATOR_AGGREGATORSETTINGS_H_
+#endif // _SPTAG_AGGREGATOR_AGGREGATORSETTINGS_H_
 

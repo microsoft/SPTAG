@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 2.8)
 
-project (SpaceVLib)
+project (SPTAGLib)
 
 function(CXX_COMPILER_DUMPVERSION _OUTPUT_VERSION)
 
@@ -65,5 +65,3 @@ set (CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory (AnnService)
 add_subdirectory (PythonWrapper)
-add_subdirectory (SingleBox)
-

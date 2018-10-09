@@ -1,5 +1,5 @@
-#ifndef _SPACEV_METADATASET_H_
-#define _SPACEV_METADATASET_H_
+#ifndef _SPTAG_METADATASET_H_
+#define _SPTAG_METADATASET_H_
 
 #include "Common.h"
 #include "CommonDataStructure.h"
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 class MetadataSet
@@ -106,6 +106,6 @@ private:
 };
 
 
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_METADATASET_H_
+#endif // _SPTAG_METADATASET_H_

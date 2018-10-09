@@ -1,7 +1,7 @@
 #include "inc/Core/BKT/WorkSpacePool.h"
 
-using namespace SpaceV;
-using namespace SpaceV::BKT;
+using namespace SPTAG;
+using namespace SPTAG::BKT;
 
 
 WorkSpacePool::WorkSpacePool(int p_maxCheck, int p_vectorCount)

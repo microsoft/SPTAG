@@ -1,5 +1,5 @@
-#ifndef _SPACEV_CORE_COMMONDEFS_H_
-#define _SPACEV_CORE_COMMONDEFS_H_
+#ifndef _SPTAG_CORE_COMMONDEFS_H_
+#define _SPTAG_CORE_COMMONDEFS_H_
 
 #include <cstdint>
 #include <type_traits>
@@ -44,7 +44,7 @@ inline bool fileexists(const char* path) {
 }
 #endif
 
-namespace SpaceV
+namespace SPTAG
 {
 
 typedef std::uint32_t SizeType;
@@ -151,6 +151,6 @@ inline std::size_t GetValueTypeSize(VectorValueType p_valueType)
     return 0;
 }
 
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_CORE_COMMONDEFS_H_
+#endif // _SPTAG_CORE_COMMONDEFS_H_

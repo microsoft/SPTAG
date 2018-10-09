@@ -1,5 +1,5 @@
-#ifndef _SPACEV_HELPER_ARGUMENTSPARSER_H_
-#define _SPACEV_HELPER_ARGUMENTSPARSER_H_
+#ifndef _SPTAG_HELPER_ARGUMENTSPARSER_H_
+#define _SPTAG_HELPER_ARGUMENTSPARSER_H_
 
 #include "inc/Helper/StringConvert.h"
 
@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -245,6 +245,6 @@ private:
 
 
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_ARGUMENTSPARSER_H_
+#endif // _SPTAG_HELPER_ARGUMENTSPARSER_H_

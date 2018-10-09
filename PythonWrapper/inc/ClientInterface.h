@@ -1,5 +1,5 @@
-#ifndef _SPACEV_PW_CLIENTINTERFACE_H_
-#define _SPACEV_PW_CLIENTINTERFACE_H_
+#ifndef _SPTAG_PW_CLIENTINTERFACE_H_
+#define _SPTAG_PW_CLIENTINTERFACE_H_
 
 #ifndef SWIG
 
@@ -14,7 +14,7 @@
 #include <mutex>
 
 #else
-%module SpaceVClient
+%module SPTAGClient
 
 %{
 #include "inc/ClientInterface.h"
@@ -54,15 +54,15 @@ private:
     std::string CreateSearchQuery(const ByteArray& p_data,
                                   SizeType p_resultNum,
                                   bool p_extractMetadata,
-                                  SpaceV::VectorValueType p_valueType);
+                                  SPTAG::VectorValueType p_valueType);
 
-    SpaceV::Socket::PacketHandlerMapPtr GetHandlerMap();
+    SPTAG::Socket::PacketHandlerMapPtr GetHandlerMap();
 
-    void SearchResponseHanlder(SpaceV::Socket::ConnectionID p_localConnectionID,
-                               SpaceV::Socket::Packet p_packet);
+    void SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID,
+                               SPTAG::Socket::Packet p_packet);
 
 private:
-    typedef std::function<void(SpaceV::Socket::RemoteSearchResult)> Callback;
+    typedef std::function<void(SPTAG::Socket::RemoteSearchResult)> Callback;
 
     std::uint32_t m_timeoutInMilliseconds;
 
@@ -70,15 +70,15 @@ private:
 
     std::string m_port;
 
-    std::unique_ptr<SpaceV::Socket::Client> m_socketClient;
+    std::unique_ptr<SPTAG::Socket::Client> m_socketClient;
 
-    std::atomic<SpaceV::Socket::ConnectionID> m_connectionID;
+    std::atomic<SPTAG::Socket::ConnectionID> m_connectionID;
 
-    SpaceV::Socket::ResourceManager<Callback> m_callbackManager;
+    SPTAG::Socket::ResourceManager<Callback> m_callbackManager;
 
     std::unordered_map<std::string, std::string> m_params;
 
     std::mutex m_paramMutex;
 };
 
-#endif // _SPACEV_PW_CLIENTINTERFACE_H_
+#endif // _SPTAG_PW_CLIENTINTERFACE_H_

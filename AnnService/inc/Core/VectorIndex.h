@@ -1,5 +1,5 @@
-#ifndef _SPACEV_VECTORINDEX_H_
-#define _SPACEV_VECTORINDEX_H_
+#ifndef _SPTAG_VECTORINDEX_H_
+#define _SPTAG_VECTORINDEX_H_
 
 #include "Common.h"
 #include "SearchQuery.h"
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 namespace Helper
@@ -61,6 +61,6 @@ private:
 };
 
 
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_VECTORINDEX_H_
+#endif // _SPTAG_VECTORINDEX_H_

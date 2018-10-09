@@ -1,5 +1,5 @@
-#ifndef _SPACEV_BKT_WORKSPACEPOOL_H_
-#define _SPACEV_BKT_WORKSPACEPOOL_H_
+#ifndef _SPTAG_BKT_WORKSPACEPOOL_H_
+#define _SPTAG_BKT_WORKSPACEPOOL_H_
 
 #include "WorkSpace.h"
 
@@ -7,7 +7,7 @@
 #include <mutex>
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace BKT
 {
@@ -38,4 +38,4 @@ private:
 }
 }
 
-#endif // _SPACEV_BKT_WORKSPACEPOOL_H_
+#endif // _SPTAG_BKT_WORKSPACEPOOL_H_

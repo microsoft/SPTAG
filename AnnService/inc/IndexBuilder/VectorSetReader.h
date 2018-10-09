@@ -1,5 +1,5 @@
-#ifndef _SPACEV_INDEXBUILDER_VECTORSETREADER_H_
-#define _SPACEV_INDEXBUILDER_VECTORSETREADER_H_
+#ifndef _SPTAG_INDEXBUILDER_VECTORSETREADER_H_
+#define _SPTAG_INDEXBUILDER_VECTORSETREADER_H_
 
 #include "inc/Core/Common.h"
 #include "inc/Core/VectorSet.h"
@@ -8,7 +8,7 @@
 
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace IndexBuilder
 {
@@ -35,6 +35,6 @@ protected:
 
 
 } // namespace IndexBuilder
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_INDEXBUILDER_VECTORSETREADER_H_
+#endif // _SPTAG_INDEXBUILDER_VECTORSETREADER_H_

@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SERVER_SEARCHEXECUTOR_H_
-#define _SPACEV_SERVER_SEARCHEXECUTOR_H_
+#ifndef _SPTAG_SERVER_SEARCHEXECUTOR_H_
+#define _SPTAG_SERVER_SEARCHEXECUTOR_H_
 
 #include "ServiceContext.h"
 #include "ServiceSettings.h"
@@ -10,7 +10,7 @@
 #include <memory>
 #include <vector>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -50,4 +50,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_SERVER_SEARCHEXECUTOR_H_
+#endif // _SPTAG_SERVER_SEARCHEXECUTOR_H_

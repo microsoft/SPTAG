@@ -5,17 +5,17 @@
 #include <atomic>
 #include <iostream>
 
-std::unique_ptr<SpaceV::Client::ClientWrapper> g_client;
+std::unique_ptr<SPTAG::Client::ClientWrapper> g_client;
 
 int main(int argc, char** argv)
 {
-    SpaceV::Client::ClientOptions options;
+    SPTAG::Client::ClientOptions options;
     if (!options.Parse(argc - 1, argv + 1))
     {
         return 1;
     }
 
-    g_client.reset(new SpaceV::Client::ClientWrapper(options));
+    g_client.reset(new SPTAG::Client::ClientWrapper(options));
     if (!g_client->IsAvailable())
     {
         return 1;
@@ -33,12 +33,12 @@ int main(int argc, char** argv)
             break;
         }
 
-        SpaceV::Socket::RemoteQuery query;
-        query.m_type = SpaceV::Socket::RemoteQuery::QueryType::String;
+        SPTAG::Socket::RemoteQuery query;
+        query.m_type = SPTAG::Socket::RemoteQuery::QueryType::String;
         query.m_queryString = std::move(line);
 
-        SpaceV::Socket::RemoteSearchResult result;
-        auto callback = [&result](SpaceV::Socket::RemoteSearchResult p_result)
+        SPTAG::Socket::RemoteSearchResult result;
+        auto callback = [&result](SPTAG::Socket::RemoteSearchResult p_result)
         {
             result = std::move(p_result);
         };

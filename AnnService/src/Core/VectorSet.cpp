@@ -1,6 +1,6 @@
 #include "inc/Core/VectorSet.h"
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 
 VectorSet::VectorSet()

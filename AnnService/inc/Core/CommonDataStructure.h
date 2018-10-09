@@ -1,11 +1,11 @@
-#ifndef _SPACEV_COMMONDATASTRUCTURE_H_
-#define _SPACEV_COMMONDATASTRUCTURE_H_
+#ifndef _SPTAG_COMMONDATASTRUCTURE_H_
+#define _SPTAG_COMMONDATASTRUCTURE_H_
 
 #include "Common.h"
 
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 class ByteArray
@@ -48,6 +48,6 @@ private:
     std::shared_ptr<std::uint8_t> m_dataHolder;
 };
 
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_COMMONDATASTRUCTURE_H_
+#endif // _SPTAG_COMMONDATASTRUCTURE_H_

@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SERVER_SERVICECONTEX_H_
-#define _SPACEV_SERVER_SERVICECONTEX_H_
+#ifndef _SPTAG_SERVER_SERVICECONTEX_H_
+#define _SPTAG_SERVER_SERVICECONTEX_H_
 
 #include "inc/Core/VectorIndex.h"
 #include "ServiceSettings.h"
@@ -7,7 +7,7 @@
 #include <memory>
 #include <map>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -37,5 +37,5 @@ private:
 } // namespace Server
 } // namespace AnnService
 
-#endif // _SPACEV_SERVER_SERVICECONTEX_H_
+#endif // _SPTAG_SERVER_SERVICECONTEX_H_
 

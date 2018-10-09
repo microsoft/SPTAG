@@ -1,7 +1,7 @@
 #include "inc/Aggregator/AggregatorExecutionContext.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Aggregator;
+using namespace SPTAG;
+using namespace SPTAG::Aggregator;
 
 AggregatorExecutionContext::AggregatorExecutionContext(std::size_t p_totalServerNumber,
                                                        Socket::PacketHeader p_requestHeader)

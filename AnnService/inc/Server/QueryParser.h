@@ -1,12 +1,12 @@
-#ifndef _SPACEV_SERVER_QUERYPARSER_H_
-#define _SPACEV_SERVER_QUERYPARSER_H_
+#ifndef _SPTAG_SERVER_QUERYPARSER_H_
+#define _SPTAG_SERVER_QUERYPARSER_H_
 
 #include "../Core/Common.h"
 #include "../Core/CommonDataStructure.h"
 
 #include <vector>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -50,4 +50,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_SERVER_QUERYPARSER_H_
+#endif // _SPTAG_SERVER_QUERYPARSER_H_

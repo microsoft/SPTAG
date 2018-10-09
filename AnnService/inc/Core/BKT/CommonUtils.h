@@ -1,5 +1,5 @@
-#ifndef _SPACEV_BKT_COMMONUTILS_H_
-#define _SPACEV_BKT_COMMONUTILS_H_
+#ifndef _SPTAG_BKT_COMMONUTILS_H_
+#define _SPTAG_BKT_COMMONUTILS_H_
 
 #include "../Common.h"
 
@@ -30,7 +30,7 @@
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 #endif
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT 
     {
@@ -152,4 +152,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_COMMONUTILS_H_
+#endif // _SPTAG_BKT_COMMONUTILS_H_

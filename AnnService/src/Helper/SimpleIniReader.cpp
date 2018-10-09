@@ -6,8 +6,8 @@
 #include <cctype>
 #include <functional>
 
-using namespace SpaceV;
-using namespace SpaceV::Helper;
+using namespace SPTAG;
+using namespace SPTAG::Helper;
 
 const IniReader::ParameterValueMap IniReader::c_emptyParameters;
 

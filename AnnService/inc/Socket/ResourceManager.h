@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_RESOURCEMANAGER_H_
-#define _SPACEV_SOCKET_RESOURCEMANAGER_H_
+#ifndef _SPTAG_SOCKET_RESOURCEMANAGER_H_
+#define _SPTAG_SOCKET_RESOURCEMANAGER_H_
 
 #include "Common.h"
 
@@ -19,7 +19,7 @@ namespace std
 typedef atomic<uint32_t> atomic_uint32_t;
 }
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -182,6 +182,6 @@ private:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SOCKET_RESOURCEMANAGER_H_
+#endif // _SPTAG_SOCKET_RESOURCEMANAGER_H_

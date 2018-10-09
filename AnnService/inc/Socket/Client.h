@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_CLIENT_H_
-#define _SPACEV_SOCKET_CLIENT_H_
+#ifndef _SPTAG_SOCKET_CLIENT_H_
+#define _SPTAG_SOCKET_CLIENT_H_
 
 #include "inc/Core/Common.h"
 #include "Connection.h"
@@ -11,7 +11,7 @@
 #include <atomic>
 #include <boost/asio.hpp>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -19,7 +19,7 @@ namespace Socket
 class Client
 {
 public:
-    typedef std::function<void(ConnectionID p_cid, SpaceV::ErrorCode)> ConnectCallback;
+    typedef std::function<void(ConnectionID p_cid, SPTAG::ErrorCode)> ConnectCallback;
 
     Client(const PacketHandlerMapPtr& p_handlerMap,
            std::size_t p_threadNum,
@@ -29,7 +29,7 @@ public:
 
     ConnectionID ConnectToServer(const std::string& p_address,
                                  const std::string& p_port,
-                                 SpaceV::ErrorCode& p_ec);
+                                 SPTAG::ErrorCode& p_ec);
 
     void AsyncConnectToServer(const std::string& p_address,
                               const std::string& p_port,
@@ -60,6 +60,6 @@ private:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SOCKET_CLIENT_H_
+#endif // _SPTAG_SOCKET_CLIENT_H_

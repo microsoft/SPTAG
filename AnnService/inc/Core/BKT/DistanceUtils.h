@@ -1,5 +1,5 @@
-#ifndef _SPACEV_BKT_DISTANCEUTILS_H_
-#define _SPACEV_BKT_DISTANCEUTILS_H_
+#ifndef _SPTAG_BKT_DISTANCEUTILS_H_
+#define _SPTAG_BKT_DISTANCEUTILS_H_
 
 #include <immintrin.h>
 #include "CommonUtils.h"
@@ -16,7 +16,7 @@
 #define DIFF256 diff256.m256_f32
 #endif
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT
     {
@@ -456,9 +456,9 @@ namespace SpaceV
             }
 
             template<typename T>
-            static inline float ComputeDistance(const T *p1, const T *p2, int length, SpaceV::DistCalcMethod distCalcMethod)
+            static inline float ComputeDistance(const T *p1, const T *p2, int length, SPTAG::DistCalcMethod distCalcMethod)
             {
-                if (distCalcMethod == SpaceV::DistCalcMethod::L2)
+                if (distCalcMethod == SPTAG::DistCalcMethod::L2)
                     return ComputeL2Distance(p1, p2, length);
 
                 return ComputeCosineDistance(p1, p2, length);
@@ -480,14 +480,14 @@ namespace SpaceV
 
 
         template<typename T>
-        float (*DistanceCalcSelector(SpaceV::DistCalcMethod p_method)) (const T*, const T*, int)
+        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, int)
         {
             switch (p_method)
             {
-            case SpaceV::DistCalcMethod::Cosine:
+            case SPTAG::DistCalcMethod::Cosine:
                 return &(DistanceUtils::ComputeCosineDistance);
 
-            case SpaceV::DistCalcMethod::L2:
+            case SPTAG::DistCalcMethod::L2:
                 return &(DistanceUtils::ComputeL2Distance);
 
             default:
@@ -499,4 +499,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_DISTANCEUTILS_H_
+#endif // _SPTAG_BKT_DISTANCEUTILS_H_

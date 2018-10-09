@@ -1,5 +1,5 @@
-#ifndef _SPACEV_HELPER_CONCURRENT_H_
-#define _SPACEV_HELPER_CONCURRENT_H_
+#ifndef _SPTAG_HELPER_CONCURRENT_H_
+#define _SPTAG_HELPER_CONCURRENT_H_
 
 #include <cstdint>
 #include <cstddef> 
@@ -8,7 +8,7 @@
 #include <mutex>
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -60,6 +60,6 @@ private:
 
 } // namespace Base64
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_CONCURRENT_H_
+#endif // _SPTAG_HELPER_CONCURRENT_H_

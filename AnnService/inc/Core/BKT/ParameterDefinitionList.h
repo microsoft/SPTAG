@@ -22,7 +22,7 @@ DefineBKTParameter(g_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L,
 DefineBKTParameter(g_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineBKTParameter(g_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
 
-DefineBKTParameter(m_iDistCalcMethod, SpaceV::DistCalcMethod, SpaceV::DistCalcMethod::Cosine, "DistCalcMethod")
+DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
 DefineBKTParameter(m_iRefineIter, int, 0L, "RefineIterations")
 DefineBKTParameter(m_iDebugLoad, int, -1, "NumTrains")
 DefineBKTParameter(m_iCacheSize, int, -1, "CacheSize")

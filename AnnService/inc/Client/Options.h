@@ -1,5 +1,5 @@
-#ifndef _SPACEV_CLIENT_OPTIONS_H_
-#define _SPACEV_CLIENT_OPTIONS_H_
+#ifndef _SPTAG_CLIENT_OPTIONS_H_
+#define _SPTAG_CLIENT_OPTIONS_H_
 
 #include "inc/Helper/ArgumentsParser.h"
 
@@ -7,7 +7,7 @@
 #include <vector>
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Client
 {
@@ -34,6 +34,6 @@ public:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_CLIENT_OPTIONS_H_
+#endif // _SPTAG_CLIENT_OPTIONS_H_

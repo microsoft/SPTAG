@@ -1,5 +1,5 @@
-#ifndef _SPACEV_CLIENT_CLIENTWRAPPER_H_
-#define _SPACEV_CLIENT_CLIENTWRAPPER_H_
+#ifndef _SPTAG_CLIENT_CLIENTWRAPPER_H_
+#define _SPTAG_CLIENT_CLIENTWRAPPER_H_
 
 #include "inc/Socket/Client.h"
 #include "inc/Socket/RemoteSearchQuery.h"
@@ -15,7 +15,7 @@
 #include <condition_variable>
 #include <functional>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Client
 {
@@ -72,6 +72,6 @@ private:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_CLIENT_OPTIONS_H_
+#endif // _SPTAG_CLIENT_OPTIONS_H_

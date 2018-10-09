@@ -9,7 +9,7 @@
 
 #include <chrono>
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
 Connection::Connection(ConnectionID p_connectionID,
                        boost::asio::ip::tcp::socket&& p_socket,

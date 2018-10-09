@@ -1,15 +1,15 @@
 #include "inc/Client/ClientWrapper.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Socket;
-using namespace SpaceV::Client;
+using namespace SPTAG;
+using namespace SPTAG::Socket;
+using namespace SPTAG::Client;
 
 ClientWrapper::ClientWrapper(const ClientOptions& p_options)
     : m_options(p_options),
       m_unfinishedJobCount(0),
       m_isWaitingFinish(false)
 {
-    m_client.reset(new SpaceV::Socket::Client(GetHandlerMap(), p_options.m_socketThreadNum, 30));
+    m_client.reset(new SPTAG::Socket::Client(GetHandlerMap(), p_options.m_socketThreadNum, 30));
     m_client->SetEventOnConnectionClose(std::bind(&ClientWrapper::HandleDeadConnection,
                                                   this,
                                                   std::placeholders::_1));
@@ -17,10 +17,10 @@ ClientWrapper::ClientWrapper(const ClientOptions& p_options)
     m_connections.reserve(m_options.m_threadNum);
     for (std::uint32_t i = 0; i < m_options.m_threadNum; ++i)
     {
-        SpaceV::ErrorCode errCode;
+        SPTAG::ErrorCode errCode;
         ConnectionPair conn(c_invalidConnectionID, c_invalidConnectionID);
         conn.first = m_client->ConnectToServer(p_options.m_serverAddr, p_options.m_serverPort, errCode);
-        if (SpaceV::ErrorCode::Socket_FailedResolveEndPoint == errCode)
+        if (SPTAG::ErrorCode::Socket_FailedResolveEndPoint == errCode)
         {
             fprintf(stderr, "Unable to resolve remote address.\n");
             return;
@@ -209,11 +209,11 @@ ClientWrapper::HandleDeadConnection(Socket::ConnectionID p_cid)
             conn.first = c_invalidConnectionID;
             conn.second = c_invalidConnectionID;
 
-            SpaceV::ErrorCode errCode;
+            SPTAG::ErrorCode errCode;
             while (c_invalidConnectionID == conn.first)
             {
                 conn.first = m_client->ConnectToServer(m_options.m_serverAddr, m_options.m_serverPort, errCode);
-                if (SpaceV::ErrorCode::Socket_FailedResolveEndPoint == errCode)
+                if (SPTAG::ErrorCode::Socket_FailedResolveEndPoint == errCode)
                 {
                     break;
                 }

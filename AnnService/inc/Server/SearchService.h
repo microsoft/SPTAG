@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SERVER_SERVICE_H_
-#define _SPACEV_SERVER_SERVICE_H_
+#ifndef _SPTAG_SERVER_SERVICE_H_
+#define _SPTAG_SERVER_SERVICE_H_
 
 #include "ServiceContext.h"
 #include "../Socket/Server.h"
@@ -11,7 +11,7 @@
 #include <thread>
 #include <condition_variable>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -67,4 +67,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_SERVER_SERVICE_H_
+#endif // _SPTAG_SERVER_SERVICE_H_

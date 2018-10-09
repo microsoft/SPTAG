@@ -2,7 +2,7 @@
 
 #include <string>
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 
 

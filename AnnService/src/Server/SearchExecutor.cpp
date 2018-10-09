@@ -1,7 +1,7 @@
 #include "inc/Server/SearchExecutor.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Service;
+using namespace SPTAG;
+using namespace SPTAG::Service;
 
 
 SearchExecutor::SearchExecutor(std::string p_queryString,

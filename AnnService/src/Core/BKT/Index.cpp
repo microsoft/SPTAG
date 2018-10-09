@@ -10,7 +10,7 @@
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4127)  // conditional expression is constant
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT
     {
@@ -335,7 +335,7 @@ namespace SpaceV
                 std::memcpy(m_pSamples.GetData(), p_vectorSet->GetData(), p_vectorSet->Count() * p_vectorSet->Dimension() * sizeof(T));
 
                 int base = Utils::GetBase<T>();
-                for (SpaceV::SizeType i = 0; i < p_vectorSet->Count(); i++) {
+                for (SPTAG::SizeType i = 0; i < p_vectorSet->Count(); i++) {
                     Utils::Normalize(m_pSamples[i], m_pSamples.C(), base);
                 }
                 p_vectorSet.reset();
@@ -1163,11 +1163,11 @@ namespace SpaceV
             }
 
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    else if (SpaceV::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
+    else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
         fprintf(stderr, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
-        if (SpaceV::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
+        if (SPTAG::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
             VarName = tmp; \
         } \
@@ -1191,9 +1191,9 @@ namespace SpaceV
             }
 
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    else if (SpaceV::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
+    else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        return SpaceV::Helper::Convert::ConvertToString(VarName); \
+        return SPTAG::Helper::Convert::ConvertToString(VarName); \
     } \
 
 #include "inc/Core/BKT/ParameterDefinitionList.h"
@@ -1205,7 +1205,7 @@ namespace SpaceV
 }
 
 #define DefineVectorValueType(Name, Type) \
-template class SpaceV::BKT::Index<Type>; \
+template class SPTAG::BKT::Index<Type>; \
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType

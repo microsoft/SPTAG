@@ -8,10 +8,10 @@
 
 
 AnnClient::AnnClient(const char* p_serverAddr, const char* p_serverPort)
-    : m_connectionID(SpaceV::Socket::c_invalidConnectionID),
+    : m_connectionID(SPTAG::Socket::c_invalidConnectionID),
       m_timeoutInMilliseconds(9000)
 {
-    using namespace SpaceV;
+    using namespace SPTAG;
 
     m_socketClient.reset(new Socket::Client(GetHandlerMap(), 2, 30));
 
@@ -78,7 +78,7 @@ AnnClient::SetSearchParam(const char* p_name, const char* p_value)
     }
 
     std::string name(p_name);
-    SpaceV::Helper::StrUtils::ToLowerInPlace(name);
+    SPTAG::Helper::StrUtils::ToLowerInPlace(name);
 
     if (nullptr == p_value || '\0' == *p_value)
     {
@@ -101,9 +101,9 @@ AnnClient::ClearSearchParam()
 RemoteSearchResult
 AnnClient::Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueType, bool p_withMetaData)
 {
-    using namespace SpaceV;
+    using namespace SPTAG;
 
-    SpaceV::Socket::RemoteSearchResult ret;
+    SPTAG::Socket::RemoteSearchResult ret;
     if (Socket::c_invalidConnectionID != m_connectionID)
     {
 
@@ -150,8 +150,8 @@ AnnClient::Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueTyp
             std::move(timeoutCallback));
 
         Socket::RemoteQuery query;
-        SpaceV::VectorValueType valueType;
-        SpaceV::Helper::Convert::ConvertStringTo<SpaceV::VectorValueType>(p_valueType, valueType);
+        SPTAG::VectorValueType valueType;
+        SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, valueType);
         query.m_queryString = CreateSearchQuery(p_data, p_resultNum, p_withMetaData, valueType);
 
         packet.Header().m_bodyLength = static_cast<std::uint32_t>(query.EstimateBufferSize());
@@ -170,14 +170,14 @@ AnnClient::Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueTyp
 bool
 AnnClient::IsConnected() const
 {
-    return m_connectionID != SpaceV::Socket::c_invalidConnectionID;
+    return m_connectionID != SPTAG::Socket::c_invalidConnectionID;
 }
 
 
-SpaceV::Socket::PacketHandlerMapPtr
+SPTAG::Socket::PacketHandlerMapPtr
 AnnClient::GetHandlerMap()
 {
-    using namespace SpaceV;
+    using namespace SPTAG;
 
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
     handlerMap->emplace(Socket::PacketType::SearchResponse,
@@ -191,10 +191,10 @@ AnnClient::GetHandlerMap()
 
 
 void
-AnnClient::SearchResponseHanlder(SpaceV::Socket::ConnectionID p_localConnectionID,
-                                 SpaceV::Socket::Packet p_packet)
+AnnClient::SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID,
+                                 SPTAG::Socket::Packet p_packet)
 {
-    using namespace SpaceV;
+    using namespace SPTAG;
 
     std::shared_ptr<Callback> callback = m_callbackManager.GetAndRemove(p_packet.Header().m_resourceID);
     if (nullptr == callback)
@@ -222,15 +222,15 @@ std::string
 AnnClient::CreateSearchQuery(const ByteArray& p_data,
                              SizeType p_resultNum,
                              bool p_extractMetadata,
-                             SpaceV::VectorValueType p_valueType)
+                             SPTAG::VectorValueType p_valueType)
 {
     std::stringstream out;
 
     out << "#";
     std::size_t encLen;
-    SpaceV::Helper::Base64::Encode(p_data.Data(), p_data.Length(), out, encLen);
+    SPTAG::Helper::Base64::Encode(p_data.Data(), p_data.Length(), out, encLen);
 
-    out << " $datatype:" << SpaceV::Helper::Convert::ConvertToString(p_valueType);
+    out << " $datatype:" << SPTAG::Helper::Convert::ConvertToString(p_valueType);
     out << " $resultnum:" << std::to_string(p_resultNum);
     out << " $extractmetadata:" << (p_extractMetadata ? "true" : "false");
 

@@ -6,8 +6,8 @@
 
 #include <iostream>
 
-using namespace SpaceV;
-using namespace SpaceV::Service;
+using namespace SPTAG;
+using namespace SPTAG::Service;
 
 
 namespace

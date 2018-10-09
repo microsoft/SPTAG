@@ -3,7 +3,7 @@
 #include <fstream>
 #include <iostream>
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 namespace
 {

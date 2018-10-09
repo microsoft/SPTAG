@@ -3,7 +3,7 @@
 
 #include <type_traits>
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
 PacketHeader::PacketHeader()
     : m_packetType(PacketType::Undefined),

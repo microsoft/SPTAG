@@ -1,6 +1,6 @@
 #include "inc/Server/SearchService.h"
 
-SpaceV::Service::SearchService g_service;
+SPTAG::Service::SearchService g_service;
 
 int main(int argc, char* argv[])
 {

@@ -8,7 +8,7 @@
 #include <fstream>
 
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 
 VectorIndex::VectorIndex()

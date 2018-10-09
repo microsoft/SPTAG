@@ -45,9 +45,9 @@ foreach(F ${PROJ_HDR_FILES})
   install(FILES "${F}" DESTINATION ${FS})
 endforeach(F)
 
-add_library (SpaceVLib SHARED ${SRC_FILES} ${HDR_FILES})
+add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
 
-install(TARGETS SpaceVLib   
+install(TARGETS SPTAGLib   
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   COMPONENT library

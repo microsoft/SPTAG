@@ -1,5 +1,5 @@
-#ifndef _SPACEV_AGGREGATOR_AGGREGATORSERVICE_H_
-#define _SPACEV_AGGREGATOR_AGGREGATORSERVICE_H_
+#ifndef _SPTAG_AGGREGATOR_AGGREGATORSERVICE_H_
+#define _SPTAG_AGGREGATOR_AGGREGATORSERVICE_H_
 
 #include "AggregatorContext.h"
 #include "AggregatorExecutionContext.h"
@@ -14,7 +14,7 @@
 #include <thread>
 #include <condition_variable>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Aggregator
 {
@@ -82,4 +82,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_AGGREGATOR_AGGREGATORSERVICE_H_
+#endif // _SPTAG_AGGREGATOR_AGGREGATORSERVICE_H_

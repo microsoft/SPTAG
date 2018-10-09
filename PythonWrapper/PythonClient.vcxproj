@@ -70,7 +70,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup>
-    <TargetName>_SpaceVClient</TargetName>
+    <TargetName>_SPTAGClient</TargetName>
     <TargetExt>.pyd</TargetExt>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
     <IncludePath>$(PyIncludeDir);$(ProjectDir);$(SolutionDir)AnnService\;$(BoostIncDir);$(IncludePath)</IncludePath>
@@ -149,6 +149,6 @@
     <Exec Command="$(SwigDir)swig.exe -python -c++ -outdir $(IntDir) -o $(IntDir)/ClientInterfaceSwigGen.cpp inc/ClientInterface.h" />
   </Target>
   <Target Name="CopyFiles" AfterTargets="BeforeBuild">
-    <Copy SourceFiles="$(IntDir)SpaceVClient.py" DestinationFolder="$(Outdir)" />
+    <Copy SourceFiles="$(IntDir)SPTAGClient.py" DestinationFolder="$(Outdir)" />
   </Target>
 </Project>

@@ -1,7 +1,7 @@
-#ifndef _SPACEV_BKT_HEAP_H_
-#define _SPACEV_BKT_HEAP_H_
+#ifndef _SPTAG_BKT_HEAP_H_
+#define _SPTAG_BKT_HEAP_H_
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT
     {
@@ -99,4 +99,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_HEAP_H_
+#endif // _SPTAG_BKT_HEAP_H_

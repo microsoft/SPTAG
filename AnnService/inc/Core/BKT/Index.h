@@ -1,5 +1,5 @@
-#ifndef _SPACEV_BKT_INDEX_H_
-#define _SPACEV_BKT_INDEX_H_
+#ifndef _SPTAG_BKT_INDEX_H_
+#define _SPTAG_BKT_INDEX_H_
 
 #include "../SearchQuery.h"
 #include "../VectorIndex.h"
@@ -18,7 +18,7 @@
 #include <mutex>
 #include <stack>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 namespace Helper
@@ -347,6 +347,6 @@ namespace BKT
         }
     };
 } // namespace BKT
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_BKT_INDEX_H_
+#endif // _SPTAG_BKT_INDEX_H_

@@ -2,8 +2,8 @@
 #include "inc/IndexBuilder/VectorSetReaders/DefaultReader.h"
 
 
-using namespace SpaceV;
-using namespace SpaceV::IndexBuilder;
+using namespace SPTAG;
+using namespace SPTAG::IndexBuilder;
 
 VectorSetReader::VectorSetReader(std::shared_ptr<BuilderOptions> p_options)
     : m_options(p_options)

@@ -1,6 +1,6 @@
 #include "inc/Socket/ConnectionManager.h"
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
 
 ConnectionManager::ConnectionItem::ConnectionItem()

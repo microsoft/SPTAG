@@ -1,8 +1,8 @@
 #include "inc/Socket/RemoteSearchQuery.h"
 #include "inc/Socket/SimpleSerialization.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Socket;
+using namespace SPTAG;
+using namespace SPTAG::Socket;
 
 
 RemoteQuery::RemoteQuery()

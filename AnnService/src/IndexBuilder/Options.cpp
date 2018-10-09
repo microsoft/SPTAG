@@ -3,8 +3,8 @@
 
 #include <cassert>
 
-using namespace SpaceV;
-using namespace SpaceV::IndexBuilder;
+using namespace SPTAG;
+using namespace SPTAG::IndexBuilder;
 
 
 BuilderOptions::BuilderOptions()

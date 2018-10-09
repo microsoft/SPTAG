@@ -1,11 +1,11 @@
-#ifndef _SPACEV_HELPER_BASE64ENCODE_H_
-#define _SPACEV_HELPER_BASE64ENCODE_H_
+#ifndef _SPTAG_HELPER_BASE64ENCODE_H_
+#define _SPTAG_HELPER_BASE64ENCODE_H_
 
 #include <cstdint>
 #include <cstddef> 
 #include <ostream>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -25,6 +25,6 @@ std::size_t CapacityForDecode(std::size_t p_inLen);
 
 } // namespace Base64
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_BASE64ENCODE_H_
+#endif // _SPTAG_HELPER_BASE64ENCODE_H_

@@ -1,7 +1,7 @@
 #include "inc/Aggregator/AggregatorSettings.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Aggregator;
+using namespace SPTAG;
+using namespace SPTAG::Aggregator;
 
 AggregatorSettings::AggregatorSettings()
     : m_searchTimeout(100),

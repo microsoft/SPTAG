@@ -1,8 +1,8 @@
 #include "inc/Aggregator/AggregatorContext.h"
 #include "inc/Helper/SimpleIniReader.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Aggregator;
+using namespace SPTAG;
+using namespace SPTAG::Aggregator;
 
 RemoteMachine::RemoteMachine()
     : m_connectionID(Socket::c_invalidConnectionID),

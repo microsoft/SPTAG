@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_SERVER_H_
-#define _SPACEV_SOCKET_SERVER_H_
+#ifndef _SPTAG_SOCKET_SERVER_H_
+#define _SPTAG_SOCKET_SERVER_H_
 
 #include "Connection.h"
 #include "ConnectionManager.h"
@@ -9,7 +9,7 @@
 #include <memory>
 #include <boost/asio.hpp>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -47,6 +47,6 @@ private:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SOCKET_SERVER_H_
+#endif // _SPTAG_SOCKET_SERVER_H_

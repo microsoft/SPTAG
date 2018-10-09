@@ -1,6 +1,6 @@
 #include "inc/Core/CommonDataStructure.h"
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 const ByteArray ByteArray::c_empty;
 

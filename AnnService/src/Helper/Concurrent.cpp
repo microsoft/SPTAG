@@ -1,7 +1,7 @@
 #include "inc/Helper/Concurrent.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Helper::Concurrent;
+using namespace SPTAG;
+using namespace SPTAG::Helper::Concurrent;
 
 
 SpinLock::SpinLock()

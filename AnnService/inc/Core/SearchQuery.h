@@ -1,12 +1,12 @@
-#ifndef _SPACEV_SEARCHQUERY_H_
-#define _SPACEV_SEARCHQUERY_H_
+#ifndef _SPTAG_SEARCHQUERY_H_
+#define _SPTAG_SEARCHQUERY_H_
 
 #include "Common.h"
 #include "CommonDataStructure.h"
 
 #include <cstring>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 struct BasicResult
@@ -226,6 +226,6 @@ protected:
 
     std::unique_ptr<ByteArray[]> m_metadatas;
 };
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SEARCHQUERY_H_
+#endif // _SPTAG_SEARCHQUERY_H_

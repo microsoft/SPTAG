@@ -1,5 +1,5 @@
-#ifndef _SPACEV_INDEXBUILDER_OPTIONS_H_
-#define _SPACEV_INDEXBUILDER_OPTIONS_H_
+#ifndef _SPTAG_INDEXBUILDER_OPTIONS_H_
+#define _SPTAG_INDEXBUILDER_OPTIONS_H_
 
 #include "inc/Core/Common.h"
 #include "inc/Helper/ArgumentsParser.h"
@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace IndexBuilder
 {
@@ -26,19 +26,19 @@ public:
 
     std::string m_vectorDelimiter;
 
-    SpaceV::VectorValueType m_inputValueType;
+    SPTAG::VectorValueType m_inputValueType;
 
     std::string m_inputFiles;
 
     std::string m_outputFolder;
 
-    SpaceV::IndexAlgoType m_indexAlgoType;
+    SPTAG::IndexAlgoType m_indexAlgoType;
 
     std::string m_builderConfigFile;
 };
 
 
 } // namespace IndexBuilder
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_INDEXBUILDER_OPTIONS_H_
+#endif // _SPTAG_INDEXBUILDER_OPTIONS_H_

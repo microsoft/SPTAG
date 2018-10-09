@@ -1,5 +1,5 @@
-#ifndef _SPACEV_HELPER_INIREADER_H_
-#define _SPACEV_HELPER_INIREADER_H_
+#ifndef _SPTAG_HELPER_INIREADER_H_
+#define _SPTAG_HELPER_INIREADER_H_
 
 #include "../Core/Common.h"
 #include "StringConvert.h"
@@ -11,7 +11,7 @@
 #include <sstream>
 
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -89,6 +89,6 @@ IniReader::ConvertStringTo<std::string>(std::string&& p_str, const std::string& 
 
 
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_INIREADER_H_
+#endif // _SPTAG_HELPER_INIREADER_H_

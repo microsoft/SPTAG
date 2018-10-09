@@ -1,5 +1,5 @@
-#ifndef _SPACEV_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
-#define _SPACEV_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
+#ifndef _SPTAG_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
+#define _SPTAG_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
 
 #include "inc/Socket/RemoteSearchQuery.h"
 #include "inc/Socket/Packet.h"
@@ -7,7 +7,7 @@
 #include <memory>
 #include <atomic>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Aggregator
 {
@@ -46,5 +46,5 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
+#endif // _SPTAG_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
 

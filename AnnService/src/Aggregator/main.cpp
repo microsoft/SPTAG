@@ -1,6 +1,6 @@
 #include "inc/Aggregator/AggregatorService.h"
 
-SpaceV::Aggregator::AggregatorService g_service;
+SPTAG::Aggregator::AggregatorService g_service;
 
 int main(int argc, char* argv[])
 {

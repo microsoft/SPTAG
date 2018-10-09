@@ -1,9 +1,9 @@
-#ifndef _SPACEV_BKT_QUERYRESULTSET_H_
-#define _SPACEV_BKT_QUERYRESULTSET_H_
+#ifndef _SPTAG_BKT_QUERYRESULTSET_H_
+#define _SPTAG_BKT_QUERYRESULTSET_H_
 
 #include "../SearchQuery.h"
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace BKT
 {
@@ -90,4 +90,4 @@ private:
 }
 }
 
-#endif // _SPACEV_BKT_QUERYRESULTSET_H_
+#endif // _SPTAG_BKT_QUERYRESULTSET_H_

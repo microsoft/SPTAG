@@ -5,7 +5,7 @@
 #include <memory>
 #include <atomic>
 
-using namespace SpaceV::IndexBuilder;
+using namespace SPTAG::IndexBuilder;
 
 namespace Local
 {

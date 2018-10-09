@@ -1,5 +1,5 @@
-#ifndef _SPACEV_AGGREGATOR_AGGREGATORCONTEXT_H_
-#define _SPACEV_AGGREGATOR_AGGREGATORCONTEXT_H_
+#ifndef _SPTAG_AGGREGATOR_AGGREGATORCONTEXT_H_
+#define _SPTAG_AGGREGATOR_AGGREGATORCONTEXT_H_
 
 #include "inc/Socket/Common.h"
 #include "AggregatorSettings.h"
@@ -8,7 +8,7 @@
 #include <vector>
 #include <atomic>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Aggregator
 {
@@ -61,4 +61,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_AGGREGATOR_AGGREGATORCONTEXT_H_
+#endif // _SPTAG_AGGREGATOR_AGGREGATORCONTEXT_H_

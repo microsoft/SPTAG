@@ -1,6 +1,6 @@
 #include "inc/Helper/ArgumentsParser.h"
 
-using namespace SpaceV::Helper;
+using namespace SPTAG::Helper;
 
 
 ArgumentsParser::IArgument::IArgument()

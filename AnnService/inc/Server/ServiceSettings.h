@@ -1,11 +1,11 @@
-#ifndef _SPACEV_SERVER_SERVICESTTINGS_H_
-#define _SPACEV_SERVER_SERVICESTTINGS_H_
+#ifndef _SPTAG_SERVER_SERVICESTTINGS_H_
+#define _SPTAG_SERVER_SERVICESTTINGS_H_
 
 #include "../Core/Common.h"
 
 #include <string>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -34,5 +34,5 @@ struct ServiceSettings
 } // namespace AnnService
 
 
-#endif // _SPACEV_SERVER_SERVICESTTINGS_H_
+#endif // _SPTAG_SERVER_SERVICESTTINGS_H_
 

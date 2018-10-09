@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_CONNECTION_H_
-#define _SPACEV_SOCKET_CONNECTION_H_
+#ifndef _SPTAG_SOCKET_CONNECTION_H_
+#define _SPTAG_SOCKET_CONNECTION_H_
 
 #include "Packet.h"
 
@@ -11,7 +11,7 @@
 #include <boost/asio/io_service_strand.hpp>
 #include <boost/asio/deadline_timer.hpp>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -92,6 +92,6 @@ private:
 
 
 } // namespace Socket
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_SOCKET_CONNECTION_H_
+#endif // _SPTAG_SOCKET_CONNECTION_H_

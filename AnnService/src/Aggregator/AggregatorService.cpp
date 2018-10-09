@@ -1,8 +1,8 @@
 #include "inc/Aggregator/AggregatorService.h"
 
 
-using namespace SpaceV;
-using namespace SpaceV::Aggregator;
+using namespace SPTAG;
+using namespace SPTAG::Aggregator;
 
 AggregatorService::AggregatorService()
     : m_shutdownSignals(m_ioContext),
@@ -31,7 +31,7 @@ AggregatorService::Initialize()
 void
 AggregatorService::Run()
 {
-    auto threadNum = max((SpaceV::SizeType)1, GetContext()->GetSettings()->m_threadNum);
+    auto threadNum = max((SPTAG::SizeType)1, GetContext()->GetSettings()->m_threadNum);
     m_threadPool.reset(new boost::asio::thread_pool(threadNum));
 
     StartClient();

@@ -1,5 +1,5 @@
-#ifndef _SPACEV_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
-#define _SPACEV_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
+#ifndef _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
+#define _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
 
 #include "../VectorSetReader.h"
 #include "inc/Helper/Concurrent.h"
@@ -8,7 +8,7 @@
 #include <condition_variable>
 #include <mutex>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace IndexBuilder
 {
@@ -100,6 +100,6 @@ private:
 
 
 } // namespace IndexBuilder
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_INDEXBUILDER_VECTORSETREADERS_DEFAULT_H_
+#endif // _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULT_H_

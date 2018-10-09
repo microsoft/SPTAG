@@ -41,21 +41,21 @@ else ()
 endif ()
 
 execute_process(COMMAND swig -l${PROJECT_SOURCE_DIR}/PythonWrapper/inc/PyByteArray.i -python -c++ ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h)
-execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SpaceV.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
+execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAG.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
 
 execute_process(COMMAND swig -l${PROJECT_SOURCE_DIR}/PythonWrapper/inc/PyByteArray.i -python -c++ ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h)
-execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SpaceVClient.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
+execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAGClient.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
 
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
 file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h ${OTH_HDR_FILES})
 file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/CoreInterface.cpp ${LIBRARY_OUTPUT_PATH}/CoreInterface_wrap.cxx)
-add_library (_SpaceV SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
-target_link_libraries(_SpaceV SpaceVLib python2.7)
+add_library (_SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
+target_link_libraries(_SPTAG SPTAGLib python2.7)
 
 file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h ${OTH_HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
 file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${LIBRARY_OUTPUT_PATH}/ClientInterface_wrap.cxx)
-add_library (_SpaceVClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
-target_link_libraries(_SpaceVClient SpaceVLib python2.7 ${Boost_LIBRARIES})
+add_library (_SPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
+target_link_libraries(_SPTAGClient SPTAGLib python2.7 ${Boost_LIBRARIES})
 
 string(LENGTH ${PROJECT_SOURCE_DIR} PREFIX_LEN) 
 MATH(EXPR PREFIX_LEN "${PREFIX_LEN}+1")
@@ -66,10 +66,10 @@ foreach(F ${PROJ_HDR_FILES})
   install(FILES "${F}" DESTINATION ${FS})
 endforeach(F)
 
-install(TARGETS _SpaceV  
+install(TARGETS _SPTAG  
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   COMPONENT library
 )
 
-install(FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/SpaceV.py DESTINATION lib)
+install(FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/SPTAG.py DESTINATION lib)

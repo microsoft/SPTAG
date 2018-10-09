@@ -3,8 +3,8 @@
 
 #include <cassert>
 
-using namespace SpaceV;
-using namespace SpaceV::Client;
+using namespace SPTAG;
+using namespace SPTAG::Client;
 
 ClientOptions::ClientOptions()
     : m_searchTimeout(9000),

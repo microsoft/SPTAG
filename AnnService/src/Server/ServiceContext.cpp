@@ -3,8 +3,8 @@
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Service;
+using namespace SPTAG;
+using namespace SPTAG::Service;
 
 
 ServiceContext::ServiceContext(const std::string& p_configFilePath)

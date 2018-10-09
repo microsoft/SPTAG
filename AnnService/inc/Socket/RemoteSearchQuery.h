@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_REMOTESEARCHQUERY_H_
-#define _SPACEV_SOCKET_REMOTESEARCHQUERY_H_
+#ifndef _SPTAG_SOCKET_REMOTESEARCHQUERY_H_
+#define _SPTAG_SOCKET_REMOTESEARCHQUERY_H_
 
 #include "inc/Core/CommonDataStructure.h"
 #include "inc/Core/SearchQuery.h"
@@ -10,7 +10,7 @@
 #include <vector>
 #include <unordered_map>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -90,7 +90,7 @@ struct RemoteSearchResult
 
 
 
-} // namespace SpaceV
+} // namespace SPTAG
 } // namespace Socket
 
-#endif // _SPACEV_SOCKET_REMOTESEARCHQUERY_H_
+#endif // _SPTAG_SOCKET_REMOTESEARCHQUERY_H_

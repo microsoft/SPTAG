@@ -1,5 +1,5 @@
-#ifndef _SPACEV_BKT_DATASET_H_
-#define _SPACEV_BKT_DATASET_H_
+#ifndef _SPTAG_BKT_DATASET_H_
+#define _SPTAG_BKT_DATASET_H_
 
 #include <fstream>
 
@@ -8,7 +8,7 @@
 #define aligned_malloc(a, b) _mm_malloc(a, b)
 #define aligned_free(a) _mm_free(a)
 
-namespace SpaceV
+namespace SPTAG
 {
     namespace BKT 
     {
@@ -205,4 +205,4 @@ namespace SpaceV
     }
 }
 
-#endif // _SPACEV_BKT_DATASET_H_
+#endif // _SPTAG_BKT_DATASET_H_

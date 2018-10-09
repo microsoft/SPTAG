@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SERVER_SEARCHEXECUTIONCONTEXT_H_
-#define _SPACEV_SERVER_SEARCHEXECUTIONCONTEXT_H_
+#ifndef _SPTAG_SERVER_SEARCHEXECUTIONCONTEXT_H_
+#define _SPTAG_SERVER_SEARCHEXECUTIONCONTEXT_H_
 
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/SearchQuery.h"
@@ -12,7 +12,7 @@
 #include <memory>
 
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Service
 {
@@ -74,4 +74,4 @@ private:
 } // namespace AnnService
 
 
-#endif // _SPACEV_SERVER_SEARCHEXECUTIONCONTEXT_H_
+#endif // _SPTAG_SERVER_SEARCHEXECUTIONCONTEXT_H_

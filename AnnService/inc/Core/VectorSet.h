@@ -1,5 +1,5 @@
-#ifndef _SPACEV_VECTORSET_H_
-#define _SPACEV_VECTORSET_H_
+#ifndef _SPTAG_VECTORSET_H_
+#define _SPTAG_VECTORSET_H_
 
 #include "Common.h"
 #include "CommonDataStructure.h"
@@ -7,7 +7,7 @@
 #include <memory>
 #include <string>
 
-namespace SpaceV
+namespace SPTAG
 {
 
 class VectorSet
@@ -61,6 +61,6 @@ private:
     SizeType m_perVectorDataSize;
 };
 
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_VECTORSET_H_
+#endif // _SPTAG_VECTORSET_H_

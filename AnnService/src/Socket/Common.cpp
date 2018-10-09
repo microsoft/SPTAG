@@ -1,8 +1,8 @@
 #include "inc/Socket/Common.h"
 
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
-const ConnectionID SpaceV::Socket::c_invalidConnectionID = 0;
+const ConnectionID SPTAG::Socket::c_invalidConnectionID = 0;
 
-const ResourceID SpaceV::Socket::c_invalidResourceID = 0;
+const ResourceID SPTAG::Socket::c_invalidResourceID = 0;

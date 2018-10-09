@@ -3,32 +3,32 @@
 
 
 AnnIndex::AnnIndex(SizeType p_dimension)
-    : m_algoType(SpaceV::IndexAlgoType::BKT),
-      m_inputValueType(SpaceV::VectorValueType::Float),
+    : m_algoType(SPTAG::IndexAlgoType::BKT),
+      m_inputValueType(SPTAG::VectorValueType::Float),
       m_dimension(p_dimension)
 {
-    m_inputVectorSize = SpaceV::GetValueTypeSize(m_inputValueType) * m_dimension;
+    m_inputVectorSize = SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
 }
 
 
 AnnIndex::AnnIndex(const char* p_algoType, const char* p_valueType, SizeType p_dimension)
-    : m_algoType(SpaceV::IndexAlgoType::Undefined),
-      m_inputValueType(SpaceV::VectorValueType::Undefined),
+    : m_algoType(SPTAG::IndexAlgoType::Undefined),
+      m_inputValueType(SPTAG::VectorValueType::Undefined),
       m_dimension(p_dimension)
 {
-    SpaceV::Helper::Convert::ConvertStringTo<SpaceV::IndexAlgoType>(p_algoType, m_algoType);
-    SpaceV::Helper::Convert::ConvertStringTo<SpaceV::VectorValueType>(p_valueType, m_inputValueType);
-    m_inputVectorSize = SpaceV::GetValueTypeSize(m_inputValueType) * m_dimension;
+    SPTAG::Helper::Convert::ConvertStringTo<SPTAG::IndexAlgoType>(p_algoType, m_algoType);
+    SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, m_inputValueType);
+    m_inputVectorSize = SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
 }
 
 
-AnnIndex::AnnIndex(const std::shared_ptr<SpaceV::VectorIndex>& p_index)
+AnnIndex::AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index)
     : m_algoType(p_index->GetIndexAlgoType()),
       m_inputValueType(p_index->AcceptableQueryValueType()),
       m_dimension(p_index->GetFeatureDim()),
       m_index(p_index)
 {
-    m_inputVectorSize = SpaceV::GetValueTypeSize(m_inputValueType) * m_dimension;
+    m_inputVectorSize = SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
 }
 
 
@@ -42,19 +42,19 @@ AnnIndex::Build(ByteArray p_data, SizeType p_num)
 {
     if (nullptr == m_index)
     {
-        m_index = SpaceV::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
     }
     if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
     {
         return false;
     }
 
-    std::shared_ptr<SpaceV::VectorSet> vectors(new SpaceV::BasicVectorSet(p_data,
+    std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
         m_inputValueType,
-        static_cast<SpaceV::SizeType>(m_dimension),
-        static_cast<SpaceV::SizeType>(p_num)));
+        static_cast<SPTAG::SizeType>(m_dimension),
+        static_cast<SPTAG::SizeType>(p_num)));
 
-    if (SpaceV::ErrorCode::Success != m_index->BuildIndex(vectors, nullptr))
+    if (SPTAG::ErrorCode::Success != m_index->BuildIndex(vectors, nullptr))
     {
         return false;
     }
@@ -67,12 +67,12 @@ AnnIndex::SetBuildParam(const char* p_name, const char* p_value)
 {
     if (nullptr == m_index) 
     {
-        if (SpaceV::IndexAlgoType::Undefined == m_algoType || 
-            SpaceV::VectorValueType::Undefined == m_inputValueType)
+        if (SPTAG::IndexAlgoType::Undefined == m_algoType || 
+            SPTAG::VectorValueType::Undefined == m_inputValueType)
         {
             return;    
         }
-        m_index = SpaceV::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
 
     }
     m_index->SetParameter(p_name, p_value);
@@ -120,16 +120,16 @@ AnnIndex::ReadyToServe() const
 bool
 AnnIndex::Save(const char* p_savefile) const
 {
-    return SpaceV::ErrorCode::Success == m_index->SaveIndex(p_savefile);
+    return SPTAG::ErrorCode::Success == m_index->SaveIndex(p_savefile);
 }
 
 
 AnnIndex
 AnnIndex::Load(const char* p_loaderFile)
 {
-    std::shared_ptr<SpaceV::VectorIndex> vecIndex;
-    auto ret = SpaceV::VectorIndex::LoadIndex(p_loaderFile, vecIndex);
-    if (SpaceV::ErrorCode::Success != ret || nullptr == vecIndex)
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    auto ret = SPTAG::VectorIndex::LoadIndex(p_loaderFile, vecIndex);
+    if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
     {
         return AnnIndex(0);
     }

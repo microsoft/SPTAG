@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_PACKET_H_
-#define _SPACEV_SOCKET_PACKET_H_
+#ifndef _SPTAG_SOCKET_PACKET_H_
+#define _SPTAG_SOCKET_PACKET_H_
 
 #include "Common.h"
 
@@ -9,7 +9,7 @@
 #include <array>
 #include <unordered_map>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -133,7 +133,7 @@ PacketType GetCrosspondingResponseType(PacketType p_type);
 }
 
 
-} // namespace SpaceV
+} // namespace SPTAG
 } // namespace Socket
 
-#endif // _SPACEV_SOCKET_SOCKETSERVER_H_
+#endif // _SPTAG_SOCKET_SOCKETSERVER_H_

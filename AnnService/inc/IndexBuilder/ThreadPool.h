@@ -1,10 +1,10 @@
-#ifndef _SPACEV_INDEXBUILDER_THREADPOOL_H_
-#define _SPACEV_INDEXBUILDER_THREADPOOL_H_
+#ifndef _SPTAG_INDEXBUILDER_THREADPOOL_H_
+#define _SPTAG_INDEXBUILDER_THREADPOOL_H_
 
 #include <functional>
 #include <cstdint>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace IndexBuilder
 {
@@ -19,6 +19,6 @@ std::uint32_t CurrentThreadNum();
 
 }
 } // namespace IndexBuilder
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_INDEXBUILDER_THREADPOOL_H_
+#endif // _SPTAG_INDEXBUILDER_THREADPOOL_H_

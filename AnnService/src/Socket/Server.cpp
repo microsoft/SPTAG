@@ -2,7 +2,7 @@
 
 #include <exception>
 
-using namespace SpaceV::Socket;
+using namespace SPTAG::Socket;
 
 Server::Server(const std::string& p_address,
                const std::string& p_port,

@@ -1,5 +1,5 @@
-#ifndef _SPACEV_SOCKET_SIMPLESERIALIZATION_H_
-#define _SPACEV_SOCKET_SIMPLESERIALIZATION_H_
+#ifndef _SPTAG_SOCKET_SIMPLESERIALIZATION_H_
+#define _SPTAG_SOCKET_SIMPLESERIALIZATION_H_
 
 #include "inc/Core/CommonDataStructure.h"
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <cstring>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Socket
 {
@@ -165,7 +165,7 @@ namespace SimpleSerialization
     }
 
 } // namespace SimpleSerialization
-} // namespace SpaceV
+} // namespace SPTAG
 } // namespace Socket
 
-#endif // _SPACEV_SOCKET_SIMPLESERIALIZATION_H_
+#endif // _SPTAG_SOCKET_SIMPLESERIALIZATION_H_

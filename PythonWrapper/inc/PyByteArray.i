@@ -65,7 +65,7 @@
 
 %typemap(in) ByteArray p_data
 %{
-    $1 = SpaceV::ByteArray((std::uint8_t*)PyBytes_AsString($input), PyBytes_Size($input), false);
+    $1 = SPTAG::ByteArray((std::uint8_t*)PyBytes_AsString($input), PyBytes_Size($input), false);
 %}
 
 #endif

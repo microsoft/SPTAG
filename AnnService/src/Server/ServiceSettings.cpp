@@ -1,7 +1,7 @@
 #include "inc/Server/ServiceSettings.h"
 
-using namespace SpaceV;
-using namespace SpaceV::Service;
+using namespace SPTAG;
+using namespace SPTAG::Service;
 
 
 ServiceSettings::ServiceSettings()

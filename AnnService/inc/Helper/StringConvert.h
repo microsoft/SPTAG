@@ -1,5 +1,5 @@
-#ifndef _SPACEV_HELPER_STRINGCONVERTHELPER_H_
-#define _SPACEV_HELPER_STRINGCONVERTHELPER_H_
+#ifndef _SPTAG_HELPER_STRINGCONVERTHELPER_H_
+#define _SPTAG_HELPER_STRINGCONVERTHELPER_H_
 
 #include "inc/Core/Common.h"
 #include "CommonHelper.h"
@@ -11,7 +11,7 @@
 #include <limits>
 #include <cerrno>
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -366,6 +366,6 @@ inline std::string ConvertToString<VectorValueType>(const VectorValueType& p_val
 
 } // namespace Convert
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_STRINGCONVERTHELPER_H_
+#endif // _SPTAG_HELPER_STRINGCONVERTHELPER_H_

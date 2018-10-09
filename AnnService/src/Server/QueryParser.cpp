@@ -3,8 +3,8 @@
 #include <cctype>
 #include <cstring>
 
-using namespace SpaceV;
-using namespace SpaceV::Service;
+using namespace SPTAG;
+using namespace SPTAG::Service;
 
 
 const char* QueryParser::c_defaultVectorSeparator = "|";

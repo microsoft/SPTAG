@@ -7,7 +7,7 @@
 #include <memory>
 #include <iostream>
 
-using namespace SpaceV;
+using namespace SPTAG;
 
 int main(int argc, char* argv[])
 {

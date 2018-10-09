@@ -1,5 +1,5 @@
-#ifndef _SPACEV_HELPER_COMMONHELPER_H_
-#define _SPACEV_HELPER_COMMONHELPER_H_
+#ifndef _SPTAG_HELPER_COMMONHELPER_H_
+#define _SPTAG_HELPER_COMMONHELPER_H_
 
 #include "../Core/Common.h"
 
@@ -11,7 +11,7 @@
 #include <cerrno>
 
 
-namespace SpaceV
+namespace SPTAG
 {
 namespace Helper
 {
@@ -32,6 +32,6 @@ bool StrEqualIgnoreCase(const char* p_left, const char* p_right);
 
 } // namespace StrUtils
 } // namespace Helper
-} // namespace SpaceV
+} // namespace SPTAG
 
-#endif // _SPACEV_HELPER_COMMONHELPER_H_
+#endif // _SPTAG_HELPER_COMMONHELPER_H_
