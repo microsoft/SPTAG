@@ -50,3 +50,15 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+/.vs/SPTAG/v14
+/AnnService/x64
+/obj/x64_Release
+/PythonWrapper/x64/Release
+/x64/Release
+/SPTAG.VC.db
+/SPTAG.VC.VC.opendb
+/AnnService/CoreLibrary.vcxproj.user
+/AnnService/IndexBuilder.vcxproj.user
+/AnnService/Server.vcxproj.user
+/AnnService/SocketLib.vcxproj.user
+/PythonWrapper/PythonCore.vcxproj.user
