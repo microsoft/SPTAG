@@ -1,12 +1,3 @@
-file(GLOB PROJ_HDR_FILES ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h)
-file(GLOB OTH_HDR_FILES)
-set(HDR_FILES ${PROJ_HDR_FILES} ${OTH_HDR_FILES})
-file(GLOB SRC_FILES ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
-
-include_directories(${PROJECT_SOURCE_DIR}/AnnService)
-message(STATUS "Header files: ${HDR_FILES}")
-message(STATUS "Source files: ${SRC_FILES}")
-
 find_package(OpenMP)
 if (OpenMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -29,29 +20,14 @@ else()
     message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set (LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/release/")
-    set (EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/release/")
-else ()
-    set (LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/debug/")
-    set (EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/debug/")
-endif ()
+file(GLOB HDR_FILES ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h)
+file(GLOB SRC_FILES ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/*.cpp)
 
-string(LENGTH ${PROJECT_SOURCE_DIR} PREFIX_LEN) 
-MATH(EXPR PREFIX_LEN "${PREFIX_LEN}+1")
-foreach(F ${PROJ_HDR_FILES}) 
-  GET_FILENAME_COMPONENT(FP ${F} PATH)
-  string(SUBSTRING ${FP} ${PREFIX_LEN} -1 FS)
-  install(FILES "${F}" DESTINATION ${FS})
-endforeach(F)
+include_directories(${PROJECT_SOURCE_DIR}/AnnService)
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-
-install(TARGETS SPTAGLib   
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  COMPONENT library
-)
+add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
+set_target_properties(SPTAGLibStatic PROPERTIES OUTPUT_NAME SPTAGLib)
 
 file(GLOB SERVER_HDR_FILES ${HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/Server/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h)
 file(GLOB SERVER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/Server/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp)
@@ -72,3 +48,8 @@ file(GLOB BUILDER_HDR_FILES ${HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/In
 file(GLOB BUILDER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexBuilder/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/IndexBuilder/VectorSetReaders/*.cpp)
 add_executable (indexbuilder ${BUILDER_FILES} ${BUILDER_HDR_FILES})
 target_link_libraries(indexbuilder ${Boost_LIBRARIES})
+
+install(TARGETS SPTAGLib SPTAGLibStatic server client aggregator indexbuilder
+  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib)

@@ -1,14 +1,19 @@
-if (WIN32)
-    set(PYTHON_INCLUDE_PATH C:\Python27\include)
-    set(PY_SUFFIX .pyd)
+find_package(Python2 COMPONENTS Development)
+if (Python2_FOUND)
+    if (WIN32)
+        set(PY_SUFFIX .pyd)
+    else()
+        set(PY_SUFFIX .so)
+    endif()
+    include_directories (${Python2_INCLUDE_DIRS})
+    link_directories (${Python2_LIBRARY_DIRS})
+    message (STATUS "Found Python.")
+    message (STATUS "Include Path: ${Python2_INCLUDE_DIRS}")
+    message (STATUS "Library Path: ${Python2_LIBRARIES}")
+    message (STATUS "Suffix: ${PY_SUFFIX}")
 else()
-    set(PYTHON_INCLUDE_PATH /usr/include/python2.7)
-    set(PY_SUFFIX .so)
+	message (FATAL_ERROR "Could not find Python 2.7!")
 endif()
-
-include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/PythonWrapper)
-message(STATUS "Header files: ${HDR_FILES}")
-message(STATUS "Source files: ${SRC_FILES}")
 
 find_package(OpenMP)
 if (OpenMP_FOUND)
@@ -23,7 +28,7 @@ endif()
 find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex)
 if (Boost_FOUND)
     include_directories (${Boost_INCLUDE_DIR})
-    link_directories (${Boost_LIBRARY_DIR} "/usr/lib")
+    link_directories (${Boost_LIBRARY_DIR})
     message (STATUS "Found Boost.")
     message (STATUS "Include Path: ${Boost_INCLUDE_DIRS}")
     message (STATUS "Library Path: ${Boost_LIBRARY_DIRS}")
@@ -31,45 +36,30 @@ if (Boost_FOUND)
 else()
     message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
-
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set (LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/release/")
-    set (EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/release/")
-else ()
-    set (LIBRARY_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/debug/")
-    set (EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/debug/")
-endif ()
-
+				
 execute_process(COMMAND swig -l${PROJECT_SOURCE_DIR}/PythonWrapper/inc/PyByteArray.i -python -c++ ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h)
-execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAG.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
-
 execute_process(COMMAND swig -l${PROJECT_SOURCE_DIR}/PythonWrapper/inc/PyByteArray.i -python -c++ ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h)
-execute_process(COMMAND mv ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAGClient.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface_wrap.cxx ${LIBRARY_OUTPUT_PATH})
 
+include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/PythonWrapper)
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
+
 file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h ${OTH_HDR_FILES})
-file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/CoreInterface.cpp ${LIBRARY_OUTPUT_PATH}/CoreInterface_wrap.cxx)
+file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/CoreInterface.cpp ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface_wrap.cxx)
 add_library (_SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
-target_link_libraries(_SPTAG SPTAGLib python2.7)
+set_target_properties(_SPTAG PROPERTIES SUFFIX ${PY_SUFFIX})
+target_link_libraries(_SPTAG SPTAGLib ${Python2_LIBRARIES})
+add_custom_command(TARGET _SPTAG POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAG.py ${EXECUTABLE_OUTPUT_PATH})
 
 file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h ${OTH_HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
-file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${LIBRARY_OUTPUT_PATH}/ClientInterface_wrap.cxx)
+file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface_wrap.cxx)
 add_library (_SPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
-target_link_libraries(_SPTAGClient SPTAGLib python2.7 ${Boost_LIBRARIES})
+set_target_properties(_SPTAGClient PROPERTIES SUFFIX ${PY_SUFFIX})
+target_link_libraries(_SPTAGClient SPTAGLib ${Python2_LIBRARIES} ${Boost_LIBRARIES})
+add_custom_command(TARGET _SPTAGClient POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAGClient.py ${EXECUTABLE_OUTPUT_PATH})
 
-string(LENGTH ${PROJECT_SOURCE_DIR} PREFIX_LEN) 
-MATH(EXPR PREFIX_LEN "${PREFIX_LEN}+1")
-foreach(F ${PROJ_HDR_FILES}) 
-  GET_FILENAME_COMPONENT(FP ${F} PATH)
-  string(SUBSTRING ${FP} ${PREFIX_LEN} -1 FS)
-  message(${PREFIX_LEN} ":" ${FS})
-  install(FILES "${F}" DESTINATION ${FS})
-endforeach(F)
-
-install(TARGETS _SPTAG  
+install(TARGETS _SPTAG _SPTAGClient
+  RUNTIME DESTINATION bin  
   ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  COMPONENT library
-)
+  LIBRARY DESTINATION lib)
 
-install(FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/SPTAG.py DESTINATION lib)
+install(FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/SPTAG.py ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAGClient.py DESTINATION bin)

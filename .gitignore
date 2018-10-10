@@ -62,3 +62,8 @@ dkms.conf
 /AnnService/Server.vcxproj.user
 /AnnService/SocketLib.vcxproj.user
 /PythonWrapper/PythonCore.vcxproj.user
+/build
+/PythonWrapper/inc/ClientInterface_wrap.cxx
+/PythonWrapper/inc/CoreInterface_wrap.cxx
+/PythonWrapper/inc/SPTAG.py
+/PythonWrapper/inc/SPTAGClient.py
