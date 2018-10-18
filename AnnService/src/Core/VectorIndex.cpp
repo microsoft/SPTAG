@@ -62,7 +62,7 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
         {
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
-        return std::shared_ptr<BKT::Index<Type>>(new BKT::Index<Type>); \
+        return std::shared_ptr<VectorIndex>(new BKT::Index<Type>); \
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType

@@ -29,7 +29,7 @@ inline T max(T a, T b) {
     return a > b ? a : b;
 }
 #else
-#include <WinSock2.h>
+#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Psapi.h>
 #define FolderSep '\\'

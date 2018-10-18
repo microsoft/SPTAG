@@ -133,8 +133,10 @@ namespace SPTAG
             {
                 if (cache != nullptr) delete cache;
                 if (ownData) aligned_free(data);
-                dataIncremental->clear();
-                delete dataIncremental;
+                if (dataIncremental) {
+                    dataIncremental->clear();
+                    delete dataIncremental;
+                }
             }
             void Initialize(int rows_, int cols_, T* data_ = nullptr, const char * filename_ = nullptr, int cachesize_ = 0)
             {

@@ -67,3 +67,6 @@ dkms.conf
 /PythonWrapper/inc/CoreInterface_wrap.cxx
 /PythonWrapper/inc/SPTAG.py
 /PythonWrapper/inc/SPTAGClient.py
+/ipch/TEST-4fb66b42
+/obj/x64_Debug
+/x64/Debug
