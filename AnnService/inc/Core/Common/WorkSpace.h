@@ -1,12 +1,12 @@
-#ifndef _SPTAG_BKT_WORKSPACE_H_
-#define _SPTAG_BKT_WORKSPACE_H_
+#ifndef _SPTAG_COMMON_WORKSPACE_H_
+#define _SPTAG_COMMON_WORKSPACE_H_
 
 #include "CommonUtils.h"
 #include "Heap.h"
 
 namespace SPTAG
 {
-    namespace BKT
+    namespace COMMON
     {
         // node type in the priority queue
         struct HeapCell
@@ -175,9 +175,10 @@ namespace SPTAG
             void Initialize(int maxCheck, int dataSize)
             {
                 nodeCheckStatus.Init(dataSize);
-                m_BKTQueue.Resize(maxCheck * 10);
+                m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
 
+                m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iContinuousLimit = maxCheck / 64;
                 m_iMaxCheck = maxCheck;
@@ -187,9 +188,10 @@ namespace SPTAG
             void Reset(int maxCheck)
             {
                 nodeCheckStatus.clear();
-                m_BKTQueue.clear();
+                m_SPTQueue.clear();
                 m_NGQueue.clear();
 
+                m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iContinuousLimit = maxCheck / 64;
                 m_iMaxCheck = maxCheck;
@@ -207,6 +209,7 @@ namespace SPTAG
             // counter for dynamic pivoting
             int m_iNumOfContinuousNoBetterPropagation;
             int m_iContinuousLimit;
+            int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
 
@@ -214,9 +217,9 @@ namespace SPTAG
             Heap<HeapCell> m_NGQueue;
 
             // Priority queue Used for BKT-Tree
-            Heap<HeapCell> m_BKTQueue;
+            Heap<HeapCell> m_SPTQueue;
         };
     }
 }
 
-#endif // _SPTAG_BKT_WORKSPACE_H_
+#endif // _SPTAG_COMMON_WORKSPACE_H_

@@ -1,9 +1,9 @@
-#ifndef _SPTAG_BKT_HEAP_H_
-#define _SPTAG_BKT_HEAP_H_
+#ifndef _SPTAG_COMMON_HEAP_H_
+#define _SPTAG_COMMON_HEAP_H_
 
 namespace SPTAG
 {
-    namespace BKT
+    namespace COMMON
     {
 
         // priority queue
@@ -99,4 +99,4 @@ namespace SPTAG
     }
 }
 
-#endif // _SPTAG_BKT_HEAP_H_
+#endif // _SPTAG_COMMON_HEAP_H_

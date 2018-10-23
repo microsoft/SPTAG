@@ -1,6 +1,6 @@
 #include <bitset>
 #include "inc/Test.h"
-#include "inc/Core/BKT/DistanceUtils.h"
+#include "inc/Core/Common/DistanceUtils.h"
 
 template<typename T>
 static float ComputeCosineDistance(const T *pX, const T *pY, int length) {
@@ -36,14 +36,8 @@ void test(int high) {
         X[i] = random<T>(high, -high);
         Y[i] = random<T>(high, -high);
     }
-    for (int i = 0; i < dimension; i++)
-        std::cout << (int)X[i] << " ";
-    std::cout << std::endl;
-    for (int i = 0; i < dimension; i++)
-        std::cout << (int)Y[i] << " ";
-    std::cout << std::endl;
-    BOOST_CHECK_CLOSE_FRACTION(ComputeL2Distance(X, Y, dimension), SPTAG::BKT::DistanceUtils::ComputeL2Distance(X, Y, dimension), 1e-6);
-    BOOST_CHECK_CLOSE_FRACTION(high*high - ComputeCosineDistance(X, Y, dimension), SPTAG::BKT::DistanceUtils::ComputeCosineDistance(X, Y, dimension), 1e-6);
+    BOOST_CHECK_CLOSE_FRACTION(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeL2Distance(X, Y, dimension), 1e-6);
+    BOOST_CHECK_CLOSE_FRACTION(high*high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeCosineDistance(X, Y, dimension), 1e-6);
 
     delete[] X;
     delete[] Y;

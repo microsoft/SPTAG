@@ -1,5 +1,5 @@
-#ifndef _SPTAG_BKT_DISTANCEUTILS_H_
-#define _SPTAG_BKT_DISTANCEUTILS_H_
+#ifndef _SPTAG_COMMON_DISTANCEUTILS_H_
+#define _SPTAG_COMMON_DISTANCEUTILS_H_
 
 #include <immintrin.h>
 #include "CommonUtils.h"
@@ -18,7 +18,7 @@
 
 namespace SPTAG
 {
-    namespace BKT
+    namespace COMMON
     {
         class DistanceUtils
         {
@@ -471,4 +471,4 @@ namespace SPTAG
     }
 }
 
-#endif // _SPTAG_BKT_DISTANCEUTILS_H_
+#endif // _SPTAG_COMMON_DISTANCEUTILS_H_

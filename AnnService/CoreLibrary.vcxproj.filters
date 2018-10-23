@@ -26,6 +26,18 @@
     <Filter Include="Source Files\Helper">
       <UniqueIdentifier>{23fdeb31-9052-47d1-8edb-9b47c4b02707}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Core\KDT">
+      <UniqueIdentifier>{6dff7b24-66ea-40b4-b408-d8fe264a6caa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Core\Common">
+      <UniqueIdentifier>{b0f1e81d-ca05-426e-bffa-75513a52ca6b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\Common">
+      <UniqueIdentifier>{774592a9-40aa-4342-a4af-b711a1cc4d52}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\KDT">
+      <UniqueIdentifier>{8fb36afb-73ed-4c3d-8c9b-c3581d80c5d1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -44,9 +56,6 @@
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\BKT\Index.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\BKT\WorkSpacePool.h">
       <Filter>Header Files\Core\BKT</Filter>
     </ClInclude>
     <ClInclude Include="inc\Helper\CommonHelper.h">
@@ -73,29 +82,38 @@
     <ClInclude Include="inc\Helper\ArgumentsParser.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\BKT\CommonUtils.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\BKT\Dataset.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\BKT\DataUtils.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\BKT\DistanceUtils.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\BKT\Heap.h">
-      <Filter>Header Files\Core\BKT</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h">
       <Filter>Header Files\Core\BKT</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\BKT\QueryResultSet.h">
-      <Filter>Header Files\Core\BKT</Filter>
+    <ClInclude Include="inc\Core\Common\WorkSpace.h">
+      <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\BKT\WorkSpace.h">
-      <Filter>Header Files\Core\BKT</Filter>
+    <ClInclude Include="inc\Core\Common\CommonUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Dataset.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\DataUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\DistanceUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Heap.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\QueryResultSet.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\WorkSpacePool.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\KDT\Index.h">
+      <Filter>Header Files\Core\KDT</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h">
+      <Filter>Header Files\Core\KDT</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -105,11 +123,8 @@
     <ClCompile Include="src\Core\VectorIndex.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
-    <ClCompile Include="src\Core\BKT\Index.cpp">
-      <Filter>Source Files\Core\BKT</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\BKT\WorkSpacePool.cpp">
-      <Filter>Source Files\Core\BKT</Filter>
+    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp">
+      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\CommonHelper.cpp">
       <Filter>Source Files\Helper</Filter>
@@ -134,6 +149,12 @@
     </ClCompile>
     <ClCompile Include="src\Helper\ArgumentsParser.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\BKT\BKTIndex.cpp">
+      <Filter>Source Files\Core\BKT</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\KDT\KDTIndex.cpp">
+      <Filter>Source Files\Core\KDT</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

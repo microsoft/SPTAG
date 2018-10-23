@@ -1,5 +1,5 @@
-#include "inc/Core/BKT/Index.h"
-#include "inc/Core/BKT/WorkSpacePool.h"
+#include "inc/Core/KDT/Index.h"
+#include "inc/Core/Common/WorkSpacePool.h"
 #include "inc/Core/MetadataSet.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
@@ -12,7 +12,7 @@
 
 namespace SPTAG
 {
-    namespace BKT
+    namespace KDT
     {
 #pragma region Load data points, kd-tree, neighborhood graph
         template <typename T>
@@ -24,8 +24,8 @@ namespace SPTAG
             m_iDataSize = m_pSamples.R();
             m_iDataDimension = m_pSamples.C();
 
-            bool loadedBKT = m_pBKTMemoryFile != NULL ? LoadBKT(m_pBKTMemoryFile) : LoadBKT(m_sBKTFilename);
-            if (!loadedBKT) return false;
+            bool loadedKDT = m_pKDTMemoryFile != NULL ? LoadKDT(m_pKDTMemoryFile) : LoadKDT(m_sKDTFilename);
+            if (!loadedKDT) return false;
 
             bool loadedGraph = m_pGraphMemoryFile != NULL ? LoadGraph(m_pGraphMemoryFile) : LoadGraph(m_sGraphFilename);
             if (!loadedGraph) return false;
@@ -84,50 +84,43 @@ namespace SPTAG
         }
 
         template <typename T>
-        bool Index<T>::LoadBKT(std::string sBKTFilename)
+        bool Index<T>::LoadKDT(std::string sKDTFilename)
         {
-            std::cout << "Load BKT From " << sBKTFilename << std::endl;
-            FILE *fp = fopen(sBKTFilename.c_str(), "rb");
+            std::cout << "Load KDT From " << sKDTFilename << std::endl;
+            FILE *fp = fopen(sKDTFilename.c_str(), "rb");
             if (fp == NULL) return false;
-            int realBKTNumber;
-            fread(&realBKTNumber, sizeof(int), 1, fp);
-            m_pBKTStart.resize(realBKTNumber);
-            fread(m_pBKTStart.data(), sizeof(int), realBKTNumber, fp);
-            if (realBKTNumber < m_iBKTNumber) m_iBKTNumber = realBKTNumber;
-            int treeNodeSize;
-            fread(&treeNodeSize, sizeof(int), 1, fp);
-            m_pBKTRoots.resize(treeNodeSize);
-            for (int i = 0; i < treeNodeSize; i++) {
-                fread(&(m_pBKTRoots[i].centerid), sizeof(int), 1, fp);
-                fread(&(m_pBKTRoots[i].childStart), sizeof(int), 1, fp);
-                fread(&(m_pBKTRoots[i].childEnd), sizeof(int), 1, fp);
+            int realKDTNumber;
+            fread(&realKDTNumber, sizeof(int), 1, fp);
+            if (realKDTNumber < m_iKDTNumber) m_iKDTNumber = realKDTNumber;
+            for (int i = 0; i < m_iKDTNumber; i++) {
+                m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
+                int treeNodeSize;
+                fread(&treeNodeSize, sizeof(int), 1, fp);
+                m_pKDTRoots.resize(m_pKDTRoots.size() + treeNodeSize);
+                fread(&(m_pKDTRoots[m_pKDTStart[i]]), sizeof(KDTNode), treeNodeSize, fp);
             }
+            m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
             fclose(fp);
-            std::cout << "Load BKT (" << m_iBKTNumber << ", " << treeNodeSize << ") Finish!" << std::endl;
+            std::cout << "Load KDT (" << m_iKDTNumber << ", " << m_pKDTRoots.size() << ") Finish!" << std::endl;
             return true;
         }
 
         template <typename T>
-        bool Index<T>::LoadBKT(char* pBKTMemFile)
+        bool Index<T>::LoadKDT(char* pKDTMemFile)
         {
-            int realBKTNumber = *((int*)pBKTMemFile);
-            pBKTMemFile += sizeof(int);
-            m_pBKTStart.resize(realBKTNumber);
-            memcpy(m_pBKTStart.data(), pBKTMemFile, sizeof(int)*realBKTNumber);
-            pBKTMemFile += sizeof(int)*realBKTNumber;
-            if (realBKTNumber < m_iBKTNumber) m_iBKTNumber = realBKTNumber;
+            int realKDTNumber = *((int*)pKDTMemFile);
+            pKDTMemFile += sizeof(int);
+            if (realKDTNumber < m_iKDTNumber) m_iKDTNumber = realKDTNumber;
+            for (int i = 0; i < m_iKDTNumber; i++) {
+                m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
 
-            int treeNodeSize = *((int*)pBKTMemFile);
-            pBKTMemFile += sizeof(int);
-            m_pBKTRoots.resize(treeNodeSize);
-            for (int i = 0; i < treeNodeSize; i++) {
-                m_pBKTRoots[i].centerid = *((int*)pBKTMemFile);
-                pBKTMemFile += sizeof(int);
-                m_pBKTRoots[i].childStart = *((int*)pBKTMemFile);
-                pBKTMemFile += sizeof(int);
-                m_pBKTRoots[i].childEnd = *((int*)pBKTMemFile);
-                pBKTMemFile += sizeof(int);
+                int treeNodeSize = *((int*)pKDTMemFile);
+                pKDTMemFile += sizeof(int);
+                m_pKDTRoots.resize(m_pKDTRoots.size() + treeNodeSize);
+                std::memcpy(&(m_pKDTRoots[m_pKDTStart[i]]), pKDTMemFile, sizeof(KDTNode)*treeNodeSize);
+                pKDTMemFile += sizeof(KDTNode)*treeNodeSize;
             }
+            m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
             return true;
         }
 
@@ -179,90 +172,110 @@ namespace SPTAG
 #pragma endregion
 
 #pragma region K-NN search
-
         template <typename T>
-        void Index<T>::SearchIndex(QueryResultSet<T> &query, WorkSpace &space) const
-        {
-            for (char i = 0; i < m_iBKTNumber; i++) {
-                const BKTNode& node = m_pBKTRoots[m_pBKTStart[i]];
-                if (node.childStart < 0) {
-                    space.m_BKTQueue.insert(HeapCell(m_pBKTStart[i], m_fComputeDistance(query.GetTarget(), (m_pSamples)[node.centerid], m_iDataDimension)));
-                }
-                else {
-                    for (int begin = node.childStart; begin < node.childEnd; begin++) {
-                        int index = m_pBKTRoots[begin].centerid;
-                        space.m_BKTQueue.insert(HeapCell(begin, m_fComputeDistance(query.GetTarget(), (m_pSamples)[index], m_iDataDimension)));
-                    }
-                }
-            }
-            int checkLimit = g_iNumberOfInitialDynamicPivots;
-            const int checkPos = m_iNeighborhoodSize - 1;
-            while (!space.m_BKTQueue.empty()) {
-                do
-                {
-                    HeapCell bcell = space.m_BKTQueue.pop();
-                    const BKTNode& tnode = m_pBKTRoots[bcell.node];
-
-                    if (tnode.childStart < 0) {
-                        if (!space.CheckAndSet(tnode.centerid)) {
-                            space.m_iNumberOfCheckedLeaves++;
-                            space.m_NGQueue.insert(HeapCell(tnode.centerid, bcell.distance));
-                        }
-                        if (space.m_iNumberOfCheckedLeaves >= checkLimit) break;
-                    }
-                    else {
-                        if (!space.CheckAndSet(tnode.centerid)) {
-                            space.m_NGQueue.insert(HeapCell(tnode.centerid, bcell.distance));
-                        }
-                        for (int begin = tnode.childStart; begin < tnode.childEnd; begin++) {
-                            int index = m_pBKTRoots[begin].centerid;
-                            space.m_BKTQueue.insert(HeapCell(begin, m_fComputeDistance(query.GetTarget(), (m_pSamples)[index], m_iDataDimension)));
-                        }
-                    }
-                } while (!space.m_BKTQueue.empty());
-                while (!space.m_NGQueue.empty()) {
-                    HeapCell gnode = space.m_NGQueue.pop();
-                    const int *node = (m_pNeighborhoodGraph)[gnode.node];
-                    _mm_prefetch((const char *)node, _MM_HINT_T0);
-                    if (query.AddPoint(gnode.node, gnode.distance)) {
-                        space.m_iNumOfContinuousNoBetterPropagation = 0;
-
-                        int checkNode = node[checkPos];
-                        if (checkNode < -1) {
-                            const BKTNode& tnode = m_pBKTRoots[-2 - checkNode];
-                            for (int i = -tnode.childStart; i < tnode.childEnd; i++) {
-                                if (!query.AddPoint(m_pBKTRoots[i].centerid, gnode.distance)) break;
-                            }
-                        }
-                    }
-                    else {
-                        space.m_iNumOfContinuousNoBetterPropagation++;
-                        if (space.m_iNumOfContinuousNoBetterPropagation > space.m_iContinuousLimit || space.m_iNumberOfCheckedLeaves > space.m_iMaxCheck) {
-                            query.SortResult(); return;
-                        }
-                    }
+        void Index<T>::KDTSearch(const int node, const bool isInit, const float distBound,
+            COMMON::WorkSpace& space, COMMON::QueryResultSet<T> &query) const {
+            if (node < 0)
+            {
+                int index = -node - 1;
 
 #ifdef PREFETCH
-                    for (int i = 0; i <= checkPos; i++) {
-                        _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0);
-                    }
+                const char* data = (const char *)(m_pSamples[index]);
+                _mm_prefetch(data, _MM_HINT_T0);
+                _mm_prefetch(data + 64, _MM_HINT_T0);
+#endif
+                if (space.CheckAndSet(index)) return;
+
+                float distance = m_fComputeDistance(query.GetTarget(), (T*)data, m_iDataDimension);
+                query.AddPoint(index, distance);
+                ++space.m_iNumberOfTreeCheckedLeaves;
+                ++space.m_iNumberOfCheckedLeaves;
+                space.m_NGQueue.insert(COMMON::HeapCell(index, distance));
+                return;
+            }
+
+            auto& tnode = m_pKDTRoots[node];
+
+            float diff = (query.GetTarget())[tnode.split_dim] - tnode.split_value;
+            float distanceBound = distBound + diff * diff;
+            int otherChild, bestChild;
+            if (diff < 0)
+            {
+                bestChild = tnode.left;
+                otherChild = tnode.right;
+            }
+            else
+            {
+                otherChild = tnode.left;
+                bestChild = tnode.right;
+            }
+
+            if (!isInit || distanceBound < query.worstDist())
+            {
+                space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
+            }
+            KDTSearch(bestChild, isInit, distBound, space, query);
+        }
+
+        template <typename T>
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &query, COMMON::WorkSpace &space) const
+        {
+            for (char i = 0; i < m_iKDTNumber; i++) {
+                KDTSearch(m_pKDTStart[i], true, 0, space, query);
+            }
+
+            while (!space.m_SPTQueue.empty() && space.m_iNumberOfCheckedLeaves < g_iNumberOfInitialDynamicPivots)
+            {
+                auto& tcell = space.m_SPTQueue.pop();
+                if (query.worstDist() < tcell.distance) break;
+                KDTSearch(tcell.node, true, tcell.distance, space, query);
+            }
+
+            while (!space.m_NGQueue.empty() && space.m_iNumberOfCheckedLeaves < space.m_iMaxCheck) {
+                bool bLocalOpt = true;
+                COMMON::HeapCell gnode = space.m_NGQueue.pop();
+                const int *node = (m_pNeighborhoodGraph)[gnode.node];
+
+#ifdef PREFETCH
+                _mm_prefetch((const char *)node, _MM_HINT_T0);
+                for (int i = 0; i < m_iNeighborhoodSize; i++)
+                {
+                    _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0);
+                }
 #endif
 
-                    for (int i = 0; i <= checkPos; i++)
+                for (int i = 0; i < m_iNeighborhoodSize; i++)
+                {
+                    int nn_index = node[i];
+
+                    // do not check it if it has been checked
+                    if (nn_index < 0) break;
+                    if (space.CheckAndSet(nn_index)) continue;
+
+                    // count the number of the computed nodes
+                    float distance2leaf = m_fComputeDistance(query.GetTarget(), (m_pSamples)[nn_index], m_iDataDimension);
+                    
+                    bool inserted = query.AddPoint(nn_index, distance2leaf);
+                    space.m_iNumberOfCheckedLeaves++;
+                    space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf));
+                    if (inserted || distance2leaf < gnode.distance) bLocalOpt = false;
+                }
+
+                if (bLocalOpt) space.m_iNumOfContinuousNoBetterPropagation++;
+                else space.m_iNumOfContinuousNoBetterPropagation = 0;
+
+                if (space.m_iNumOfContinuousNoBetterPropagation > g_iThresholdOfNumberOfContinuousNoBetterPropagation)
+                {
+                    if (space.m_iNumberOfTreeCheckedLeaves < space.m_iNumberOfCheckedLeaves / 10)
                     {
-                        int nn_index = node[i];
-
-                        // do not check it if it has been checked
-                        if (nn_index < 0) break;
-                        if (space.CheckAndSet(nn_index)) continue;
-
-                        // count the number of the computed nodes
-                        float distance2leaf = m_fComputeDistance(query.GetTarget(), (m_pSamples)[nn_index], m_iDataDimension);
-                        space.m_iNumberOfCheckedLeaves++;
-                        space.m_NGQueue.insert(HeapCell(nn_index, distance2leaf));
+                        int nextNumberOfCheckedLeaves = g_iNumberOfOtherDynamicPivots + space.m_iNumberOfCheckedLeaves;
+                        while (!space.m_SPTQueue.empty() && space.m_iNumberOfCheckedLeaves < nextNumberOfCheckedLeaves)
+                        {
+                            auto& tcell = space.m_SPTQueue.pop();
+                            KDTSearch(tcell.node, false, tcell.distance, space, query);
+                        }
                     }
-                    if (space.m_NGQueue.Top().distance >= space.m_BKTQueue.Top().distance) {
-                        checkLimit = g_iNumberOfOtherDynamicPivots + space.m_iNumberOfCheckedLeaves;
+                    else if (gnode.distance > query.worstDist()) {
                         break;
                     }
                 }
@@ -276,7 +289,7 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            SearchIndex(*((QueryResultSet<T>*)&query), *workSpace);
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&query), *workSpace);
             m_workSpacePool->Return(workSpace);
 
             if (query.WithMeta() && nullptr != m_pMetadata)
@@ -300,8 +313,8 @@ namespace SPTAG
             m_iDataSize = m_pSamples.R();
             m_iDataDimension = m_pSamples.C();
 
-            BuildBKT();
-            if (!SaveBKT(m_sBKTFilename)) return false;
+            BuildKDT();
+            if (!SaveKDT(m_sKDTFilename)) return false;
 
             BuildRNG();
             if (!SaveRNG(m_sGraphFilename)) return false;
@@ -315,7 +328,7 @@ namespace SPTAG
             m_iDataSize = m_pSamples.R();
             m_iDataDimension = m_pSamples.C();
 
-            BuildBKT();
+            BuildKDT();
             BuildRNG();
             return true;
         }
@@ -334,276 +347,193 @@ namespace SPTAG
                 m_pSamples.Initialize(p_vectorSet->Count(), p_vectorSet->Dimension());
                 std::memcpy(m_pSamples.GetData(), p_vectorSet->GetData(), p_vectorSet->Count() * p_vectorSet->Dimension() * sizeof(T));
 
-                int base = Utils::GetBase<T>();
+                int base = COMMON::Utils::GetBase<T>();
                 for (SPTAG::SizeType i = 0; i < p_vectorSet->Count(); i++) {
-                    Utils::Normalize(m_pSamples[i], m_pSamples.C(), base);
+                    COMMON::Utils::Normalize(m_pSamples[i], m_pSamples.C(), base);
                 }
                 p_vectorSet.reset();
-            } else {
+            }
+            else {
                 m_pSamples.Initialize(p_vectorSet->Count(), p_vectorSet->Dimension(), reinterpret_cast<T*>(p_vectorSet->GetData()));
             }
 
             m_iDataSize = m_pSamples.R();
             m_iDataDimension = m_pSamples.C();
 
-            BuildBKT();
+            BuildKDT();
             BuildRNG();
 
             m_pMetadata = std::move(p_metadataSet);
 
-            m_workSpacePool.reset(new WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             return ErrorCode::Success;
         }
 
 #pragma region Build/Save kd-tree
         template <typename T>
-        bool Index<T>::SaveBKT(std::string sBKTFilename) const
+        bool Index<T>::SaveKDT(std::string sKDTFilename) const
         {
-            std::cout << "Save BKT to " << sBKTFilename << std::endl;
-            FILE *fp = fopen(sBKTFilename.c_str(), "wb");
-            if(fp == NULL) return false;
-            fwrite(&m_iBKTNumber, sizeof(int), 1, fp);
-            fwrite(m_pBKTStart.data(), sizeof(int), m_iBKTNumber, fp);
-            int treeNodeSize = (int)m_pBKTRoots.size();
-            fwrite(&treeNodeSize, sizeof(int), 1, fp);
-            for (int i = 0; i < treeNodeSize; i++) {
-                fwrite(&(m_pBKTRoots[i].centerid), sizeof(int), 1, fp);
-                fwrite(&(m_pBKTRoots[i].childStart), sizeof(int), 1, fp);
-                fwrite(&(m_pBKTRoots[i].childEnd), sizeof(int), 1, fp);
+            std::cout << "Save KDT to " << sKDTFilename << std::endl;
+            FILE *fp = fopen(sKDTFilename.c_str(), "wb");
+            if (fp == NULL) return false;
+            fwrite(&m_iKDTNumber, sizeof(int), 1, fp);
+            for (int i = 0; i < m_iKDTNumber; i++)
+            {
+                int treeNodeSize = m_pKDTStart[i + 1] - m_pKDTStart[i];
+                fwrite(&treeNodeSize, sizeof(int), 1, fp);
+                fwrite(&(m_pKDTRoots[m_pKDTStart[i]]), sizeof(KDTNode), treeNodeSize, fp);
             }
             fclose(fp);
-            std::cout << "Save BKT Finish!" << std::endl;
+            std::cout << "Save KDT Finish!" << std::endl;
             return true;
         }
 
         template <typename T>
-        void Index<T>::BuildBKT()
+        void Index<T>::BuildKDT()
         {
             omp_set_num_threads(m_iNumberOfThreads);
-            struct  BKTStackItem {
-                int index, first, last;
-                BKTStackItem(int index_, int first_, int last_) : index(index_), first(first_), last(last_) {}
-            };
-
-            std::stack<BKTStackItem> ss;
-            KmeansArgs<T> args(m_iBKTKmeansK, m_iDataDimension, m_iDataSize, m_iNumberOfThreads);
-
-            std::vector<int> indices(m_iDataSize);
-            for (int i = 0; i < m_iDataSize; i++) indices[i] = i;
-
-            for (char i = 0; i < m_iBKTNumber; i++)
-            {
-                std::random_shuffle(indices.begin(), indices.end());
-
-                m_pBKTStart.push_back((int)m_pBKTRoots.size());
-                m_pBKTRoots.push_back(BKTNode(m_iDataSize));
-                std::cout << "Start to build tree " << i + 1 << std::endl;
-
-                ss.push(BKTStackItem(m_pBKTStart[i], 0, m_iDataSize));
-                while (!ss.empty()) {
-                    BKTStackItem item = ss.top(); ss.pop();
-                    int newBKTid = (int)m_pBKTRoots.size();
-                    m_pBKTRoots[item.index].childStart = newBKTid;
-                    if (item.last - item.first <= m_iBKTLeafSize) {
-                        if (item.last == item.first) {
-                            m_pBKTRoots[item.index].childStart = -m_pBKTRoots[item.index].childStart;
-                        }
-                        else {
-                            for (int j = item.first; j < item.last; j++) {
-                                m_pBKTRoots.push_back(BKTNode(indices[j]));
-                            }
-                        }
-                    }
-                    else { // clustering the data into BKTKmeansK clusters
-                        int numClusters = KmeansClustering(indices, item.first, item.last, args);
-                        if (numClusters <= 1) {
-                            int end = min(item.last + 1, m_iDataSize);
-                            std::sort(indices.begin() + item.first, indices.begin() + end);
-                            m_pBKTRoots[item.index].centerid = indices[item.first];
-                            m_pBKTRoots[item.index].childStart = -m_pBKTRoots[item.index].childStart;
-                            for (int j = item.first + 1; j < end; j++) {
-                                m_pBKTRoots.push_back(BKTNode(indices[j]));
-                                m_pSampleToCenter[indices[j]] = m_pBKTRoots[item.index].centerid;
-                            }
-                            m_pSampleToCenter[-1 - m_pBKTRoots[item.index].centerid] = item.index;
-                        }
-                        else {
-                            for (int k = 0; k < m_iBKTKmeansK; k++) {
-                                if (args.counts[k] > 0) {
-                                    m_pBKTRoots.push_back(BKTNode(indices[item.first + args.counts[k] - 1]));
-                                    ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
-                                    item.first += args.counts[k];
-                                }
-                            }
-                        }
-                    }
-                    m_pBKTRoots[item.index].childEnd = (int)m_pBKTRoots.size();
-                }
-                std::cout << i + 1 << " trees built, " << m_pBKTRoots.size() - m_pBKTStart[i] << " " << m_iDataSize << std::endl;
-            }
-        }
-
-        template <typename T>
-        float Index<T>::KmeansAssign(std::vector<int>& indices, const int first, const int last, KmeansArgs<T>& args, bool updateCenters) {
-            float currDist = 0;
-            float lambda = (updateCenters) ? Utils::GetBase<T>() * Utils::GetBase<T>() / (100.0 * (last - first)) : 0;
-            int subsize = (last - first - 1) / m_iNumberOfThreads + 1;
-
+            m_pKDTRoots.resize(m_iKDTNumber * m_iDataSize);
+            m_pKDTStart.resize(m_iKDTNumber + 1, (int)(m_pKDTRoots.size()));
+            
 #pragma omp parallel for
-            for (int tid = 0; tid < m_iNumberOfThreads; tid++)
+            for (int i = 0; i < m_iKDTNumber; i++)
             {
-                int istart = first + tid * subsize;
-                int iend = min(first + (tid + 1) * subsize, last);
-                int *inewCounts = args.newCounts + tid * m_iBKTKmeansK;
-                float *inewCenters = args.newCenters + tid * m_iBKTKmeansK * m_iDataDimension;
-                int * iclusterIdx = args.clusterIdx + tid * m_iBKTKmeansK;
-                float * iclusterDist = args.clusterDist + tid * m_iBKTKmeansK;
-                float idist = 0;
-                for (int i = istart; i < iend; i++) {
-                    int clusterid = 0;
-                    float smallestDist = MaxDist;
-                    for (int k = 0; k < m_iBKTKmeansK; k++) {
-                        float dist = m_fComputeDistance(m_pSamples[indices[i]], args.centers + k*m_iDataDimension, m_iDataDimension) + lambda*args.counts[k];
-                        if (dist > -MaxDist && dist < smallestDist) {
-                            clusterid = k; smallestDist = dist;
-                        }
-                    }
-                    args.label[i] = clusterid;
-                    inewCounts[clusterid]++;
-                    idist += smallestDist;
-                    if (updateCenters) {
-                        for (int j = 0; j < m_iDataDimension; j++) inewCenters[clusterid*m_iDataDimension + j] += m_pSamples[indices[i]][j];
-                        if (smallestDist > iclusterDist[clusterid]) {
-                            iclusterDist[clusterid] = smallestDist;
-                            iclusterIdx[clusterid] = indices[i];
-                        }
-                    }
-                    else {
-                        if (smallestDist <= iclusterDist[clusterid]) {
-                            iclusterDist[clusterid] = smallestDist;
-                            iclusterIdx[clusterid] = indices[i];
-                        }
-                    }
-                }
-                Utils::atomic_float_add(&currDist, idist);
+                Sleep(i * 100); std::srand(clock());
+                m_pKDTStart[i] = i * m_iDataSize;
+                std::vector<int> KDTDataIndices(m_iDataSize);
+                for (int j = 0; j < m_iDataSize; j++) KDTDataIndices[j] = j;
+                std::random_shuffle(KDTDataIndices.begin(), KDTDataIndices.end());
+
+                std::cout << "Start to build tree " << i + 1 << std::endl;
+                int iTreeSize = m_pKDTStart[i];
+                DivideTree(m_pKDTRoots.data(), KDTDataIndices, 0, m_iDataSize - 1, m_pKDTStart[i], iTreeSize);
+                std::cout << i + 1 << " trees built, " << iTreeSize - m_pKDTStart[i] << " " << m_iDataSize << std::endl;
             }
-
-            for (int i = 1; i < m_iNumberOfThreads; i++) {
-                for (int k = 0; k < m_iBKTKmeansK; k++)
-                    args.newCounts[k] += args.newCounts[i*m_iBKTKmeansK + k];
-            }
-
-            if (updateCenters) {
-                for (int i = 1; i < m_iNumberOfThreads; i++) {
-                    float* currCenter = args.newCenters + i*m_iBKTKmeansK*m_iDataDimension;
-                    for (int j = 0; j < m_iBKTKmeansK * m_iDataDimension; j++) args.newCenters[j] += currCenter[j];
-                }
-
-                int maxcluster = 0;
-                for (int k = 1; k < m_iBKTKmeansK; k++) if (args.newCounts[maxcluster] < args.newCounts[k]) maxcluster = k;
-
-                int maxid = maxcluster;
-                for (int tid = 1; tid < m_iNumberOfThreads; tid++) {
-                    if (args.clusterDist[maxid] < args.clusterDist[tid * m_iBKTKmeansK + maxcluster]) maxid = tid * m_iBKTKmeansK + maxcluster;
-                }
-                if (args.clusterIdx[maxid] < 0 || args.clusterIdx[maxid] >= m_iDataSize)
-                    std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error maxid:" << maxid << " dist:" << args.clusterDist[maxid] << std::endl;
-                maxid = args.clusterIdx[maxid];
-
-                for (int k = 0; k < m_iBKTKmeansK; k++) {
-                    T* TCenter = args.newTCenters + k * m_iDataDimension;
-                    if (args.newCounts[k] == 0) {
-                        //int nextid = Utils::rand_int(last, first);
-                        //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
-                        int nextid = maxid;
-                        std::memcpy(TCenter, m_pSamples[nextid], sizeof(T)*m_iDataDimension);
-                    }
-                    else {
-                        float* currCenters = args.newCenters + k * m_iDataDimension;
-                        for (int j = 0; j < m_iDataDimension; j++) currCenters[j] /= args.newCounts[k];
-
-                        if (m_iDistCalcMethod == DistCalcMethod::Cosine) {
-                            Utils::Normalize(currCenters, m_iDataDimension, Utils::GetBase<T>()); 
-                        }
-                        for (int j = 0; j < m_iDataDimension; j++) TCenter[j] = (T)(currCenters[j]);
-                    }
-                }
-            }
-            else {
-                for (int i = 1; i < m_iNumberOfThreads; i++) {
-                    for (int k = 0; k < m_iBKTKmeansK; k++) {
-                        if (args.clusterIdx[i*m_iBKTKmeansK + k] != -1 && args.clusterDist[i*m_iBKTKmeansK + k] <= args.clusterDist[k]) {
-                            args.clusterDist[k] = args.clusterDist[i*m_iBKTKmeansK + k];
-                            args.clusterIdx[k] = args.clusterIdx[i*m_iBKTKmeansK + k];
-                        }
-                    }
-                }
-            }
-            return currDist;
         }
 
         template <typename T>
-        int Index<T>::KmeansClustering(std::vector<int>& indices, const int first, const int last, KmeansArgs<T>& args) {
-            int iterLimit = 100;
+        void Index<T>::DivideTree(KDTNode* pTree, std::vector<int>& indices, int first, int last,
+            int index, int &iTreeSize) {
+            ChooseDivision(pTree[index], indices, first, last);
+            int i = Subdivide(pTree[index], indices, first, last);
 
-            int batchEnd = min(first + m_iSamples, last);
-            float currDiff, currDist, minClusterDist = MaxDist;
-            for (int numKmeans = 0; numKmeans < 3; numKmeans++) {
-                for (int k = 0; k < m_iBKTKmeansK; k++) {
-                    int randid = Utils::rand_int(last, first);
-                    memcpy(args.centers + k*m_iDataDimension, m_pSamples[indices[randid]], sizeof(T)*m_iDataDimension);
-                }
-                args.ClearCounts();
-                currDist = KmeansAssign(indices, first, batchEnd, args, false);
-                if (currDist < minClusterDist) {
-                    minClusterDist = currDist;
-                    memcpy(args.newTCenters, args.centers, sizeof(T)*m_iBKTKmeansK*m_iDataDimension);
-                    memcpy(args.counts, args.newCounts, sizeof(int) * m_iBKTKmeansK);
+            if (i - 1 == first)
+            {
+                pTree[index].left = -indices[first] - 1;
+            }
+            else
+            {
+                iTreeSize++;
+                pTree[index].left = iTreeSize;
+                DivideTree(pTree, indices, first, i - 1, iTreeSize, iTreeSize);
+            }
+            if (last == i)
+            {
+                pTree[index].right = -indices[last] - 1;
+            }
+            else
+            {
+                iTreeSize++;
+                pTree[index].right = iTreeSize;
+                DivideTree(pTree, indices, i, last, iTreeSize, iTreeSize);
+            }
+        }
+
+        template <typename T>
+        void Index<T>::ChooseDivision(KDTNode& node, const std::vector<int>& indices, int first, int last)
+        {
+            std::vector<float> meanValues(m_iDataDimension, 0);
+            std::vector<float> varianceValues(m_iDataDimension, 0);
+            int end = min(first + m_numSamplesKDTSplitConsideration, last);
+            int count = end - first + 1;
+            // calculate the mean of each dimension
+            for (int j = first; j <= end; j++)
+            {
+                T* v = (m_pSamples)[indices[j]];
+                for (int k = 0; k < m_iDataDimension; k++)
+                {
+                    meanValues[k] += v[k];
                 }
             }
-
-            minClusterDist = MaxDist;
-            int noImprovement = 0;
-            for (int iter = 0; iter < iterLimit; iter++) {
-                std::memcpy(args.centers, args.newTCenters, sizeof(T)*m_iBKTKmeansK*m_iDataDimension);
-                std::random_shuffle(indices.begin() + first, indices.begin() + last);
-
-                args.ClearCenters();
-                args.ClearCounts();
-                args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(indices, first, batchEnd, args, true);
-                memcpy(args.counts, args.newCounts, sizeof(int)*m_iBKTKmeansK);
-
-                currDiff = 0;
-                for (int k = 0; k < m_iBKTKmeansK; k++) {
-                    currDiff += m_fComputeDistance(args.centers + k*m_iDataDimension, args.newTCenters + k*m_iDataDimension, m_iDataDimension);
-                }
-
-                if (currDist < minClusterDist) {
-                    noImprovement = 0;
-                    minClusterDist = currDist;
-                }
-                else {
-                    noImprovement++;
-                }
-                if (currDiff < 1e-3 || noImprovement >= 5) break;
+            for (int k = 0; k < m_iDataDimension; k++)
+            {
+                meanValues[k] /= count;
             }
-
-            args.ClearCounts();
-            args.ClearDists(MaxDist);
-            currDist = KmeansAssign(indices, first, last, args, false);
-            memcpy(args.counts, args.newCounts, sizeof(int)*m_iBKTKmeansK);
-
-            int numClusters = 0;
-            for (int i = 0; i < m_iBKTKmeansK; i++) if (args.counts[i] > 0) numClusters++;
-
-            if (numClusters <= 1) {
-                //if (last - first > 1) std::cout << "large cluster:" << last - first << " dist:" << currDist << std::endl;
-                return numClusters;
+            // calculate the variance of each dimension
+            for (int j = first; j <= end; j++)
+            {
+                T* v = (m_pSamples)[indices[j]];
+                for (int k = 0; k < m_iDataDimension; k++)
+                {
+                    float dist = v[k] - meanValues[k];
+                    varianceValues[k] += dist*dist;
+                }
             }
-            args.Shuffle(indices, first, last);
-            return numClusters;
+            // choose the split dimension as one of the dimension inside TOP_DIM maximum variance
+            node.split_dim = SelectDivisionDimension(varianceValues);
+            // determine the threshold
+            node.split_value = meanValues[node.split_dim];
+        }
+
+        template <typename T>
+        int Index<T>::SelectDivisionDimension(const std::vector<float>& varianceValues) const
+        {
+            // Record the top maximum variances
+            std::vector<int> topind(m_numTopDimensionKDTSplit);
+            int num = 0;
+            // order the variances
+            for (int i = 0; i < m_iDataDimension; i++)
+            {
+                if (num < m_numTopDimensionKDTSplit || varianceValues[i] > varianceValues[topind[num - 1]])
+                {
+                    if (num < m_numTopDimensionKDTSplit)
+                    {
+                        topind[num++] = i;
+                    }
+                    else
+                    {
+                        topind[num - 1] = i;
+                    }
+                    int j = num - 1;
+                    // order the TOP_DIM variances
+                    while (j > 0 && varianceValues[topind[j]] > varianceValues[topind[j - 1]])
+                    {
+                        std::swap(topind[j], topind[j - 1]);
+                        j--;
+                    }
+                }
+            }
+            // randomly choose a dimension from TOP_DIM
+            return topind[COMMON::Utils::rand_int(num)];
+        }
+
+        template <typename T>
+        int Index<T>::Subdivide(const KDTNode& node, std::vector<int>& indices, const int first, const int last)
+        {
+            int i = first;
+            int j = last;
+            // decide which child one point belongs
+            while (i <= j)
+            {
+                int ind = indices[i];
+                float val = (m_pSamples)[ind][node.split_dim];
+                if (val < node.split_value)
+                {
+                    i++;
+                }
+                else
+                {
+                    std::swap(indices[i], indices[j]);
+                    j--;
+                }
+            }
+            // if all the points in the node are equal,equally split the node into 2
+            if ((i == first) || (i == last + 1))
+            {
+                i = (first + last + 1) / 2;
+            }
+            return i;
         }
 #pragma endregion
 
@@ -641,7 +571,7 @@ namespace SPTAG
                 std::vector<float> Mean(m_iDataDimension, 0);
 
                 int iIteration = 100;
-                int end = min(first + m_iSamples, last);
+                int end = min(first + m_numSamplesTPTSplitConsideration, last);
                 int count = end - first + 1;
                 // calculate the mean of each dimension
                 for (int j = first; j <= end; j++)
@@ -672,11 +602,11 @@ namespace SPTAG
                         Variance[k].Dist += dist*dist;
                     }
                 }
-                std::sort(Variance.begin(), Variance.end(), Compare);
-                std::vector<int> index(m_numTopDimensionTpTreeSplit);
-                std::vector<float> weight(m_numTopDimensionTpTreeSplit), bestweight(m_numTopDimensionTpTreeSplit);
+                std::sort(Variance.begin(), Variance.end(),COMMON::Compare);
+                std::vector<int> index(m_numTopDimensionTPTSplit);
+                std::vector<float> weight(m_numTopDimensionTPTSplit), bestweight(m_numTopDimensionTPTSplit);
                 float bestvariance = Variance[m_iDataDimension - 1].Dist;
-                for (int i = 0; i < m_numTopDimensionTpTreeSplit; i++)
+                for (int i = 0; i < m_numTopDimensionTPTSplit; i++)
                 {
                     index[i] = Variance[m_iDataDimension - 1 - i].Key;
                     bestweight[i] = 0;
@@ -688,13 +618,13 @@ namespace SPTAG
                 for (int i = 0; i < iIteration; i++)
                 {
                     float sumweight = 0;
-                    for (int j = 0; j < m_numTopDimensionTpTreeSplit; j++)
+                    for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
                     {
                         weight[j] = float(rand() % 10000) / 5000.0f - 1.0f;
                         sumweight += weight[j] * weight[j];
                     }
                     sumweight = sqrt(sumweight);
-                    for (int j = 0; j < m_numTopDimensionTpTreeSplit; j++)
+                    for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
                     {
                         weight[j] /= sumweight;
                     }
@@ -702,7 +632,7 @@ namespace SPTAG
                     for (int j = 0; j < count; j++)
                     {
                         Val[j] = 0;
-                        for (int k = 0; k < m_numTopDimensionTpTreeSplit; k++)
+                        for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
                         {
                             Val[j] += weight[k] * (m_pSamples)[indices[first + j]][index[k]];
                         }
@@ -719,7 +649,7 @@ namespace SPTAG
                     {
                         bestvariance = var;
                         bestmean = mean;
-                        for (int j = 0; j < m_numTopDimensionTpTreeSplit; j++)
+                        for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
                         {
                             bestweight[j] = weight[j];
                         }
@@ -731,7 +661,7 @@ namespace SPTAG
                 while (i <= j)
                 {
                     float val = 0;
-                    for (int k = 0; k < m_numTopDimensionTpTreeSplit; k++)
+                    for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
                     {
                         val += bestweight[k] * (m_pSamples)[indices[i]][index[k]];
                     }
@@ -765,7 +695,7 @@ namespace SPTAG
 
         template <typename T>
         void Index<T>::RefineRNG() {
-            std::vector<WorkSpace> spaces(m_iNumberOfThreads);
+            std::vector<COMMON::WorkSpace> spaces(m_iNumberOfThreads);
             for (int i = 0; i < m_iNumberOfThreads; i++) spaces[i].Initialize(m_iMaxCheckForRefineGraph, m_iGraphSize);
 
 #pragma omp parallel for schedule(dynamic)
@@ -789,9 +719,9 @@ namespace SPTAG
 
             m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
             {
-                Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize);
-                std::vector<std::vector<int>> TptreeDataIndices(m_iTptreeNumber, std::vector<int>(m_iGraphSize));
-                std::vector<std::vector<std::pair<int, int>>> TptreeLeafNodes(m_iTptreeNumber, std::vector<std::pair<int, int>>());
+                COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize);
+                std::vector<std::vector<int>> TptreeDataIndices(m_iTPTNumber, std::vector<int>(m_iGraphSize));
+                std::vector<std::vector<std::pair<int, int>>> TptreeLeafNodes(m_iTPTNumber, std::vector<std::pair<int, int>>());
                 for (int i = 0; i < m_iGraphSize; i++)
                 {
                     for (int j = 0; j < m_iNeighborhoodSize; j++)
@@ -801,13 +731,13 @@ namespace SPTAG
                     }
                     TptreeDataIndices[0][i] = i;
                 }
-                for (int i = 1; i < m_iTptreeNumber; i++) {
+                for (int i = 1; i < m_iTPTNumber; i++) {
                     std::memcpy(TptreeDataIndices[i].data(), TptreeDataIndices[0].data(), sizeof(int) * m_iGraphSize);
                 }
 
                 std::cout << "Parallel TpTree Partition begin " << std::endl;
 #pragma omp parallel for schedule(dynamic)
-                for (int i = 0; i < m_iTptreeNumber; i++)
+                for (int i = 0; i < m_iTPTNumber; i++)
                 {
                     Sleep(i * 100); std::srand(clock());
                     std::random_shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end());
@@ -816,7 +746,7 @@ namespace SPTAG
                 }
                 std::cout << "Parallel TpTree Partition done" << std::endl;
 
-                for (int i = 0; i < m_iTptreeNumber; i++)
+                for (int i = 0; i < m_iTPTNumber; i++)
                 {
 #pragma omp parallel for schedule(dynamic)
                     for (int j = 0; j < TptreeLeafNodes[i].size(); j++)
@@ -831,15 +761,8 @@ namespace SPTAG
                                 int p1 = TptreeDataIndices[i][x];
                                 int p2 = TptreeDataIndices[i][y];
                                 float dist = m_fComputeDistance((m_pSamples)[p1], (m_pSamples)[p2], m_iDataDimension);
-                                if (m_pSampleToCenter.find(p2) == m_pSampleToCenter.end())
-                                    AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1], (NeighborhoodDists)[p1], m_iNeighborhoodSize);
-                                else
-                                    AddNeighbor(m_pSampleToCenter[p2], dist, (m_pNeighborhoodGraph)[p1], (NeighborhoodDists)[p1], m_iNeighborhoodSize);
-                                if (m_pSampleToCenter.find(p1) == m_pSampleToCenter.end())
-                                    AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2], (NeighborhoodDists)[p2], m_iNeighborhoodSize);
-                                else
-                                    AddNeighbor(m_pSampleToCenter[p1], dist, (m_pNeighborhoodGraph)[p2], (NeighborhoodDists)[p2], m_iNeighborhoodSize);
-                            }
+                                COMMON::Utils::AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1], (NeighborhoodDists)[p1], m_iNeighborhoodSize);
+                                COMMON::Utils::AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2], (NeighborhoodDists)[p2], m_iNeighborhoodSize);                            }
                         }
                     }
                     TptreeDataIndices[i].clear();
@@ -848,20 +771,6 @@ namespace SPTAG
                 }
                 TptreeDataIndices.clear();
                 TptreeLeafNodes.clear();
-
-                for (int i = 0; i < m_iDataSize; i++) {
-                    if (m_pSampleToCenter.find(-1 - i) != m_pSampleToCenter.end()) {
-                        BKTNode& tnode = m_pBKTRoots[m_pSampleToCenter[-1 - i]];
-                        for (int iter = -tnode.childStart; iter != tnode.childEnd; iter++) {
-                            int node = m_pBKTRoots[iter].centerid;
-                            for (int j = 0; j < m_iNeighborhoodSize; j++) {
-                                int index = m_pNeighborhoodGraph[node][j];
-                                if (index == i) continue;
-                                AddNeighbor(index, NeighborhoodDists[node][j], (m_pNeighborhoodGraph)[i], (NeighborhoodDists)[i], m_iNeighborhoodSize);
-                            }
-                        }
-                    }
-                }
             }
             std::cout << "NNG acc:" << GraphAccuracyEstimation(100, false) << std::endl;
             if (m_iMaxCheckForRefineGraph > 0) {
@@ -878,11 +787,6 @@ namespace SPTAG
                 //std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(100, true) << std::endl;
                 RefineRNG();
                 std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(100, true) << std::endl;
-
-                for (int i = 0; i < m_iGraphSize; i++) {
-                    if (m_pSampleToCenter.find(-1 - i) != m_pSampleToCenter.end())
-                        m_pNeighborhoodGraph[i][m_iNeighborhoodSize - 1] = -2 - m_pSampleToCenter[-1 - i];
-                }
             }
             std::cout << "Build RNG Graph end!" << std::endl;
         }
@@ -896,10 +800,10 @@ namespace SPTAG
             {
                 //int x = Utils::rand_int(m_iGraphSize);
                 int x = i;
-                QueryResultSet<T> query((m_pSamples)[x], m_iCEF);
+                COMMON::QueryResultSet<T> query((m_pSamples)[x], m_iCEF);
                 for (int y = 0; y < m_iGraphSize; y++)
                 {
-                    if (m_pSampleToCenter.find(y) != m_pSampleToCenter.end() || y == x) continue;
+                    if (y == x) continue;
                     float dist = m_fComputeDistance(query.GetTarget(), (m_pSamples)[y], m_iDataDimension);
                     query.AddPoint(y, dist);
                 }
@@ -936,7 +840,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        void Index<T>::AddNodes(const T* pData, int num, WorkSpace &space) {
+        void Index<T>::AddNodes(const T* pData, int num, COMMON::WorkSpace &space) {
             m_pSamples.AddBatch(pData, num);
             m_pNeighborhoodGraph.AddReserved(num);
 
@@ -951,14 +855,14 @@ namespace SPTAG
         }
 
         template <typename T>
-        void Index<T>::RefineRNGNode(const int node, WorkSpace &space, bool updateNeighbors) {
+        void Index<T>::RefineRNGNode(const int node, COMMON::WorkSpace &space, bool updateNeighbors) {
             space.Reset(m_iMaxCheckForRefineGraph);
-            QueryResultSet<T> query((m_pSamples)[node], m_iCEF);
+            COMMON::QueryResultSet<T> query((m_pSamples)[node], m_iCEF);
             space.CheckAndSet(node);
             for (int i = 0; i < m_iNeighborhoodSize; i++) {
                 int index = m_pNeighborhoodGraph[node][i];
                 if (index < 0 || space.CheckAndSet(index)) continue;
-                space.m_NGQueue.insert(HeapCell(index, m_fComputeDistance(query.GetTarget(), m_pSamples[index], m_iDataDimension)));
+                space.m_NGQueue.insert(COMMON::HeapCell(index, m_fComputeDistance(query.GetTarget(), m_pSamples[index], m_iDataDimension)));
             }
             SearchIndex(query, space);
             RebuildRNGNodeNeighbors(m_pNeighborhoodGraph[node], query.GetResults(), m_iCEF);
@@ -969,7 +873,7 @@ namespace SPTAG
                 {
                     BasicResult* item = query.GetResult(j);
                     if (item->Key < 0) continue;
-                    QueryResultSet<T> queryNbs(m_pSamples[item->Key], m_iNeighborhoodSize + 1);
+                    COMMON::QueryResultSet<T> queryNbs(m_pSamples[item->Key], m_iNeighborhoodSize + 1);
                     queryNbs.AddPoint(node, item->Dist);
                     for (int k = 0; k < m_iNeighborhoodSize; k++)
                     {
@@ -1029,7 +933,7 @@ namespace SPTAG
         bool Index<T>::SaveIndex()
         {
             if (!SaveDataPoints(m_sDataPointsFilename)) return false;
-            if (!SaveBKT(m_sBKTFilename)) return false;
+            if (!SaveKDT(m_sKDTFilename)) return false;
             if (!SaveRNG(m_sGraphFilename)) return false;
             return true;
         }
@@ -1058,24 +962,24 @@ namespace SPTAG
             }
 
             m_sDataPointsFilename = "vectors.bin";
-            m_sBKTFilename = "tree.bin";
+            m_sKDTFilename = "tree.bin";
             m_sGraphFilename = "graph.bin";
-            
+
             if (!SaveDataPoints(folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!SaveBKT(folderPath + m_sBKTFilename)) return ErrorCode::Fail;
+            if (!SaveKDT(folderPath + m_sKDTFilename)) return ErrorCode::Fail;
             if (!SaveRNG(folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            
+
             loaderFile << "[Index]" << std::endl;
 
-            loaderFile << "IndexAlgoType=" << Helper::Convert::ConvertToString(IndexAlgoType::BKT) << std::endl;
+            loaderFile << "IndexAlgoType=" << Helper::Convert::ConvertToString(IndexAlgoType::KDT) << std::endl;
             loaderFile << "ValueType=" << Helper::Convert::ConvertToString(GetEnumValueType<T>()) << std::endl;
             loaderFile << std::endl;
 
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     loaderFile << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
 
-#include "inc/Core/BKT/ParameterDefinitionList.h"
-#undef DefineBKTParameter
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
 
             loaderFile << std::endl;
 
@@ -1083,9 +987,9 @@ namespace SPTAG
             {
                 std::string metadataFile = "metadata.bin";
                 std::string metadataIndexFile = "metadataIndex.bin";
-                
+
                 m_pMetadata->SaveMetadata(folderPath + metadataFile, folderPath + metadataIndexFile);
-                
+
                 loaderFile << "[MetaData]" << std::endl;
                 loaderFile << "MetaDataFilePath=" << metadataFile << std::endl;
                 loaderFile << "MetaDataIndexPath=" << metadataIndexFile << std::endl;
@@ -1124,14 +1028,14 @@ namespace SPTAG
                 }
             }
 
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
             SetParameter(RepresentStr, \
                          p_configReader.GetParameter("Index", \
                                                      RepresentStr, \
                                                      std::string(#DefaultValue)).c_str()); \
 
-#include "inc/Core/BKT/ParameterDefinitionList.h"
-#undef DefineBKTParameter
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
 
             if (DistCalcMethod::Undefined == m_iDistCalcMethod)
             {
@@ -1139,15 +1043,15 @@ namespace SPTAG
             }
 
             if (!LoadDataPoints(folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!LoadBKT(folderPath + m_sBKTFilename)) return ErrorCode::Fail;
+            if (!LoadKDT(folderPath + m_sKDTFilename)) return ErrorCode::Fail;
             if (!LoadGraph(folderPath + m_sGraphFilename)) return ErrorCode::Fail;
 
             m_iDataSize = m_pSamples.R();
             m_iDataDimension = m_pSamples.C();
- 
-            m_workSpacePool.reset(new WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
- 
+
             return ErrorCode::Success;
         }
 #pragma endregion
@@ -1162,7 +1066,7 @@ namespace SPTAG
                 return ErrorCode::Fail;
             }
 
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
         fprintf(stderr, "Setting %s with value %s\n", RepresentStr, p_value); \
@@ -1173,10 +1077,10 @@ namespace SPTAG
         } \
     } \
 
-#include "inc/Core/BKT/ParameterDefinitionList.h"
-#undef DefineBKTParameter
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
 
-            m_fComputeDistance = DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
             return ErrorCode::Success;
         }
 
@@ -1190,14 +1094,14 @@ namespace SPTAG
                 return std::string();
             }
 
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
         return SPTAG::Helper::Convert::ConvertToString(VarName); \
     } \
 
-#include "inc/Core/BKT/ParameterDefinitionList.h"
-#undef DefineBKTParameter
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
 
             return std::string();
         }
@@ -1205,7 +1109,7 @@ namespace SPTAG
 }
 
 #define DefineVectorValueType(Name, Type) \
-template class SPTAG::BKT::Index<Type>; \
+template class SPTAG::KDT::Index<Type>; \
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType

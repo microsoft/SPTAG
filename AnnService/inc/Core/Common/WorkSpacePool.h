@@ -1,5 +1,5 @@
-#ifndef _SPTAG_BKT_WORKSPACEPOOL_H_
-#define _SPTAG_BKT_WORKSPACEPOOL_H_
+#ifndef _SPTAG_COMMON_WORKSPACEPOOL_H_
+#define _SPTAG_COMMON_WORKSPACEPOOL_H_
 
 #include "WorkSpace.h"
 
@@ -9,7 +9,7 @@
 
 namespace SPTAG
 {
-namespace BKT
+namespace COMMON
 {
 
 class WorkSpacePool
@@ -38,4 +38,4 @@ private:
 }
 }
 
-#endif // _SPTAG_BKT_WORKSPACEPOOL_H_
+#endif // _SPTAG_COMMON_WORKSPACEPOOL_H_

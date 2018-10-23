@@ -43,14 +43,14 @@ execute_process(COMMAND swig -l${PROJECT_SOURCE_DIR}/PythonWrapper/inc/PyByteArr
 include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/PythonWrapper)
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
 
-file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h ${OTH_HDR_FILES})
+file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface.h)
 file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/CoreInterface.cpp ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/CoreInterface_wrap.cxx)
 add_library (_SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
 set_target_properties(_SPTAG PROPERTIES SUFFIX ${PY_SUFFIX})
 target_link_libraries(_SPTAG SPTAGLib ${Python2_LIBRARIES})
 add_custom_command(TARGET _SPTAG POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/SPTAG.py ${EXECUTABLE_OUTPUT_PATH})
 
-file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h ${OTH_HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
+file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
 file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/PythonWrapper/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${PROJECT_SOURCE_DIR}/PythonWrapper/inc/ClientInterface_wrap.cxx)
 add_library (_SPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
 set_target_properties(_SPTAGClient PROPERTIES SUFFIX ${PY_SUFFIX})

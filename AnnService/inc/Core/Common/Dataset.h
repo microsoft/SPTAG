@@ -1,5 +1,5 @@
-#ifndef _SPTAG_BKT_DATASET_H_
-#define _SPTAG_BKT_DATASET_H_
+#ifndef _SPTAG_COMMON_DATASET_H_
+#define _SPTAG_COMMON_DATASET_H_
 
 #include <fstream>
 
@@ -10,7 +10,7 @@
 
 namespace SPTAG
 {
-    namespace BKT 
+    namespace COMMON
     {
         template <typename T>
         class LRUCache
@@ -207,4 +207,4 @@ namespace SPTAG
     }
 }
 
-#endif // _SPTAG_BKT_DATASET_H_
+#endif // _SPTAG_COMMON_DATASET_H_

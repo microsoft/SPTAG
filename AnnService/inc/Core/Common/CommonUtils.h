@@ -1,5 +1,5 @@
-#ifndef _SPTAG_BKT_COMMONUTILS_H_
-#define _SPTAG_BKT_COMMONUTILS_H_
+#ifndef _SPTAG_COMMON_COMMONUTILS_H_
+#define _SPTAG_COMMON_COMMONUTILS_H_
 
 #include "../Common.h"
 
@@ -32,7 +32,7 @@
 
 namespace SPTAG
 {
-    namespace BKT 
+    namespace COMMON
     {
         class Utils {
         public:
@@ -148,8 +148,31 @@ namespace SPTAG
                 }
                 return 1;
             }
+
+            static inline void AddNeighbor(int idx, float dist, int *neighbors, float *dists, int size)
+            {
+                size--;
+                if (dist < dists[size] || (dist == dists[size] && idx < neighbors[size]))
+                {
+                    int nb;
+                    for (nb = 0; nb <= size && neighbors[nb] != idx; nb++);
+
+                    if (nb > size)
+                    {
+                        nb = size;
+                        while (nb > 0 && (dist < dists[nb - 1] || (dist == dists[nb - 1] && idx < neighbors[nb - 1])))
+                        {
+                            dists[nb] = dists[nb - 1];
+                            neighbors[nb] = neighbors[nb - 1];
+                            nb--;
+                        }
+                        dists[nb] = dist;
+                        neighbors[nb] = idx;
+                    }
+                }
+            }
         };
     }
 }
 
-#endif // _SPTAG_BKT_COMMONUTILS_H_
+#endif // _SPTAG_COMMON_COMMONUTILS_H_

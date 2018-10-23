@@ -1,11 +1,11 @@
-#ifndef _SPTAG_BKT_QUERYRESULTSET_H_
-#define _SPTAG_BKT_QUERYRESULTSET_H_
+#ifndef _SPTAG_COMMON_QUERYRESULTSET_H_
+#define _SPTAG_COMMON_QUERYRESULTSET_H_
 
 #include "../SearchQuery.h"
 
 namespace SPTAG
 {
-namespace BKT
+namespace COMMON
 {
 
 inline bool operator < (const BasicResult& lhs, const BasicResult& rhs)
@@ -90,4 +90,4 @@ private:
 }
 }
 
-#endif // _SPTAG_BKT_QUERYRESULTSET_H_
+#endif // _SPTAG_COMMON_QUERYRESULTSET_H_

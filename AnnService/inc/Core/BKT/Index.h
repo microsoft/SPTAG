@@ -5,13 +5,13 @@
 #include "../VectorIndex.h"
 #include "../Common.h"
 
-#include "CommonUtils.h"
-#include "DistanceUtils.h"
-#include "QueryResultSet.h"
-#include "Heap.h"
-#include "Dataset.h"
-#include "WorkSpace.h"
-#include "WorkSpacePool.h"
+#include "../Common/CommonUtils.h"
+#include "../Common/DistanceUtils.h"
+#include "../Common/QueryResultSet.h"
+#include "../Common/Heap.h"
+#include "../Common/Dataset.h"
+#include "../Common/WorkSpace.h"
+#include "../Common/WorkSpacePool.h"
 
 #include <functional>
 #include <list>
@@ -118,7 +118,7 @@ namespace BKT
         // Initial data points
         int m_iDataSize;
         int m_iDataDimension;
-        Dataset<T> m_pSamples;
+        COMMON::Dataset<T> m_pSamples;
         std::shared_ptr<MetadataSet> m_pMetadata;
 
         // BKT structures. 
@@ -129,7 +129,7 @@ namespace BKT
         // Graph structure
         int m_iGraphSize;
         int m_iNeighborhoodSize;
-        Dataset<int> m_pNeighborhoodGraph;
+        COMMON::Dataset<int> m_pNeighborhoodGraph;
 
         // Variables for building BKTs and TPTs 
         int m_iBKTKmeansK;
@@ -167,7 +167,7 @@ namespace BKT
         int g_iNumberOfInitialDynamicPivots;
         int g_iNumberOfOtherDynamicPivots;
 
-        std::unique_ptr<WorkSpacePool> m_workSpacePool;
+        std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
 
     public:
         Index() : m_iBKTNumber(1),
@@ -190,7 +190,7 @@ namespace BKT
             m_sDataPointsFilename("vectors.bin"),
             m_iNumberOfThreads(1),
             m_iDistCalcMethod(DistCalcMethod::Cosine),
-            m_fComputeDistance(DistanceCalcSelector<T>(DistCalcMethod::Cosine)),
+            m_fComputeDistance(COMMON::DistanceCalcSelector<T>(DistCalcMethod::Cosine)),
             m_iCacheSize(-1),
             m_iDebugLoad(-1),
             g_iThresholdOfNumberOfContinuousNoBetterPropagation(3),
@@ -229,10 +229,10 @@ namespace BKT
         bool SaveIndex();
         ErrorCode SaveIndex(const std::string& p_folderPath);
 
-        void SearchIndex(QueryResultSet<T> &query, WorkSpace &space) const;
+        void SearchIndex(COMMON::QueryResultSet<T> &query, COMMON::WorkSpace &space) const;
         ErrorCode SearchIndex(QueryResult &query) const;
 
-        void AddNodes(const T* pData, int num, WorkSpace &space);
+        void AddNodes(const T* pData, int num, COMMON::WorkSpace &space);
 
         ErrorCode SetParameter(const char* p_param, const char* p_value);
         std::string GetParameter(const char* p_param) const;
@@ -267,7 +267,7 @@ namespace BKT
             m_iMaxCheckForRefineGraph = maxCheckForRefineGraph;
             m_iNumberOfThreads = numThreads;
             m_iDistCalcMethod = distCalcMethod;
-            m_fComputeDistance = DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
 
             m_iCacheSize = cacheSize;
             m_iDebugLoad = numPoints;
@@ -290,7 +290,7 @@ namespace BKT
             m_iNeighborhoodSize = neighborhoodSize;
             m_iNumberOfThreads = 1;
             m_iDistCalcMethod = distCalcMethod;
-            m_fComputeDistance = DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
         }
 
     private:
@@ -320,31 +320,9 @@ namespace BKT
             const int last,
             std::vector<std::pair<int, int>> &leaves);
         void RefineRNG();
-        void RefineRNGNode(const int node, WorkSpace &space, bool updateNeighbors);
+        void RefineRNGNode(const int node, COMMON::WorkSpace &space, bool updateNeighbors);
         void RebuildRNGNodeNeighbors(int* nodes, const BasicResult* queryResults, int numResults);
         float GraphAccuracyEstimation(int NSample, bool rng);
-        void AddNeighbor(int idx, float dist, int *neighbors, float *dists, int size)
-        {
-            size--;
-            if (dist < dists[size] || (dist == dists[size] && idx < neighbors[size]))
-            {
-                int nb;
-                for (nb = 0; nb <= size && neighbors[nb] != idx; nb++);
-
-                if (nb > size)
-                {
-                    nb = size;
-                    while (nb > 0 && (dist < dists[nb - 1] || (dist == dists[nb - 1] && idx < neighbors[nb - 1])))
-                    {
-                        dists[nb] = dists[nb - 1];
-                        neighbors[nb] = neighbors[nb - 1];
-                        nb--;
-                    }
-                    dists[nb] = dist;
-                    neighbors[nb] = idx;
-                }
-            }
-        }
     };
 } // namespace BKT
 } // namespace SPTAG

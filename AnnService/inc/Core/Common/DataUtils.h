@@ -1,5 +1,5 @@
-#ifndef _SPTAG_BKT_DATAUTILS_H_
-#define _SPTAG_BKT_DATAUTILS_H_
+#ifndef _SPTAG_COMMON_DATAUTILS_H_
+#define _SPTAG_COMMON_DATAUTILS_H_
 
 #include <sys/stat.h>
 #include <atomic>
@@ -8,7 +8,7 @@
 
 namespace SPTAG
 {
-    namespace BKT
+    namespace COMMON
     {
         const int bufsize = 1024 * 1024 * 1024;
 
@@ -186,4 +186,4 @@ namespace SPTAG
     }
 }
 
-#endif // _SPTAG_BKT_DATAUTILS_H_
+#endif // _SPTAG_COMMON_DATAUTILS_H_
