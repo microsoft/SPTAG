@@ -92,6 +92,7 @@ namespace SPTAG
             int realKDTNumber;
             fread(&realKDTNumber, sizeof(int), 1, fp);
             if (realKDTNumber < m_iKDTNumber) m_iKDTNumber = realKDTNumber;
+            m_pKDTStart.clear();
             for (int i = 0; i < m_iKDTNumber; i++) {
                 m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
                 int treeNodeSize;
@@ -111,6 +112,7 @@ namespace SPTAG
             int realKDTNumber = *((int*)pKDTMemFile);
             pKDTMemFile += sizeof(int);
             if (realKDTNumber < m_iKDTNumber) m_iKDTNumber = realKDTNumber;
+            m_pKDTStart.clear();
             for (int i = 0; i < m_iKDTNumber; i++) {
                 m_pKDTStart.push_back((int)(m_pKDTRoots.size()));
 
@@ -231,7 +233,7 @@ namespace SPTAG
                 KDTSearch(tcell.node, true, tcell.distance, space, query);
             }
 
-            while (!space.m_NGQueue.empty() && space.m_iNumberOfCheckedLeaves < space.m_iMaxCheck) {
+            while (!space.m_NGQueue.empty()) {
                 bool bLocalOpt = true;
                 COMMON::HeapCell gnode = space.m_NGQueue.pop();
                 const int *node = (m_pNeighborhoodGraph)[gnode.node];
@@ -279,7 +281,9 @@ namespace SPTAG
                         break;
                     }
                 }
+                if (space.m_iNumberOfCheckedLeaves >= space.m_iMaxCheck) break;
             }
+            query.SortResult();
         }
 
         template<typename T>
