@@ -2,7 +2,7 @@
 
  SPTAG (Space Partition Tree And Graph) is a toolkit which provides a high quality vector index build, search and distributed online serving toolkits for large scale vector search scenario. 
  <p align="center">
- <img src="./docs/img/bkt.png" alt="architecture" width="800"/>
+ <img src="./docs/img/sptag.png" alt="architecture" width="500"/>
  </p>
 
  ## **Why to consider using SPTAG**
@@ -47,7 +47,7 @@ Run the test (or Test.exe) in the Release folder to verify all the tests have pa
 
 This project welcomes contributions and suggestions from all the users.
 
-We use GitHub issues for tracking bugs.
+We use [GitHub issues](https://github.com/Microsoft/SPTAG/issues) for tracking suggestions and bugs.
 
 ## **License**
 The entire codebase is under [MIT license](https://github.com/Microsoft/SPTAG/blob/master/LICENSE)
