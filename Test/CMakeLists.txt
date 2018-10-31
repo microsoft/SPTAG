@@ -8,7 +8,10 @@ else()
     message (FATAL_ERROR "Could no find openmp!")
 endif()
 
-ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK)
+if(NOT WIN32)
+  ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK)
+  message (STATUS "BOOST_TEST_DYN_LINK")
+endif()
 
 find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex filesystem unit_test_framework)
 if (Boost_FOUND)
@@ -21,9 +24,6 @@ if (Boost_FOUND)
 else()
     message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
-
-set (Boost_USE_STATIC_LIBS ON)
-set (Boost_USE_MULTITHREADED ON)
 
 include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/PythonWrapper ${PROJECT_SOURCE_DIR}/Test)
 
