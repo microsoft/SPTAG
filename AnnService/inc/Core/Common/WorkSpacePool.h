@@ -5,7 +5,6 @@
 
 #include <list>
 #include <mutex>
-#include <memory>
 
 namespace SPTAG
 {

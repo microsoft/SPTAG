@@ -73,17 +73,29 @@
     <TargetName>_SPTAG</TargetName>
     <TargetExt>.pyd</TargetExt>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(PyIncludeDir);$(ProjectDir);$(SolutionDir)AnnService\;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;$(IncludePath)</IncludePath>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
     <OutDir>$(OutAppDir)</OutDir>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>CoreLibrary.lib;$(PyLinkLib);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>CoreLibrary.lib;$(SolutionDir)packages\python2.2.7.15\tools\libs\python27.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_WINDLL;SWIG_PYTHON_INTERPRETER_NO_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_WINDLL;SWIG_PYTHON_INTERPRETER_NO_DEBUG;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)packages\python2.2.7.15\tools\include\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ControlFlowGuard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Guard</ControlFlowGuard>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_WINDLL;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <Link>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/guard:cf %(AdditionalOptions)</AdditionalOptions>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="inc\CoreInterface.h" />
@@ -96,13 +108,24 @@
   <ItemGroup>
     <None Include="inc\PyByteArray.i" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
-    <Exec Command="$(SwigDir)swig.exe -python -c++ -outdir $(IntDir) -o $(IntDir)CoreInterfaceSwigGen.cpp inc/CoreInterface.h" />
+    <Exec Command="mkdir $(IntDir)" />
+    <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -python -c++ -outdir $(IntDir) -o $(IntDir)CoreInterfaceSwigGen.cpp inc/CoreInterface.h" />
   </Target>
   <Target Name="CopyFiles" AfterTargets="BeforeBuild">
     <Copy SourceFiles="$(IntDir)SPTAG.py" DestinationFolder="$(Outdir)" />
+  </Target>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\python2.2.7.15\tools\python.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python2.2.7.15\tools\python.exe'))" />
+    <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
   </Target>
 </Project>

@@ -2,11 +2,11 @@
 #define _SPTAG_COMMON_DISTANCEUTILS_H_
 
 #include <immintrin.h>
-#include "CommonUtils.h"
-
 #include <functional>
 
-#define AVX
+#include "CommonUtils.h"
+
+#define SSE
 
 #ifndef _MSC_VER
 #define DIFF128 diff128

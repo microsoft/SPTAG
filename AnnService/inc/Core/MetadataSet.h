@@ -1,14 +1,10 @@
 #ifndef _SPTAG_METADATASET_H_
 #define _SPTAG_METADATASET_H_
 
-#include "Common.h"
 #include "CommonDataStructure.h"
 
 #include <iostream>
 #include <fstream>
-#include <memory>
-#include <string>
-#include <vector>
 
 namespace SPTAG
 {

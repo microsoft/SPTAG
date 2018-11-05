@@ -1,7 +1,6 @@
 #ifndef _SPTAG_SEARCHQUERY_H_
 #define _SPTAG_SEARCHQUERY_H_
 
-#include "Common.h"
 #include "CommonDataStructure.h"
 
 #include <cstring>

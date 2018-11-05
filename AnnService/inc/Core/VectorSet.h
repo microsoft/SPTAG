@@ -1,11 +1,7 @@
 #ifndef _SPTAG_VECTORSET_H_
 #define _SPTAG_VECTORSET_H_
 
-#include "Common.h"
 #include "CommonDataStructure.h"
-
-#include <memory>
-#include <string>
 
 namespace SPTAG
 {

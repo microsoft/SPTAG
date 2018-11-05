@@ -3,8 +3,6 @@
 
 #include "Common.h"
 
-#include <memory>
-
 namespace SPTAG
 {
 

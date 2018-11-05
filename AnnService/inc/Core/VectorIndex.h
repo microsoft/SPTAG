@@ -6,10 +6,6 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 
-#include <memory>
-#include <string>
-#include <vector>
-
 namespace SPTAG
 {
 

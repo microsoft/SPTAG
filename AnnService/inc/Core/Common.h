@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <limits>
+#include <vector>
 
 #ifndef _MSC_VER
 #include <sys/stat.h>
