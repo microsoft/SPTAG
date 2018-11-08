@@ -1,7 +1,7 @@
 # Space Partition Tree And Graph for Vector Search
 
 [![MIT licensed](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/Microsoft/nni/blob/master/LICENSE)
-[![Build status](https://sysdnn.visualstudio.com/SPTAG/_apis/build/status/SPTAG-CI)](https://sysdnn.visualstudio.com/SPTAG/_build/latest?definitionId=2)
+[![Build status](https://sysdnn.visualstudio.com/SPTAG/_apis/build/status/SPTAG-GITHUB)](https://sysdnn.visualstudio.com/SPTAG/_build/latest?definitionId=6)
 
  SPTAG (Space Partition Tree And Graph) is a toolkit which provides a high quality vector index build, search and distributed online serving toolkits for large scale vector search scenario. 
  <p align="center">
