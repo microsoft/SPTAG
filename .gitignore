@@ -57,11 +57,6 @@ dkms.conf
 /x64/Release
 /SPTAG.VC.db
 /SPTAG.VC.VC.opendb
-/AnnService/CoreLibrary.vcxproj.user
-/AnnService/IndexBuilder.vcxproj.user
-/AnnService/Server.vcxproj.user
-/AnnService/SocketLib.vcxproj.user
-/PythonWrapper/PythonCore.vcxproj.user
 /build
 /PythonWrapper/inc/ClientInterface_wrap.cxx
 /PythonWrapper/inc/CoreInterface_wrap.cxx
@@ -71,3 +66,5 @@ dkms.conf
 /obj/x64_Debug
 /x64/Debug
 /packages
+.vs/
+*.user

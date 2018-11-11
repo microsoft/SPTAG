@@ -89,12 +89,15 @@ StrUtils::StartsWith(const char* p_str, const char* p_prefix)
         return false;
     }
 
-    while ('\0' == (*p_prefix) && '\0' != (*p_str))
+    while ('\0' != (*p_prefix) && '\0' != (*p_str))
     {
         if (*p_prefix != *p_str)
         {
             return false;
         }
+
+        ++p_prefix;
+        ++p_str;
     }
 
     return '\0' == *p_prefix;
