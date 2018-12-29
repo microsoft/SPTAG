@@ -8,19 +8,15 @@
 namespace SPTAG
 {
 
-struct BasicResult
-{
-    int Key;
-    float Dist;
-
-    BasicResult() : Key(-1), Dist(MaxDist)
+    struct BasicResult
     {
-    }
+        int VID;
+        float Dist;
 
-    BasicResult(int p_key, float p_dist) : Key(p_key), Dist(p_dist)
-    {
-    }
-};
+        BasicResult() : VID(-1), Dist(MaxDist) {}
+
+        BasicResult(int p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
+    };
 
 
 // Space to save temporary answer, similar with TopKCache
@@ -44,6 +40,16 @@ public:
           m_withMeta(false)
     {
         Init(p_target, p_resultNum, p_withMeta);
+    }
+
+    
+    QueryResult(const void* p_target, int p_resultNum, std::vector<BasicResult>& p_results)
+        : m_target(p_target),
+          m_resultNum(p_resultNum),
+          m_withMeta(false)
+    {
+        p_results.resize(p_resultNum);
+        m_results.reset(p_results.data());
     }
 
 
@@ -130,11 +136,11 @@ public:
     }
 
 
-    inline void SetResult(int p_index, int p_key, float p_dist)
+    inline void SetResult(int p_index, int p_VID, float p_dist)
     {
         if (p_index < m_resultNum)
         {
-            m_results[p_index].Key = p_key;
+            m_results[p_index].VID = p_VID;
             m_results[p_index].Dist = p_dist;
         }
     }
@@ -176,7 +182,7 @@ public:
     {
         for (int i = 0; i < m_resultNum; i++)
         {
-            m_results[i].Key = -1;
+            m_results[i].VID = -1;
             m_results[i].Dist = MaxDist;
         }
 

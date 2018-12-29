@@ -56,7 +56,7 @@ int main(int argc, char** argv)
             for (const auto& res : indexRes.m_results)
             {
                 fprintf(stdout, "------------------\n");
-                fprintf(stdout, "DocIndex: %d Distance: %f\n", res.Key, res.Dist);
+                fprintf(stdout, "DocIndex: %d Distance: %f\n", res.VID, res.Dist);
                 if (indexRes.m_results.WithMeta())
                 {
                     const auto& metadata = indexRes.m_results.GetMetadata(idx);

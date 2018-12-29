@@ -22,7 +22,11 @@ public:
 
     virtual bool Available() const = 0;
 
-    virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const = 0;
+    virtual void AddBatch(MetadataSet& data) = 0;
+
+    virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
+
+    static ErrorCode MetaCopy(const std::string& p_src, const std::string& p_dst);
 };
 
 
@@ -39,18 +43,22 @@ public:
 
     bool Available() const;
 
-    virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const;
+    void AddBatch(MetadataSet& data);
+
+    ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
     std::ifstream* m_fp = nullptr;
 
-    const long long *m_pOffsets = nullptr;
+    std::vector<std::uint64_t> m_pOffsets;
 
-    const int m_iCount = 0;
+    int m_count;
 
     std::string m_metaFile;
 
     std::string m_metaindexFile;
+
+    std::vector<std::uint8_t> m_newdata;
 };
 
 
@@ -67,38 +75,20 @@ public:
 
     bool Available() const;
 
-    virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const;
+    void AddBatch(MetadataSet& data);
+
+    ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
-    const std::uint64_t *m_offsets;
+    std::vector<std::uint64_t> m_offsets;
+
+    SizeType m_count;
 
     ByteArray m_metadataHolder;
 
     ByteArray m_offsetHolder;
 
-    SizeType m_count;
-};
-
-
-class MetadataSetFileTransfer : public MetadataSet
-{
-public:
-    MetadataSetFileTransfer(const std::string& p_metaFile, const std::string& p_metaindexFile);
-
-    virtual ~MetadataSetFileTransfer();
-
-    virtual ByteArray GetMetadata(IndexType p_vectorID) const;
-
-    virtual SizeType Count() const;
-
-    virtual bool Available() const;
-
-    virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const;
-
-private:
-    std::string m_metaFile;
-
-    std::string m_metaindexFile;
+    std::vector<std::uint8_t> m_newdata;
 };
 
 

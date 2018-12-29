@@ -115,6 +115,9 @@
     <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h">
       <Filter>Header Files\Core\KDT</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\FineGrainedLock.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\CommonDataStructure.cpp">
@@ -131,9 +134,6 @@
     </ClCompile>
     <ClCompile Include="src\Helper\SimpleIniReader.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common.cpp">
-      <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="src\Core\VectorSet.cpp">
       <Filter>Source Files\Core</Filter>

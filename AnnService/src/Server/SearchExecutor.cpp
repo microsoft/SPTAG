@@ -47,7 +47,7 @@ SearchExecutor::ExecuteInternal()
 
     const auto& firstIndex = m_selectedIndex.front();
 
-    if (ErrorCode::Success != m_executionContext->ExtractVector(firstIndex->AcceptableQueryValueType()))
+    if (ErrorCode::Success != m_executionContext->ExtractVector(firstIndex->GetVectorValueType()))
     {
         return;
     }
@@ -63,7 +63,7 @@ SearchExecutor::ExecuteInternal()
 
     for (const auto& vectorIndex : m_selectedIndex)
     {
-        if (vectorIndex->AcceptableQueryValueType() != firstIndex->AcceptableQueryValueType()
+        if (vectorIndex->GetVectorValueType() != firstIndex->GetVectorValueType()
             || vectorIndex->GetFeatureDim() != firstIndex->GetFeatureDim())
         {
             continue;

@@ -10,13 +10,13 @@ namespace COMMON
 
 inline bool operator < (const BasicResult& lhs, const BasicResult& rhs)
 {
-    return ((lhs.Dist < rhs.Dist) || ((lhs.Dist == rhs.Dist) && (lhs.Key < rhs.Key)));
+    return ((lhs.Dist < rhs.Dist) || ((lhs.Dist == rhs.Dist) && (lhs.VID < rhs.VID)));
 }
 
 
 inline bool Compare(BasicResult& lhs, BasicResult& rhs)
 {
-    return ((lhs.Dist < rhs.Dist) || ((lhs.Dist == rhs.Dist) && (lhs.Key < rhs.Key)));
+    return ((lhs.Dist < rhs.Dist) || ((lhs.Dist == rhs.Dist) && (lhs.VID < rhs.VID)));
 }
 
 
@@ -50,9 +50,9 @@ public:
 
     bool AddPoint(const int index, float dist)
     {
-        if (dist < m_results[0].Dist || (dist == m_results[0].Dist && index < m_results[0].Key))
+        if (dist < m_results[0].Dist || (dist == m_results[0].Dist && index < m_results[0].VID))
         {
-            m_results[0].Key = index;
+            m_results[0].VID = index;
             m_results[0].Dist = dist;
             Heapify(m_resultNum);
             return true;

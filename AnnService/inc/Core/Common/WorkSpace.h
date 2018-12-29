@@ -14,7 +14,7 @@ namespace SPTAG
             int node;
             float distance;
 
-            HeapCell(int _node = -1, float _distance = 0) : node(_node), distance(_distance) {}
+            HeapCell(int _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
 
             inline bool operator < (const HeapCell& rhs)
             {
@@ -203,7 +203,7 @@ namespace SPTAG
                 return nodeCheckStatus.CheckAndSet(idx);
             }
 
-            CountVector<unsigned short> nodeCheckStatus;
+            OptHashPosVector nodeCheckStatus;
             //OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting

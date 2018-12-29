@@ -2,6 +2,7 @@
 
 using namespace SPTAG;
 
+#pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 
 VectorSet::VectorSet()
 {
@@ -31,6 +32,13 @@ BasicVectorSet::~BasicVectorSet()
 }
 
 
+VectorValueType
+BasicVectorSet::GetValueType() const
+{
+    return m_valueType;
+}
+
+
 void*
 BasicVectorSet::GetVector(IndexType p_vectorID) const
 {
@@ -50,14 +58,6 @@ BasicVectorSet::GetData() const
     return reinterpret_cast<void*>(m_data.Data());
 }
 
-
-VectorValueType
-BasicVectorSet::ValueType() const
-{
-    return m_valueType;
-}
-
-
 SizeType
 BasicVectorSet::Dimension() const
 {
@@ -69,4 +69,26 @@ SizeType
 BasicVectorSet::Count() const
 {
     return m_vectorCount;
+}
+
+
+bool
+BasicVectorSet::Available() const
+{
+    return m_data.Data() != nullptr;
+}
+
+
+ErrorCode 
+BasicVectorSet::Save(const std::string& p_vectorFile) const
+{
+    FILE * fp = fopen(p_vectorFile.c_str(), "wb");
+    if (fp == NULL) return ErrorCode::FailedOpenFile;
+
+    fwrite(&m_vectorCount, sizeof(int), 1, fp);
+    fwrite(&m_dimension, sizeof(int), 1, fp);
+
+    fwrite((const void*)(m_data.Data()), m_data.Length(), 1, fp);
+    fclose(fp);
+    return ErrorCode::Success;
 }

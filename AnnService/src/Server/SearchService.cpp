@@ -181,7 +181,7 @@ SearchService::RunInteractiveMode()
                 for (const auto& res : result.m_results)
                 {
                     fprintf(stdout, "------------------\n");
-                    fprintf(stdout, "DocIndex: %d Distance: %f", res.Key, res.Dist);
+                    fprintf(stdout, "DocIndex: %d Distance: %f", res.VID, res.Dist);
                     if (result.m_results.WithMeta())
                     {
                         const auto& metadata = result.m_results.GetMetadata(idx);

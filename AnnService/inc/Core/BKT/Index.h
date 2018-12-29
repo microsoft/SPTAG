@@ -12,11 +12,13 @@
 #include "../Common/Dataset.h"
 #include "../Common/WorkSpace.h"
 #include "../Common/WorkSpacePool.h"
+#include "../Common/FineGrainedLock.h"
+#include "../Common/DataUtils.h"
 
 #include <functional>
-#include <list>
 #include <mutex>
 #include <stack>
+#include <tbb/concurrent_unordered_set.h>
 
 namespace SPTAG
 {
@@ -36,7 +38,7 @@ namespace BKT
         int childStart;
         int childEnd;
 
-        BKTNode(int cid = -1) : centerid(cid), childStart(-1) {}
+        BKTNode(int cid = -1) : centerid(cid), childStart(-1), childEnd(-1) {}
     };
 
     template <typename T>
@@ -119,8 +121,7 @@ namespace BKT
         int m_iDataSize;
         int m_iDataDimension;
         COMMON::Dataset<T> m_pSamples;
-        std::shared_ptr<MetadataSet> m_pMetadata;
-
+        
         // BKT structures. 
         int m_iBKTNumber;
         std::vector<int> m_pBKTStart;
@@ -156,7 +157,6 @@ namespace BKT
         char* m_pGraphMemoryFile;
         char* m_pDataPointsMemoryFile;
 
-        int m_iNumberOfThreads;
         DistCalcMethod m_iDistCalcMethod;
         float(*m_fComputeDistance)(const T* pX, const T* pY, int length);
 
@@ -167,8 +167,11 @@ namespace BKT
         int g_iNumberOfInitialDynamicPivots;
         int g_iNumberOfOtherDynamicPivots;
 
+        int m_iNumberOfThreads;
+        std::mutex m_dataAllocLock;
+        COMMON::FineGrainedLock m_dataUpdateLock;
+        tbb::concurrent_unordered_set<int> m_deletedID;
         std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
-
     public:
         Index() : m_iBKTNumber(1),
             m_iBKTKmeansK(32),
@@ -204,94 +207,28 @@ namespace BKT
         int GetFeatureDim() const { return m_pSamples.C(); }
         int GetNumThreads() const { return m_iNumberOfThreads; }
         int GetCurrMaxCheck() const { return m_iMaxCheck; }
+
         DistCalcMethod GetDistCalcMethod() const { return m_iDistCalcMethod; }
         IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::BKT; }
-        VectorValueType AcceptableQueryValueType() const { return GetEnumValueType<T>(); }
-        void SetMetadata(const std::string& metadataFilePath, const std::string& metadataIndexPath) {
-            m_pMetadata.reset(new FileMetadataSet(metadataFilePath, metadataIndexPath));
-        }
-        ByteArray GetMetadata(IndexType p_vectorID) const {
-            if (nullptr != m_pMetadata)
-            {
-                return m_pMetadata->GetMetadata(p_vectorID);
-            }
-            return ByteArray::c_empty;
-        }
+        VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
 
-        bool BuildIndex();
-        bool BuildIndex(void* p_data, int p_vectorNum, int p_dimension);
-        ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
-            std::shared_ptr<MetadataSet> p_metadataSet);
+        ErrorCode BuildIndex(const void* p_data, int p_vectorNum, int p_dimension);
+        
+        ErrorCode LoadIndex(const std::string& p_folderPath);
+        ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs);
 
-        bool LoadIndex();
-        ErrorCode LoadIndex(const std::string& p_folderPath, const Helper::IniReader& p_configReader);
-
-        bool SaveIndex();
         ErrorCode SaveIndex(const std::string& p_folderPath);
 
-        void SearchIndex(COMMON::QueryResultSet<T> &query, COMMON::WorkSpace &space) const;
-        ErrorCode SearchIndex(QueryResult &query) const;
-
-        void AddNodes(const T* pData, int num, COMMON::WorkSpace &space);
-
+        void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const;
+        ErrorCode SearchIndex(QueryResult &p_query) const;
+       
+        ErrorCode AddIndex(const void* p_vectors, int p_vectorNum, int p_dimension);
+        ErrorCode DeleteIndex(const void* p_vectors, int p_vectorNum);
+        ErrorCode RefineIndex(const std::string& p_folderPath);
+        ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2);
+        
         ErrorCode SetParameter(const char* p_param, const char* p_value);
         std::string GetParameter(const char* p_param) const;
-
-        // This can be used for both building model files or searching with model files loaded.
-        void SetParameters(std::string dataPointsFile,
-            std::string BKTFile,
-            std::string graphFile,
-            int numBKT,
-            int neighborhoodSize,
-            int kmeansK,
-            int BKTLeafSize,
-            int numSamplesBKT,
-            int numTPTrees,
-            int TPTLeafSize,
-            int maxCheckForRefineGraph,
-            int numThreads,
-            DistCalcMethod distCalcMethod,
-            int cacheSize = -1,
-            int numPoints = -1)
-        {
-            m_sDataPointsFilename = dataPointsFile;
-            m_sBKTFilename = BKTFile;
-            m_sGraphFilename = graphFile;
-            m_iBKTNumber = numBKT;
-            m_iNeighborhoodSize = neighborhoodSize;
-            m_iBKTKmeansK = kmeansK;
-            m_iBKTLeafSize = BKTLeafSize;
-            m_iSamples = numSamplesBKT;
-            m_iTptreeNumber = numTPTrees;
-            m_iTPTLeafSize = TPTLeafSize;
-            m_iMaxCheckForRefineGraph = maxCheckForRefineGraph;
-            m_iNumberOfThreads = numThreads;
-            m_iDistCalcMethod = distCalcMethod;
-            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-
-            m_iCacheSize = cacheSize;
-            m_iDebugLoad = numPoints;
-        }
-
-        // Only used for searching with memory mapped model files
-        void SetParameters(char* pDataPointsMemFile,
-            char* pBKTMemFile,
-            char* pGraphMemFile,
-            DistCalcMethod distCalcMethod,
-            int maxCheck,
-            int numBKT,
-            int neighborhoodSize)
-        {
-            m_pDataPointsMemoryFile = pDataPointsMemFile;
-            m_pBKTMemoryFile = pBKTMemFile;
-            m_pGraphMemoryFile = pGraphMemFile;
-            m_iMaxCheck = maxCheck;
-            m_iBKTNumber = numBKT;
-            m_iNeighborhoodSize = neighborhoodSize;
-            m_iNumberOfThreads = 1;
-            m_iDistCalcMethod = distCalcMethod;
-            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-        }
 
     private:
         // Functions for loading models from files
@@ -307,8 +244,8 @@ namespace BKT
         bool SaveDataPoints(std::string sDataPointsFileName);
 
         // Functions for building balanced kmeans tree
-        void BuildBKT();
-        bool SaveBKT(std::string sBKTFilename) const;
+        void BuildBKT(std::vector<int>& indices, std::vector<int>& newStart, std::vector<BKTNode>& newRoot);
+        bool SaveBKT(std::string sBKTFilename, std::vector<int>& newStart, std::vector<BKTNode>& newRoot) const;
         float KmeansAssign(std::vector<int>& indices, const int first, const int last, KmeansArgs<T>& args, bool updateCenters);
         int KmeansClustering(std::vector<int>& indices, const int first, const int last, KmeansArgs<T>& args);
 

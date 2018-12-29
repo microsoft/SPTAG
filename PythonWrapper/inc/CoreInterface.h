@@ -17,7 +17,6 @@
 %include <std_shared_ptr.i>
 %shared_ptr(AnnIndex)
 %shared_ptr(QueryResult)
-
 %include "PyByteArray.i"
 
 %{
@@ -44,6 +43,8 @@ public:
 
     bool Build(ByteArray p_data, SizeType p_num);
 
+    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num);
+
     std::shared_ptr<QueryResult> Search(ByteArray p_data, SizeType p_resultNum);
 
     std::shared_ptr<QueryResult> SearchWithMetaData(ByteArray p_data, SizeType p_resultNum);
@@ -51,6 +52,14 @@ public:
     bool ReadyToServe() const;
 
     bool Save(const char* p_saveFile) const;
+
+    bool Add(ByteArray p_data, SizeType p_num);
+
+    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num);
+
+    bool Delete(ByteArray p_data, SizeType p_num);
+
+    bool Refine(const char* p_loaderFile);
 
     static AnnIndex Load(const char* p_loaderFile);
 

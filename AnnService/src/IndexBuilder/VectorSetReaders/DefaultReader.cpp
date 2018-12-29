@@ -254,7 +254,7 @@ DefaultReader::GetVectorSet() const
 std::shared_ptr<MetadataSet>
 DefaultReader::GetMetadataSet() const
 {
-    return std::shared_ptr<MetadataSet>(new MetadataSetFileTransfer(m_metadataConentOutput, m_metadataIndexOutput));
+    return std::shared_ptr<MetadataSet>(new FileMetadataSet(m_metadataConentOutput, m_metadataIndexOutput));
 }
 
 

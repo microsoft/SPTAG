@@ -25,7 +25,7 @@ namespace SPTAG
             inline int size() { return count; }
             inline bool empty() { return count == 0; }
             inline void clear() { count = 0; }
-            inline T& Top() { return heap[1]; }
+            inline T& Top() { if (count == 0) return heap[0]; else return heap[1]; }
 
             // Insert a new element in the heap.
             void insert(T value)

@@ -13,6 +13,9 @@ WorkSpacePool::WorkSpacePool(int p_maxCheck, int p_vectorCount)
 
 WorkSpacePool::~WorkSpacePool()
 {
+    for (auto& workSpace : m_workSpacePool)
+        workSpace.reset();
+    m_workSpacePool.clear();
 }
 
 

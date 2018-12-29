@@ -105,7 +105,7 @@ RemoteSearchResult::EstimateBufferSize() const
 
         for (const auto& res : indexRes.m_results)
         {
-            sum += SimpleSerialization::EstimateBufferSize(res.Key);
+            sum += SimpleSerialization::EstimateBufferSize(res.VID);
             sum += SimpleSerialization::EstimateBufferSize(res.Dist);
         }
 
@@ -139,7 +139,7 @@ RemoteSearchResult::Write(std::uint8_t* p_buffer) const
 
         for (const auto& res : indexRes.m_results)
         {
-            p_buffer = SimpleSerialization::SimpleWriteBuffer(res.Key, p_buffer);
+            p_buffer = SimpleSerialization::SimpleWriteBuffer(res.VID, p_buffer);
             p_buffer = SimpleSerialization::SimpleWriteBuffer(res.Dist, p_buffer);
         }
 
@@ -188,7 +188,7 @@ RemoteSearchResult::Read(const std::uint8_t* p_buffer)
         indexRes.m_results.Init(nullptr, resNum, withMeta);
         for (auto& res : indexRes.m_results)
         {
-            p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, res.Key);
+            p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, res.VID);
             p_buffer = SimpleSerialization::SimpleReadBuffer(p_buffer, res.Dist);
         }
 
