@@ -1,4 +1,4 @@
-#ifdef DefineParameter
+#ifdef DefineKDTParameter
 
 // DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr)
 DefineKDTParameter(m_sKDTFilename, std::string, std::string("tree.bin"), "TreeFilePath")

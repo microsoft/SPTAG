@@ -24,7 +24,7 @@ phases:
        cmake ..
        make
        cd ../Release
-       ./test
+       ./test 
 
     displayName: 'Command Line Script'
 
@@ -110,7 +110,7 @@ phases:
 
 
 
-  - script: '.\x64\Debug\Test.exe'
+  - script: '.\x64\Debug\Test.exe' 
 
     displayName: 'Command Line Script'
 

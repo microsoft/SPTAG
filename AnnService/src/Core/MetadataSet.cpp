@@ -5,14 +5,11 @@
 
 using namespace SPTAG;
 
-namespace
-{
-namespace Local
-{
-
 ErrorCode
-CopyFile(const std::string& p_src, const std::string& p_dst)
+MetadataSet::MetaCopy(const std::string& p_src, const std::string& p_dst)
 {
+    if (p_src == p_dst) return ErrorCode::Success;
+
     std::ifstream src(p_src, std::ios::binary);
     if (!src.is_open())
     {
@@ -35,16 +32,11 @@ CopyFile(const std::string& p_src, const std::string& p_dst)
         dst.write(buf, src.gcount());
     }
     delete[] buf;
-
     src.close();
     dst.close();
 
     return ErrorCode::Success;
 }
-
-} // namespace Local
-} // namespace
-
 
 MetadataSet::MetadataSet()
 {
@@ -68,9 +60,9 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
         return;
     }
 
-    fpidx.read((char *)&m_iCount, sizeof(int));
-    m_pOffsets = new long long[m_iCount + 1];
-    fpidx.read((char *)m_pOffsets, sizeof(long long) * (m_iCount + 1));
+    fpidx.read((char *)&m_count, sizeof(int));
+    m_pOffsets.resize(m_count + 1);
+    fpidx.read((char *)m_pOffsets.data(), sizeof(std::uint64_t) * (m_count + 1));
     fpidx.close();
 }
 
@@ -82,56 +74,76 @@ FileMetadataSet::~FileMetadataSet()
         m_fp->close();
         delete m_fp;
     }
-    delete[] m_pOffsets;
 }
 
 
 ByteArray
 FileMetadataSet::GetMetadata(IndexType p_vectorID) const
 {
-    long long startoff = m_pOffsets[p_vectorID];
-    long long bytes = m_pOffsets[p_vectorID + 1] - startoff;
-    m_fp->seekg(startoff, std::ios_base::beg);
-    ByteArray b = ByteArray::Alloc((SizeType)bytes);
-    m_fp->read((char*)b.Data(), bytes);
-    return b;
+    std::uint64_t startoff = m_pOffsets[p_vectorID];
+    std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
+    if (p_vectorID < m_count) {
+        m_fp->seekg(startoff, std::ios_base::beg);
+        ByteArray b = ByteArray::Alloc((SizeType)bytes);
+        m_fp->read((char*)b.Data(), bytes);
+        return b;
+    }
+    else {
+        startoff -= m_pOffsets[m_count];
+        return ByteArray((std::uint8_t*)m_newdata.data() + startoff, static_cast<SizeType>(bytes), false);
+    }
 }
 
 
 SizeType
 FileMetadataSet::Count() const
 {
-    return m_iCount;
+    return static_cast<SizeType>(m_pOffsets.size() - 1);
 }
 
 
 bool
 FileMetadataSet::Available() const
 {
-    return m_fp && m_fp->is_open() && m_pOffsets;
+    return m_fp && m_fp->is_open() && m_pOffsets.size() > 1;
+}
+
+
+void
+FileMetadataSet::AddBatch(MetadataSet& data)
+{
+    for (int i = 0; i < static_cast<int>(data.Count()); i++) 
+    {
+        ByteArray newdata = data.GetMetadata(i);
+        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
+        m_pOffsets.push_back(m_pOffsets[m_pOffsets.size() - 1] + newdata.Length());
+    }
 }
 
 
 ErrorCode
-FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const
+FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
 {
     ErrorCode ret = ErrorCode::Success;
-    if (p_metaFile != m_metaFile) 
+    m_fp->close();
+    ret = MetaCopy(m_metaFile, p_metaFile);
+    if (ErrorCode::Success != ret)
     {
-        m_fp->close();
-        ret = Local::CopyFile(m_metaFile, p_metaFile);
-        if (ErrorCode::Success != ret)
-        {
-            return ret;
-        }
-        m_fp->open(p_metaFile, std::ifstream::binary);
+        return ret;
     }
+    if (m_newdata.size() > 0) {
+        std::ofstream tmpout(p_metaFile, std::ofstream::app|std::ios::binary);
+        if (!tmpout.is_open()) return ErrorCode::FailedOpenFile;
+        tmpout.write((char*)m_newdata.data(), m_newdata.size());
+        tmpout.close();
+    }
+    m_fp->open(p_metaFile, std::ifstream::binary);
     
-    if (p_metaindexFile != m_metaindexFile) 
-    {
-        ret = Local::CopyFile(m_metaindexFile, p_metaindexFile);
-    }
-
+    std::ofstream dst(p_metaindexFile, std::ios::binary);
+    m_count = static_cast<int>(m_pOffsets.size()) - 1;
+    m_newdata.clear();
+    dst.write((char*)&m_count, sizeof(int));
+    dst.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
     return ret;
 }
 
@@ -141,7 +153,8 @@ MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeTy
       m_offsetHolder(std::move(p_offsets)),
       m_count(p_count)
 {
-    m_offsets = reinterpret_cast<const std::uint64_t*>(m_offsetHolder.Data());
+    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(m_offsetHolder.Data());
+    m_offsets.insert(m_offsets.end(), newdata, newdata + p_count + 1);
 }
 
 
@@ -158,6 +171,11 @@ MemMetadataSet::GetMetadata(IndexType p_vectorID) const
         return ByteArray(m_metadataHolder.Data() + m_offsets[p_vectorID],
                          static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),
                          m_metadataHolder.DataHolder());
+    }
+    else if (p_vectorID < m_offsets.size() - 1) {
+        return ByteArray((std::uint8_t*)m_newdata.data() + m_offsets[p_vectorID] - m_offsets[m_count],
+            static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),
+            false);
     }
 
     return ByteArray::c_empty;
@@ -177,9 +195,19 @@ MemMetadataSet::Available() const
     return m_metadataHolder.Length() > 0 && m_offsetHolder.Length() > 0;
 }
 
+void
+MemMetadataSet::AddBatch(MetadataSet& data)
+{
+    for (int i = 0; i < static_cast<int>(data.Count()); i++)
+    {
+        ByteArray newdata = data.GetMetadata(i);
+        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
+        m_offsets.push_back(m_offsets[m_offsets.size() - 1] + newdata.Length());
+    }
+}
 
 ErrorCode
-MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const
+MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
 {
     std::ofstream outputStream;
     outputStream.open(p_metaFile, std::ios::binary);
@@ -190,6 +218,7 @@ MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p
     }
 
     outputStream.write(reinterpret_cast<const char*>(m_metadataHolder.Data()), m_metadataHolder.Length());
+    outputStream.write((const char*)m_newdata.data(), sizeof(std::uint8_t)*m_newdata.size());
     outputStream.close();
 
     outputStream.open(p_metaindexFile, std::ios::binary);
@@ -199,55 +228,11 @@ MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p
         return ErrorCode::FailedCreateFile;
     }
 
+    m_count = static_cast<int>(m_offsets.size()) - 1;
     outputStream.write(reinterpret_cast<const char*>(&m_count), sizeof(m_count));
-    outputStream.write(reinterpret_cast<const char*>(m_offsetHolder.Data()), m_offsetHolder.Length());
+    outputStream.write(reinterpret_cast<const char*>(m_offsets.data()), sizeof(std::uint64_t)*m_offsets.size());
     outputStream.close();
 
     return ErrorCode::Success;
 }
 
-
-MetadataSetFileTransfer::MetadataSetFileTransfer(const std::string& p_metaFile, const std::string& p_metaindexFile)
-    : m_metaFile(p_metaFile),
-      m_metaindexFile(p_metaindexFile)
-{
-}
-
-
-MetadataSetFileTransfer::~MetadataSetFileTransfer()
-{
-}
-
-
-ByteArray
-MetadataSetFileTransfer::GetMetadata(IndexType p_vectorID) const
-{
-    return ByteArray::c_empty;
-}
-
-
-SizeType
-MetadataSetFileTransfer::Count() const
-{
-    return 0;
-}
-
-
-bool
-MetadataSetFileTransfer::Available() const
-{
-    return false;
-}
-
-
-ErrorCode
-MetadataSetFileTransfer::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) const
-{
-    auto ret = Local::CopyFile(m_metaFile, p_metaFile);
-    if (ErrorCode::Success != ret)
-    {
-        return ret;
-    }
-
-    return Local::CopyFile(m_metaindexFile, p_metaindexFile);
-}

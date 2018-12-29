@@ -24,7 +24,7 @@ AnnIndex::AnnIndex(const char* p_algoType, const char* p_valueType, SizeType p_d
 
 AnnIndex::AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index)
     : m_algoType(p_index->GetIndexAlgoType()),
-      m_inputValueType(p_index->AcceptableQueryValueType()),
+      m_inputValueType(p_index->GetVectorValueType()),
       m_dimension(p_index->GetFeatureDim()),
       m_index(p_index)
 {
@@ -48,17 +48,35 @@ AnnIndex::Build(ByteArray p_data, SizeType p_num)
     {
         return false;
     }
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), p_num, m_dimension));
+}
+
+
+bool
+AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
+    {
+        return false;
+    }
 
     std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
         m_inputValueType,
         static_cast<SPTAG::SizeType>(m_dimension),
         static_cast<SPTAG::SizeType>(p_num)));
 
-    if (SPTAG::ErrorCode::Success != m_index->BuildIndex(vectors, nullptr))
-    {
-        return false;
+    std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
+    int current = 1;
+    for (size_t i = 0; i < p_meta.Length(); i++) {
+        if (((char)p_meta.Data()[i]) == '\n')
+            offsets[current++] = (std::uint64_t)(i + 1);
     }
-    return true;
+    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta));
 }
 
 
@@ -135,4 +153,64 @@ AnnIndex::Load(const char* p_loaderFile)
     }
 
     return AnnIndex(vecIndex);
+}
+
+
+bool 
+AnnIndex::Add(ByteArray p_data, SizeType p_num)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
+    {
+        return false;
+    }
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), p_num, m_dimension));
+}
+
+
+bool
+AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
+    {
+        return false;
+    }
+
+    std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
+        m_inputValueType,
+        static_cast<SPTAG::SizeType>(m_dimension),
+        static_cast<SPTAG::SizeType>(p_num)));
+
+    std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
+    int current = 1;
+    for (size_t i = 0; i < p_meta.Length(); i++) {
+        if (((char)p_meta.Data()[i]) == '\n')
+            offsets[current++] = (std::uint64_t)(i + 1);
+    }
+    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta));
+}
+
+
+bool
+AnnIndex::Delete(ByteArray p_data, SizeType p_num)
+{
+    if (nullptr != m_index && p_num > 0)
+    {
+        return (SPTAG::ErrorCode::Success == m_index->DeleteIndex(p_data.Data(), p_num));
+    }
+    return false;
+}
+
+bool 
+AnnIndex::Refine(const char* p_loaderFile)
+{
+    return (SPTAG::ErrorCode::Success == m_index->RefineIndex(std::string(p_loaderFile)));
 }

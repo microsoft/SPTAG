@@ -7,6 +7,7 @@
 #include <string>
 #include <limits>
 #include <vector>
+#include <cmath>
 
 #ifndef _MSC_VER
 #include <sys/stat.h>
@@ -29,6 +30,11 @@ template <class T>
 inline T max(T a, T b) {
     return a > b ? a : b;
 }
+
+#ifndef _rotl
+#define _rotl(x, n) (((x) << (n)) | ((x) >> (32-(n))))
+#endif
+
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

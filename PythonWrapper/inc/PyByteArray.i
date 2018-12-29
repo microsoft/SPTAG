@@ -11,7 +11,7 @@
         int i = 0;
         for (const auto& res : *($1))
         {
-            PyList_SetItem(dstVecIDs, i, PyInt_FromLong(res.Key));
+            PyList_SetItem(dstVecIDs, i, PyInt_FromLong(res.VID));
             PyList_SetItem(dstVecDists, i, PyFloat_FromDouble(res.Dist));
             i++;
         }
@@ -43,7 +43,7 @@
         {
             for (const auto& res : indexRes.m_results)
             {
-                PyList_Append(dstVecIDs, PyInt_FromLong(res.Key));
+                PyList_Append(dstVecIDs, PyInt_FromLong(res.VID));
                 PyList_Append(dstVecDists, PyFloat_FromDouble(res.Dist));
             }
 
@@ -63,7 +63,7 @@
     }
 %}
 
-%typemap(in) ByteArray p_data
+%typemap(in) ByteArray
 %{
     $1 = SPTAG::ByteArray((std::uint8_t*)PyBytes_AsString($input), PyBytes_Size($input), false);
 %}

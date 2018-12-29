@@ -15,32 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cpp">
+    <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\DistanceTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\AlgoTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="src\StringConvertTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="src\IniReaderTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="src\Base64HelperTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-	<ClCompile Include="src\CommonHelperTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="inc\Test.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

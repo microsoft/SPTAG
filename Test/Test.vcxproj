@@ -140,15 +140,21 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\BKTTest.cpp" />
+    <ClCompile Include="src\AlgoTest.cpp" />
+	<ClCompile Include="src\Base64HelperTest.cpp" />
+	<ClCompile Include="src\CommonHelperTest.cpp" />
     <ClCompile Include="src\DistanceTest.cpp" />
+	<ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
+	<ClCompile Include="src\StringConvertTest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Test.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <None Include="packages.config">
+      <SubType>Designer</SubType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
@@ -160,6 +166,8 @@
     <Import Project="..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets" Condition="Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" />
     <Import Project="..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets" Condition="Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" />
     <Import Project="..\packages\boost_unit_test_framework-vc140.1.67.0.0\build\boost_unit_test_framework-vc140.targets" Condition="Exists('..\packages\boost_unit_test_framework-vc140.1.67.0.0\build\boost_unit_test_framework-vc140.targets')" />
+    <Import Project="..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets" Condition="Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" />
+    <Import Project="..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets" Condition="Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -173,5 +181,7 @@
     <Error Condition="!Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets'))" />
     <Error Condition="!Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets'))" />
     <Error Condition="!Exists('..\packages\boost_unit_test_framework-vc140.1.67.0.0\build\boost_unit_test_framework-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_unit_test_framework-vc140.1.67.0.0\build\boost_unit_test_framework-vc140.targets'))" />
+    <Error Condition="!Exists('..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.redist.9.107.0.0\build\native\tbb_oss.redist.targets'))" />
+    <Error Condition="!Exists('..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb_oss.9.107.0.0\build\native\tbb_oss.targets'))" />
   </Target>
 </Project>

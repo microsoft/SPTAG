@@ -41,9 +41,8 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
 
         if (last == p_argc)
         {
-            fprintf(stderr, "Unrecognized arg \"%s\"\n", *p_args);
-            PrintHelp();
-            return false;
+            p_argc -= 1;
+            p_args += 1;
         }
     }
 

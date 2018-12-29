@@ -8,7 +8,7 @@ using namespace SPTAG::IndexBuilder;
 
 
 BuilderOptions::BuilderOptions()
-    : m_threadNum(4),
+    : m_threadNum(32),
       m_inputValueType(VectorValueType::Float),
       m_vectorDelimiter("|")
 {

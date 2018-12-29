@@ -168,7 +168,7 @@
     <Import Project="..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets" Condition="Exists('..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets')" />
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
-    <Exec Command="mkdir $(IntDir)" />
+    <MakeDir Directories="$(IntDir)" />
     <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -python -c++ -outdir $(IntDir) -o $(IntDir)/ClientInterfaceSwigGen.cpp inc/ClientInterface.h" />
   </Target>
   <Target Name="CopyFiles" AfterTargets="BeforeBuild">

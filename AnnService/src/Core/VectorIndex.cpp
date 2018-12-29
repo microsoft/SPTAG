@@ -4,7 +4,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 #include "inc/Core/BKT/Index.h"
-
+#include "inc/Core/KDT/Index.h"
 #include <fstream>
 
 
@@ -49,6 +49,62 @@ VectorIndex::SetParameter(const std::string& p_param, const std::string& p_value
 }
 
 
+void 
+VectorIndex::SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath) {
+    m_pMetadata.reset(new FileMetadataSet(p_metadataFilePath, p_metadataIndexPath));
+}
+
+
+ByteArray 
+VectorIndex::GetMetadata(IndexType p_vectorID) const {
+    if (nullptr != m_pMetadata)
+    {
+        return m_pMetadata->GetMetadata(p_vectorID);
+    }
+    return ByteArray::c_empty;
+}
+
+
+ErrorCode
+VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
+    std::shared_ptr<MetadataSet> p_metadataSet)
+{
+    if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
+    {
+        return ErrorCode::Fail;
+    }
+
+    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
+    m_pMetadata = std::move(p_metadataSet);
+    return ErrorCode::Success;
+}
+
+
+ErrorCode
+VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, std::vector<BasicResult>& p_results) const {
+    QueryResult res(p_vector, p_neighborCount, p_results);
+    SearchIndex(res);
+    return ErrorCode::Success;
+}
+
+
+ErrorCode 
+VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet) {
+    if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
+    {
+        return ErrorCode::Fail;
+    }
+    AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
+    if (m_pMetadata == nullptr) {
+        m_pMetadata = std::move(p_metadataSet);
+    }
+    else {
+        m_pMetadata->AddBatch(*p_metadataSet);
+    }
+    return ErrorCode::Success;
+}
+
+
 std::shared_ptr<VectorIndex>
 VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 {
@@ -63,6 +119,19 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
         return std::shared_ptr<VectorIndex>(new BKT::Index<Type>); \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+        default: break;
+        }
+    }
+    else if (p_algo == IndexAlgoType::KDT) {
+        switch (p_valuetype)
+        {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        return std::shared_ptr<VectorIndex>(new KDT::Index<Type>); \
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
@@ -97,7 +166,22 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
         p_vectorIndex.reset(new BKT::Index<Type>); \
-        p_vectorIndex->LoadIndex(p_loaderFilePath, iniReader); \
+        p_vectorIndex->LoadIndex(p_loaderFilePath); \
+        break; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+        default: break;
+        }
+    }
+    else if (algoType == IndexAlgoType::KDT) {
+        switch (valueType)
+        {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        p_vectorIndex.reset(new KDT::Index<Type>); \
+        p_vectorIndex->LoadIndex(p_loaderFilePath); \
         break; \
 
 #include "inc/Core/DefinitionList.h"

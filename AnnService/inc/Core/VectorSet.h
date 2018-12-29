@@ -13,15 +13,19 @@ public:
 
     virtual ~VectorSet();
 
+    virtual VectorValueType GetValueType() const = 0;
+
     virtual void* GetVector(IndexType p_vectorID) const = 0;
 
     virtual void* GetData() const = 0;
 
-    virtual VectorValueType ValueType() const = 0;
-
     virtual SizeType Dimension() const = 0;
 
     virtual SizeType Count() const = 0;
+
+    virtual bool Available() const = 0;
+
+    virtual ErrorCode Save(const std::string& p_vectorFile) const = 0;
 };
 
 
@@ -35,15 +39,19 @@ public:
 
     virtual ~BasicVectorSet();
 
+    virtual VectorValueType GetValueType() const;
+
     virtual void* GetVector(IndexType p_vectorID) const;
 
     virtual void* GetData() const;
 
-    virtual VectorValueType ValueType() const;
-
     virtual SizeType Dimension() const;
 
     virtual SizeType Count() const;
+
+    virtual bool Available() const;
+
+    virtual ErrorCode Save(const std::string& p_vectorFile) const;
 
 private:
     ByteArray m_data;

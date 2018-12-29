@@ -71,3 +71,4 @@ dkms.conf
 /obj/x64_Debug
 /x64/Debug
 /packages
+/Search/Search.vcxproj.user
