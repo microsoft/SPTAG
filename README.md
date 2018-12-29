@@ -82,6 +82,7 @@ Please cite SPTAG in your publications if it helps your research:
                Lintao Zhang and
                Jingdong Wang},
   title     = {SPTAG: A library for fast approximate nearest neighbor search},
+  url       = {https://github.com/Microsoft/SPTAG},
   year      = {2018}
 }
 
