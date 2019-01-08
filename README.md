@@ -80,6 +80,7 @@ Please cite SPTAG in your publications if it helps your research:
                Scarlett Li and
                Jeffery Zhu and
                Jason Li and
+               Chuanjie Liu and
                Lintao Zhang and
                Jingdong Wang},
   title     = {SPTAG: A library for fast approximate nearest neighbor search},
