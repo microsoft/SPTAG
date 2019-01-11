@@ -3,7 +3,7 @@
 
 #include <fstream>
 
-#if defined(__INTEL_COMPILER)
+#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
 #include <malloc.h>
 #else
 #include <mm_malloc.h>
