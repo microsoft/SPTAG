@@ -3,6 +3,12 @@
 
 #include <fstream>
 
+#if defined(__INTEL_COMPILER)
+#include <malloc.h>
+#else
+#include <mm_malloc.h>
+#endif // defined(__GNUC__)
+
 #define ALIGN 32
 
 #define aligned_malloc(a, b) _mm_malloc(a, b)
