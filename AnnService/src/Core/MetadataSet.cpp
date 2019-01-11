@@ -6,6 +6,31 @@
 using namespace SPTAG;
 
 ErrorCode
+MetadataSet::RefineMetadata(std::vector<int>& indices, const std::string& p_folderPath)
+{
+    std::ofstream metaOut(p_folderPath + "metadata.bin_tmp", std::ios::binary);
+    std::ofstream metaIndexOut(p_folderPath + "metadataIndex.bin", std::ios::binary);
+    if (!metaOut.is_open() || !metaIndexOut.is_open()) return ErrorCode::FailedCreateFile;
+
+    int R = (int)indices.size();
+    metaIndexOut.write((char*)&R, sizeof(int));
+    std::uint64_t offset = 0;
+    for (int i = 0; i < R; i++) {
+        metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
+        ByteArray meta = GetMetadata(indices[i]);
+        metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
+        offset += meta.Length();
+    }
+    metaOut.close();
+    metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
+    metaIndexOut.close();
+
+    SPTAG::MetadataSet::MetaCopy(p_folderPath + "metadata.bin_tmp", p_folderPath + "metadata.bin");
+    return ErrorCode::Success;
+}
+
+
+ErrorCode
 MetadataSet::MetaCopy(const std::string& p_src, const std::string& p_dst)
 {
     if (p_src == p_dst) return ErrorCode::Success;
@@ -60,7 +85,7 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
         return;
     }
 
-    fpidx.read((char *)&m_count, sizeof(int));
+    fpidx.read((char *)&m_count, sizeof(m_count));
     m_pOffsets.resize(m_count + 1);
     fpidx.read((char *)m_pOffsets.data(), sizeof(std::uint64_t) * (m_count + 1));
     fpidx.close();
@@ -82,7 +107,7 @@ FileMetadataSet::GetMetadata(IndexType p_vectorID) const
 {
     std::uint64_t startoff = m_pOffsets[p_vectorID];
     std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
-    if (p_vectorID < m_count) {
+    if (p_vectorID < (IndexType)m_count) {
         m_fp->seekg(startoff, std::ios_base::beg);
         ByteArray b = ByteArray::Alloc((SizeType)bytes);
         m_fp->read((char*)b.Data(), bytes);
@@ -142,7 +167,7 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
     std::ofstream dst(p_metaindexFile, std::ios::binary);
     m_count = static_cast<int>(m_pOffsets.size()) - 1;
     m_newdata.clear();
-    dst.write((char*)&m_count, sizeof(int));
+    dst.write((char*)&m_count, sizeof(m_count));
     dst.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
     return ret;
 }

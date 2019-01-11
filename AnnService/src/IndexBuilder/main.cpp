@@ -35,7 +35,7 @@ int main(int argc, char* argv[])
         std::string paramName = param.substr(0, idx);
         std::string paramVal = param.substr(idx + 1);
         std::string sectionName;
-        idx = paramName.find(".");
+        idx = (int)paramName.find(".");
         if (idx >= 0) {
             sectionName = paramName.substr(0, idx);
             paramName = paramName.substr(idx + 1);

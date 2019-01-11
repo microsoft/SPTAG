@@ -1,4 +1,5 @@
 #include "inc/Core/VectorIndex.h"
+#include "inc/Core/Common/DataUtils.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
@@ -18,20 +19,6 @@ VectorIndex::VectorIndex()
 
 VectorIndex::~VectorIndex()
 {
-}
-
-
-void
-VectorIndex::SetIndexName(const std::string& p_indexName)
-{
-    m_indexName = p_indexName;
-}
-
-
-const std::string&
-VectorIndex::GetIndexName() const
-{
-    return m_indexName;
 }
 
 
@@ -64,6 +51,92 @@ VectorIndex::GetMetadata(IndexType p_vectorID) const {
     return ByteArray::c_empty;
 }
 
+
+ErrorCode 
+VectorIndex::LoadIndex(const std::string& p_folderPath)
+{
+    std::string folderPath(p_folderPath);
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
+    {
+        folderPath += FolderSep;
+    }
+
+    Helper::IniReader p_configReader;
+    if (ErrorCode::Success != p_configReader.LoadIniFile(folderPath + "/indexloader.ini"))
+    {
+        return ErrorCode::FailedOpenFile;
+    }
+
+    std::string metadataSection("MetaData");
+    if (p_configReader.DoesSectionExist(metadataSection))
+    {
+        std::string metadataFilePath = p_configReader.GetParameter(metadataSection,
+            "MetaDataFilePath",
+            std::string());
+        std::string metadataIndexFilePath = p_configReader.GetParameter(metadataSection,
+            "MetaDataIndexPath",
+            std::string());
+
+        m_pMetadata.reset(new FileMetadataSet(folderPath + metadataFilePath, folderPath + metadataIndexFilePath));
+
+        if (!m_pMetadata->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
+    }
+    if (DistCalcMethod::Undefined == p_configReader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
+    {
+        std::cerr << "Error: Failed to load parameter DistCalcMethod." << std::endl;
+        return ErrorCode::Fail;
+    }
+
+    return LoadIndex(folderPath, p_configReader);
+}
+
+
+ErrorCode VectorIndex::SaveIndex(const std::string& p_folderPath)
+{
+    std::string folderPath(p_folderPath);
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
+    {
+        folderPath += FolderSep;
+    }
+
+    if (!direxists(folderPath.c_str()))
+    {
+        mkdir(folderPath.c_str());
+    }
+
+    std::string loaderFilePath = folderPath + "indexloader.ini";
+
+    std::ofstream loaderFile(loaderFilePath);
+    if (!loaderFile.is_open())
+    {
+        return ErrorCode::FailedCreateFile;
+    }
+
+    if (nullptr != m_pMetadata)
+    {
+        std::string metadataFile = "metadata.bin";
+        std::string metadataIndexFile = "metadataIndex.bin";
+        loaderFile << "[MetaData]" << std::endl;
+        loaderFile << "MetaDataFilePath=" << metadataFile << std::endl;
+        loaderFile << "MetaDataIndexPath=" << metadataIndexFile << std::endl;
+        loaderFile << std::endl;
+
+        m_pMetadata->SaveMetadata(folderPath + metadataFile, folderPath + metadataIndexFile);
+    }
+
+    loaderFile << "[Index]" << std::endl;
+    loaderFile << "IndexAlgoType=" << Helper::Convert::ConvertToString(GetIndexAlgoType()) << std::endl;
+    loaderFile << "ValueType=" << Helper::Convert::ConvertToString(GetVectorValueType()) << std::endl;
+    loaderFile << std::endl;
+
+    ErrorCode ret = SaveIndex(folderPath, loaderFile);
+    loaderFile.close();
+    return ret;
+}
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
@@ -190,5 +263,57 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         default: break;
         }
     }
+    return ErrorCode::Success;
+}
+
+
+ErrorCode VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2)
+{
+    std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
+    if (!folderPath1.empty() && *(folderPath1.rbegin()) != FolderSep) folderPath1 += FolderSep;
+    if (!folderPath2.empty() && *(folderPath2.rbegin()) != FolderSep) folderPath2 += FolderSep;
+
+    Helper::IniReader p_configReader1, p_configReader2;
+    if (ErrorCode::Success != p_configReader1.LoadIniFile(folderPath1 + "/indexloader.ini"))
+        return ErrorCode::FailedOpenFile;
+
+    if (ErrorCode::Success != p_configReader2.LoadIniFile(folderPath2 + "/indexloader.ini"))
+        return ErrorCode::FailedOpenFile;
+
+    std::shared_ptr<VectorIndex> index = CreateInstance(
+        p_configReader1.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined), 
+        p_configReader1.GetParameter("Index", "ValueType", VectorValueType::Undefined));
+    if (index == nullptr) return ErrorCode::FailedParseValue;
+
+    std::string empty("");
+    if (!COMMON::DataUtils::MergeIndex(folderPath1 + p_configReader1.GetParameter("Index", "VectorFilePath", empty),
+        folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
+        folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty),
+        folderPath2 + p_configReader1.GetParameter("Index", "VectorFilePath", empty),
+        folderPath2 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
+        folderPath2 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty)))
+        return ErrorCode::Fail;
+
+    for (const auto& iter : p_configReader1.GetParameters("Index"))
+        index->SetParameter(iter.first.c_str(), iter.second.c_str());
+
+    if (p_configReader1.DoesSectionExist("MetaData"))
+    {
+        for (const auto& iter : p_configReader1.GetParameters("MetaData"))
+            index->SetParameter(iter.first.c_str(), iter.second.c_str());
+        index->SetMetadata(folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
+                           folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty));
+    }
+
+    std::ifstream vecIn(folderPath1 + p_configReader1.GetParameter("Index", "VectorFilePath", empty), std::ios::binary);
+    int R, C;
+    vecIn.read((char*)&R, sizeof(int));
+    vecIn.read((char*)&C, sizeof(int));
+    size_t size = R * C * GetValueTypeSize(index->GetVectorValueType());
+    char* data = new char[size];
+    vecIn.read(data, size);
+    vecIn.close();
+    index->BuildIndex((void*)data, R, C);
+    index->SaveIndex(folderPath1);
     return ErrorCode::Success;
 }

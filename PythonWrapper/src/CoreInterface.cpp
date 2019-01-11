@@ -208,9 +208,3 @@ AnnIndex::Delete(ByteArray p_data, SizeType p_num)
     }
     return false;
 }
-
-bool 
-AnnIndex::Refine(const char* p_loaderFile)
-{
-    return (SPTAG::ErrorCode::Success == m_index->RefineIndex(std::string(p_loaderFile)));
-}
