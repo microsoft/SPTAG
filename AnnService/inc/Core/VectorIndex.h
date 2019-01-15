@@ -5,6 +5,7 @@
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
+#include "inc/Helper/SimpleIniReader.h"
 
 namespace SPTAG
 {
@@ -16,9 +17,9 @@ public:
 
     virtual ~VectorIndex();
 
-    virtual ErrorCode SaveIndex(const std::string& p_folderPath) = 0;
+    virtual ErrorCode SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout) = 0;
 
-    virtual ErrorCode LoadIndex(const std::string& p_folderPath) = 0;
+    virtual ErrorCode LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader) = 0;
 
     virtual ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs) = 0;
 
@@ -30,14 +31,12 @@ public:
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, int p_vectorNum) = 0;
 
-    virtual ErrorCode RefineIndex(const std::string& p_folderPath) = 0;
-
-    virtual ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2) = 0;
-
     //virtual ErrorCode AddIndexWithID(const void* p_vector, const int& p_id) = 0;
 
     //virtual ErrorCode DeleteIndexWithID(const void* p_vector, const int& p_id) = 0;
-
+    
+    virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    virtual const void* GetSample(const int idx) const = 0;
     virtual int GetFeatureDim() const = 0;
     virtual int GetNumSamples() const = 0;
 
@@ -48,6 +47,10 @@ public:
 
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
+
+    virtual ErrorCode LoadIndex(const std::string& p_folderPath);
+
+    virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
     
@@ -61,16 +64,22 @@ public:
     virtual ByteArray GetMetadata(IndexType p_vectorID) const;
     virtual void SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath);
 
-    void SetIndexName(const std::string& p_indexName);
-
-    const std::string& GetIndexName() const;
+    virtual std::string GetIndexName() const 
+    { 
+        if (m_sIndexName == "")
+            return Helper::Convert::ConvertToString(GetIndexAlgoType());
+        return m_sIndexName; 
+    }
+    virtual void SetIndexName(std::string p_name) { m_sIndexName = p_name; }
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
+    static ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2);
+    
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
 protected:
-    std::string m_indexName;
+    std::string m_sIndexName;
     std::shared_ptr<MetadataSet> m_pMetadata;
 };
 

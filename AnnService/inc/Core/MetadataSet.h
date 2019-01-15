@@ -26,6 +26,8 @@ public:
 
     virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
 
+    virtual ErrorCode RefineMetadata(std::vector<int>& indices, const std::string& p_folderPath);
+
     static ErrorCode MetaCopy(const std::string& p_src, const std::string& p_dst);
 };
 
@@ -52,7 +54,7 @@ private:
 
     std::vector<std::uint64_t> m_pOffsets;
 
-    int m_count;
+    SizeType m_count;
 
     std::string m_metaFile;
 

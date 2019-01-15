@@ -118,6 +118,18 @@
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\KDTree.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\BKTree.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\CommonDataStructure.cpp">
@@ -156,5 +168,11 @@
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp">
       <Filter>Source Files\Core\KDT</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

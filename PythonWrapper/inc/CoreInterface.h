@@ -59,8 +59,6 @@ public:
 
     bool Delete(ByteArray p_data, SizeType p_num);
 
-    bool Refine(const char* p_loaderFile);
-
     static AnnIndex Load(const char* p_loaderFile);
 
 private:

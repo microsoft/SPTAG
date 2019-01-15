@@ -38,7 +38,7 @@ public:
         m_target = p_target;
     }
 
-    inline const T* GetTarget()
+    inline const T* GetTarget() const
     {
         return reinterpret_cast<const T*>(m_target);
     }
