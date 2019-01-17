@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+
 find_package(Python2 COMPONENTS Development)
 if (Python2_FOUND)    
     include_directories (${Python2_INCLUDE_DIRS})

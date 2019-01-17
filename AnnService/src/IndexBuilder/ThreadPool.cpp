@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/IndexBuilder/ThreadPool.h"
 
 #include <boost/asio.hpp>

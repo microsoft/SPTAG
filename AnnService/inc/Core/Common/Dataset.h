@@ -1,6 +1,9 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include <fstream>
 
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)

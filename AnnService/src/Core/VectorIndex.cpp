@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/DataUtils.h"
 #include "inc/Helper/CommonHelper.h"

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Aggregator/AggregatorSettings.h"
 
 using namespace SPTAG;

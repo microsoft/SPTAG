@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifndef _SPTAG_SOCKET_COMMON_H_
 #define _SPTAG_SOCKET_COMMON_H_
 

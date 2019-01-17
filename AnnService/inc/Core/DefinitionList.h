@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifdef DefineVectorValueType
 
 DefineVectorValueType(Int8, std::int8_t)

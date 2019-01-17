@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Aggregator/AggregatorService.h"
 
 SPTAG::Aggregator::AggregatorService g_service;

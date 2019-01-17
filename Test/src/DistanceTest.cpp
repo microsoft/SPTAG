@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include <bitset>
 #include "inc/Test.h"
 #include "inc/Core/Common/DistanceUtils.h"

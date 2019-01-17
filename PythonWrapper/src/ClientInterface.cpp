@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/ClientInterface.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/Concurrent.h"

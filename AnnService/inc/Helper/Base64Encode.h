@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifndef _SPTAG_HELPER_BASE64ENCODE_H_
 #define _SPTAG_HELPER_BASE64ENCODE_H_
 
