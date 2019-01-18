@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+
 if(NOT WIN32)
   ADD_DEFINITIONS(-DBOOST_TEST_DYN_LINK)
   message (STATUS "BOOST_TEST_DYN_LINK")

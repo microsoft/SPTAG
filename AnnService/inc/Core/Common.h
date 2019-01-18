@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifndef _SPTAG_CORE_COMMONDEFS_H_
 #define _SPTAG_CORE_COMMONDEFS_H_
 

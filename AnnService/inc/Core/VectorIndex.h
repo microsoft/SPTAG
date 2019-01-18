@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifndef _SPTAG_VECTORINDEX_H_
 #define _SPTAG_VECTORINDEX_H_
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #define BOOST_TEST_MAIN
 #define BOOST_TEST_MODULE Main
 #include "inc/Test.h"

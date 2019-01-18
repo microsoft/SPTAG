@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/CoreInterface.h"
 #include "inc/Helper/StringConvert.h"
 

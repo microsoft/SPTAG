@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Server/SearchService.h"
 #include "inc/Server/SearchExecutor.h"
 #include "inc/Socket/RemoteSearchQuery.h"

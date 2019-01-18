@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #ifndef _SPTAG_SERVER_SERVICESTTINGS_H_
 #define _SPTAG_SERVER_SERVICESTTINGS_H_
 

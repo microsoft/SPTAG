@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Client/Options.h"
 #include "inc/Client/ClientWrapper.h"
 
