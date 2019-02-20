@@ -7,6 +7,7 @@ file(GLOB SRC_FILES ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp ${PROJECT_SO
 include_directories(${PROJECT_SOURCE_DIR}/AnnService)
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
+target_link_libraries (SPTAGLib ${TBB_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
 set_target_properties(SPTAGLibStatic PROPERTIES OUTPUT_NAME SPTAGLib)
 
@@ -30,7 +31,11 @@ file(GLOB BUILDER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexB
 add_executable (indexbuilder ${BUILDER_FILES} ${BUILDER_HDR_FILES})
 target_link_libraries(indexbuilder ${Boost_LIBRARIES} ${TBB_LIBRARIES})
 
-install(TARGETS SPTAGLib SPTAGLibStatic server client aggregator indexbuilder
+file(GLOB SEARCHER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexSearcher/*.cpp)
+add_executable (indexsearcher ${SEARCHER_FILES} ${HDR_FILES})
+target_link_libraries(indexsearcher ${Boost_LIBRARIES} ${TBB_LIBRARIES})
+
+install(TARGETS SPTAGLib SPTAGLibStatic server client aggregator indexbuilder indexsearcher
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)

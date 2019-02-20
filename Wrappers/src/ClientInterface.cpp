@@ -64,7 +64,7 @@ AnnClient::~AnnClient()
 
 
 void
-AnnClient::SetTimeoutMilliseconds(SizeType p_timeout)
+AnnClient::SetTimeoutMilliseconds(int p_timeout)
 {
     m_timeoutInMilliseconds = p_timeout;
 }
@@ -101,8 +101,8 @@ AnnClient::ClearSearchParam()
 }
 
 
-RemoteSearchResult
-AnnClient::Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueType, bool p_withMetaData)
+std::shared_ptr<RemoteSearchResult>
+AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bool p_withMetaData)
 {
     using namespace SPTAG;
 
@@ -166,7 +166,7 @@ AnnClient::Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueTyp
 
         signal->Wait();
     }
-    return std::move(ret);
+    return std::make_shared<RemoteSearchResult>(ret);
 }
 
 
@@ -223,7 +223,7 @@ AnnClient::SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID
 
 std::string
 AnnClient::CreateSearchQuery(const ByteArray& p_data,
-                             SizeType p_resultNum,
+                             int p_resultNum,
                              bool p_extractMetadata,
                              SPTAG::VectorValueType p_valueType)
 {

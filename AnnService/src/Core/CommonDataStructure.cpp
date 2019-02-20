@@ -101,10 +101,24 @@ ByteArray::Data() const
 }
 
 
+void
+ByteArray::SetData(std::uint8_t* p_array)
+{
+    m_data = p_array;
+}
+
+
 std::size_t
 ByteArray::Length() const
 {
     return m_length;
+}
+
+
+void
+ByteArray::SetLength(std::size_t p_length)
+{
+    m_length = p_length;
 }
 
 

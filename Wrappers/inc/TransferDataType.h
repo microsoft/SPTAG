@@ -12,8 +12,6 @@ typedef SPTAG::ByteArray ByteArray;
 
 typedef SPTAG::QueryResult QueryResult;
 
-typedef SPTAG::BasicResult BasicResult;
-
 typedef SPTAG::Socket::RemoteSearchResult RemoteSearchResult;
 
 #endif // _SPTAG_PW_TRANSFERDATATYPE_H_

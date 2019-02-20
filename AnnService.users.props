@@ -11,6 +11,8 @@
   <PropertyGroup Label="UserMacros">
 	<OutAppDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutAppDir>
     <OutLibDir>$(SolutionDir)\$(Platform)\$(Configuration)\</OutLibDir>
+	<JavaIncDir></JavaIncDir>
+	<JavaLib></JavaLib>
   </PropertyGroup>
 </Project>
 

@@ -32,14 +32,14 @@
     }
 %}
 
-%typemap(out) RemoteSearchResult
+%typemap(out) std::shared_ptr<RemoteSearchResult>
 %{
     {
         $result = PyTuple_New(3);
         auto dstVecIDs = PyList_New(0);
         auto dstVecDists = PyList_New(0);
         auto dstMetadata = PyList_New(0);
-        for (const auto& indexRes : $1.m_allIndexResults)
+        for (const auto& indexRes : $1->m_allIndexResults)
         {
             for (const auto& res : indexRes.m_results)
             {
