@@ -14,3 +14,4 @@
 %}
 
 %include "CoreInterface.h"
+%include "TransferDataType.h"
