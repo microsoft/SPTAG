@@ -57,8 +57,8 @@ int main(int argc, char* argv[])
 
     ErrorCode code;
     if (options->m_inputFiles.find("BIN:") == 0) {
-        options->m_inputFiles = options->m_inputFiles.substr(4);
-        std::ifstream inputStream(options->m_inputFiles, std::ifstream::binary);
+        std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles.substr(4), ",");
+        std::ifstream inputStream(files[0], std::ifstream::binary);
         if (!inputStream.is_open()) {
             fprintf(stderr, "Failed to read input file.\n");
             exit(1);
@@ -71,9 +71,13 @@ int main(int argc, char* argv[])
         char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
         inputStream.read(vecBuf, totalRecordVectorBytes);
         inputStream.close();
-
         std::shared_ptr<VectorSet> p_vectorSet(new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
-        code = indexBuilder->BuildIndex(p_vectorSet, nullptr);
+        
+        std::shared_ptr<MetadataSet> p_metaSet = nullptr;
+        if (files.size() >= 3) {
+            p_metaSet.reset(new FileMetadataSet(files[1], files[2]));
+        }
+        code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
         indexBuilder->SaveIndex(options->m_outputFolder);
     }
     else {
