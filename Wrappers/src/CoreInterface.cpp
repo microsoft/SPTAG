@@ -5,7 +5,7 @@
 #include "inc/Helper/StringConvert.h"
 
 
-AnnIndex::AnnIndex(SizeType p_dimension)
+AnnIndex::AnnIndex(int p_dimension)
     : m_algoType(SPTAG::IndexAlgoType::BKT),
       m_inputValueType(SPTAG::VectorValueType::Float),
       m_dimension(p_dimension)
@@ -14,7 +14,7 @@ AnnIndex::AnnIndex(SizeType p_dimension)
 }
 
 
-AnnIndex::AnnIndex(const char* p_algoType, const char* p_valueType, SizeType p_dimension)
+AnnIndex::AnnIndex(const char* p_algoType, const char* p_valueType, int p_dimension)
     : m_algoType(SPTAG::IndexAlgoType::Undefined),
       m_inputValueType(SPTAG::VectorValueType::Undefined),
       m_dimension(p_dimension)
@@ -41,7 +41,7 @@ AnnIndex::~AnnIndex()
 
 
 bool
-AnnIndex::Build(ByteArray p_data, SizeType p_num)
+AnnIndex::Build(ByteArray p_data, int p_num)
 {
     if (nullptr == m_index)
     {
@@ -56,7 +56,7 @@ AnnIndex::Build(ByteArray p_data, SizeType p_num)
 
 
 bool
-AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num)
 {
     if (nullptr == m_index)
     {
@@ -69,8 +69,8 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
 
     std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
         m_inputValueType,
-        static_cast<SPTAG::SizeType>(m_dimension),
-        static_cast<SPTAG::SizeType>(p_num)));
+        static_cast<int>(m_dimension),
+        static_cast<int>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
     int current = 1;
@@ -108,7 +108,7 @@ AnnIndex::SetSearchParam(const char* p_name, const char* p_value)
 
 
 std::shared_ptr<QueryResult>
-AnnIndex::Search(ByteArray p_data, SizeType p_resultNum)
+AnnIndex::Search(ByteArray p_data, int p_resultNum)
 {
     std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_resultNum, false);
 
@@ -120,7 +120,7 @@ AnnIndex::Search(ByteArray p_data, SizeType p_resultNum)
 }
 
 std::shared_ptr<QueryResult>
-AnnIndex::SearchWithMetaData(ByteArray p_data, SizeType p_resultNum)
+AnnIndex::SearchWithMetaData(ByteArray p_data, int p_resultNum)
 {
     std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_resultNum, true);
 
@@ -160,7 +160,7 @@ AnnIndex::Load(const char* p_loaderFile)
 
 
 bool 
-AnnIndex::Add(ByteArray p_data, SizeType p_num)
+AnnIndex::Add(ByteArray p_data, int p_num)
 {
     if (nullptr == m_index)
     {
@@ -175,7 +175,7 @@ AnnIndex::Add(ByteArray p_data, SizeType p_num)
 
 
 bool
-AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num)
 {
     if (nullptr == m_index)
     {
@@ -188,8 +188,8 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
 
     std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
         m_inputValueType,
-        static_cast<SPTAG::SizeType>(m_dimension),
-        static_cast<SPTAG::SizeType>(p_num)));
+        static_cast<int>(m_dimension),
+        static_cast<int>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
     int current = 1;
@@ -203,7 +203,7 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
 
 
 bool
-AnnIndex::Delete(ByteArray p_data, SizeType p_num)
+AnnIndex::Delete(ByteArray p_data, int p_num)
 {
     if (nullptr != m_index && p_num > 0)
     {

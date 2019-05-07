@@ -4,37 +4,13 @@
 #ifndef _SPTAG_PW_CLIENTINTERFACE_H_
 #define _SPTAG_PW_CLIENTINTERFACE_H_
 
-#ifndef SWIG
-
 #include "TransferDataType.h"
-#include "inc/Core/CommonDataStructure.h"
 #include "inc/Socket/Client.h"
-#include "inc/Socket/RemoteSearchQuery.h"
 #include "inc/Socket/ResourceManager.h"
 
 #include <unordered_map>
 #include <atomic>
 #include <mutex>
-
-#else
-%module SPTAGClient
-
-%{
-#include "inc/ClientInterface.h"
-%}
-
-%include <std_shared_ptr.i>
-%shared_ptr(AnnClient)
-
-%include "PyByteArray.i"
-
-%{
-#define SWIG_FILE_WITH_INIT
-%}
-
-#endif // SWIG
-
-typedef unsigned int SizeType;
 
 class AnnClient
 {
@@ -43,19 +19,19 @@ public:
 
     ~AnnClient();
 
-    void SetTimeoutMilliseconds(SizeType p_timeout);
+    void SetTimeoutMilliseconds(int p_timeout);
 
     void SetSearchParam(const char* p_name, const char* p_value);
 
     void ClearSearchParam();
 
-    RemoteSearchResult Search(ByteArray p_data, SizeType p_resultNum, const char* p_valueType, bool p_withMetaData);
+    std::shared_ptr<RemoteSearchResult> Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bool p_withMetaData);
 
     bool IsConnected() const;
 
 private:
     std::string CreateSearchQuery(const ByteArray& p_data,
-                                  SizeType p_resultNum,
+                                  int p_resultNum,
                                   bool p_extractMetadata,
                                   SPTAG::VectorValueType p_valueType);
 

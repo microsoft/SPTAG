@@ -9,7 +9,7 @@
   -v, --vectortype <value>      Input vector data type (e.g. Float, Int8, Int16), required.
   -i, --input <value>           Input raw data, required.
   -o, --outputfolder <value>    Output folder, required.
-  -a, --algo <value>            Index Algorithm type, required.
+  -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
 
   -t, --thread <value>          Thread Number, default is 32.
   --delimiter <value>           Vector delimiter, default is |.
@@ -19,7 +19,7 @@
   ### **Index Search**
   ```bash
   Usage:
-  ./Search <index folder> [options]
+  ./IndexSearcher <index folder> [options]
   Options
    Index.QueryFile=XXX           Input Query file
    Index.ResultFile=XXX	       Output result file
@@ -27,6 +27,23 @@
    Index.K=XXX                   How many nearest neighbors return
    Index.MaxCheck=XXX            The maxcheck of the search
   ```
+
+### ** Input File format **
+> Input raw data for index build and input query file for index search (suppose vector dimension is 3):
+```
+<metadata1>\t<v11>|<v12>|<v13>|
+<metadata2>\t<v21>|<v22>|<v23>|
+... 
+```
+where each line represents a vector with its metadata and its value separated by a tab space. Each dimension of a vector is separated by | or use --delimiter to define the separator.
+
+> Truth file to calculate recall (suppose K is 2):
+```
+<t11> <t12>
+<t21> <t22>
+...
+```
+where each line represents the K nearest neighbors of a query separated by a blank space. Each neighbor is given by its vector id.
 
 ### **Server**
 ```bash
@@ -190,7 +207,7 @@ if __name__ == '__main__':
 
  ```
 
- > Python Client Wrapper, Surpose there is a sever run at 127.0.0.1:8000 serving nytimes datasets:
+ > Python Client Wrapper, Suppose there is a sever run at 127.0.0.1:8000 serving ten-dimensional vector datasets:
  ```python
 import SPTAGClient
 import numpy as np

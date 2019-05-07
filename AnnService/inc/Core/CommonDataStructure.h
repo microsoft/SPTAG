@@ -32,7 +32,9 @@ public:
 
     std::uint8_t* Data() const;
 
-    std::size_t Length() const;
+	std::size_t Length() const;
+    
+	void SetData(std::uint8_t* p_array, std::size_t p_length);
 
     std::shared_ptr<std::uint8_t> DataHolder() const;
 

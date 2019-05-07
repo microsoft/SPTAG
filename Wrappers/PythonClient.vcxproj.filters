@@ -9,12 +9,13 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
     </Filter>
-    <Filter Include="Resources">
-      <UniqueIdentifier>{ba4289c4-f872-4dbc-a57f-7b415614afb3}</UniqueIdentifier>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="inc\CoreInterface.h">
+    <ClInclude Include="inc\ClientInterface.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\TransferDataType.h">
@@ -22,16 +23,16 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\CoreInterface.cpp">
+    <ClCompile Include="src\ClientInterface.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)CoreInterfaceSwigGen.cpp">
+    <ClCompile Include="$(IntDir)ClientInterface_pwrap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="inc\PyByteArray.i">
-      <Filter>Resources</Filter>
+    <None Include="inc\PythonClient.i">
+      <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>
 </Project>

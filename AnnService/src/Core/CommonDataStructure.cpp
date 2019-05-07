@@ -104,7 +104,15 @@ ByteArray::Data() const
 std::size_t
 ByteArray::Length() const
 {
-    return m_length;
+	return m_length;
+}
+
+
+void
+ByteArray::SetData(std::uint8_t* p_array, std::size_t p_length)
+{
+    m_data = p_array;
+	m_length = p_length;
 }
 
 
