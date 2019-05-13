@@ -244,6 +244,7 @@ DefaultReader::GetVectorSet() const
 
     std::ifstream inputStream;
     inputStream.open(m_vectorOutput, std::ifstream::binary);
+	inputStream.seekg(sizeof(uint32_t) + sizeof(uint32_t), std::ifstream::beg);
     inputStream.read(vecBuf, m_totalRecordVectorBytes);
     inputStream.close();
 
@@ -399,7 +400,12 @@ DefaultReader::MergeData()
     std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
     char* buf = bufferHolder.get();
 
+	std::uint32_t uint32Var = m_totalRecordCount;
+
     outputStream.open(m_vectorOutput, std::ofstream::binary);
+
+	outputStream.write(reinterpret_cast<char*>(&uint32Var), sizeof(uint32Var));
+	outputStream.write(reinterpret_cast<char*>(&(m_options->m_dimension)), sizeof(m_options->m_dimension));
 
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
     {
@@ -436,7 +442,6 @@ DefaultReader::MergeData()
 
     outputStream.open(m_metadataIndexOutput, std::ofstream::binary);
 
-    std::uint32_t uint32Var = m_totalRecordCount;
     outputStream.write(reinterpret_cast<char*>(&uint32Var), sizeof(uint32Var));
 
     std::uint64_t totalOffset = 0;

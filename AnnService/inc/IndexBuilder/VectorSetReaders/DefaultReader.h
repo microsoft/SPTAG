@@ -53,7 +53,7 @@ private:
                 ++next;
             }
 
-            bool reachEnd = '\0' == (*next);
+            bool reachEnd = ('\0' == (*next));
             *next = '\0';
             if (p_str != next)
             {
