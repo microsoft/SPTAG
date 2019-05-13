@@ -62,17 +62,16 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
         public:
-            Index() :
-                m_sBKTFilename("tree.bin"),
-                m_sGraphFilename("graph.bin"),
-                m_sDataPointsFilename("vectors.bin"),
-                m_iNumberOfThreads(1),
-                m_iDistCalcMethod(DistCalcMethod::Cosine),
-                m_fComputeDistance(COMMON::DistanceCalcSelector<T>(DistCalcMethod::Cosine)),
-                m_iMaxCheck(2048),
-                m_iThresholdOfNumberOfContinuousNoBetterPropagation(3),
-                m_iNumberOfInitialDynamicPivots(50),
-                m_iNumberOfOtherDynamicPivots(4) {}
+			Index()
+			{
+#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+                VarName = DefaultValue; \
+
+#include "inc/Core/BKT/ParameterDefinitionList.h"
+#undef DefineBKTParameter
+
+				m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+			}
 
             ~Index() {}
 

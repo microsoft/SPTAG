@@ -23,8 +23,8 @@ namespace SPTAG
                                  m_iSamples(1000), 
                                  m_numTopDimensionTPTSplit(5),
                                  m_iNeighborhoodSize(32),
-                                 m_iNeighborhoodScale(16),
-                                 m_iCEFScale(4),
+                                 m_iNeighborhoodScale(2),
+                                 m_iCEFScale(2),
                                  m_iRefineIter(0),
                                  m_iCEF(1000),
                                  m_iMaxCheckForRefineGraph(10000) {}
