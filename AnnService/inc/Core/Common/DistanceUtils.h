@@ -473,7 +473,7 @@ namespace SPTAG
 					c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
 				}
 				while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
-				return 16129 - diff;
+				return 65025 - diff;
 			}
 
             static float ComputeCosineDistance(const std::int16_t *pX, const std::int16_t *pY, int length) {
