@@ -4,7 +4,7 @@
 [![Build status](https://sysdnn.visualstudio.com/SPTAG/_apis/build/status/SPTAG-GITHUB)](https://sysdnn.visualstudio.com/SPTAG/_build/latest?definitionId=2)
 
 ## **SPTAG**
- SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenerio, which is written in C++ and wrapped by Python.
+ SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario, which is written in C++ and wrapped by Python.
 
  <p align="center">
  <img src="docs/img/sptag.png" alt="architecture" width="500"/>
@@ -18,7 +18,7 @@ This library assumes that the samples are represented as vectors and that the ve
 Vectors returned for a query vector are the vectors that have smallest L2 distance or cosine distances with the query vector. 
 
 SPTAG provides two methods: kd-tree and relative neighborhood graph (SPTAG-KDT) 
-and balanced k-means tree and relatrive neighborhood graph (SPTAG-BKT).
+and balanced k-means tree and relative neighborhood graph (SPTAG-BKT).
 SPTAG-KDT is advantageous in index building cost, and SPTAG-BKT is advantageous in search accuracy in very high-dimensional data.
 
 
@@ -27,7 +27,7 @@ SPTAG-KDT is advantageous in index building cost, and SPTAG-BKT is advantageous 
 
 SPTAG is inspired by the NGS approach [[WangL12](#References)]. It contains two basic modules: index builder and searcher. 
 The RNG is built on the k-nearest neighborhood graph [[WangWZTG12](#References), [WangWJLZZH14](References)] 
-for boosting the conectivity. Balanced k-means trees are used to replace kd-trees to avoid the inaccurate distance bound estimation in kd-trees for very high-dimensional vectors.
+for boosting the connectivity. Balanced k-means trees are used to replace kd-trees to avoid the inaccurate distance bound estimation in kd-trees for very high-dimensional vectors.
 The search begins with the search in the space partition trees for 
 finding several seeds to start the search in the RNG. 
 The searches in the trees and the graph are iteratively conducted. 
