@@ -18,7 +18,7 @@ This library assumes that the samples are represented as vectors and that the ve
 Vectors returned for a query vector are the vectors that have smallest L2 distance or cosine distances with the query vector. 
 
 SPTAG provides two methods: kd-tree and relative neighborhood graph (SPTAG-KDT) 
-and balanced k-means tree and relatrive neighborhood graph (SPTAG-BKT).
+and balanced k-means tree and relative neighborhood graph (SPTAG-BKT).
 SPTAG-KDT is advantageous in index building cost, and SPTAG-BKT is advantageous in search accuracy in very high-dimensional data.
 
 
