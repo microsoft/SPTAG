@@ -26,7 +26,7 @@ SPTAG-KDT is advantageous in index building cost, and SPTAG-BKT is advantageous 
 ## **How it works**
 
 SPTAG is inspired by the NGS approach [[WangL12](#References)]. It contains two basic modules: index builder and searcher. 
-The RNG is built on the k-nearest neighborhood graph [[WangWZTG12](#References), [WangWJLZZH14](References)] 
+The RNG is built on the k-nearest neighborhood graph [[WangWZTG12](#References), [WangWJLZZH14](#References)] 
 for boosting the connectivity. Balanced k-means trees are used to replace kd-trees to avoid the inaccurate distance bound estimation in kd-trees for very high-dimensional vectors.
 The search begins with the search in the space partition trees for 
 finding several seeds to start the search in the RNG. 
