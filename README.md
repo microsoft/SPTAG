@@ -4,7 +4,7 @@
 [![Build status](https://sysdnn.visualstudio.com/SPTAG/_apis/build/status/SPTAG-GITHUB)](https://sysdnn.visualstudio.com/SPTAG/_build/latest?definitionId=2)
 
 ## **SPTAG**
- SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario, which is written in C++ and wrapped by Python.
+ SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by [Microsoft Research (MSR)](https://www.microsoft.com/en-us/research/group/systems-research-group-asia/) and [Microsoft Search Technology Center (STC)](https://www.microsoft.com/en-us/ard/company/introduction.aspx). 
 
  <p align="center">
  <img src="docs/img/sptag.png" alt="architecture" width="500"/>
