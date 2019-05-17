@@ -156,7 +156,7 @@ namespace SPTAG
 
 				return _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_madd_epi16(xlo, ylo), _mm256_madd_epi16(xhi, yhi)));
 			}
-			static inline __m256 _mm256_sqdf_epi8(__m256i X, __m256i Y)
+			static inline __m256 _mm256_sqdf_epu8(__m256i X, __m256i Y)
 			{
 				__m256i zero = _mm256_setzero_si256();
 
