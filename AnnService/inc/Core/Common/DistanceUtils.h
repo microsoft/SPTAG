@@ -446,7 +446,7 @@ namespace SPTAG
 				__m128 diff128 = _mm_setzero_ps();
 				while (pX < pEnd32) {
 					REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epu8, _mm_add_ps, diff128)
-						REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epu8, _mm_add_ps, diff128)
+					REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epu8, _mm_add_ps, diff128)
 				}
 				while (pX < pEnd16) {
 					REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epu8, _mm_add_ps, diff128)
@@ -476,7 +476,7 @@ namespace SPTAG
 				return 65025 - diff;
 			}
 
-			static float ComputeCosineDistance(const std::int16_t *pX, const std::int16_t *pY, int length) {
+	static float ComputeCosineDistance(const std::int16_t *pX, const std::int16_t *pY, int length) {
                 const std::int16_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
                 const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
