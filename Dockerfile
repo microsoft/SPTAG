@@ -26,3 +26,6 @@ RUN wget "https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar
 
 # build
 RUN mkdir build && cd build && cmake .. && make && cd ..
+
+# so python can find the SPTAG module
+ENV PYTHONPATH=/app/Release
