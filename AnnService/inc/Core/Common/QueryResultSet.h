@@ -17,7 +17,7 @@ inline bool operator < (const BasicResult& lhs, const BasicResult& rhs)
 }
 
 
-inline bool Compare(BasicResult& lhs, BasicResult& rhs)
+inline bool Compare(const BasicResult& lhs, const BasicResult& rhs)
 {
     return ((lhs.Dist < rhs.Dist) || ((lhs.Dist == rhs.Dist) && (lhs.VID < rhs.VID)));
 }
