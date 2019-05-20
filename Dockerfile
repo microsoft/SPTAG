@@ -10,7 +10,7 @@ RUN apt-get update && apt-get -y install wget build-essential libtbb-dev \
     # remove the following if you don't want to build the wrappers
     openjdk-8-jdk python3-pip swig
 
-# latest cmake
+# cmake >= 3.12 is required
 RUN wget "https://github.com/Kitware/CMake/releases/download/v3.14.4/cmake-3.14.4-Linux-x86_64.tar.gz" -q -O - \
         | tar -xz --strip-components=1 -C /usr/local
 
