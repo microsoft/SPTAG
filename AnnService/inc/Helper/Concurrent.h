@@ -20,19 +20,19 @@ namespace Concurrent
 class SpinLock
 {
 public:
-	SpinLock() = default;
+    SpinLock() = default;
 
-	void Lock() noexcept 
-	{
-		while (m_lock.test_and_set(std::memory_order_acquire))
-		{
-		}
-	}
+    void Lock() noexcept 
+    {
+        while (m_lock.test_and_set(std::memory_order_acquire))
+        {
+        }
+    }
 
-	void Unlock() noexcept 
-	{
-		m_lock.clear(std::memory_order_release);
-	}
+    void Unlock() noexcept 
+    {
+        m_lock.clear(std::memory_order_release);
+    }
 
     SpinLock(const SpinLock&) = delete;
     SpinLock& operator = (const SpinLock&) = delete;
