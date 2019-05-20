@@ -156,7 +156,7 @@ namespace SPTAG
 
 				return _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_madd_epi16(xlo, ylo), _mm256_madd_epi16(xhi, yhi)));
 			}
-			static inline __m256 _mm256_sqdf_epi8(__m256i X, __m256i Y)
+			static inline __m256 _mm256_sqdf_epu8(__m256i X, __m256i Y)
 			{
 				__m256i zero = _mm256_setzero_si256();
 
@@ -473,10 +473,10 @@ namespace SPTAG
 					c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
 				}
 				while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
-				return 16129 - diff;
+				return 65025 - diff;
 			}
 
-            static float ComputeCosineDistance(const std::int16_t *pX, const std::int16_t *pY, int length) {
+	static float ComputeCosineDistance(const std::int16_t *pX, const std::int16_t *pY, int length) {
                 const std::int16_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
                 const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
