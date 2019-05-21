@@ -52,15 +52,15 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)aligned_malloc(sizeof(T) * rows * cols, ALIGN);
-                    if (data_ != nullptr) memcpy(data, data_, rows * cols * sizeof(T));
-                    else std::memset(data, -1, rows * cols * sizeof(T));
+                    data = (T*)aligned_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
+                    else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
             void SetR(int R_) 
             {
                 if (R_ >= rows)
-                    dataIncremental.resize((R_ - rows) * cols);
+                    dataIncremental.resize(((size_t)(R_ - rows)) * cols);
                 else 
                 {
                     rows = R_;
@@ -72,27 +72,27 @@ namespace SPTAG
             T* operator[](int index)
             {
                 if (index >= rows) {
-                    return dataIncremental.data() + (size_t)(index - rows)*cols;
+                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
                 }
-                return data + (size_t)index*cols;
+                return data + ((size_t)index) * cols;
             }
             
             const T* operator[](int index) const
             {
                 if (index >= rows) {
-                    return dataIncremental.data() + (size_t)(index - rows)*cols;
+                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
                 }
-                return data + (size_t)index*cols;
+                return data + ((size_t)index) * cols;
             }
 
             void AddBatch(const T* pData, int num)
             {
-                dataIncremental.insert(dataIncremental.end(), pData, pData + num*cols);
+                dataIncremental.insert(dataIncremental.end(), pData, pData + ((size_t)num) * cols);
             }
 
             void AddBatch(int num)
             {
-                dataIncremental.insert(dataIncremental.end(), (size_t)num*cols, T(-1));
+                dataIncremental.insert(dataIncremental.end(), ((size_t)num) * cols, T(-1));
             }
 
             bool Save(std::string sDataPointsFileName)
@@ -176,9 +176,9 @@ namespace SPTAG
                 // write point one by one in case for cache miss
                 for (int i = 0; i < R; i++) {
                     if (indices[i] < rows)
-                        fwrite(data + (size_t)indices[i] * cols, sizeof(T) * cols, 1, fp);
+                        fwrite(data + ((size_t)indices[i]) * cols, sizeof(T) * cols, 1, fp);
                     else
-                        fwrite(dataIncremental.data() + (size_t)(indices[i] - rows) * cols, sizeof(T) * cols, 1, fp);
+                        fwrite(dataIncremental.data() + ((size_t)(indices[i] - rows)) * cols, sizeof(T) * cols, 1, fp);
                 }
                 fclose(fp);
 
