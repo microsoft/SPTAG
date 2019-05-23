@@ -6,35 +6,6 @@
 using namespace SPTAG;
 using namespace SPTAG::Helper::Concurrent;
 
-
-SpinLock::SpinLock()
-    : m_lock()
-{
-    m_lock.clear();
-}
-
-
-SpinLock::~SpinLock()
-{
-}
-
-
-void
-SpinLock::Lock()
-{
-    while (m_lock.test_and_set(std::memory_order_acquire))
-    {
-    }
-}
-
-
-void
-SpinLock::Unlock()
-{
-    m_lock.clear();
-}
-
-
 WaitSignal::WaitSignal()
     : m_isWaiting(false),
       m_unfinished(0)
