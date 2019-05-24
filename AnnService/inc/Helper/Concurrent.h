@@ -4,12 +4,11 @@
 #ifndef _SPTAG_HELPER_CONCURRENT_H_
 #define _SPTAG_HELPER_CONCURRENT_H_
 
-#include <cstdint>
-#include <cstddef> 
+
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
-#include <memory>
+
 
 namespace SPTAG
 {
@@ -21,17 +20,25 @@ namespace Concurrent
 class SpinLock
 {
 public:
-    SpinLock();
-    ~SpinLock();
+    SpinLock() = default;
 
-    void Lock();
-    void Unlock();
+    void Lock() noexcept 
+    {
+        while (m_lock.test_and_set(std::memory_order_acquire))
+        {
+        }
+    }
+
+    void Unlock() noexcept 
+    {
+        m_lock.clear(std::memory_order_release);
+    }
 
     SpinLock(const SpinLock&) = delete;
     SpinLock& operator = (const SpinLock&) = delete;
 
 private:
-    std::atomic_flag m_lock;
+    std::atomic_flag m_lock = ATOMIC_FLAG_INIT;
 };
 
 
