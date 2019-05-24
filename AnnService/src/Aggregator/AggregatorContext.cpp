@@ -73,7 +73,7 @@ AggregatorContext::IsInitialized() const
 
 
 const std::vector<std::shared_ptr<RemoteMachine>>&
-AggregatorContext::GetRemoveServers() const
+AggregatorContext::GetRemoteServers() const
 {
     return m_remoteServers;
 }
