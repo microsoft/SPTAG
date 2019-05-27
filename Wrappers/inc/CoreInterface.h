@@ -46,7 +46,7 @@ private:
     
     std::shared_ptr<SPTAG::VectorIndex> m_index;
 
-    int m_inputVectorSize;
+    size_t m_inputVectorSize;
     
     int m_dimension;
 
