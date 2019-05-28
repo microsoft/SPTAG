@@ -124,7 +124,7 @@ def test_build(algo, distmethod, x, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    ret = i.Build(x.tobytes(), x.shape[0])
+    ret = i.Build(x, x.shape[0])
     i.Save(out)
 
 
@@ -132,23 +132,22 @@ def test_build_with_metadata(algo, distmethod, x, s, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.BuildWithMetaData(x.tobytes(), s, x.shape[0]):
+    if i.BuildWithMetaData(x, s, x.shape[0]):
         i.Save(out)
 
 
 def test_search(index, q, k):
     j = SPTAG.AnnIndex.Load(index)
     for t in range(q.shape[0]):
-        result = j.Search(q[t].tobytes(), k)
+        result = j.Search(q[t], k)
         print(result[0]) # ids
         print(result[1]) # distances
-
 
 def test_search_with_metadata(index, q, k):
     j = SPTAG.AnnIndex.Load(index)
     j.SetSearchParam("MaxCheck", '1024')
     for t in range(q.shape[0]):
-        result = j.SearchWithMetaData(q[t].tobytes(), k)
+        result = j.SearchWithMetaData(q[t], k)
         print(result[0]) # ids
         print(result[1]) # distances
         print(result[2]) # metadata
@@ -161,7 +160,7 @@ def test_add(index, x, out, algo, distmethod):
         i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.Add(x.tobytes(), x.shape[0]):
+    if i.Add(x, x.shape[0]):
         i.Save(out)
 
 
@@ -173,13 +172,13 @@ def test_add_with_metadata(index, x, s, out, algo, distmethod):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.AddWithMetaData(x.tobytes(), s, x.shape[0]):
+    if i.AddWithMetaData(x, s, x.shape[0]):
         i.Save(out)
 
 
 def test_delete(index, x, out):
     i = SPTAG.AnnIndex.Load(index)
-    ret = i.Delete(x.tobytes(), x.shape[0])
+    ret = i.Delete(x, x.shape[0])
     print(ret)
     i.Save(out)
 
@@ -191,6 +190,7 @@ def test(algo, distmethod):
     for i in range(n):
         m += str(i) + '\n'
 
+    m = m.encode()
     print("Build.............................")
     test_build(algo, distmethod, x, 'testindices')
     test_search('testindices', q, k)
@@ -230,10 +230,9 @@ def test_sptag_client():
 
     q = np.ones((10, 10), dtype=np.float32)
     for t in range(q.shape[0]):
-        result = index.Search(q[t].tobytes(), 6, 'Float', False)
+        result = index.Search(q[t], 6, 'Float', False)
         print(result[0])
         print(result[1])
-
 
 if __name__ == '__main__':
     test_sptag_client()
