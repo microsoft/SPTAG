@@ -9,23 +9,23 @@ namespace SPTAG
 const ByteArray ByteArray::c_empty;
 
 ByteArray::ByteArray() noexcept
-    : m_data(nullptr)
-    , m_length(0)
+    : m_data(nullptr),
+      m_length(0)
 {
 }
 
 ByteArray::ByteArray(ByteArray&& p_right) noexcept
-    : m_data(p_right.m_data)
-    , m_length(p_right.m_length)
-    , m_dataHolder(std::move(p_right.m_dataHolder))
+    : m_data(p_right.m_data),
+      m_length(p_right.m_length),
+      m_dataHolder(std::move(p_right.m_dataHolder))
 {
     p_right.m_data = nullptr;
     p_right.m_length = 0;
 }
 
 ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transferOnwership)
-    : m_data(p_array)
-    , m_length(p_length)
+    : m_data(p_array),
+      m_length(p_length)
 {
     if (p_transferOnwership)
     {
@@ -34,9 +34,9 @@ ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transfe
 }
 
 ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, std::shared_ptr<std::uint8_t> p_dataHolder) noexcept
-    : m_data(p_array)
-    , m_length(p_length)
-    , m_dataHolder(std::move(p_dataHolder))
+    : m_data(p_array),
+      m_length(p_length),
+      m_dataHolder(std::move(p_dataHolder))
 {
 }
 
