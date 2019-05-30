@@ -55,8 +55,8 @@ int main(int argc, char* argv[])
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
     }
 
-	std::shared_ptr<VectorSet> p_vectorSet = nullptr;
-	std::shared_ptr<MetadataSet> p_metaSet = nullptr;
+    std::shared_ptr<VectorSet> p_vectorSet = nullptr;
+    std::shared_ptr<MetadataSet> p_metaSet = nullptr;
 
     if (options->m_inputFiles.find("BIN:") == 0) {
         std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles.substr(4), ",");
@@ -88,20 +88,20 @@ int main(int argc, char* argv[])
             exit(1);
         }
 
-		p_vectorSet = vectorReader->GetVectorSet();
-		p_metaSet = vectorReader->GetMetadataSet();
+        p_vectorSet = vectorReader->GetVectorSet();
+        p_metaSet = vectorReader->GetMetadataSet();
     }
 
-	ErrorCode code;
-	std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-	if (options->m_append && ErrorCode::Success == indexBuilder->LoadIndex(options->m_outputFolder, vecIndex) && nullptr != vecIndex) {
-		code = vecIndex->AddIndex(p_vectorSet, p_metaSet);
-		indexBuilder = vecIndex;
-	}
-	else {
-		code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
-	}
-	indexBuilder->SaveIndex(options->m_outputFolder);
+    ErrorCode code;
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    if (options->m_append && ErrorCode::Success == indexBuilder->LoadIndex(options->m_outputFolder, vecIndex) && nullptr != vecIndex) {
+        code = vecIndex->AddIndex(p_vectorSet, p_metaSet);
+        indexBuilder = vecIndex;
+    }
+    else {
+        code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
+    }
+    indexBuilder->SaveIndex(options->m_outputFolder);
 
     if (ErrorCode::Success != code)
     {

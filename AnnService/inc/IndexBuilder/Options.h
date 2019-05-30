@@ -29,7 +29,7 @@ public:
 
     std::string m_vectorDelimiter;
 
-	bool m_append;
+    bool m_append;
 
     SPTAG::VectorValueType m_inputValueType;
 
