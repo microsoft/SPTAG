@@ -74,7 +74,7 @@ int main(int argc, char* argv[])
         inputStream.read(vecBuf, totalRecordVectorBytes);
         inputStream.close();
 
-        p_vectorSet = std::make_shared<BasicVectorSet>(*new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
+        p_vectorSet.reset(new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
         
         if (files.size() >= 3) {
             p_metaSet.reset(new FileMetadataSet(files[1], files[2]));
