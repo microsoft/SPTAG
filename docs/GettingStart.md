@@ -11,6 +11,7 @@
   -o, --outputfolder <value>    Output folder, required.
   -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
 
+  -p, --append <true|false>     Indicate whether the data should be appended to an existing index, if one exists.
   -t, --thread <value>          Thread Number, default is 32.
   --delimiter <value>           Vector delimiter, default is |.
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
