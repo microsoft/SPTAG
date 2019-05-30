@@ -55,7 +55,9 @@ int main(int argc, char* argv[])
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
     }
 
-    ErrorCode code;
+	std::shared_ptr<VectorSet> p_vectorSet = nullptr;
+	std::shared_ptr<MetadataSet> p_metaSet = nullptr;
+
     if (options->m_inputFiles.find("BIN:") == 0) {
         std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles.substr(4), ",");
         std::ifstream inputStream(files[0], std::ifstream::binary);
@@ -71,14 +73,12 @@ int main(int argc, char* argv[])
         char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
         inputStream.read(vecBuf, totalRecordVectorBytes);
         inputStream.close();
-        std::shared_ptr<VectorSet> p_vectorSet(new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
+
+        p_vectorSet = std::make_shared<BasicVectorSet>(*new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
         
-        std::shared_ptr<MetadataSet> p_metaSet = nullptr;
         if (files.size() >= 3) {
             p_metaSet.reset(new FileMetadataSet(files[1], files[2]));
         }
-        code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
-        indexBuilder->SaveIndex(options->m_outputFolder);
     }
     else {
         auto vectorReader = IndexBuilder::VectorSetReader::CreateInstance(options);
@@ -87,9 +87,21 @@ int main(int argc, char* argv[])
             fprintf(stderr, "Failed to read input file.\n");
             exit(1);
         }
-        code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
-        indexBuilder->SaveIndex(options->m_outputFolder);
+
+		p_vectorSet = vectorReader->GetVectorSet();
+		p_metaSet = vectorReader->GetMetadataSet();
     }
+
+	ErrorCode code;
+	std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+	if (options->m_append && ErrorCode::Success == indexBuilder->LoadIndex(options->m_outputFolder, vecIndex) && nullptr != vecIndex) {
+		code = vecIndex->AddIndex(p_vectorSet, p_metaSet);
+		indexBuilder = vecIndex;
+	}
+	else {
+		code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
+	}
+	indexBuilder->SaveIndex(options->m_outputFolder);
 
     if (ErrorCode::Success != code)
     {
