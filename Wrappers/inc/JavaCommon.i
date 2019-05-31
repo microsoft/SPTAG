@@ -15,10 +15,10 @@
 %typemap(javaout) ByteArray { return $jnicall; }
 
 %typemap(jni) std::shared_ptr<QueryResult> "jobjectArray"
-%typemap(jtype) std::shared_ptr<QueryResult> "Result[]"
-%typemap(jstype) std::shared_ptr<QueryResult> "Result[]"
+%typemap(jtype) std::shared_ptr<QueryResult> "BasicResult[]"
+%typemap(jstype) std::shared_ptr<QueryResult> "BasicResult[]"
 %typemap(out) std::shared_ptr<QueryResult> {
-    jclass retClass = jenv->FindClass("Result");
+    jclass retClass = jenv->FindClass("BasicResult");
     int len = $1->GetResultNum();
     $result = jenv->NewObjectArray(len, retClass, NULL);
     for (int i = 0; i < len; i++) {
@@ -31,15 +31,15 @@
 %typemap(javaout) std::shared_ptr<QueryResult> { return $jnicall; }
 
 %typemap(jni) std::shared_ptr<RemoteSearchResult> "jobjectArray"
-%typemap(jtype) std::shared_ptr<RemoteSearchResult> "Result[]"
-%typemap(jstype) std::shared_ptr<RemoteSearchResult> "Result[]"
+%typemap(jtype) std::shared_ptr<RemoteSearchResult> "BasicResult[]"
+%typemap(jstype) std::shared_ptr<RemoteSearchResult> "BasicResult[]"
 %typemap(out) std::shared_ptr<RemoteSearchResult> {
     int combinelen = 0;
     int nodelen = (int)(($1->m_allIndexResults).size());
     for (int i = 0; i < nodelen; i++) {
         combinelen += $1->m_allIndexResults[i].m_results.GetResultNum();
     }
-    jclass retClass = jenv->FindClass("Result");
+    jclass retClass = jenv->FindClass("BasicResult");
     $result = jenv->NewObjectArray(combinelen, retClass, NULL);
     int id = 0;
     for (int i = 0; i < nodelen; i++) {

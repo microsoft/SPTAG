@@ -48,15 +48,15 @@ public:
 
     inline float worstDist() const
     {
-        return m_results[0].Dist;
+        return m_results.get()[0].Dist;
     }
 
     bool AddPoint(const int index, float dist)
     {
-        if (dist < m_results[0].Dist || (dist == m_results[0].Dist && index < m_results[0].VID))
+        if (dist < m_results.get()[0].Dist || (dist == m_results.get()[0].Dist && index < m_results.get()[0].VID))
         {
-            m_results[0].VID = index;
-            m_results[0].Dist = dist;
+            m_results.get()[0].VID = index;
+            m_results.get()[0].Dist = dist;
             Heapify(m_resultNum);
             return true;
         }
@@ -67,7 +67,7 @@ public:
     {
         for (int i = m_resultNum - 1; i >= 0; i--)
         {
-            std::swap(m_results[0], m_results[i]);
+            std::swap(m_results.get()[0], m_results.get()[i]);
             Heapify(i);
         }
     }
@@ -78,16 +78,16 @@ private:
         int parent = 0, next = 1, maxidx = count - 1;
         while (next < maxidx)
         {
-            if (m_results[next] < m_results[next + 1]) next++;
-            if (m_results[parent] < m_results[next])
+            if (m_results.get()[next] < m_results.get()[next + 1]) next++;
+            if (m_results.get()[parent] < m_results.get()[next])
             {
-                std::swap(m_results[next], m_results[parent]);
+                std::swap(m_results.get()[next], m_results.get()[parent]);
                 parent = next;
                 next = (parent << 1) + 1;
             }
             else break;
         }
-        if (next == maxidx && m_results[parent] < m_results[next]) std::swap(m_results[parent], m_results[next]);
+        if (next == maxidx && m_results.get()[parent] < m_results.get()[next]) std::swap(m_results.get()[parent], m_results.get()[next]);
     }
 };
 }
