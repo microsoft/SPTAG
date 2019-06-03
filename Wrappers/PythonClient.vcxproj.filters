@@ -34,7 +34,6 @@
     <None Include="inc\PythonClient.i">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="packages.config" />
     <None Include="inc\PythonCommon.i">
       <Filter>Resource Files</Filter>
     </None>

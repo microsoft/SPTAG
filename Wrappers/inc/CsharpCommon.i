@@ -77,7 +77,7 @@
     BasicResult[] ret = new BasicResult[data._size];
 	System.IntPtr ptr = data._data;
     for (ulong i = 0; i < data._size; i++) {
-		ret[i] = new BasicResult(ptr, $owner);
+		ret[i] = new BasicResult(ptr, true);
 		ptr += (int)data._itemsize;
 	}
 	$excode
@@ -108,7 +108,7 @@
     BasicResult[] ret = new BasicResult[data._size];
 	System.IntPtr ptr = data._data;
     for (ulong i = 0; i < data._size; i++) {
-		ret[i] = new BasicResult(ptr, $owner);
+		ret[i] = new BasicResult(ptr, true);
 		ptr += (int)data._itemsize;
 	}
 	$excode

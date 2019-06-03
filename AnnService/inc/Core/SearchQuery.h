@@ -73,7 +73,7 @@ public:
     {
         m_target = p_target;
 		m_resultNum = p_resultNum;
-        m_withMeta = p_withMeta;
+		m_withMeta = p_withMeta;
 
         m_results.reset(new BasicResult[p_resultNum], std::default_delete<BasicResult[]>());
     }
@@ -140,7 +140,7 @@ public:
     {
         if (p_index < m_resultNum && m_withMeta)
         {
-			m_results.get()[p_index].Meta = std::move(p_metadata);
+            m_results.get()[p_index].Meta = std::move(p_metadata);
         }
     }
 

@@ -30,7 +30,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
     <None Include="inc\JavaCore.i">
       <Filter>Resources</Filter>
     </None>

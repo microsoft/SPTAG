@@ -34,7 +34,6 @@
     <None Include="inc\CsharpClient.i">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="packages.config" />
     <None Include="inc\CsharpCommon.i">
       <Filter>Resource Files</Filter>
     </None>

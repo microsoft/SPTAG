@@ -5,18 +5,18 @@
 
 namespace SPTAG
 {
-	struct BasicResult
-	{
-		int VID;
-		float Dist;
-		ByteArray Meta;
+    struct BasicResult
+    {
+        int VID;
+        float Dist;
+        ByteArray Meta;
 
-		BasicResult() : VID(-1), Dist(MaxDist) {}
+        BasicResult() : VID(-1), Dist(MaxDist) {}
 
-		BasicResult(int p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
+        BasicResult(int p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
 
-		BasicResult(int p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta) {}
-	};
+        BasicResult(int p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta) {}
+    };
 
 } // namespace SPTAG
 

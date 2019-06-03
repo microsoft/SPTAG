@@ -149,7 +149,7 @@
     <ClInclude Include="inc\Core\DefinitionList.h" />
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
-	<ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />

@@ -79,23 +79,23 @@ if (JNI_FOUND)
 
 	file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface.h)
 	file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/CoreInterface.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_jwrap.cpp)
-	add_library (SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
-	set_target_properties(SPTAG PROPERTIES SUFFIX ${JAVA_SUFFIX})
-	target_link_libraries(SPTAG SPTAGLib ${JNI_LIBRARIES} ${TBB_LIBRARIES})
+	add_library (JAVASPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
+	set_target_properties(JAVASPTAG PROPERTIES SUFFIX ${JAVA_SUFFIX})
+	target_link_libraries(JAVASPTAG SPTAGLib ${JNI_LIBRARIES} ${TBB_LIBRARIES})
 
 	file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
 	file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_jwrap.cpp)
-	add_library (SPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
-	set_target_properties(SPTAGClient PROPERTIES SUFFIX ${JAVA_SUFFIX})
-	target_link_libraries(SPTAGClient SPTAGLib ${JNI_LIBRARIES} ${Boost_LIBRARIES} ${TBB_LIBRARIES})
+	add_library (JAVASPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
+	set_target_properties(JAVASPTAGClient PROPERTIES SUFFIX ${JAVA_SUFFIX})
+	target_link_libraries(JAVASPTAGClient SPTAGLib ${JNI_LIBRARIES} ${Boost_LIBRARIES} ${TBB_LIBRARIES})
 	
 	file(GLOB JAVA_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/*.java)
 	foreach(JAVA_FILE ${JAVA_FILES})
 	    message (STATUS "Add copy post-command for file " ${JAVA_FILE})
-	    add_custom_command(TARGET SPTAGClient POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${JAVA_FILE} ${EXECUTABLE_OUTPUT_PATH})
+	    add_custom_command(TARGET JAVASPTAGClient POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${JAVA_FILE} ${EXECUTABLE_OUTPUT_PATH})
 	endforeach(JAVA_FILE)
 	
-	install(TARGETS SPTAG SPTAGClient
+	install(TARGETS JAVASPTAG JAVASPTAGClient
 	RUNTIME DESTINATION bin  
 	ARCHIVE DESTINATION lib
 	LIBRARY DESTINATION lib)
