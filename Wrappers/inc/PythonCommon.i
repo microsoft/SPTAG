@@ -63,9 +63,55 @@
     }
 %}
 
-%typemap(in) ByteArray
+
 %{
-    $1 = SPTAG::ByteArray((std::uint8_t*)PyBytes_AsString($input), PyBytes_Size($input), false);
+struct PyBufferHolder
+{
+    PyBufferHolder() : shouldRelease(false) { }
+
+    ~PyBufferHolder()
+    {
+        if (shouldRelease)
+        {
+            PyBuffer_Release(&buff);
+        }
+    }
+
+    Py_buffer buff;
+
+    bool shouldRelease;
+};
+%}
+
+%typemap(in) ByteArray (PyBufferHolder bufferHolder)
+%{
+    if (PyBytes_Check($input))
+    {
+        $1 = SPTAG::ByteArray((std::uint8_t*)PyBytes_AsString($input), PyBytes_Size($input), false);
+    }
+    else if (PyObject_CheckBuffer($input))
+    {
+        if (PyObject_GetBuffer($input, &bufferHolder.buff, PyBUF_SIMPLE | PyBUF_C_CONTIGUOUS) == -1)
+        {
+            PyErr_SetString(PyExc_ValueError, "Failed get buffer.");
+            return NULL;
+        }
+
+        bufferHolder.shouldRelease = true;
+        $1 = SPTAG::ByteArray((std::uint8_t*)bufferHolder.buff.buf, bufferHolder.buff.len, false);
+    }
+#if (PY_VERSION_HEX >= 0x03030000)
+    else if (PyUnicode_Check($input))
+    {
+        $1 = SPTAG::ByteArray((std::uint8_t*)PyUnicode_DATA($input), PyUnicode_GET_LENGTH($input), false);
+    }
+#endif
+
+    if (nullptr == $1.Data())
+    {
+        PyErr_SetString(PyExc_ValueError, "Expected Bytes, Data Structure with Buffer Protocol, or Unicode String after Python 3.3 .");
+        return NULL;
+    }
 %}
 
 #endif
