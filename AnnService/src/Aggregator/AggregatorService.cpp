@@ -65,7 +65,7 @@ AggregatorService::StartClient()
     m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid)
                                               {
                                                   auto context = this->GetContext();
-                                                  for (const auto& server : context->GetRemoveServers())
+                                                  for (const auto& server : context->GetRemoteServers())
                                                   {
                                                       if (nullptr != server && p_cid == server->m_connectionID)
                                                       {
@@ -77,7 +77,7 @@ AggregatorService::StartClient()
 
     {
         std::lock_guard<std::mutex> guard(m_pendingConnectServersMutex);
-        m_pendingConnectServers = context->GetRemoveServers();
+        m_pendingConnectServers = context->GetRemoteServers();
     }
 
     ConnectToPendingServers();
@@ -140,7 +140,7 @@ AggregatorService::ConnectToPendingServers()
 {
     auto context = GetContext();
     std::vector<std::shared_ptr<RemoteMachine>> pendingList;
-    pendingList.reserve(context->GetRemoveServers().size());
+    pendingList.reserve(context->GetRemoteServers().size());
 
     {
         std::lock_guard<std::mutex> guard(m_pendingConnectServersMutex);
@@ -207,9 +207,9 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 {
     auto context = GetContext();
     std::vector<Socket::ConnectionID> remoteServers;
-    remoteServers.reserve(context->GetRemoveServers().size());
+    remoteServers.reserve(context->GetRemoteServers().size());
 
-    for (const auto& server : context->GetRemoveServers())
+    for (const auto& server : context->GetRemoteServers())
     {
         if (RemoteMachineStatus::Connected != server->m_status)
         {
