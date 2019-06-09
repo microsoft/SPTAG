@@ -12,35 +12,42 @@ namespace SPTAG
 class ByteArray
 {
 public:
-    ByteArray();
-
-    ByteArray(ByteArray&& p_right);
-
-    ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transferOnwership);
-
-    ByteArray(std::uint8_t* p_array, std::size_t p_length, std::shared_ptr<std::uint8_t> p_dataHolder);
-
-    ByteArray(const ByteArray& p_right);
-
-    ByteArray& operator= (const ByteArray& p_right);
-
-    ByteArray& operator= (ByteArray&& p_right);
-
-    ~ByteArray();
+    const static ByteArray c_empty;
 
     static ByteArray Alloc(std::size_t p_length);
 
-    std::uint8_t* Data() const;
+    ByteArray() noexcept;
 
-	std::size_t Length() const;
-    
-	void SetData(std::uint8_t* p_array, std::size_t p_length);
+    ByteArray(ByteArray&& p_right) noexcept;
 
-    std::shared_ptr<std::uint8_t> DataHolder() const;
+    ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transferOnwership);
 
-    void Clear();
+    ByteArray(std::uint8_t* p_array, std::size_t p_length, std::shared_ptr<std::uint8_t> p_dataHolder) noexcept;
 
-    const static ByteArray c_empty;
+    ByteArray(const ByteArray& p_right) noexcept;
+
+    ByteArray& operator=(const ByteArray& p_right) noexcept;
+
+    ByteArray& operator=(ByteArray&& p_right) noexcept;
+
+    std::uint8_t* Data() const noexcept 
+    {
+        return m_data;
+    }
+
+    std::size_t Length() const noexcept
+    {
+        return m_length;
+    }
+
+    std::shared_ptr<std::uint8_t> DataHolder() const noexcept
+    {
+        return m_dataHolder;
+    }
+
+    void SetData(std::uint8_t* p_array, std::size_t p_length) noexcept;
+
+    void Clear() noexcept;
 
 private:
     std::uint8_t* m_data;

@@ -3,24 +3,25 @@
 
 #include "inc/Core/CommonDataStructure.h"
 
-using namespace SPTAG;
+namespace SPTAG
+{ 
 
 const ByteArray ByteArray::c_empty;
 
-ByteArray::ByteArray()
+ByteArray::ByteArray() noexcept
     : m_data(nullptr),
-    m_length(0)
+      m_length(0)
 {
 }
 
-
-ByteArray::ByteArray(ByteArray&& p_right)
+ByteArray::ByteArray(ByteArray&& p_right) noexcept
     : m_data(p_right.m_data),
-    m_length(p_right.m_length),
-    m_dataHolder(std::move(p_right.m_dataHolder))
+      m_length(p_right.m_length),
+      m_dataHolder(std::move(p_right.m_dataHolder))
 {
+    p_right.m_data = nullptr;
+    p_right.m_length = 0;
 }
-
 
 ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transferOnwership)
     : m_data(p_array),
@@ -32,25 +33,22 @@ ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, bool p_transfe
     }
 }
 
-
-ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, std::shared_ptr<std::uint8_t> p_dataHolder)
+ByteArray::ByteArray(std::uint8_t* p_array, std::size_t p_length, std::shared_ptr<std::uint8_t> p_dataHolder) noexcept
     : m_data(p_array),
       m_length(p_length),
       m_dataHolder(std::move(p_dataHolder))
 {
 }
 
-
-ByteArray::ByteArray(const ByteArray& p_right)
+ByteArray::ByteArray(const ByteArray& p_right) noexcept
     : m_data(p_right.m_data),
       m_length(p_right.m_length),
       m_dataHolder(p_right.m_dataHolder)
 {
 }
 
-
 ByteArray&
-ByteArray::operator= (const ByteArray& p_right)
+ByteArray::operator=(const ByteArray& p_right) noexcept
 {
     m_data = p_right.m_data;
     m_length = p_right.m_length;
@@ -59,9 +57,8 @@ ByteArray::operator= (const ByteArray& p_right)
     return *this;
 }
 
-
 ByteArray&
-ByteArray::operator= (ByteArray&& p_right)
+ByteArray::operator=(ByteArray&& p_right) noexcept
 {
     m_data = p_right.m_data;
     m_length = p_right.m_length;
@@ -70,63 +67,32 @@ ByteArray::operator= (ByteArray&& p_right)
     return *this;
 }
 
-
-ByteArray::~ByteArray()
-{
-}
-
-
 ByteArray
 ByteArray::Alloc(std::size_t p_length)
 {
-    ByteArray byteArray;
     if (0 == p_length)
     {
-        return byteArray;
+        return ByteArray();
     }
-
-    byteArray.m_dataHolder.reset(new std::uint8_t[p_length],
-                                 std::default_delete<std::uint8_t[]>());
-
-    byteArray.m_length = p_length;
-    byteArray.m_data = byteArray.m_dataHolder.get();
-    return byteArray;
+    else {
+        auto array = new std::uint8_t[p_length];
+        return ByteArray(array, p_length, true);
+    }
 }
-
-
-std::uint8_t*
-ByteArray::Data() const
-{
-    return m_data;
-}
-
-
-std::size_t
-ByteArray::Length() const
-{
-	return m_length;
-}
-
 
 void
-ByteArray::SetData(std::uint8_t* p_array, std::size_t p_length)
+ByteArray::SetData(std::uint8_t* p_array, std::size_t p_length) noexcept
 {
     m_data = p_array;
-	m_length = p_length;
+    m_length = p_length;
+    m_dataHolder.reset();
 }
-
-
-std::shared_ptr<std::uint8_t>
-ByteArray::DataHolder() const
-{
-    return m_dataHolder;
-}
-
 
 void
-ByteArray::Clear()
+ByteArray::Clear() noexcept
 {
     m_data = nullptr;
     m_dataHolder.reset();
     m_length = 0;
+}
 }
