@@ -50,12 +50,9 @@ ByteArray::ByteArray(const ByteArray& p_right) noexcept
 ByteArray&
 ByteArray::operator=(const ByteArray& p_right) noexcept
 {
-    if (this != std::addressof(p_right))
-    {
-        m_data = p_right.m_data;
-        m_length = p_right.m_length;
-        m_dataHolder = p_right.m_dataHolder;
-    }
+    m_data = p_right.m_data;
+    m_length = p_right.m_length;
+    m_dataHolder = p_right.m_dataHolder;
 
     return *this;
 }
@@ -63,12 +60,9 @@ ByteArray::operator=(const ByteArray& p_right) noexcept
 ByteArray&
 ByteArray::operator=(ByteArray&& p_right) noexcept
 {
-    if (this != std::addressof(p_right))
-    {
-        m_data = p_right.m_data;
-        m_length = p_right.m_length;
-        m_dataHolder = std::move(p_right.m_dataHolder);
-    }
+    m_data = p_right.m_data;
+    m_length = p_right.m_length;
+    m_dataHolder = std::move(p_right.m_dataHolder);
 
     return *this;
 }
