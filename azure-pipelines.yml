@@ -4,34 +4,6 @@ resources:
 
 phases:
 
-- phase: Phase_1
-
-  displayName: Agent job
-
-
-
-  condition: succeeded()
-
-  queue:
-
-    name: SPTAGBuild
-
-  steps:
-
-  - script: |  
-       mkdir build
-       cd build
-       cmake ..
-       make
-       cd ../Release
-       ./test 
-
-    displayName: 'Command Line Script'
-
-
-
-
-
 - phase: Phase_2
 
   displayName: Agent job
