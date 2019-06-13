@@ -4,9 +4,9 @@
 #ifndef _SPTAG_SERVER_SEARCHEXECUTIONCONTEXT_H_
 #define _SPTAG_SERVER_SEARCHEXECUTIONCONTEXT_H_
 
-#include "inc/Core/VectorIndex.h"
-#include "inc/Core/SearchQuery.h"
-#include "inc/Socket/RemoteSearchQuery.h"
+#include "../Core/VectorIndex.h"
+#include "../Core/SearchQuery.h"
+#include "../Socket/RemoteSearchQuery.h"
 #include "ServiceSettings.h"
 #include "QueryParser.h"
 

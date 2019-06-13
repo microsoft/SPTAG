@@ -5,7 +5,7 @@
 #define _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
 
 #include "../VectorSetReader.h"
-#include "inc/Helper/Concurrent.h"
+#include "../../Helper/Concurrent.h"
 
 #include <atomic>
 #include <condition_variable>

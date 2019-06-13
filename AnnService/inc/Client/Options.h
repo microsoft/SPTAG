@@ -4,7 +4,7 @@
 #ifndef _SPTAG_CLIENT_OPTIONS_H_
 #define _SPTAG_CLIENT_OPTIONS_H_
 
-#include "inc/Helper/ArgumentsParser.h"
+#include "../Helper/ArgumentsParser.h"
 
 #include <string>
 #include <vector>

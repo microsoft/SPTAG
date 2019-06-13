@@ -4,7 +4,7 @@
 #ifndef _SPTAG_SOCKET_SIMPLESERIALIZATION_H_
 #define _SPTAG_SOCKET_SIMPLESERIALIZATION_H_
 
-#include "inc/Core/CommonDataStructure.h"
+#include "../Core/CommonDataStructure.h"
 
 #include <type_traits>
 #include <cstdint>

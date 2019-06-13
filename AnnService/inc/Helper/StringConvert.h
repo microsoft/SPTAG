@@ -4,7 +4,7 @@
 #ifndef _SPTAG_HELPER_STRINGCONVERTHELPER_H_
 #define _SPTAG_HELPER_STRINGCONVERTHELPER_H_
 
-#include "inc/Core/Common.h"
+#include "../Core/Common.h"
 #include "CommonHelper.h"
 
 #include <string>
@@ -240,7 +240,7 @@ inline bool ConvertStringTo<IndexAlgoType>(const char* p_str, IndexAlgoType& p_v
         return true; \
     } \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineIndexAlgo
 
     return false;
@@ -262,7 +262,7 @@ inline bool ConvertStringTo<DistCalcMethod>(const char* p_str, DistCalcMethod& p
         return true; \
     } \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineDistCalcMethod
 
     return false;
@@ -284,7 +284,7 @@ inline bool ConvertStringTo<VectorValueType>(const char* p_str, VectorValueType&
         return true; \
     } \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineVectorValueType
 
     return false;
@@ -316,7 +316,7 @@ inline std::string ConvertToString<IndexAlgoType>(const IndexAlgoType& p_value)
     case IndexAlgoType::Name: \
         return #Name; \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineIndexAlgo
 
     default:
@@ -336,7 +336,7 @@ inline std::string ConvertToString<DistCalcMethod>(const DistCalcMethod& p_value
     case DistCalcMethod::Name: \
         return #Name; \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineDistCalcMethod
 
     default:
@@ -356,7 +356,7 @@ inline std::string ConvertToString<VectorValueType>(const VectorValueType& p_val
     case VectorValueType::Name: \
         return #Name; \
 
-#include "inc/Core/DefinitionList.h"
+#include "../Core/DefinitionList.h"
 #undef DefineVectorValueType
 
     default:

@@ -8,7 +8,7 @@
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
-#include "inc/Helper/SimpleIniReader.h"
+#include "../Helper/SimpleIniReader.h"
 
 namespace SPTAG
 {

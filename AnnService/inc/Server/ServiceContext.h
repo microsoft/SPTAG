@@ -4,7 +4,7 @@
 #ifndef _SPTAG_SERVER_SERVICECONTEX_H_
 #define _SPTAG_SERVER_SERVICECONTEX_H_
 
-#include "inc/Core/VectorIndex.h"
+#include "../Core/VectorIndex.h"
 #include "ServiceSettings.h"
 
 #include <memory>
