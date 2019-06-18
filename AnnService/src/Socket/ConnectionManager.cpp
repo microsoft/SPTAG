@@ -42,9 +42,10 @@ ConnectionManager::AddConnection(boost::asio::ip::tcp::socket&& p_socket,
                                                    p_handler,
                                                    std::weak_ptr<ConnectionManager>(shared_from_this()));
 
-    m_spinLock.Lock();
-    m_connections[GetPosition(currID)].m_connection = connection;
-    m_spinLock.Unlock();
+    {
+        Helper::Concurrent::LockGuard<Helper::Concurrent::SpinLock> guard(m_spinLock);
+        m_connections[GetPosition(currID)].m_connection = connection;
+    }
 
     connection->Start();
     if (p_heartbeatIntervalSeconds > 0)
@@ -67,9 +68,10 @@ ConnectionManager::RemoveConnection(ConnectionID p_connectionID)
 
     Connection::Ptr conn;
 
-    m_spinLock.Lock();
-    conn = std::move(m_connections[position].m_connection);
-    m_spinLock.Unlock();
+    {
+        Helper::Concurrent::LockGuard<Helper::Concurrent::SpinLock> guard(m_spinLock);
+        conn = std::move(m_connections[position].m_connection);
+    }
 
     --m_connectionCount;
 
@@ -89,9 +91,10 @@ ConnectionManager::GetConnection(ConnectionID p_connectionID)
     auto position = GetPosition(p_connectionID);
     Connection::Ptr ret;
 
-    m_spinLock.Lock();
-    ret = m_connections[position].m_connection;
-    m_spinLock.Unlock();
+    {
+        Helper::Concurrent::LockGuard<Helper::Concurrent::SpinLock> guard(m_spinLock);
+        ret = m_connections[position].m_connection;
+    }
 
     if (nullptr == ret || ret->GetConnectionID() != p_connectionID)
     {
@@ -112,7 +115,7 @@ ConnectionManager::SetEventOnRemoving(std::function<void(ConnectionID)> p_event)
 void
 ConnectionManager::StopAll()
 {
-    m_spinLock.Lock();
+    Helper::Concurrent::LockGuard<Helper::Concurrent::SpinLock> guard(m_spinLock);
     for (auto& connection : m_connections)
     {
         if (nullptr != connection.m_connection)
@@ -120,8 +123,6 @@ ConnectionManager::StopAll()
             connection.m_connection->Stop();
         }
     }
-
-    m_spinLock.Unlock();
 }
 
 
