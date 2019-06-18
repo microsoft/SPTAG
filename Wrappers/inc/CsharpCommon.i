@@ -25,7 +25,7 @@
 %typemap(imtype) ByteArray "WrapperArray"
 %typemap(cstype) ByteArray "byte[]"
 %typemap(in) ByteArray {
-    $1.SetData((std::uint8_t*)$input._data, $input._size);
+    $1.Set((std::uint8_t*)$input._data, $input._size, false);
 }
 %typemap(out) ByteArray {
     $result._data = $1.Data();

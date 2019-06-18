@@ -198,7 +198,7 @@ MemMetadataSet::GetMetadata(IndexType p_vectorID) const
     {
         return ByteArray(m_metadataHolder.Data() + m_offsets[p_vectorID],
                          static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),
-                         m_metadataHolder.DataHolder());
+                         false);
     }
     else if (p_vectorID < m_offsets.size() - 1) {
         return ByteArray((std::uint8_t*)m_newdata.data() + m_offsets[p_vectorID] - m_offsets[m_count],
