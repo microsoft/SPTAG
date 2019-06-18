@@ -48,7 +48,7 @@ public:
 
     bool IsInitialized() const;
 
-    const std::vector<std::shared_ptr<RemoteMachine>>& GetRemoveServers() const;
+    const std::vector<std::shared_ptr<RemoteMachine>>& GetRemoteServers() const;
 
     const std::shared_ptr<AggregatorSettings>& GetSettings() const;
 

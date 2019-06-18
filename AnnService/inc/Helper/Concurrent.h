@@ -41,6 +41,28 @@ private:
     std::atomic_flag m_lock = ATOMIC_FLAG_INIT;
 };
 
+template<typename Lock>
+class LockGuard {
+public:
+    LockGuard(Lock& lock) noexcept 
+        : m_lock(lock) {
+        lock.Lock();
+    }
+
+    LockGuard(Lock& lock, std::adopt_lock_t) noexcept
+        : m_lock(lock) {}
+
+    ~LockGuard() {
+        m_lock.Unlock();
+    }
+
+    LockGuard(const LockGuard&) = delete;
+    LockGuard& operator=(const LockGuard&) = delete;
+
+private:
+    Lock& m_lock;
+};
+
 
 class WaitSignal
 {
