@@ -52,7 +52,7 @@
     <ClInclude Include="inc\Core\SearchQuery.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
-	<ClInclude Include="inc\Core\SearchResult.h">
+    <ClInclude Include="inc\Core\SearchResult.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\VectorIndex.h">

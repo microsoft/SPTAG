@@ -38,13 +38,13 @@ public:
           m_withMeta(p_withMeta)
     {
         p_results.resize(p_resultNum);
-		m_results.reset(p_results.data(), [](BasicResult* ptr) {});
+        m_results.reset(p_results.data(), [](BasicResult* ptr) {});
     }
 
 
     QueryResult(const QueryResult& p_other)
     {
-		Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
+        Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
         if (m_resultNum > 0)
         {
             std::memcpy(m_results.get(), p_other.m_results.get(), sizeof(BasicResult) * m_resultNum);
@@ -72,8 +72,8 @@ public:
     inline void Init(const void* p_target, int p_resultNum, bool p_withMeta)
     {
         m_target = p_target;
-		m_resultNum = p_resultNum;
-		m_withMeta = p_withMeta;
+        m_resultNum = p_resultNum;
+        m_withMeta = p_withMeta;
 
         m_results.reset(new BasicResult[p_resultNum], std::default_delete<BasicResult[]>());
     }
@@ -151,7 +151,7 @@ public:
         {
             m_results.get()[i].VID = -1;
             m_results.get()[i].Dist = MaxDist;
-			m_results.get()[i].Meta.Clear();
+            m_results.get()[i].Meta.Clear();
         }
     }
 

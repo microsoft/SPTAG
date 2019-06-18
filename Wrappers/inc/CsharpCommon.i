@@ -2,11 +2,11 @@
 
 %{
     struct WrapperArray
-	{
-	    void * _data;
-		size_t _size;
-		size_t _itemsize;
-	};
+    {
+        void * _data;
+        size_t _size;
+        size_t _itemsize;
+    };
 %}
 
 %pragma(csharp) imclasscode=%{ 
@@ -15,7 +15,7 @@
     { 
         public System.IntPtr _data; 
         public ulong _size;
-		public ulong _itemsize;
+        public ulong _itemsize;
         public WrapperArray(System.IntPtr in_data, ulong in_size, ulong in_itemsize = 0) { _data = in_data; _size = in_size; _itemsize = in_itemsize; } 
     } 
 %} 
@@ -29,38 +29,38 @@
 }
 %typemap(out) ByteArray {
     $result._data = $1.Data();
-	$result._size = $1.Length();
+    $result._size = $1.Length();
 }
 %typemap(csin,
          pre="unsafe { fixed(byte* ptr$csinput = $csinput) { $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.Length );",
-		 terminator="} }"
-		 ) ByteArray %{ temp$csinput %}
+         terminator="} }"
+         ) ByteArray %{ temp$csinput %}
 
 %typemap(csvarin) ByteArray %{ 
     set {
-	     unsafe { fixed(byte* ptr$csinput = $csinput) 
-		     {
-			     $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.Length );
-				 $imcall;
-		     }
-		 }
-	}
+         unsafe { fixed(byte* ptr$csinput = $csinput) 
+             {
+                 $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.Length );
+                 $imcall;
+             }
+         }
+    }
 %}
 
 %typemap(csout, excode=SWIGEXCODE) ByteArray %{
     $modulePINVOKE.WrapperArray data = $imcall;$excode
     byte[] ret = new byte[data._size];
-	System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
+    System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
     return ret; 
 %}
 
 %typemap(csvarout) ByteArray %{
     get {
-	    $modulePINVOKE.WrapperArray data = $imcall;
+        $modulePINVOKE.WrapperArray data = $imcall;
         byte[] ret = new byte[data._size];
-	    System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
+        System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
         return ret; 
-	}
+    }
 %}
 
 %typemap(ctype) std::shared_ptr<QueryResult> "WrapperArray"
@@ -68,26 +68,26 @@
 %typemap(cstype) std::shared_ptr<QueryResult> "BasicResult[]"
 %typemap(out) std::shared_ptr<QueryResult> {
     $result._data = new BasicResult[$1->GetResultNum()];
-	$result._size = $1->GetResultNum();
-	$result._itemsize = sizeof(BasicResult);
-	for (int i = 0; i < $1->GetResultNum(); i++) {
-	    BasicResult* cur = ((BasicResult*)$result._data) + i;
-	    BasicResult* res = $1->GetResult(i);
-	    cur->VID = res->VID;
-		cur->Dist = res->Dist;
-		cur->Meta = res->Meta;
-	}
+    $result._size = $1->GetResultNum();
+    $result._itemsize = sizeof(BasicResult);
+    for (int i = 0; i < $1->GetResultNum(); i++) {
+        BasicResult* cur = ((BasicResult*)$result._data) + i;
+        BasicResult* res = $1->GetResult(i);
+        cur->VID = res->VID;
+        cur->Dist = res->Dist;
+        cur->Meta = res->Meta;
+    }
 }
 %typemap(csout, excode=SWIGEXCODE) std::shared_ptr<QueryResult> {
     $modulePINVOKE.WrapperArray data = $imcall;
     BasicResult[] ret = new BasicResult[data._size];
-	System.IntPtr ptr = data._data;
+    System.IntPtr ptr = data._data;
     for (ulong i = 0; i < data._size; i++) {
-		ret[i] = new BasicResult(ptr, true);
-		ptr += (int)data._itemsize;
-	}
-	$excode
-	return ret;
+        ret[i] = new BasicResult(ptr, true);
+        ptr += (int)data._itemsize;
+    }
+    $excode
+    return ret;
 }
 
 %typemap(ctype) std::shared_ptr<RemoteSearchResult> "WrapperArray"
@@ -100,30 +100,30 @@
         combinelen += $1->m_allIndexResults[i].m_results.GetResultNum();
     }
     $result._data = new BasicResult[combinelen];
-	$result._size = combinelen;
-	$result._itemsize = sizeof(BasicResult);
-	size_t copyed = 0;
-	for (int i = 0; i < nodelen; i++) {
-	    auto& queryResult = $1->m_allIndexResults[i].m_results;
-		for (int j = 0; j < queryResult.GetResultNum(); j++) {
-		    BasicResult* cur = ((BasicResult*)$result._data) + copyed;
-			BasicResult* res = queryResult.GetResult(j);
-		    cur->VID = res->VID;
-		    cur->Dist = res->Dist;
-		    cur->Meta = res->Meta;
-			copyed ++;
-		}
-	}
+    $result._size = combinelen;
+    $result._itemsize = sizeof(BasicResult);
+    size_t copyed = 0;
+    for (int i = 0; i < nodelen; i++) {
+        auto& queryResult = $1->m_allIndexResults[i].m_results;
+        for (int j = 0; j < queryResult.GetResultNum(); j++) {
+            BasicResult* cur = ((BasicResult*)$result._data) + copyed;
+            BasicResult* res = queryResult.GetResult(j);
+            cur->VID = res->VID;
+            cur->Dist = res->Dist;
+            cur->Meta = res->Meta;
+            copyed ++;
+        }
+    }
 }
 %typemap(csout, excode=SWIGEXCODE) std::shared_ptr<RemoteSearchResult> {
     $modulePINVOKE.WrapperArray data = $imcall;
     BasicResult[] ret = new BasicResult[data._size];
-	System.IntPtr ptr = data._data;
+    System.IntPtr ptr = data._data;
     for (ulong i = 0; i < data._size; i++) {
-		ret[i] = new BasicResult(ptr, true);
-		ptr += (int)data._itemsize;
-	}
-	$excode
-	return ret;
+        ret[i] = new BasicResult(ptr, true);
+        ptr += (int)data._itemsize;
+    }
+    $excode
+    return ret;
 }
 #endif
