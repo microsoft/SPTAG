@@ -1,4 +1,4 @@
-%module JAVASPTAG
+%module CSHARPSPTAG
 
 %{
 #include "inc/CoreInterface.h"
@@ -7,7 +7,7 @@
 %include <std_shared_ptr.i>
 %shared_ptr(AnnIndex)
 %shared_ptr(QueryResult)
-%include "JavaCommon.i"
+%include "CsharpCommon.i"
 
 %{
 #define SWIG_FILE_WITH_INIT

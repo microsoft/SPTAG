@@ -52,6 +52,9 @@
     <ClInclude Include="inc\Core\SearchQuery.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\SearchResult.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
     <ClInclude Include="inc\Core\VectorIndex.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
@@ -132,9 +135,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\CommonDataStructure.cpp">
-      <Filter>Source Files\Core</Filter>
-    </ClCompile>
     <ClCompile Include="src\Core\VectorIndex.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>

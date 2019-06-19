@@ -26,15 +26,15 @@
     <ClCompile Include="src\ClientInterface.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(IntDir)ClientInterface_jwrap.cpp">
+    <ClCompile Include="$(IntDir)ClientInterface_cwrap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="inc\JavaClient.i">
+    <None Include="inc\CsharpClient.i">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="inc\JavaCommon.i">
+    <None Include="inc\CsharpCommon.i">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

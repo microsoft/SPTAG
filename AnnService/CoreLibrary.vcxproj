@@ -149,6 +149,7 @@
     <ClInclude Include="inc\Core\DefinitionList.h" />
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
+    <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
@@ -167,7 +168,6 @@
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
-    <ClCompile Include="src\Core\CommonDataStructure.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
