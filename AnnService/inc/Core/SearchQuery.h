@@ -14,7 +14,7 @@ namespace SPTAG
 // Space to save temporary answer, similar with TopKCache
 class QueryResult
 {
-public:	
+public:
     typedef BasicResult* iterator;
     typedef const BasicResult* const_iterator;
 
@@ -47,7 +47,7 @@ public:
         Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
         if (m_resultNum > 0)
         {
-            std::memcpy(m_results.Data(), p_other.m_results.Data(), sizeof(BasicResult) * m_resultNum);
+            std::copy(p_other.m_results.Data(), p_other.m_results.Data() + m_resultNum, m_results.Data());
         }
     }
 
@@ -57,7 +57,7 @@ public:
         Init(p_other.m_target, p_other.m_resultNum, p_other.m_withMeta);
         if (m_resultNum > 0)
         {
-            std::memcpy(m_results.Data(), p_other.m_results.Data(), sizeof(BasicResult) * m_resultNum);
+            std::copy(p_other.m_results.Data(), p_other.m_results.Data() + m_resultNum, m_results.Data());
         }
 
         return *this;

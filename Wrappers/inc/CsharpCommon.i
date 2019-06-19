@@ -70,13 +70,7 @@
     $result._data = new BasicResult[$1->GetResultNum()];
     $result._size = $1->GetResultNum();
     $result._itemsize = sizeof(BasicResult);
-    for (int i = 0; i < $1->GetResultNum(); i++) {
-        BasicResult* cur = ((BasicResult*)$result._data) + i;
-        BasicResult* res = $1->GetResult(i);
-        cur->VID = res->VID;
-        cur->Dist = res->Dist;
-        cur->Meta = res->Meta;
-    }
+    std::copy($1->GetResults(), $1->GetResults() + $1->GetResultNum(), (BasicResult*)$result._data);
 }
 %typemap(csout, excode=SWIGEXCODE) std::shared_ptr<QueryResult> {
     $modulePINVOKE.WrapperArray data = $imcall;
@@ -105,14 +99,8 @@
     size_t copyed = 0;
     for (int i = 0; i < nodelen; i++) {
         auto& queryResult = $1->m_allIndexResults[i].m_results;
-        for (int j = 0; j < queryResult.GetResultNum(); j++) {
-            BasicResult* cur = ((BasicResult*)$result._data) + copyed;
-            BasicResult* res = queryResult.GetResult(j);
-            cur->VID = res->VID;
-            cur->Dist = res->Dist;
-            cur->Meta = res->Meta;
-            copyed ++;
-        }
+        std::copy(queryResult.GetResults(), queryResult.GetResults() + queryResult.GetResultNum(), ((BasicResult*)$result._data) + copyed);
+        copyed += queryResult.GetResultNum();
     }
 }
 %typemap(csout, excode=SWIGEXCODE) std::shared_ptr<RemoteSearchResult> {
