@@ -75,6 +75,7 @@ Run the test (or Test.exe) in the Release folder to verify all the tests have pa
 ### **Usage**
 
 The detailed usage can be found in [Get started](docs/GettingStart.md).
+The detailed parameters tunning can be found in [Parameters](docs/Parameters.md).
 
 ## **References**
 Please cite SPTAG in your publications if it helps your research:
