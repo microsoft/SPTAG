@@ -19,9 +19,9 @@ if(NOT WIN32)
 endif()
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    # require at least gcc 4.7
-    if (CXX_COMPILER_VERSION VERSION_LESS 4.7)
-        message(FATAL_ERROR "GCC version must be at least 4.7!")
+    # require at least gcc 5.0
+    if (CXX_COMPILER_VERSION VERSION_LESS 5.0)
+        message(FATAL_ERROR "GCC version must be at least 5.0!")
     endif()
     set (CMAKE_CXX_FLAGS_RELEASE "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -DNDEBUG -std=c++14 -fopenmp -march=native")
     set (CMAKE_CXX_FLAGS_DEBUG   "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -ggdb -lm -lrt -DNDEBUG -std=c++14 -fopenmp -march=native")

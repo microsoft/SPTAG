@@ -34,14 +34,14 @@ namespace SPTAG
             size_t size() const;
 
         private:
-            std::unique_ptr<std::shared_mutex> m_lock;
+            std::unique_ptr<std::shared_timed_mutex> m_lock;
             std::unordered_set<T> m_data;
         };
 
         template<typename T>
         ConcurrentSet<T>::ConcurrentSet()
         {
-            m_lock.reset(new std::shared_mutex);
+            m_lock.reset(new std::shared_timed_mutex);
         }
 
         template<typename T>
