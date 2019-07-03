@@ -20,7 +20,7 @@
 
 #include <functional>
 #include <mutex>
-#include <tbb/concurrent_unordered_set.h>
+#include <unordered_set>
 
 namespace SPTAG
 {
@@ -49,8 +49,9 @@ namespace SPTAG
             std::string m_sGraphFilename;
             std::string m_sDataPointsFilename;
 
-            std::mutex m_dataLock; // protect data and graph
-            tbb::concurrent_unordered_set<int> m_deletedID;
+            std::mutex m_dataAddLock; // protect data and graph
+			std::mutex m_dataDelLock;
+            std::unordered_set<int> m_deletedID;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
             
             int m_iNumberOfThreads;

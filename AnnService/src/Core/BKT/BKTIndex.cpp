@@ -166,7 +166,8 @@ namespace SPTAG
                 mkdir(folderPath.c_str());
             }
 
-            std::lock_guard<std::mutex> lock(m_dataLock);
+            std::lock_guard<std::mutex> lock1(m_dataAddLock);
+			std::lock_guard<std::mutex> lock2(m_dataDelLock);
             int newR = GetNumSamples();
 
             std::vector<int> indices;
@@ -213,7 +214,7 @@ namespace SPTAG
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        std::lock_guard<std::mutex> lock(m_dataLock);
+                        std::lock_guard<std::mutex> lock(m_dataDelLock);
                         m_deletedID.insert(query.GetResult(i)->VID);
                     }
                 }
@@ -226,7 +227,7 @@ namespace SPTAG
         {
             int begin, end;
             {
-                std::lock_guard<std::mutex> lock(m_dataLock);
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
 
                 if (GetNumSamples() == 0)
                     return BuildIndex(p_vectors, p_vectorNum, p_dimension);
