@@ -4,7 +4,7 @@
 #ifndef _SPTAG_AGGREGATOR_AGGREGATORCONTEXT_H_
 #define _SPTAG_AGGREGATOR_AGGREGATORCONTEXT_H_
 
-#include "inc/Socket/Common.h"
+#include "../Socket/Common.h"
 #include "AggregatorSettings.h"
 
 #include <memory>

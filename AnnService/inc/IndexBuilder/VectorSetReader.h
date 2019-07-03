@@ -4,9 +4,9 @@
 #ifndef _SPTAG_INDEXBUILDER_VECTORSETREADER_H_
 #define _SPTAG_INDEXBUILDER_VECTORSETREADER_H_
 
-#include "inc/Core/Common.h"
-#include "inc/Core/VectorSet.h"
-#include "inc/Core/MetadataSet.h"
+#include "../Core/Common.h"
+#include "../Core/VectorSet.h"
+#include "../Core/MetadataSet.h"
 #include "Options.h"
 
 #include <memory>

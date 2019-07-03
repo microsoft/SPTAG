@@ -15,8 +15,8 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/KDTree.h"
-#include "inc/Helper/StringConvert.h"
-#include "inc/Helper/SimpleIniReader.h"
+#include "../../Helper/StringConvert.h"
+#include "../../Helper/SimpleIniReader.h"
 
 #include <functional>
 #include <mutex>
@@ -67,7 +67,7 @@ namespace SPTAG
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \
 
-#include "inc/Core/KDT/ParameterDefinitionList.h"
+#include "ParameterDefinitionList.h"
 #undef DefineKDTParameter
 				
 				m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);

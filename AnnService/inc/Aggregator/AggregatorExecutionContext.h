@@ -4,8 +4,8 @@
 #ifndef _SPTAG_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
 #define _SPTAG_AGGREGATOR_AGGREGATOREXECUTIONCONTEXT_H_
 
-#include "inc/Socket/RemoteSearchQuery.h"
-#include "inc/Socket/Packet.h"
+#include "../Socket/RemoteSearchQuery.h"
+#include "../Socket/Packet.h"
 
 #include <memory>
 #include <atomic>

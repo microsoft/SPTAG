@@ -6,9 +6,9 @@
 
 #include "AggregatorContext.h"
 #include "AggregatorExecutionContext.h"
-#include "inc/Socket/Server.h"
-#include "inc/Socket/Client.h"
-#include "inc/Socket/ResourceManager.h"
+#include "../Socket/Server.h"
+#include "../Socket/Client.h"
+#include "../Socket/ResourceManager.h"
 
 #include <boost/asio.hpp>
 

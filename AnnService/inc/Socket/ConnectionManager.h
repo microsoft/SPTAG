@@ -5,7 +5,7 @@
 #define _SPTAG_SOCKET_CONNECTIONMANAGER_H_
 
 #include "Connection.h"
-#include "inc/Helper/Concurrent.h"
+#include "../Helper/Concurrent.h"
 
 #include <cstdint>
 #include <memory>

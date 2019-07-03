@@ -15,8 +15,8 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/BKTree.h"
-#include "inc/Helper/SimpleIniReader.h"
-#include "inc/Helper/StringConvert.h"
+#include "../../Helper/SimpleIniReader.h"
+#include "../../Helper/StringConvert.h"
 
 #include <functional>
 #include <mutex>
@@ -67,7 +67,7 @@ namespace SPTAG
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \
 
-#include "inc/Core/BKT/ParameterDefinitionList.h"
+#include "ParameterDefinitionList.h"
 #undef DefineBKTParameter
 
 				m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);

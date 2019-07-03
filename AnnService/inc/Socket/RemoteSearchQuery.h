@@ -4,8 +4,8 @@
 #ifndef _SPTAG_SOCKET_REMOTESEARCHQUERY_H_
 #define _SPTAG_SOCKET_REMOTESEARCHQUERY_H_
 
-#include "inc/Core/CommonDataStructure.h"
-#include "inc/Core/SearchQuery.h"
+#include "../Core/CommonDataStructure.h"
+#include "../Core/SearchQuery.h"
 
 #include <cstdint>
 #include <memory>

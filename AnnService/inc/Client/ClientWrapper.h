@@ -4,9 +4,9 @@
 #ifndef _SPTAG_CLIENT_CLIENTWRAPPER_H_
 #define _SPTAG_CLIENT_CLIENTWRAPPER_H_
 
-#include "inc/Socket/Client.h"
-#include "inc/Socket/RemoteSearchQuery.h"
-#include "inc/Socket/ResourceManager.h"
+#include "../Socket/Client.h"
+#include "../Socket/RemoteSearchQuery.h"
+#include "../Socket/ResourceManager.h"
 #include "Options.h"
 
 #include <string>

@@ -4,7 +4,7 @@
 #ifndef _SPTAG_SOCKET_CLIENT_H_
 #define _SPTAG_SOCKET_CLIENT_H_
 
-#include "inc/Core/Common.h"
+#include "../Core/Common.h"
 #include "Connection.h"
 #include "ConnectionManager.h"
 #include "Packet.h"

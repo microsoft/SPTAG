@@ -4,8 +4,8 @@
 #ifndef _SPTAG_INDEXBUILDER_OPTIONS_H_
 #define _SPTAG_INDEXBUILDER_OPTIONS_H_
 
-#include "inc/Core/Common.h"
-#include "inc/Helper/ArgumentsParser.h"
+#include "../Core/Common.h"
+#include "../Helper/ArgumentsParser.h"
 
 #include <string>
 #include <vector>
