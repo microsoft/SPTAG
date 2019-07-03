@@ -14,7 +14,7 @@ DefineBKTParameter(m_pTrees.m_iBKTLeafSize, int, 8L, "BKTLeafSize")
 DefineBKTParameter(m_pTrees.m_iSamples, int, 1000L, "Samples")
 
 
-DefineBKTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TpTreeNumber")
+DefineBKTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineBKTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineBKTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTpTreeSplit")
 

@@ -10,7 +10,7 @@ DefineKDTParameter(m_sDataPointsFilename, std::string, std::string("vectors.bin"
 
 DefineKDTParameter(m_pTrees.m_iTreeNumber, int, 1L, "KDTNumber")
 DefineKDTParameter(m_pTrees.m_numTopDimensionKDTSplit, int, 5L, "NumTopDimensionKDTSplit")
-DefineKDTParameter(m_pTrees.m_iSamples, int, 100L, "NumSamplesKDTSplitConsideration")
+DefineKDTParameter(m_pTrees.m_iSamples, int, 100L, "Samples")
 
 DefineKDTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineKDTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
