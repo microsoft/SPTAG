@@ -131,6 +131,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="inc\Core\Common\ConcurrentSet.h" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />

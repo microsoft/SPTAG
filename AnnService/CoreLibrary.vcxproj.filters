@@ -133,6 +133,9 @@
     <ClInclude Include="inc\Core\Common\BKTree.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\ConcurrentSet.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">

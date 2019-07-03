@@ -15,12 +15,12 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/KDTree.h"
+#include "../Common/ConcurrentSet.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
 
 #include <functional>
 #include <mutex>
-#include <unordered_set>
 
 namespace SPTAG
 {
@@ -50,8 +50,7 @@ namespace SPTAG
             std::string m_sDataPointsFilename;
 
             std::mutex m_dataAddLock; // protect data and graph
-			std::mutex m_dataDelLock;
-            std::unordered_set<int> m_deletedID;
+            COMMON::ConcurrentSet<int> m_deletedID;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
             
             int m_iNumberOfThreads;
@@ -103,7 +102,7 @@ namespace SPTAG
 
         private:
             ErrorCode RefineIndex(const std::string& p_folderPath);
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const;
+            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const;
             void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };
     } // namespace KDT

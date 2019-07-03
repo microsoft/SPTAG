@@ -81,9 +81,9 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const
         {
-            Search(if (p_deleted.find(gnode.node) == p_deleted.end()))
+            Search(if (!p_deleted.find(gnode.node)))
         }
 
         template <typename T>
@@ -157,19 +157,20 @@ namespace SPTAG
                 mkdir(folderPath.c_str());
             }
 
-            std::lock_guard<std::mutex> lock1(m_dataAddLock);
-			std::lock_guard<std::mutex> lock2(m_dataDelLock);
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            m_deletedID.lock_shared();
+
             int newR = GetNumSamples();
 
             std::vector<int> indices;
             std::vector<int> reverseIndices(newR);
             for (int i = 0; i < newR; i++) {
-                if (m_deletedID.find(i) == m_deletedID.end()) {
+                if (!m_deletedID.find(i)) {
                     indices.push_back(i);
                     reverseIndices[i] = i;
                 }
                 else {
-                    while (m_deletedID.find(newR - 1) != m_deletedID.end() && newR > i) newR--;
+                    while (m_deletedID.find(newR - 1) && newR > i) newR--;
                     if (newR == i) break;
                     indices.push_back(newR - 1);
                     reverseIndices[newR - 1] = i;
@@ -194,6 +195,8 @@ namespace SPTAG
                     newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
             }
             newTrees.SaveTrees(folderPath + m_sKDTFilename);
+
+            m_deletedID.unlock_shared();
             return ErrorCode::Success;
         }
 
@@ -207,7 +210,6 @@ namespace SPTAG
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        std::lock_guard<std::mutex> lock(m_dataDelLock);
                         m_deletedID.insert(query.GetResult(i)->VID);
                     }
                 }
