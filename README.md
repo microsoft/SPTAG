@@ -65,7 +65,7 @@ Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will genera
 ```bash
 docker build -t sptag .
 ```
-Will build a docker container with binaries in `/app/Release/`
+Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
