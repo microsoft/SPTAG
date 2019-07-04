@@ -15,7 +15,7 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/KDTree.h"
-#include "../Common/ConcurrentSet.h"
+#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
 

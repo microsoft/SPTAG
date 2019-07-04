@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_COMMON_CONCURRENTSET_H_
-#define _SPTAG_COMMON_CONCURRENTSET_H_
+#ifndef _SPTAG_HELPER_CONCURRENTSET_H_
+#define _SPTAG_HELPER_CONCURRENTSET_H_
 
 #include <shared_mutex>
 #include <unordered_set>
@@ -19,7 +19,7 @@ namespace SPTAG
 
             ~ConcurrentSet();
 
-            bool find(const T& key) const;
+            bool contains(const T& key) const;
 
             void insert(const T& key);
 
@@ -50,7 +50,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        bool ConcurrentSet<T>::find(const T& key) const
+        bool ConcurrentSet<T>::contains(const T& key) const
         {
             m_lock->lock_shared();
             bool res = (m_data.find(key) != m_data.end());
@@ -100,4 +100,4 @@ namespace SPTAG
         }
     }
 }
-#endif
+#endif // _SPTAG_HELPER_CONCURRENTSET_H_

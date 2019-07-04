@@ -83,7 +83,7 @@ namespace SPTAG
         template <typename T>
         void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const
         {
-            Search(if (!p_deleted.find(gnode.node)))
+            Search(if (!p_deleted.contains(gnode.node)))
         }
 
         template <typename T>
@@ -165,12 +165,12 @@ namespace SPTAG
             std::vector<int> indices;
             std::vector<int> reverseIndices(newR);
             for (int i = 0; i < newR; i++) {
-                if (!m_deletedID.find(i)) {
+                if (!m_deletedID.contains(i)) {
                     indices.push_back(i);
                     reverseIndices[i] = i;
                 }
                 else {
-                    while (m_deletedID.find(newR - 1) && newR > i) newR--;
+                    while (m_deletedID.contains(newR - 1) && newR > i) newR--;
                     if (newR == i) break;
                     indices.push_back(newR - 1);
                     reverseIndices[newR - 1] = i;
