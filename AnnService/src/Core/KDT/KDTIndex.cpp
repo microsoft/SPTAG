@@ -158,7 +158,7 @@ namespace SPTAG
             }
 
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            m_deletedID.lock_shared();
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
 
             int newR = GetNumSamples();
 
@@ -196,7 +196,6 @@ namespace SPTAG
             }
             newTrees.SaveTrees(folderPath + m_sKDTFilename);
 
-            m_deletedID.unlock_shared();
             return ErrorCode::Success;
         }
 

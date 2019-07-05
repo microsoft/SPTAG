@@ -167,7 +167,7 @@ namespace SPTAG
             }
 
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            m_deletedID.lock_shared();
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
 
             int newR = GetNumSamples();
 
@@ -203,7 +203,6 @@ namespace SPTAG
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, folderPath + m_sGraphFilename, 
                 &(newTrees.GetSampleMap()));
 
-            m_deletedID.unlock_shared();
             return ErrorCode::Success;
         }
 

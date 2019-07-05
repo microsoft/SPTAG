@@ -19,19 +19,13 @@ namespace SPTAG
 
             ~ConcurrentSet();
 
+            size_t size() const;
+      
             bool contains(const T& key) const;
 
             void insert(const T& key);
 
-            void lock();
-
-            void unlock();
-
-            void lock_shared();
-
-            void unlock_shared();
-
-            size_t size() const;
+            std::shared_timed_mutex& getLock();
 
         private:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
@@ -50,53 +44,30 @@ namespace SPTAG
         }
 
         template<typename T>
+        size_t ConcurrentSet<T>::size() const
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+            return m_data.size();
+        }
+
+        template<typename T>
         bool ConcurrentSet<T>::contains(const T& key) const
         {
-            m_lock->lock_shared();
-            bool res = (m_data.find(key) != m_data.end());
-            m_lock->unlock_shared();
-            return res;
+            std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+            return (m_data.find(key) != m_data.end());
         }
 
         template<typename T>
         void ConcurrentSet<T>::insert(const T& key)
         {
-            m_lock->lock();
+            std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
             m_data.insert(key);
-            m_lock->unlock();
         }
 
         template<typename T>
-        void ConcurrentSet<T>::lock()
+        std::shared_timed_mutex& ConcurrentSet<T>::getLock()
         {
-            m_lock->lock();
-        }
-
-        template<typename T>
-        void ConcurrentSet<T>::unlock()
-        {
-            m_lock->unlock();
-        }
-
-        template<typename T>
-        void ConcurrentSet<T>::lock_shared()
-        {
-            m_lock->lock_shared();
-        }
-
-        template<typename T>
-        void ConcurrentSet<T>::unlock_shared()
-        {
-            m_lock->unlock_shared();
-        }
-
-        template<typename T>
-        size_t ConcurrentSet<T>::size() const
-        {
-            m_lock->lock_shared();
-            size_t res = m_data.size();
-            m_lock->unlock_shared();
-            return res;
+            return *m_lock;
         }
     }
 }

@@ -32,8 +32,9 @@ namespace SPTAG
             int cols;
             bool ownData = false;
             T* data = nullptr;
-            std::vector<T> dataIncremental;
-
+            int incRows;
+            std::vector<T*> incBlocks;
+            static const int rowsInBlock = 1000;
         public:
             Dataset(): rows(0), cols(1) {}
             Dataset(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
@@ -43,6 +44,8 @@ namespace SPTAG
             ~Dataset()
             {
                 if (ownData) aligned_free(data);
+                for (int i = 0; i < incBlocks.size(); i++) aligned_free(incBlocks[i]);
+                incBlocks.clear();
             }
             void Initialize(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
@@ -60,39 +63,65 @@ namespace SPTAG
             void SetR(int R_) 
             {
                 if (R_ >= rows)
-                    dataIncremental.resize(((size_t)(R_ - rows)) * cols);
+                    incRows = R_ - rows;
                 else 
                 {
                     rows = R_;
-                    dataIncremental.clear();
+                    incRows = 0;
                 }
             }
-            inline int R() const { return (int)(rows + dataIncremental.size() / cols); }
+            inline int R() const { return (int)(rows + incRows); }
             inline int C() const { return cols; }
-            T* operator[](int index)
+            
+            inline const T* At(int index) const
             {
                 if (index >= rows) {
-                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
+                    int incIndex = index - rows;
+                    return incBlocks[incIndex / rowsInBlock] + ((size_t)(incIndex % rowsInBlock)) * cols;
                 }
                 return data + ((size_t)index) * cols;
+            }
+
+            T* operator[](int index)
+            {
+                return (T*)At(index);
             }
             
             const T* operator[](int index) const
             {
-                if (index >= rows) {
-                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
-                }
-                return data + ((size_t)index) * cols;
+                return At(index);
             }
 
             void AddBatch(const T* pData, int num)
             {
-                dataIncremental.insert(dataIncremental.end(), pData, pData + ((size_t)num) * cols);
+                int written = 0;
+                while (written < num) {
+                    int curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= incBlocks.size()) {
+                        incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
+                    }
+                    int curBlockPos = (incRows + written) % rowsInBlock;
+                    int toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
+                }
+                incRows += written;
             }
 
             void AddBatch(int num)
             {
-                dataIncremental.insert(dataIncremental.end(), ((size_t)num) * cols, T(-1));
+                int written = 0;
+                while (written < num) {
+                    int curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= incBlocks.size()) {
+                        incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
+                    }
+                    int curBlockPos = (incRows + written) % rowsInBlock;
+                    int toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
+                }
+                incRows += written;
             }
 
             bool Save(std::string sDataPointsFileName)
@@ -105,21 +134,17 @@ namespace SPTAG
                 fwrite(&CR, sizeof(int), 1, fp);
                 fwrite(&cols, sizeof(int), 1, fp);
 
-                T* ptr = data;
-                int toWrite = rows;
-                while (toWrite > 0) 
+                int written = 0;
+                while (written < rows) 
                 {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
+                    written += (int)fwrite(data + ((size_t)written) * cols, sizeof(T) * cols, rows - written, fp);
                 }
-                ptr = dataIncremental.data();
-                toWrite = CR - rows;
-                while (toWrite > 0)
+
+                written = 0;
+                while (written < incRows)
                 {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
+                    int pos = written % rowsInBlock;
+                    written += (int)fwrite(incBlocks[written / rowsInBlock] + ((size_t)pos) * cols, sizeof(T) * cols, min(rowsInBlock - pos, incRows - written), fp);
                 }
                 fclose(fp);
 
@@ -138,11 +163,9 @@ namespace SPTAG
                 fread(&C, sizeof(int), 1, fp);
 
                 Initialize(R, C);
-                T* ptr = data;
-                while (R > 0) {
-                    size_t read = fread(ptr, sizeof(T) * C, R, fp);
-                    ptr += read * C;
-                    R -= (int)read;
+                R = 0;
+                while (R < rows) {
+                    R += (int)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
                 }
                 fclose(fp);
                 std::cout << "Load Data (" << rows << ", " << cols << ") Finish!" << std::endl;
@@ -175,10 +198,7 @@ namespace SPTAG
 
                 // write point one by one in case for cache miss
                 for (int i = 0; i < R; i++) {
-                    if (indices[i] < rows)
-                        fwrite(data + ((size_t)indices[i]) * cols, sizeof(T) * cols, 1, fp);
-                    else
-                        fwrite(dataIncremental.data() + ((size_t)(indices[i] - rows)) * cols, sizeof(T) * cols, 1, fp);
+                    fwrite(At(indices[i]), sizeof(T) * cols, 1, fp);
                 }
                 fclose(fp);
 
