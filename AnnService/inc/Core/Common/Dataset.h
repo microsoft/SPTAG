@@ -70,7 +70,7 @@ namespace SPTAG
                     incRows = 0;
                 }
             }
-            inline int R() const { return (int)(rows + incRows); }
+            inline int R() const { return rows + incRows; }
             inline int C() const { return cols; }
             
             inline const T* At(int index) const
@@ -118,7 +118,8 @@ namespace SPTAG
                     }
                     int curBlockPos = (incRows + written) % rowsInBlock;
                     int toWrite = min(rowsInBlock - curBlockPos, num - written);
-                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
+                    T *begin = incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, *end = incBlocks[curBlockIdx] + ((size_t)(curBlockPos + toWrite)) * cols;
+                    while (begin < end) *begin++ = -1;
                     written += toWrite;
                 }
                 incRows += written;
