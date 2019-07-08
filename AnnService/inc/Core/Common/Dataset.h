@@ -28,15 +28,15 @@ namespace SPTAG
         class Dataset
         {
         private:
-            int rows;
-            int cols;
+            int rows = 0;
+            int cols = 1;
             bool ownData = false;
             T* data = nullptr;
-            int incRows;
+            int incRows = 0;
             std::vector<T*> incBlocks;
             static const int rowsInBlock = 1000;
         public:
-            Dataset(): rows(0), cols(1) {}
+            Dataset() {}
             Dataset(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
