@@ -118,8 +118,7 @@ namespace SPTAG
                     }
                     int curBlockPos = (incRows + written) % rowsInBlock;
                     int toWrite = min(rowsInBlock - curBlockPos, num - written);
-                    T *begin = incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, *end = incBlocks[curBlockIdx] + ((size_t)(curBlockPos + toWrite)) * cols;
-                    while (begin < end) *begin++ = -1;
+                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
                     written += toWrite;
                 }
                 incRows += written;
