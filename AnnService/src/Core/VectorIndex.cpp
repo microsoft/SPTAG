@@ -157,7 +157,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
 
 
 ErrorCode
-VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, std::vector<BasicResult>& p_results) const {
+VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const {
     QueryResult res(p_vector, p_neighborCount, p_withMeta, p_results);
     SearchIndex(res);
     return ErrorCode::Success;

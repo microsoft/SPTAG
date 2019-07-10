@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.25420.1
@@ -76,6 +76,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CsharpClient", "Wrappers\Cs
 		{F9A72303-6381-4C80-86FF-606A2F6F7B96} = {F9A72303-6381-4C80-86FF-606A2F6F7B96}
 		{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9} = {C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRCore", "Wrappers\CLRCore.vcxproj", "{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -189,6 +191,14 @@ Global
 		{363BA3BB-75C4-4CC7-AECB-28C7534B3710}.Release|x64.Build.0 = Release|x64
 		{363BA3BB-75C4-4CC7-AECB-28C7534B3710}.Release|x86.ActiveCfg = Release|Win32
 		{363BA3BB-75C4-4CC7-AECB-28C7534B3710}.Release|x86.Build.0 = Release|Win32
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Debug|x64.ActiveCfg = Debug|x64
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Debug|x64.Build.0 = Debug|x64
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Debug|x86.ActiveCfg = Debug|Win32
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Debug|x86.Build.0 = Debug|Win32
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x64.ActiveCfg = Release|x64
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x64.Build.0 = Release|x64
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x86.ActiveCfg = Release|Win32
+		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -32,13 +32,12 @@ public:
     }
 
     
-    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta, std::vector<BasicResult>& p_results)
+    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta, BasicResult* p_results)
         : m_target(p_target),
           m_resultNum(p_resultNum),
           m_withMeta(p_withMeta)
     {
-        p_results.resize(p_resultNum);
-        m_results.Set(p_results.data(), p_resultNum, false);
+        m_results.Set(p_results, p_resultNum, false);
     }
 
 

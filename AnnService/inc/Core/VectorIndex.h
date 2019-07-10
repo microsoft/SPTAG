@@ -57,7 +57,7 @@ public:
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
     
-    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, std::vector<BasicResult>& p_results) const;
+    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
     
     virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
 
