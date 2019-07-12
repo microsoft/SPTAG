@@ -239,7 +239,7 @@ namespace SPTAG
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
-                    return ErrorCode::Fail;
+                    return ErrorCode::MemoryOverFlow;
                 }
                 if (DistCalcMethod::Cosine == m_iDistCalcMethod)
                 {

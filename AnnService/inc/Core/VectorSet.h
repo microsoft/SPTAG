@@ -18,7 +18,7 @@ public:
 
     virtual VectorValueType GetValueType() const = 0;
 
-    virtual void* GetVector(IndexType p_vectorID) const = 0;
+    virtual void* GetVector(SizeType p_vectorID) const = 0;
 
     virtual void* GetData() const = 0;
 
@@ -44,7 +44,7 @@ public:
 
     virtual VectorValueType GetValueType() const;
 
-    virtual void* GetVector(IndexType p_vectorID) const;
+    virtual void* GetVector(SizeType p_vectorID) const;
 
     virtual void* GetData() const;
 

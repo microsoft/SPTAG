@@ -46,7 +46,7 @@ VectorIndex::SetMetadata(const std::string& p_metadataFilePath, const std::strin
 
 
 ByteArray 
-VectorIndex::GetMetadata(IndexType p_vectorID) const {
+VectorIndex::GetMetadata(SizeType p_vectorID) const {
     if (nullptr != m_pMetadata)
     {
         return m_pMetadata->GetMetadata(p_vectorID);

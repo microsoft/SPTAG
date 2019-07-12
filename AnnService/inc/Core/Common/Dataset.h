@@ -28,26 +28,26 @@ namespace SPTAG
         class Dataset
         {
         private:
-            int rows = 0;
-            int cols = 1;
+            SizeType rows = 0;
+            SizeType cols = 1;
             bool ownData = false;
             T* data = nullptr;
-            int incRows = 0;
+            SizeType incRows = 0;
             std::vector<T*> incBlocks;
-            static const int rowsInBlock = 1000;
+            static const SizeType rowsInBlock = 1024 * 1024;
         public:
             Dataset() {}
-            Dataset(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
             }
             ~Dataset()
             {
                 if (ownData) aligned_free(data);
-                for (int i = 0; i < incBlocks.size(); i++) aligned_free(incBlocks[i]);
+                for (T* ptr : incBlocks) aligned_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -59,8 +59,9 @@ namespace SPTAG
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
+                incBlocks.reserve((std::numeric_limits<SizeType>::max)() / rowsInBlock + 1);
             }
-            void SetR(int R_) 
+            void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
                     incRows = R_ - rows;
@@ -70,54 +71,58 @@ namespace SPTAG
                     incRows = 0;
                 }
             }
-            inline int R() const { return rows + incRows; }
-            inline int C() const { return cols; }
+            inline SizeType R() const { return rows + incRows; }
+            inline SizeType C() const { return cols; }
             
-            inline const T* At(int index) const
+            inline const T* At(SizeType index) const
             {
                 if (index >= rows) {
-                    int incIndex = index - rows;
+                    SizeType incIndex = index - rows;
                     return incBlocks[incIndex / rowsInBlock] + ((size_t)(incIndex % rowsInBlock)) * cols;
                 }
                 return data + ((size_t)index) * cols;
             }
 
-            T* operator[](int index)
+            T* operator[](SizeType index)
             {
                 return (T*)At(index);
             }
             
-            const T* operator[](int index) const
+            const T* operator[](SizeType index) const
             {
                 return At(index);
             }
 
-            void AddBatch(const T* pData, int num)
+            void AddBatch(const T* pData, SizeType num)
             {
-                int written = 0;
+                if (R() > (std::numeric_limits<SizeType>::max)() - num) return;
+
+                SizeType written = 0;
                 while (written < num) {
-                    int curBlockIdx = (incRows + written) / rowsInBlock;
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= incBlocks.size()) {
                         incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
                     }
-                    int curBlockPos = (incRows + written) % rowsInBlock;
-                    int toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
                     std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
                     written += toWrite;
                 }
                 incRows += written;
             }
 
-            void AddBatch(int num)
+            void AddBatch(SizeType num)
             {
-                int written = 0;
+                if (R() > (std::numeric_limits<SizeType>::max)() - num) return;
+
+                SizeType written = 0;
                 while (written < num) {
-                    int curBlockIdx = (incRows + written) / rowsInBlock;
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= incBlocks.size()) {
                         incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
                     }
-                    int curBlockPos = (incRows + written) % rowsInBlock;
-                    int toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
                     std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
                     written += toWrite;
                 }
@@ -130,21 +135,21 @@ namespace SPTAG
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
                 if (fp == NULL) return false;
 
-                int CR = R();
-                fwrite(&CR, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
+                SizeType CR = R();
+                fwrite(&CR, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(SizeType), 1, fp);
 
-                int written = 0;
+                SizeType written = 0;
                 while (written < rows) 
                 {
-                    written += (int)fwrite(data + ((size_t)written) * cols, sizeof(T) * cols, rows - written, fp);
+                    written += (SizeType)fwrite(data + ((size_t)written) * cols, sizeof(T) * cols, rows - written, fp);
                 }
 
                 written = 0;
                 while (written < incRows)
                 {
-                    int pos = written % rowsInBlock;
-                    written += (int)fwrite(incBlocks[written / rowsInBlock] + ((size_t)pos) * cols, sizeof(T) * cols, min(rowsInBlock - pos, incRows - written), fp);
+                    SizeType pos = written % rowsInBlock;
+                    written += (SizeType)fwrite(incBlocks[written / rowsInBlock] + ((size_t)pos) * cols, sizeof(T) * cols, min(rowsInBlock - pos, incRows - written), fp);
                 }
                 fclose(fp);
 
@@ -158,14 +163,14 @@ namespace SPTAG
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
                 if (fp == NULL) return false;
 
-                int R, C;
-                fread(&R, sizeof(int), 1, fp);
-                fread(&C, sizeof(int), 1, fp);
+                SizeType R, C;
+                fread(&R, sizeof(SizeType), 1, fp);
+                fread(&C, sizeof(SizeType), 1, fp);
 
                 Initialize(R, C);
                 R = 0;
                 while (R < rows) {
-                    R += (int)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
+                    R += (SizeType)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
                 }
                 fclose(fp);
                 std::cout << "Load Data (" << rows << ", " << cols << ") Finish!" << std::endl;
@@ -175,29 +180,29 @@ namespace SPTAG
             // Functions for loading models from memory mapped files
             bool Load(char* pDataPointsMemFile)
             {
-                int R, C;
-                R = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                SizeType R, C;
+                R = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
 
-                C = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                C = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
                 return true;
             }
 
-            bool Refine(const std::vector<int>& indices, std::string sDataPointsFileName)
+            bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName)
             {
                 std::cout << "Save Refine Data To " << sDataPointsFileName << std::endl;
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
                 if (fp == NULL) return false;
 
-                int R = (int)(indices.size());
-                fwrite(&R, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
+                SizeType R = (SizeType)(indices.size());
+                fwrite(&R, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(SizeType), 1, fp);
 
                 // write point one by one in case for cache miss
-                for (int i = 0; i < R; i++) {
+                for (SizeType i = 0; i < R; i++) {
                     fwrite(At(indices[i]), sizeof(T) * cols, 1, fp);
                 }
                 fclose(fp);

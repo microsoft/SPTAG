@@ -43,15 +43,14 @@ BasicVectorSet::GetValueType() const
 
 
 void*
-BasicVectorSet::GetVector(IndexType p_vectorID) const
+BasicVectorSet::GetVector(SizeType p_vectorID) const
 {
-    if (p_vectorID < 0 || static_cast<SizeType>(p_vectorID) >= m_vectorCount)
+    if (p_vectorID < 0 || p_vectorID >= m_vectorCount)
     {
         return nullptr;
     }
 
-    SizeType offset = static_cast<SizeType>(p_vectorID) * m_perVectorDataSize;
-    return reinterpret_cast<void*>(m_data.Data() + offset);
+    return reinterpret_cast<void*>(m_data.Data() + ((size_t)p_vectorID) * m_perVectorDataSize);
 }
 
 
