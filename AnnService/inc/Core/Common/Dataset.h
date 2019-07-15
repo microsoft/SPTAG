@@ -36,10 +36,14 @@ namespace SPTAG
             std::vector<T*> incBlocks;
             static const SizeType rowsInBlock = 1024 * 1024;
         public:
-            Dataset() {}
+            Dataset()
+            { 
+                incBlocks.reserve(MaxSize / rowsInBlock + 1); 
+            }
             Dataset(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
+                incBlocks.reserve(MaxSize / rowsInBlock + 1);
             }
             ~Dataset()
             {
@@ -59,7 +63,6 @@ namespace SPTAG
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
-                incBlocks.reserve((std::numeric_limits<SizeType>::max)() / rowsInBlock + 1);
             }
             void SetR(SizeType R_) 
             {
@@ -93,15 +96,17 @@ namespace SPTAG
                 return At(index);
             }
 
-            void AddBatch(const T* pData, SizeType num)
+            ErrorCode AddBatch(const T* pData, SizeType num)
             {
-                if (R() > (std::numeric_limits<SizeType>::max)() - num) return;
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= incBlocks.size()) {
-                        incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
                     }
                     SizeType curBlockPos = (incRows + written) % rowsInBlock;
                     SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
@@ -109,17 +114,20 @@ namespace SPTAG
                     written += toWrite;
                 }
                 incRows += written;
+                return ErrorCode::Success;
             }
 
-            void AddBatch(SizeType num)
+            ErrorCode AddBatch(SizeType num)
             {
-                if (R() > (std::numeric_limits<SizeType>::max)() - num) return;
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= incBlocks.size()) {
-                        incBlocks.push_back((T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN));
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
                     }
                     SizeType curBlockPos = (incRows + written) % rowsInBlock;
                     SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
@@ -127,6 +135,7 @@ namespace SPTAG
                     written += toWrite;
                 }
                 incRows += written;
+                return ErrorCode::Success;
             }
 
             bool Save(std::string sDataPointsFileName)

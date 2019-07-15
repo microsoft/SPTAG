@@ -59,6 +59,7 @@ namespace SPTAG
 
 typedef std::int32_t SizeType;
 
+const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
 const float MaxDist = (std::numeric_limits<float>::max)();
 const float Epsilon = 0.000000001f;

@@ -232,10 +232,7 @@ namespace SPTAG
                 begin = GetNumSamples();
                 end = GetNumSamples() + p_vectorNum;
 
-                m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum);
-                m_pGraph.AddBatch(p_vectorNum);
-
-                if (m_pSamples.R() != end || m_pGraph.R() != end) {
+                if (m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
