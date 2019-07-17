@@ -15,12 +15,12 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/BKTree.h"
+#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 
 #include <functional>
 #include <mutex>
-#include <tbb/concurrent_unordered_set.h>
 
 namespace SPTAG
 {
@@ -49,8 +49,8 @@ namespace SPTAG
             std::string m_sGraphFilename;
             std::string m_sDataPointsFilename;
 
-            std::mutex m_dataLock; // protect data and graph
-            tbb::concurrent_unordered_set<int> m_deletedID;
+            std::mutex m_dataAddLock; // protect data and graph
+            COMMON::ConcurrentSet<int> m_deletedID;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
 
             int m_iNumberOfThreads;
@@ -102,7 +102,7 @@ namespace SPTAG
 
         private:
             ErrorCode RefineIndex(const std::string& p_folderPath);
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const;
+            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const;
             void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };
     } // namespace BKT

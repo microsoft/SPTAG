@@ -106,11 +106,11 @@ FileMetadataSet::~FileMetadataSet()
 
 
 ByteArray
-FileMetadataSet::GetMetadata(IndexType p_vectorID) const
+FileMetadataSet::GetMetadata(SizeType p_vectorID) const
 {
     std::uint64_t startoff = m_pOffsets[p_vectorID];
     std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
-    if (p_vectorID < (IndexType)m_count) {
+    if (p_vectorID < m_count) {
         m_fp->seekg(startoff, std::ios_base::beg);
         ByteArray b = ByteArray::Alloc((SizeType)bytes);
         m_fp->read((char*)b.Data(), bytes);
@@ -192,9 +192,9 @@ MemMetadataSet::~MemMetadataSet()
 
 
 ByteArray
-MemMetadataSet::GetMetadata(IndexType p_vectorID) const
+MemMetadataSet::GetMetadata(SizeType p_vectorID) const
 {
-    if (static_cast<SizeType>(p_vectorID) < m_count)
+    if (p_vectorID < m_count)
     {
         return ByteArray(m_metadataHolder.Data() + m_offsets[p_vectorID],
                          static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),

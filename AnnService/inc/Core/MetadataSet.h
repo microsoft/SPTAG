@@ -19,7 +19,7 @@ public:
 
     virtual ~MetadataSet();
 
-    virtual ByteArray GetMetadata(IndexType p_vectorID) const = 0;
+    virtual ByteArray GetMetadata(SizeType p_vectorID) const = 0;
 
     virtual SizeType Count() const = 0;
 
@@ -42,7 +42,7 @@ public:
     
     ~FileMetadataSet();
 
-    ByteArray GetMetadata(IndexType p_vectorID) const;
+    ByteArray GetMetadata(SizeType p_vectorID) const;
 
     SizeType Count() const;
 
@@ -74,7 +74,7 @@ public:
 
     ~MemMetadataSet();
 
-    ByteArray GetMetadata(IndexType p_vectorID) const;
+    ByteArray GetMetadata(SizeType p_vectorID) const;
 
     SizeType Count() const;
 

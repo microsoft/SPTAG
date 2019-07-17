@@ -28,23 +28,30 @@ namespace SPTAG
         class Dataset
         {
         private:
-            int rows;
-            int cols;
+            SizeType rows = 0;
+            SizeType cols = 1;
             bool ownData = false;
             T* data = nullptr;
-            std::vector<T> dataIncremental;
-
+            SizeType incRows = 0;
+            std::vector<T*> incBlocks;
+            static const SizeType rowsInBlock = 1024 * 1024;
         public:
-            Dataset(): rows(0), cols(1) {}
-            Dataset(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset()
+            { 
+                incBlocks.reserve(MaxSize / rowsInBlock + 1); 
+            }
+            Dataset(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
+                incBlocks.reserve(MaxSize / rowsInBlock + 1);
             }
             ~Dataset()
             {
                 if (ownData) aligned_free(data);
+                for (T* ptr : incBlocks) aligned_free(ptr);
+                incBlocks.clear();
             }
-            void Initialize(int rows_, int cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -57,42 +64,78 @@ namespace SPTAG
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
-            void SetR(int R_) 
+            void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
-                    dataIncremental.resize(((size_t)(R_ - rows)) * cols);
+                    incRows = R_ - rows;
                 else 
                 {
                     rows = R_;
-                    dataIncremental.clear();
+                    incRows = 0;
                 }
             }
-            inline int R() const { return (int)(rows + dataIncremental.size() / cols); }
-            inline int C() const { return cols; }
-            T* operator[](int index)
+            inline SizeType R() const { return rows + incRows; }
+            inline SizeType C() const { return cols; }
+            
+            inline const T* At(SizeType index) const
             {
                 if (index >= rows) {
-                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
+                    SizeType incIndex = index - rows;
+                    return incBlocks[incIndex / rowsInBlock] + ((size_t)(incIndex % rowsInBlock)) * cols;
                 }
                 return data + ((size_t)index) * cols;
+            }
+
+            T* operator[](SizeType index)
+            {
+                return (T*)At(index);
             }
             
-            const T* operator[](int index) const
+            const T* operator[](SizeType index) const
             {
-                if (index >= rows) {
-                    return dataIncremental.data() + ((size_t)(index - rows)) * cols;
+                return At(index);
+            }
+
+            ErrorCode AddBatch(const T* pData, SizeType num)
+            {
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+
+                SizeType written = 0;
+                while (written < num) {
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= incBlocks.size()) {
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
+                    }
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
                 }
-                return data + ((size_t)index) * cols;
+                incRows += written;
+                return ErrorCode::Success;
             }
 
-            void AddBatch(const T* pData, int num)
+            ErrorCode AddBatch(SizeType num)
             {
-                dataIncremental.insert(dataIncremental.end(), pData, pData + ((size_t)num) * cols);
-            }
+                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
 
-            void AddBatch(int num)
-            {
-                dataIncremental.insert(dataIncremental.end(), ((size_t)num) * cols, T(-1));
+                SizeType written = 0;
+                while (written < num) {
+                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    if (curBlockIdx >= incBlocks.size()) {
+                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        incBlocks.push_back(newBlock);
+                    }
+                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
+                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
+                    written += toWrite;
+                }
+                incRows += written;
+                return ErrorCode::Success;
             }
 
             bool Save(std::string sDataPointsFileName)
@@ -101,25 +144,21 @@ namespace SPTAG
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
                 if (fp == NULL) return false;
 
-                int CR = R();
-                fwrite(&CR, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
+                SizeType CR = R();
+                fwrite(&CR, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(SizeType), 1, fp);
 
-                T* ptr = data;
-                int toWrite = rows;
-                while (toWrite > 0) 
+                SizeType written = 0;
+                while (written < rows) 
                 {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
+                    written += (SizeType)fwrite(data + ((size_t)written) * cols, sizeof(T) * cols, rows - written, fp);
                 }
-                ptr = dataIncremental.data();
-                toWrite = CR - rows;
-                while (toWrite > 0)
+
+                written = 0;
+                while (written < incRows)
                 {
-                    size_t write = fwrite(ptr, sizeof(T) * cols, toWrite, fp);
-                    ptr += write * cols;
-                    toWrite -= (int)write;
+                    SizeType pos = written % rowsInBlock;
+                    written += (SizeType)fwrite(incBlocks[written / rowsInBlock] + ((size_t)pos) * cols, sizeof(T) * cols, min(rowsInBlock - pos, incRows - written), fp);
                 }
                 fclose(fp);
 
@@ -133,16 +172,14 @@ namespace SPTAG
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
                 if (fp == NULL) return false;
 
-                int R, C;
-                fread(&R, sizeof(int), 1, fp);
-                fread(&C, sizeof(int), 1, fp);
+                SizeType R, C;
+                fread(&R, sizeof(SizeType), 1, fp);
+                fread(&C, sizeof(SizeType), 1, fp);
 
                 Initialize(R, C);
-                T* ptr = data;
-                while (R > 0) {
-                    size_t read = fread(ptr, sizeof(T) * C, R, fp);
-                    ptr += read * C;
-                    R -= (int)read;
+                R = 0;
+                while (R < rows) {
+                    R += (SizeType)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
                 }
                 fclose(fp);
                 std::cout << "Load Data (" << rows << ", " << cols << ") Finish!" << std::endl;
@@ -152,33 +189,30 @@ namespace SPTAG
             // Functions for loading models from memory mapped files
             bool Load(char* pDataPointsMemFile)
             {
-                int R, C;
-                R = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                SizeType R, C;
+                R = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
 
-                C = *((int*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(int);
+                C = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
                 return true;
             }
 
-            bool Refine(const std::vector<int>& indices, std::string sDataPointsFileName)
+            bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName)
             {
                 std::cout << "Save Refine Data To " << sDataPointsFileName << std::endl;
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
                 if (fp == NULL) return false;
 
-                int R = (int)(indices.size());
-                fwrite(&R, sizeof(int), 1, fp);
-                fwrite(&cols, sizeof(int), 1, fp);
+                SizeType R = (SizeType)(indices.size());
+                fwrite(&R, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(SizeType), 1, fp);
 
                 // write point one by one in case for cache miss
-                for (int i = 0; i < R; i++) {
-                    if (indices[i] < rows)
-                        fwrite(data + ((size_t)indices[i]) * cols, sizeof(T) * cols, 1, fp);
-                    else
-                        fwrite(dataIncremental.data() + ((size_t)(indices[i] - rows)) * cols, sizeof(T) * cols, 1, fp);
+                for (SizeType i = 0; i < R; i++) {
+                    fwrite(At(indices[i]), sizeof(T) * cols, 1, fp);
                 }
                 fclose(fp);
 

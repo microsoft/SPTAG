@@ -43,7 +43,6 @@ The searches in the trees and the graph are iteratively conducted.
 * swig >= 3.0
 * cmake >= 3.12.0
 * boost >= 1.67.0
-* tbb >= 4.2
 
 ### **Install**
 
@@ -66,7 +65,7 @@ Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will genera
 ```bash
 docker build -t sptag .
 ```
-Will build a docker container with binaries in `/app/Release/`
+Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 

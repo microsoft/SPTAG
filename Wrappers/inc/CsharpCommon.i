@@ -32,7 +32,7 @@
     $result._size = $1.Length();
 }
 %typemap(csin,
-         pre="unsafe { fixed(byte* ptr$csinput = $csinput) { $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.Length );",
+         pre="unsafe { fixed(byte* ptr$csinput = $csinput) { $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.LongLength );",
          terminator="} }"
          ) ByteArray %{ temp$csinput %}
 
@@ -40,7 +40,7 @@
     set {
          unsafe { fixed(byte* ptr$csinput = $csinput) 
              {
-                 $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.Length );
+                 $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.LongLength );
                  $imcall;
              }
          }

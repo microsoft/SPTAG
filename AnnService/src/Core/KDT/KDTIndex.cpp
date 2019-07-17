@@ -81,9 +81,9 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const tbb::concurrent_unordered_set<int> &p_deleted) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const
         {
-            Search(if (p_deleted.find(gnode.node) == p_deleted.end()))
+            Search(if (!p_deleted.contains(gnode.node)))
         }
 
         template <typename T>
@@ -157,18 +157,20 @@ namespace SPTAG
                 mkdir(folderPath.c_str());
             }
 
-            std::lock_guard<std::mutex> lock(m_dataLock);
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
             int newR = GetNumSamples();
 
             std::vector<int> indices;
             std::vector<int> reverseIndices(newR);
             for (int i = 0; i < newR; i++) {
-                if (m_deletedID.find(i) == m_deletedID.end()) {
+                if (!m_deletedID.contains(i)) {
                     indices.push_back(i);
                     reverseIndices[i] = i;
                 }
                 else {
-                    while (m_deletedID.find(newR - 1) != m_deletedID.end() && newR > i) newR--;
+                    while (m_deletedID.contains(newR - 1) && newR > i) newR--;
                     if (newR == i) break;
                     indices.push_back(newR - 1);
                     reverseIndices[newR - 1] = i;
@@ -193,6 +195,7 @@ namespace SPTAG
                     newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
             }
             newTrees.SaveTrees(folderPath + m_sKDTFilename);
+
             return ErrorCode::Success;
         }
 
@@ -206,7 +209,6 @@ namespace SPTAG
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        std::lock_guard<std::mutex> lock(m_dataLock);
                         m_deletedID.insert(query.GetResult(i)->VID);
                     }
                 }
@@ -219,7 +221,7 @@ namespace SPTAG
         {
             int begin, end;
             {
-                std::lock_guard<std::mutex> lock(m_dataLock);
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
 
                 if (GetNumSamples() == 0)
                     return BuildIndex(p_vectors, p_vectorNum, p_dimension);
@@ -230,14 +232,11 @@ namespace SPTAG
                 begin = GetNumSamples();
                 end = GetNumSamples() + p_vectorNum;
 
-                m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum);
-                m_pGraph.AddBatch(p_vectorNum);
-
-                if (m_pSamples.R() != end || m_pGraph.R() != end) {
+                if (m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
-                    return ErrorCode::Fail;
+                    return ErrorCode::MemoryOverFlow;
                 }
                 if (DistCalcMethod::Cosine == m_iDistCalcMethod)
                 {

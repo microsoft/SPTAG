@@ -386,7 +386,15 @@ namespace SPTAG
                 return true;
             }
 
-            inline void AddBatch(int num) { m_pNeighborhoodGraph.AddBatch(num); m_iGraphSize += num; m_dataUpdateLock.resize(m_iGraphSize); }
+            inline ErrorCode AddBatch(int num) 
+            { 
+                ErrorCode ret = m_pNeighborhoodGraph.AddBatch(num);
+                if (ret != ErrorCode::Success) return ret;
+
+                m_iGraphSize += num;
+                m_dataUpdateLock.resize(m_iGraphSize);
+                return ErrorCode::Success;
+            }
 
             inline int* operator[](int index) { return m_pNeighborhoodGraph[index]; }
 
