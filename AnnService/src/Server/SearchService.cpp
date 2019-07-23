@@ -114,7 +114,7 @@ SearchService::Run()
 void
 SearchService::RunSocketMode()
 {
-    auto threadNum = max((unsigned int)1, m_serviceContext->GetServiceSettings()->m_threadNum);
+    auto threadNum = max((SizeType)1, m_serviceContext->GetServiceSettings()->m_threadNum);
     m_threadPool.reset(new boost::asio::thread_pool(threadNum));
 
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
