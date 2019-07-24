@@ -18,7 +18,7 @@ DefineBKTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineBKTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineBKTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTpTreeSplit")
 
-DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, int, 32L, "NeighborhoodSize")
+DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
 DefineBKTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
 DefineBKTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
 DefineBKTParameter(m_pGraph.m_iRefineIter, int, 0L, "RefineIterations")

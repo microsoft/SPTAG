@@ -309,10 +309,11 @@ ErrorCode VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_in
     }
 
     std::ifstream vecIn(folderPath1 + p_configReader1.GetParameter("Index", "VectorFilePath", empty), std::ios::binary);
-    int R, C;
-    vecIn.read((char*)&R, sizeof(int));
-    vecIn.read((char*)&C, sizeof(int));
-    size_t size = R * C * GetValueTypeSize(index->GetVectorValueType());
+    SizeType R;
+    DimensionType C;
+    vecIn.read((char*)&R, sizeof(SizeType));
+    vecIn.read((char*)&C, sizeof(DimensionType));
+    size_t size = GetValueTypeSize(index->GetVectorValueType()) * R * C;
     char* data = new char[size];
     vecIn.read(data, size);
     vecIn.close();

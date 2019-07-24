@@ -29,7 +29,7 @@ namespace SPTAG
         {
         private:
             SizeType rows = 0;
-            SizeType cols = 1;
+            DimensionType cols = 1;
             bool ownData = false;
             T* data = nullptr;
             SizeType incRows = 0;
@@ -40,7 +40,7 @@ namespace SPTAG
             { 
                 incBlocks.reserve(MaxSize / rowsInBlock + 1); 
             }
-            Dataset(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
                 incBlocks.reserve(MaxSize / rowsInBlock + 1);
@@ -51,7 +51,7 @@ namespace SPTAG
                 for (T* ptr : incBlocks) aligned_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -75,7 +75,7 @@ namespace SPTAG
                 }
             }
             inline SizeType R() const { return rows + incRows; }
-            inline SizeType C() const { return cols; }
+            inline DimensionType C() const { return cols; }
             
             inline const T* At(SizeType index) const
             {
@@ -103,7 +103,7 @@ namespace SPTAG
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
-                    if (curBlockIdx >= incBlocks.size()) {
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
@@ -124,7 +124,7 @@ namespace SPTAG
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
-                    if (curBlockIdx >= incBlocks.size()) {
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
@@ -146,7 +146,7 @@ namespace SPTAG
 
                 SizeType CR = R();
                 fwrite(&CR, sizeof(SizeType), 1, fp);
-                fwrite(&cols, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(DimensionType), 1, fp);
 
                 SizeType written = 0;
                 while (written < rows) 
@@ -172,9 +172,10 @@ namespace SPTAG
                 FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
                 if (fp == NULL) return false;
 
-                SizeType R, C;
+                SizeType R;
+                DimensionType C;
                 fread(&R, sizeof(SizeType), 1, fp);
-                fread(&C, sizeof(SizeType), 1, fp);
+                fread(&C, sizeof(DimensionType), 1, fp);
 
                 Initialize(R, C);
                 R = 0;
@@ -189,12 +190,13 @@ namespace SPTAG
             // Functions for loading models from memory mapped files
             bool Load(char* pDataPointsMemFile)
             {
-                SizeType R, C;
+                SizeType R;
+                DimensionType C;
                 R = *((SizeType*)pDataPointsMemFile);
                 pDataPointsMemFile += sizeof(SizeType);
 
-                C = *((SizeType*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(SizeType);
+                C = *((DimensionType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(DimensionType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
                 return true;
@@ -208,7 +210,7 @@ namespace SPTAG
 
                 SizeType R = (SizeType)(indices.size());
                 fwrite(&R, sizeof(SizeType), 1, fp);
-                fwrite(&cols, sizeof(SizeType), 1, fp);
+                fwrite(&cols, sizeof(DimensionType), 1, fp);
 
                 // write point one by one in case for cache miss
                 for (SizeType i = 0; i < R; i++) {

@@ -22,7 +22,7 @@ public:
 
     virtual void* GetData() const = 0;
 
-    virtual SizeType Dimension() const = 0;
+    virtual DimensionType Dimension() const = 0;
 
     virtual SizeType Count() const = 0;
 
@@ -37,7 +37,7 @@ class BasicVectorSet : public VectorSet
 public:
     BasicVectorSet(const ByteArray& p_bytesArray,
                    VectorValueType p_valueType,
-                   SizeType p_dimension,
+                   DimensionType p_dimension,
                    SizeType p_vectorCount);
 
     virtual ~BasicVectorSet();
@@ -48,7 +48,7 @@ public:
 
     virtual void* GetData() const;
 
-    virtual SizeType Dimension() const;
+    virtual DimensionType Dimension() const;
 
     virtual SizeType Count() const;
 
@@ -61,7 +61,7 @@ private:
 
     VectorValueType m_valueType;
 
-    SizeType m_dimension;
+    DimensionType m_dimension;
 
     SizeType m_vectorCount;
 

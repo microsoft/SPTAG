@@ -9,16 +9,16 @@
 using namespace SPTAG;
 
 ErrorCode
-MetadataSet::RefineMetadata(std::vector<int>& indices, const std::string& p_folderPath)
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p_folderPath)
 {
     std::ofstream metaOut(p_folderPath + "metadata.bin_tmp", std::ios::binary);
     std::ofstream metaIndexOut(p_folderPath + "metadataIndex.bin", std::ios::binary);
     if (!metaOut.is_open() || !metaIndexOut.is_open()) return ErrorCode::FailedCreateFile;
 
-    int R = (int)indices.size();
-    metaIndexOut.write((char*)&R, sizeof(int));
+    SizeType R = (SizeType)indices.size();
+    metaIndexOut.write((char*)&R, sizeof(SizeType));
     std::uint64_t offset = 0;
-    for (int i = 0; i < R; i++) {
+    for (SizeType i = 0; i < R; i++) {
         metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
         ByteArray meta = GetMetadata(indices[i]);
         metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
@@ -112,13 +112,13 @@ FileMetadataSet::GetMetadata(SizeType p_vectorID) const
     std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
     if (p_vectorID < m_count) {
         m_fp->seekg(startoff, std::ios_base::beg);
-        ByteArray b = ByteArray::Alloc((SizeType)bytes);
+        ByteArray b = ByteArray::Alloc(bytes);
         m_fp->read((char*)b.Data(), bytes);
         return b;
     }
     else {
         startoff -= m_pOffsets[m_count];
-        return ByteArray((std::uint8_t*)m_newdata.data() + startoff, static_cast<SizeType>(bytes), false);
+        return ByteArray((std::uint8_t*)m_newdata.data() + startoff, bytes, false);
     }
 }
 
@@ -140,7 +140,7 @@ FileMetadataSet::Available() const
 void
 FileMetadataSet::AddBatch(MetadataSet& data)
 {
-    for (int i = 0; i < static_cast<int>(data.Count()); i++) 
+    for (SizeType i = 0; i < data.Count(); i++) 
     {
         ByteArray newdata = data.GetMetadata(i);
         m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
@@ -168,7 +168,7 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
     m_fp->open(p_metaFile, std::ifstream::binary);
     
     std::ofstream dst(p_metaindexFile, std::ios::binary);
-    m_count = static_cast<int>(m_pOffsets.size()) - 1;
+    m_count = static_cast<SizeType>(m_pOffsets.size() - 1);
     m_newdata.clear();
     dst.write((char*)&m_count, sizeof(m_count));
     dst.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
@@ -197,12 +197,12 @@ MemMetadataSet::GetMetadata(SizeType p_vectorID) const
     if (p_vectorID < m_count)
     {
         return ByteArray(m_metadataHolder.Data() + m_offsets[p_vectorID],
-                         static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),
+                         m_offsets[p_vectorID + 1] - m_offsets[p_vectorID],
                          false);
     }
-    else if (p_vectorID < m_offsets.size() - 1) {
+    else if (p_vectorID < (SizeType)(m_offsets.size() - 1)) {
         return ByteArray((std::uint8_t*)m_newdata.data() + m_offsets[p_vectorID] - m_offsets[m_count],
-            static_cast<SizeType>(m_offsets[p_vectorID + 1] - m_offsets[p_vectorID]),
+            m_offsets[p_vectorID + 1] - m_offsets[p_vectorID],
             false);
     }
 
@@ -226,7 +226,7 @@ MemMetadataSet::Available() const
 void
 MemMetadataSet::AddBatch(MetadataSet& data)
 {
-    for (int i = 0; i < static_cast<int>(data.Count()); i++)
+    for (SizeType i = 0; i < data.Count(); i++)
     {
         ByteArray newdata = data.GetMetadata(i);
         m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
@@ -256,7 +256,7 @@ MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p
         return ErrorCode::FailedCreateFile;
     }
 
-    m_count = static_cast<int>(m_offsets.size()) - 1;
+    m_count = static_cast<SizeType>(m_offsets.size() - 1);
     outputStream.write(reinterpret_cast<const char*>(&m_count), sizeof(m_count));
     outputStream.write(reinterpret_cast<const char*>(m_offsets.data()), sizeof(std::uint64_t)*m_offsets.size());
     outputStream.close();

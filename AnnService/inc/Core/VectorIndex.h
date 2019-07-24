@@ -10,6 +10,8 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 
+#include <unordered_map>
+
 namespace SPTAG
 {
 
@@ -26,22 +28,20 @@ public:
 
     virtual ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs) = 0;
 
-    virtual ErrorCode BuildIndex(const void* p_data, int p_vectorNum, int p_dimension) = 0;
+    virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension) = 0;
 
     virtual ErrorCode SearchIndex(QueryResult& p_results) const = 0;
 
-    virtual ErrorCode AddIndex(const void* p_vectors, int p_vectorNum, int p_dimension) = 0;
+    virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension) = 0;
 
-    virtual ErrorCode DeleteIndex(const void* p_vectors, int p_vectorNum) = 0;
+    virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
-    //virtual ErrorCode AddIndexWithID(const void* p_vector, const int& p_id) = 0;
-
-    //virtual ErrorCode DeleteIndexWithID(const void* p_vector, const int& p_id) = 0;
+    //virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
     
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
-    virtual const void* GetSample(const int idx) const = 0;
-    virtual int GetFeatureDim() const = 0;
-    virtual int GetNumSamples() const = 0;
+    virtual const void* GetSample(const SizeType idx) const = 0;
+    virtual DimensionType GetFeatureDim() const = 0;
+    virtual SizeType GetNumSamples() const = 0;
 
     virtual DistCalcMethod GetDistCalcMethod() const = 0;
     virtual IndexAlgoType GetIndexAlgoType() const = 0;

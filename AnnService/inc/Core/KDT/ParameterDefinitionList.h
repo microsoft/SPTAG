@@ -16,7 +16,7 @@ DefineKDTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineKDTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineKDTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTPTSplit")
 
-DefineKDTParameter(m_pGraph.m_iNeighborhoodSize, int, 32L, "NeighborhoodSize")
+DefineKDTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
 DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
 DefineKDTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
 DefineKDTParameter(m_pGraph.m_iRefineIter, int, 0L, "RefineIterations")

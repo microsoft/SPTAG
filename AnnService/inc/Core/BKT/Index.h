@@ -50,12 +50,12 @@ namespace SPTAG
             std::string m_sDataPointsFilename;
 
             std::mutex m_dataAddLock; // protect data and graph
-            COMMON::ConcurrentSet<int> m_deletedID;
+            COMMON::ConcurrentSet<SizeType> m_deletedID;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
 
             int m_iNumberOfThreads;
             DistCalcMethod m_iDistCalcMethod;
-            float(*m_fComputeDistance)(const T* pX, const T* pY, int length);
+            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
         
             int m_iMaxCheck;        
             int m_iThresholdOfNumberOfContinuousNoBetterPropagation;
@@ -75,8 +75,8 @@ namespace SPTAG
 
             ~Index() {}
 
-            inline int GetNumSamples() const { return m_pSamples.R(); }
-            inline int GetFeatureDim() const { return m_pSamples.C(); }
+            inline SizeType GetNumSamples() const { return m_pSamples.R(); }
+            inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
         
             inline int GetCurrMaxCheck() const { return m_iMaxCheck; }
             inline int GetNumThreads() const { return m_iNumberOfThreads; }
@@ -85,24 +85,24 @@ namespace SPTAG
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
             
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
-            inline const void* GetSample(const int idx) const { return (void*)m_pSamples[idx]; }
+            inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
 
-            ErrorCode BuildIndex(const void* p_data, int p_vectorNum, int p_dimension);
+            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
 
             ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs);
 
             ErrorCode SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout);
             ErrorCode LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader);
             ErrorCode SearchIndex(QueryResult &p_query) const;
-            ErrorCode AddIndex(const void* p_vectors, int p_vectorNum, int p_dimension);
-            ErrorCode DeleteIndex(const void* p_vectors, int p_vectorNum);
+            ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension);
+            ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
 
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;
 
         private:
             ErrorCode RefineIndex(const std::string& p_folderPath);
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const;
+            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<SizeType> &p_deleted) const;
             void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };
     } // namespace BKT

@@ -46,20 +46,20 @@ namespace SPTAG
 
 #define Search(CheckDeleted1) \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
-        const int checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
+        const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_SPTQueue.empty()) { \
             m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             while (!p_space.m_NGQueue.empty()) { \
                 COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
-                const int *node = m_pGraph[gnode.node]; \
+                const SizeType *node = m_pGraph[gnode.node]; \
                 _mm_prefetch((const char *)node, _MM_HINT_T0); \
                 CheckDeleted1 { \
                     if (p_query.AddPoint(gnode.node, gnode.distance)) { \
                         p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
-                        int checkNode = node[checkPos]; \
+                        SizeType checkNode = node[checkPos]; \
                         if (checkNode < -1) { \
                             const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
-                            for (int i = -tnode.childStart; i < tnode.childEnd; i++) { \
+                            for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
                                 if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
                             } \
                         } \
@@ -71,11 +71,11 @@ namespace SPTAG
                         } \
                     } \
                 } \
-                for (int i = 0; i <= checkPos; i++) { \
+                for (DimensionType i = 0; i <= checkPos; i++) { \
                     _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
                 } \
-                for (int i = 0; i <= checkPos; i++) { \
-                    int nn_index = node[i]; \
+                for (DimensionType i = 0; i <= checkPos; i++) { \
+                    SizeType nn_index = node[i]; \
                     if (nn_index < 0) break; \
                     if (p_space.CheckAndSet(nn_index)) continue; \
                     float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
@@ -90,7 +90,7 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<int> &p_deleted) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<SizeType> &p_deleted) const
         {
             Search(if (!p_deleted.contains(gnode.node)))
         }
@@ -119,7 +119,7 @@ namespace SPTAG
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
-                    int result = p_query.GetResult(i)->VID;
+                    SizeType result = p_query.GetResult(i)->VID;
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
                 }
             }
@@ -128,7 +128,7 @@ namespace SPTAG
 #pragma endregion
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, int p_vectorNum, int p_dimension)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension)
         {
             omp_set_num_threads(m_iNumberOfThreads);
 
@@ -138,7 +138,7 @@ namespace SPTAG
             {
                 int base = COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
-                for (int i = 0; i < GetNumSamples(); i++) {
+                for (SizeType i = 0; i < GetNumSamples(); i++) {
                     COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
                 }
             }
@@ -169,11 +169,11 @@ namespace SPTAG
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
 
-            int newR = GetNumSamples();
+            SizeType newR = GetNumSamples();
 
-            std::vector<int> indices;
-            std::vector<int> reverseIndices(newR);
-            for (int i = 0; i < newR; i++) {
+            std::vector<SizeType> indices;
+            std::vector<SizeType> reverseIndices(newR);
+            for (SizeType i = 0; i < newR; i++) {
                 if (!m_deletedID.contains(i)) {
                     indices.push_back(i);
                     reverseIndices[i] = i;
@@ -195,7 +195,7 @@ namespace SPTAG
             COMMON::BKTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices);
 #pragma omp parallel for
-            for (int i = 0; i < newTrees.size(); i++) {
+            for (SizeType i = 0; i < newTrees.size(); i++) {
                 newTrees[i].centerid = reverseIndices[newTrees[i].centerid];
             }
             newTrees.SaveTrees(folderPath + m_sBKTFilename);
@@ -207,10 +207,10 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, int p_vectorNum) {
+        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, SizeType p_vectorNum) {
             const T* ptr_v = (const T*)p_vectors;
 #pragma omp parallel for schedule(dynamic)
-            for (int i = 0; i < p_vectorNum; i++) {
+            for (SizeType i = 0; i < p_vectorNum; i++) {
                 COMMON::QueryResultSet<T> query(ptr_v + i * GetFeatureDim(), m_pGraph.m_iCEF);
                 SearchIndex(query);
 
@@ -224,9 +224,9 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_vectors, int p_vectorNum, int p_dimension) 
+        ErrorCode Index<T>::AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension)
         {
-            int begin, end;
+            SizeType begin, end;
             {
                 std::lock_guard<std::mutex> lock(m_dataAddLock);
 
@@ -248,13 +248,13 @@ namespace SPTAG
                 if (DistCalcMethod::Cosine == m_iDistCalcMethod)
                 {
                     int base = COMMON::Utils::GetBase<T>();
-                    for (int i = begin; i < end; i++) {
+                    for (SizeType i = begin; i < end; i++) {
                         COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                     }
                 }
             }
 
-            for (int node = begin; node < end; node++)
+            for (SizeType node = begin; node < end; node++)
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }

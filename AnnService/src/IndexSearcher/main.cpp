@@ -258,13 +258,13 @@ int main(int argc, char** argv)
     {
         std::string param(argv[i]);
         size_t idx = param.find("=");
-        if (idx < 0) continue;
+        if (idx == std::string::npos) continue;
 
         std::string paramName = param.substr(0, idx);
         std::string paramVal = param.substr(idx + 1);
         std::string sectionName;
         idx = paramName.find(".");
-        if (idx >= 0) {
+        if (idx != std::string::npos) {
             sectionName = paramName.substr(0, idx);
             paramName = paramName.substr(idx + 1);
         }
