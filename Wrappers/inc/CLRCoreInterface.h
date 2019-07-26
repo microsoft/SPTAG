@@ -70,7 +70,7 @@ namespace CLI {
 
         bool Build(array<Byte>^ p_data, int p_num);
 
-        bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num);
+        bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
 
         array<Result^>^ Search(array<Byte>^ p_data, int p_resultNum);
 
@@ -84,7 +84,11 @@ namespace CLI {
 
         bool Delete(array<Byte>^ p_data, int p_num);
 
+        bool DeleteByMetaData(array<Byte>^ p_meta);
+
         static AnnIndex^ Load(String^ p_loaderFile);
+
+        static bool Merge(String^ p_indexFilePath1, String^ p_indexFilePath2);
 
     private:
 

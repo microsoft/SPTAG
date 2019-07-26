@@ -18,6 +18,8 @@ namespace SPTAG
             if (!m_pSamples.Load((char*)p_indexBlobs[0])) return ErrorCode::FailedParseValue;
             if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1])) return ErrorCode::FailedParseValue;
             if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2])) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && !m_deletedID.load((char*)p_indexBlobs[3])) return ErrorCode::FailedParseValue;
+
             return ErrorCode::Success;
         }
 
@@ -36,6 +38,7 @@ namespace SPTAG
             if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
             if (!m_pTrees.LoadTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
             if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
@@ -217,7 +220,13 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension)
+        ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
+            m_deletedID.insert(p_id);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start)
         {
             SizeType begin, end;
             {
@@ -251,6 +260,7 @@ namespace SPTAG
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }
+            if (p_start != nullptr) *p_start = begin;
             std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
         }
@@ -262,7 +272,7 @@ namespace SPTAG
             m_sDataPointsFilename = "vectors.bin";
             m_sKDTFilename = "tree.bin";
             m_sGraphFilename = "graph.bin";
-
+            
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     p_configout << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
 
@@ -271,14 +281,14 @@ namespace SPTAG
 
             p_configout << std::endl;
 
-            if (m_deletedID.size() > 0) {
-                RefineIndex(p_folderPath);
-            }
-            else {
-                if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-                if (!m_pTrees.SaveTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
-                if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            }
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_pTrees.SaveTrees(p_folderPath + m_sKDTFilename)) return ErrorCode::Fail;
+            if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+
             return ErrorCode::Success;
         }
 

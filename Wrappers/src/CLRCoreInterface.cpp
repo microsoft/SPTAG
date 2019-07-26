@@ -39,7 +39,7 @@ namespace CLI {
         return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(ptr, p_num, m_dimension));
     }
 
-    bool AnnIndex::BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num)
+    bool AnnIndex::BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex)
     {
         if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
             return false;
@@ -55,7 +55,7 @@ namespace CLI {
                 offsets[++current] = (std::uint64_t)(i + 1);
         }
         std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false), SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
-        return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(vectors, meta));
+        return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(vectors, meta, p_withMetaIndex));
     }
 
     array<Result^>^ AnnIndex::Search(array<Byte>^ p_data, int p_resultNum)
@@ -134,6 +134,15 @@ namespace CLI {
         return (SPTAG::ErrorCode::Success == (*m_Instance)->DeleteIndex(ptr, p_num));
     }
 
+    bool AnnIndex::DeleteByMetaData(array<Byte>^ p_meta)
+    {
+        if (m_Instance == nullptr)
+            return false;
+
+        pin_ptr<Byte> metaptr = &p_meta[0];
+        return (SPTAG::ErrorCode::Success == (*m_Instance)->DeleteIndex(SPTAG::ByteArray(metaptr, p_meta->LongLength, false)));
+    }
+
     AnnIndex^ AnnIndex::Load(String^ p_loaderFile)
     {
         std::shared_ptr<SPTAG::VectorIndex> vecIndex;
@@ -146,5 +155,10 @@ namespace CLI {
             res = gcnew AnnIndex(vecIndex);
         }
         return res;
+    }
+
+    bool AnnIndex::Merge(String^ p_indexFilePath1, String^ p_indexFilePath2)
+    {
+        return (SPTAG::ErrorCode::Success == SPTAG::VectorIndex::MergeIndex(string_to_char_array(p_indexFilePath1), string_to_char_array(p_indexFilePath2)));
     }
 }

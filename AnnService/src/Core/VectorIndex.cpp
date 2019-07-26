@@ -87,6 +87,19 @@ VectorIndex::LoadIndex(const std::string& p_folderPath)
             std::cerr << "Error: Failed to load metadata." << std::endl;
             return ErrorCode::Fail;
         }
+
+        std::string metadataToVectorIndex = p_configReader.GetParameter(metadataSection,
+            "MetaDataToVectorIndex",
+            std::string());
+
+        if (metadataToVectorIndex == "true")
+        {
+            m_pMetaToVec.reset(new std::unordered_map<std::string, SizeType>);
+            for (SizeType i = 0; i < m_pMetadata->Count(); i++) {
+                ByteArray meta = m_pMetadata->GetMetadata(i);
+                m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), i);
+            }
+        }
     }
     if (DistCalcMethod::Undefined == p_configReader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
     {
@@ -126,6 +139,7 @@ ErrorCode VectorIndex::SaveIndex(const std::string& p_folderPath)
         loaderFile << "[MetaData]" << std::endl;
         loaderFile << "MetaDataFilePath=" << metadataFile << std::endl;
         loaderFile << "MetaDataIndexPath=" << metadataIndexFile << std::endl;
+        if (nullptr != m_pMetaToVec) loaderFile << "MetaDataToVectorIndex=true" << std::endl;
         loaderFile << std::endl;
 
         m_pMetadata->SaveMetadata(folderPath + metadataFile, folderPath + metadataIndexFile);
@@ -143,7 +157,7 @@ ErrorCode VectorIndex::SaveIndex(const std::string& p_folderPath)
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
-    std::shared_ptr<MetadataSet> p_metadataSet)
+    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
 {
     if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
     {
@@ -152,6 +166,13 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
 
     BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
     m_pMetadata = std::move(p_metadataSet);
+    if (p_withMetaIndex && m_pMetadata != nullptr) {
+        m_pMetaToVec.reset(new std::unordered_map<std::string, SizeType>);
+        for (SizeType i = 0; i < p_vectorSet->Count(); i++) {
+            ByteArray meta = m_pMetadata->GetMetadata(i);
+            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), i);
+        }
+    }
     return ErrorCode::Success;
 }
 
@@ -170,13 +191,39 @@ VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<Me
     {
         return ErrorCode::Fail;
     }
-    AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
+
+    SizeType currStart;
+    ErrorCode ret = AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), &currStart);
+    if (ret != ErrorCode::Success) return ret;
+
     if (m_pMetadata == nullptr) {
-        m_pMetadata = std::move(p_metadataSet);
+        if (currStart == 0)
+            m_pMetadata = std::move(p_metadataSet);
+        else
+            return ErrorCode::Success;
     }
     else {
         m_pMetadata->AddBatch(*p_metadataSet);
     }
+    
+    if (m_pMetaToVec != nullptr) {
+        for (SizeType i = 0; i < p_vectorSet->Count(); i++) {
+            ByteArray meta = m_pMetadata->GetMetadata(currStart + i);
+            DeleteIndex(meta);
+            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), currStart + i);
+        }
+    }
+    return ErrorCode::Success;
+}
+
+
+ErrorCode
+VectorIndex::DeleteIndex(ByteArray p_meta) {
+    if (m_pMetaToVec == nullptr) return ErrorCode::Fail;
+
+    std::string meta((char*)p_meta.Data(), p_meta.Length());
+    auto iter = m_pMetaToVec->find(meta);
+    if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
     return ErrorCode::Success;
 }
 
@@ -270,54 +317,31 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 }
 
 
-ErrorCode VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2)
+ErrorCode
+VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2)
 {
     std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
-    if (!folderPath1.empty() && *(folderPath1.rbegin()) != FolderSep) folderPath1 += FolderSep;
-    if (!folderPath2.empty() && *(folderPath2.rbegin()) != FolderSep) folderPath2 += FolderSep;
 
-    Helper::IniReader p_configReader1, p_configReader2;
-    if (ErrorCode::Success != p_configReader1.LoadIniFile(folderPath1 + "/indexloader.ini"))
-        return ErrorCode::FailedOpenFile;
+    std::shared_ptr<VectorIndex> index1, index2;
+    LoadIndex(folderPath1, index1);
+    LoadIndex(folderPath2, index2);
 
-    if (ErrorCode::Success != p_configReader2.LoadIniFile(folderPath2 + "/indexloader.ini"))
-        return ErrorCode::FailedOpenFile;
+    std::shared_ptr<VectorSet> p_vectorSet;
+    std::shared_ptr<MetadataSet> p_metaSet;
+    size_t vectorSize = GetValueTypeSize(index2->GetVectorValueType()) * index2->GetFeatureDim();
+    std::uint64_t offsets[2] = { 0 };
+    ByteArray metaoffset((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false);
+    for (SizeType i = 0; i < index2->GetNumSamples(); i++)
+        if (index2->ContainSample(i))
+        {
+            p_vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)index2->GetSample(i), vectorSize, false),
+                index2->GetVectorValueType(), index2->GetFeatureDim(), 1));
+            ByteArray meta = index2->GetMetadata(i);
+            offsets[1] = meta.Length();
+            p_metaSet.reset(new MemMetadataSet(meta, metaoffset, 1));
+            index1->AddIndex(p_vectorSet, p_metaSet);
+        }
 
-    std::shared_ptr<VectorIndex> index = CreateInstance(
-        p_configReader1.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined), 
-        p_configReader1.GetParameter("Index", "ValueType", VectorValueType::Undefined));
-    if (index == nullptr) return ErrorCode::FailedParseValue;
-
-    std::string empty("");
-    if (!COMMON::DataUtils::MergeIndex(folderPath1 + p_configReader1.GetParameter("Index", "VectorFilePath", empty),
-        folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
-        folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty),
-        folderPath2 + p_configReader1.GetParameter("Index", "VectorFilePath", empty),
-        folderPath2 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
-        folderPath2 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty)))
-        return ErrorCode::Fail;
-
-    for (const auto& iter : p_configReader1.GetParameters("Index"))
-        index->SetParameter(iter.first.c_str(), iter.second.c_str());
-
-    if (p_configReader1.DoesSectionExist("MetaData"))
-    {
-        for (const auto& iter : p_configReader1.GetParameters("MetaData"))
-            index->SetParameter(iter.first.c_str(), iter.second.c_str());
-        index->SetMetadata(folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataFilePath", empty),
-                           folderPath1 + p_configReader1.GetParameter("MetaData", "MetaDataIndexPath", empty));
-    }
-
-    std::ifstream vecIn(folderPath1 + p_configReader1.GetParameter("Index", "VectorFilePath", empty), std::ios::binary);
-    SizeType R;
-    DimensionType C;
-    vecIn.read((char*)&R, sizeof(SizeType));
-    vecIn.read((char*)&C, sizeof(DimensionType));
-    size_t size = GetValueTypeSize(index->GetVectorValueType()) * R * C;
-    char* data = new char[size];
-    vecIn.read(data, size);
-    vecIn.close();
-    index->BuildIndex((void*)data, R, C);
-    index->SaveIndex(folderPath1);
+    index1->SaveIndex(folderPath1);
     return ErrorCode::Success;
 }

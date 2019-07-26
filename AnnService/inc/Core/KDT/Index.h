@@ -48,6 +48,7 @@ namespace SPTAG
             std::string m_sKDTFilename;
             std::string m_sGraphFilename;
             std::string m_sDataPointsFilename;
+            std::string m_sDeleteDataPointsFilename;
 
             std::mutex m_dataAddLock; // protect data and graph
             COMMON::ConcurrentSet<SizeType> m_deletedID;
@@ -86,6 +87,7 @@ namespace SPTAG
             
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
+            inline const bool ContainSample(const SizeType idx) const { return !m_deletedID.contains(idx); }
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
 
@@ -94,8 +96,9 @@ namespace SPTAG
             ErrorCode SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout);
             ErrorCode LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader);
             ErrorCode SearchIndex(QueryResult &p_query) const;
-            ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension);
+            ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
+            ErrorCode DeleteIndex(const SizeType& p_id);
 
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;

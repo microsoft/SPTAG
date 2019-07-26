@@ -56,7 +56,7 @@ AnnIndex::Build(ByteArray p_data, int p_num)
 
 
 bool
-AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num)
+AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num, bool p_withMetaIndex)
 {
     if (nullptr == m_index)
     {
@@ -79,7 +79,7 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num)
             offsets[current++] = (std::uint64_t)(i + 1);
     }
     std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
-    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta));
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta, p_withMetaIndex));
 }
 
 
@@ -205,9 +205,26 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num)
 bool
 AnnIndex::Delete(ByteArray p_data, int p_num)
 {
-    if (nullptr != m_index && p_num > 0)
+    if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
     {
-        return (SPTAG::ErrorCode::Success == m_index->DeleteIndex(p_data.Data(), p_num));
+        return false;
     }
-    return false;
+
+    return (SPTAG::ErrorCode::Success == m_index->DeleteIndex(p_data.Data(), p_num));
+}
+
+
+bool
+AnnIndex::DeleteByMetaData(ByteArray p_meta)
+{
+    if (nullptr == m_index) return false;
+    
+    return (SPTAG::ErrorCode::Success == m_index->DeleteIndex(p_meta));
+}
+
+
+bool
+AnnIndex::Merge(const char* p_indexFilePath1, const char* p_indexFilePath2)
+{
+    return (SPTAG::ErrorCode::Success == SPTAG::VectorIndex::MergeIndex(p_indexFilePath1, p_indexFilePath2));
 }

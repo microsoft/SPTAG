@@ -23,7 +23,7 @@ public:
 
     bool Build(ByteArray p_data, int p_num);
 
-    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num);
+    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, int p_num, bool p_withMetaIndex);
 
     std::shared_ptr<QueryResult> Search(ByteArray p_data, int p_resultNum);
 
@@ -39,7 +39,11 @@ public:
 
     bool Delete(ByteArray p_data, int p_num);
 
+    bool DeleteByMetaData(ByteArray p_meta);
+
     static AnnIndex Load(const char* p_loaderFile);
+
+    static bool Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);
 
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);

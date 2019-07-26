@@ -32,14 +32,15 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results) const = 0;
 
-    virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension) = 0;
+    virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
-    //virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
+    virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
     
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
+    virtual const bool ContainSample(const SizeType idx) const = 0;
     virtual DimensionType GetFeatureDim() const = 0;
     virtual SizeType GetNumSamples() const = 0;
 
@@ -55,11 +56,13 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
-    virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
+    virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
     virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
     
     virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
+
+    virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
@@ -84,6 +87,7 @@ public:
 protected:
     std::string m_sIndexName;
     std::shared_ptr<MetadataSet> m_pMetadata;
+    std::unique_ptr<std::unordered_map<std::string, SizeType>> m_pMetaToVec;
 };
 
 
