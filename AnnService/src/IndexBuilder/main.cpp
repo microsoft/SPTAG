@@ -32,14 +32,14 @@ int main(int argc, char* argv[])
     for (int i = 1; i < argc; i++)
     {
         std::string param(argv[i]);
-        int idx = (int)param.find("=");
-        if (idx < 0) continue;
+        size_t idx = param.find("=");
+        if (idx == std::string::npos) continue;
 
         std::string paramName = param.substr(0, idx);
         std::string paramVal = param.substr(idx + 1);
         std::string sectionName;
-        idx = (int)paramName.find(".");
-        if (idx >= 0) {
+        idx = paramName.find(".");
+        if (idx != std::string::npos) {
             sectionName = paramName.substr(0, idx);
             paramName = paramName.substr(idx + 1);
         }
@@ -63,9 +63,10 @@ int main(int argc, char* argv[])
             fprintf(stderr, "Failed to read input file.\n");
             exit(1);
         }
-        int row, col;
-        inputStream.read((char*)&row, sizeof(int));
-        inputStream.read((char*)&col, sizeof(int));
+        SizeType row;
+        DimensionType col;
+        inputStream.read((char*)&row, sizeof(SizeType));
+        inputStream.read((char*)&col, sizeof(DimensionType));
         std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(options->m_inputValueType)) * row * col;
         ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
         char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());

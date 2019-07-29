@@ -6,25 +6,25 @@
 #include "inc/Core/VectorIndex.h"
 
 template <typename T>
-void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, T* vec, int n, int m)
+void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, T* vec, SPTAG::SizeType n, SPTAG::DimensionType m)
 {
     std::vector<char> meta;
-    std::vector<long long> metaoffset;
-    for (int i = 0; i < n; i++) {
-        metaoffset.push_back(meta.size());
+    std::vector<std::uint64_t> metaoffset;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        metaoffset.push_back((std::uint64_t)meta.size());
         std::string a = std::to_string(i);
-        for (int j = 0; j < a.length(); j++)
+        for (size_t j = 0; j < a.length(); j++)
             meta.push_back(a[j]);
     }
-    metaoffset.push_back(meta.size());
+    metaoffset.push_back((std::uint64_t)meta.size());
 
     std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
-        SPTAG::ByteArray((std::uint8_t*)vec, n * m * sizeof(T), false),
+        SPTAG::ByteArray((std::uint8_t*)vec, sizeof(T) * n * m, false),
         SPTAG::GetEnumValueType<T>(), m, n));
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
-        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(long long), false),
+        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
         n));
     std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -50,30 +50,30 @@ void Search(std::string folder, T* vec, int k)
 }
 
 template <typename T>
-void Add(T* vec, int n)
+void Add(T* vec, SPTAG::SizeType n)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex("origindices", vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
 
     std::vector<char> meta;
-    std::vector<long long> metaoffset;
-    for (int i = 0; i < n; i++) {
-        metaoffset.push_back(meta.size());
+    std::vector<std::uint64_t> metaoffset;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        metaoffset.push_back((std::uint64_t)meta.size());
         std::string a = std::to_string(vecIndex->GetNumSamples() + i);
-        for (int j = 0; j < a.length(); j++)
+        for (size_t j = 0; j < a.length(); j++)
             meta.push_back(a[j]);
     }
-    metaoffset.push_back(meta.size());
+    metaoffset.push_back((std::uint64_t)meta.size());
 
-    int m = vecIndex->GetFeatureDim();
+    SPTAG::DimensionType m = vecIndex->GetFeatureDim();
     std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
         SPTAG::ByteArray((std::uint8_t*)vec, n * m * sizeof(T), false),
         SPTAG::GetEnumValueType<T>(), m, n));
 
     std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
-        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(long long), false),
+        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
         n));
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->AddIndex(vecset, metaset));
@@ -82,7 +82,7 @@ void Add(T* vec, int n)
 }
 
 template <typename T>
-void Delete(T* vec, int n)
+void Delete(T* vec, SPTAG::SizeType n)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex("addindices", vecIndex));
@@ -96,17 +96,19 @@ void Delete(T* vec, int n)
 template <typename T>
 void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 {
-    int n = 100, q = 3, m = 10, k = 3;
+    SPTAG::SizeType n = 100, q = 3;
+    SPTAG::DimensionType m = 10;
+    int k = 3;
     std::vector<T> vec;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < m; j++) {
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        for (SPTAG::DimensionType j = 0; j < m; j++) {
             vec.push_back((T)i);
         }
     }
     
     std::vector<T> query;
-    for (int i = 0; i < q; i++) {
-        for (int j = 0; j < m; j++) {
+    for (SPTAG::SizeType i = 0; i < q; i++) {
+        for (SPTAG::DimensionType j = 0; j < m; j++) {
             query.push_back((T)i*2);
         }
     }
