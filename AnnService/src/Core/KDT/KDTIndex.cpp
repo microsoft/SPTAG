@@ -281,6 +281,8 @@ namespace SPTAG
 
             p_configout << std::endl;
 
+            if (m_deletedID.size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine)) return RefineIndex(p_folderPath);
+            
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
 

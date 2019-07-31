@@ -52,6 +52,7 @@ namespace SPTAG
 
             std::mutex m_dataAddLock; // protect data and graph
             COMMON::ConcurrentSet<SizeType> m_deletedID;
+            float m_fDeletePercentageForRefine;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
 
             int m_iNumberOfThreads;
