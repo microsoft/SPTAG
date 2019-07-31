@@ -58,36 +58,36 @@ namespace CLI {
         return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(vectors, meta, p_withMetaIndex));
     }
 
-    array<Result^>^ AnnIndex::Search(array<Byte>^ p_data, int p_resultNum)
+    array<BasicResult^>^ AnnIndex::Search(array<Byte>^ p_data, int p_resultNum)
     {
-        array<Result^>^ res;
+        array<BasicResult^>^ res;
         if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
             return res;
 
         pin_ptr<Byte> ptr = &p_data[0];
-        SPTAG::BasicResult* results = new SPTAG::BasicResult[p_resultNum];
-        (*m_Instance)->SearchIndex(ptr, p_resultNum, false, results);
+        SPTAG::QueryResult results(ptr, p_resultNum, false);
+        (*m_Instance)->SearchIndex(results);
 
-        res = gcnew array<Result^>(p_resultNum);
+        res = gcnew array<BasicResult^>(p_resultNum);
         for (int i = 0; i < p_resultNum; i++)
-            res[i] = gcnew Result(&results[i]);
+            res[i] = gcnew BasicResult(new SPTAG::BasicResult(*(results.GetResult(i))));
 
         return res;
     }
 
-    array<Result^>^ AnnIndex::SearchWithMetaData(array<Byte>^ p_data, int p_resultNum)
+    array<BasicResult^>^ AnnIndex::SearchWithMetaData(array<Byte>^ p_data, int p_resultNum)
     {
-        array<Result^>^ res;
+        array<BasicResult^>^ res;
         if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
             return res;
 
         pin_ptr<Byte> ptr = &p_data[0];
-        SPTAG::BasicResult* results = new SPTAG::BasicResult[p_resultNum];
-        (*m_Instance)->SearchIndex(ptr, p_resultNum, true, results);
+        SPTAG::QueryResult results(ptr, p_resultNum, true);
+        (*m_Instance)->SearchIndex(results);
 
-        res = gcnew array<Result^>(p_resultNum);
+        res = gcnew array<BasicResult^>(p_resultNum);
         for (int i = 0; i < p_resultNum; i++)
-            res[i] = gcnew Result(&results[i]);
+            res[i] = gcnew BasicResult(new SPTAG::BasicResult(*(results.GetResult(i))));
 
         return res;
     }

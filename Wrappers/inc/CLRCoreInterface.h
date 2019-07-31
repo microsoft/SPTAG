@@ -6,11 +6,11 @@ using namespace System;
 
 namespace CLI {
 
-    public ref class Result :
+    public ref class BasicResult :
         public ManagedObject<SPTAG::BasicResult>
     {
     public:
-        Result(SPTAG::BasicResult* p_instance) : ManagedObject(p_instance) 
+        BasicResult(SPTAG::BasicResult* p_instance) : ManagedObject(p_instance) 
         {
         }
 
@@ -72,9 +72,9 @@ namespace CLI {
 
         bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
 
-        array<Result^>^ Search(array<Byte>^ p_data, int p_resultNum);
+        array<BasicResult^>^ Search(array<Byte>^ p_data, int p_resultNum);
 
-        array<Result^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
+        array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
 
         bool Save(String^ p_saveFile);
 
