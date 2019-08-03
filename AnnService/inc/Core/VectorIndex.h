@@ -22,47 +22,46 @@ public:
 
     virtual ~VectorIndex();
 
-    virtual ErrorCode SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout) = 0;
-
-    virtual ErrorCode LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader) = 0;
-
-    virtual ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs) = 0;
-
     virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension) = 0;
-
-    virtual ErrorCode SearchIndex(QueryResult& p_results) const = 0;
 
     virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
-    virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
+    virtual ErrorCode SearchIndex(QueryResult& p_results) const = 0;
     
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
-    virtual const bool ContainSample(const SizeType idx) const = 0;
+    virtual bool ContainSample(const SizeType idx) const = 0;
+    virtual bool NeedRefine() const = 0;
+   
     virtual DimensionType GetFeatureDim() const = 0;
     virtual SizeType GetNumSamples() const = 0;
 
     virtual DistCalcMethod GetDistCalcMethod() const = 0;
     virtual IndexAlgoType GetIndexAlgoType() const = 0;
     virtual VectorValueType GetVectorValueType() const = 0;
-    virtual int GetNumThreads() const = 0;
 
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
 
+    virtual std::vector<std::uint64_t> BufferSize() const;
+
+    virtual ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
+
     virtual ErrorCode LoadIndex(const std::string& p_folderPath);
+
+    virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
-    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
-    
     virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
+
+    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
@@ -72,8 +71,7 @@ public:
 
     virtual std::string GetIndexName() const 
     { 
-        if (m_sIndexName == "")
-            return Helper::Convert::ConvertToString(GetIndexAlgoType());
+        if (m_sIndexName == "") return Helper::Convert::ConvertToString(GetIndexAlgoType());
         return m_sIndexName; 
     }
     virtual void SetIndexName(std::string p_name) { m_sIndexName = p_name; }
@@ -84,8 +82,40 @@ public:
     
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
+    static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
+protected:
+    virtual std::vector<std::uint64_t> CalculateBufferSize() const = 0;
+
+    virtual ErrorCode SaveConfig(std::ostream& p_configout) const = 0;
+
+    virtual ErrorCode SaveIndexData(const std::string& p_folderPath) = 0;
+
+    virtual ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams) = 0;
+
+    virtual ErrorCode LoadConfig(Helper::IniReader& p_reader) = 0;
+
+    virtual ErrorCode LoadIndexData(const std::string& p_folderPath) = 0;
+
+    virtual ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) = 0;
+
+    virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
+
+    virtual ErrorCode RefineIndex(const std::string& p_folderPath) = 0;
+
+    virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
+
+private:
+    void BuildMetaMapping();
+
+    ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
+
+    ErrorCode SaveIndexConfig(std::ostream& p_configOut);
+
 protected:
     std::string m_sIndexName;
+    std::string m_sMetadataFile = "metadata.bin";
+    std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::unique_ptr<std::unordered_map<std::string, SizeType>> m_pMetaToVec;
 };

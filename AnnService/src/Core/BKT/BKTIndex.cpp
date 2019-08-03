@@ -13,17 +13,7 @@ namespace SPTAG
     namespace BKT
     {
         template <typename T>
-        ErrorCode Index<T>::LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs)
-        {
-            if (!m_pSamples.Load((char*)p_indexBlobs[0])) return ErrorCode::FailedParseValue;
-            if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1])) return ErrorCode::FailedParseValue;
-            if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2])) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() > 3 && !m_deletedID.load((char*)p_indexBlobs[3])) return ErrorCode::FailedParseValue;
-            return ErrorCode::Success;
-        }
-
-        template <typename T>
-        ErrorCode Index<T>::LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader)
+        ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
         {
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
             SetParameter(RepresentStr, \
@@ -33,7 +23,27 @@ namespace SPTAG
 
 #include "inc/Core/BKT/ParameterDefinitionList.h"
 #undef DefineBKTParameter
+            return ErrorCode::Success;
+        }
 
+        template <typename T>
+        ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
+        {
+            if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
+
+            if (!m_pSamples.Load((char*)p_indexBlobs[0].Data())) return ErrorCode::FailedParseValue;
+            if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data())) return ErrorCode::FailedParseValue;
+            if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data())) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && !m_deletedID.load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
+
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::string& p_folderPath)
+        {
             if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
             if (!m_pTrees.LoadTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
             if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
@@ -41,6 +51,47 @@ namespace SPTAG
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::SaveConfig(std::ostream& p_configOut) const
+        {
+#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+    p_configOut << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
+
+#include "inc/Core/BKT/ParameterDefinitionList.h"
+#undef DefineBKTParameter
+            p_configOut << std::endl;
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode
+            Index<T>::SaveIndexData(const std::string& p_folderPath)
+        {
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_pTrees.SaveTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
+            if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::ostream*>& p_indexStreams)
+        {
+            if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
+            
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+
+            if (!m_pSamples.Save(*p_indexStreams[0])) return ErrorCode::Fail;
+            if (!m_pTrees.SaveTrees(*p_indexStreams[1])) return ErrorCode::Fail;
+            if (!m_pGraph.SaveGraph(*p_indexStreams[2])) return ErrorCode::Fail;
+            if (!m_deletedID.save(*p_indexStreams[3])) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -155,19 +206,8 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::RefineIndex(const std::string& p_folderPath)
+        ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
         {
-            std::string folderPath(p_folderPath);
-            if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
-            {
-                folderPath += FolderSep;
-            }
-
-            if (!direxists(folderPath.c_str()))
-            {
-                mkdir(folderPath.c_str());
-            }
-
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
 
@@ -191,21 +231,58 @@ namespace SPTAG
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
 
-            if (false == m_pSamples.Refine(indices, folderPath + m_sDataPointsFilename)) return ErrorCode::FailedCreateFile;
-            if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, folderPath)) return ErrorCode::FailedCreateFile;
-    
+            if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
+            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
+
             COMMON::BKTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices);
 #pragma omp parallel for
             for (SizeType i = 0; i < newTrees.size(); i++) {
                 newTrees[i].centerid = reverseIndices[newTrees[i].centerid];
             }
-            newTrees.SaveTrees(folderPath + m_sBKTFilename);
+            newTrees.SaveTrees(*p_indexStreams[1]);
 
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, folderPath + m_sGraphFilename, 
-                &(newTrees.GetSampleMap()));
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, *p_indexStreams[2], &(newTrees.GetSampleMap()));
 
             return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::RefineIndex(const std::string& p_folderPath)
+        {
+            std::string folderPath(p_folderPath);
+            if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
+            {
+                folderPath += FolderSep;
+            }
+
+            if (!direxists(folderPath.c_str()))
+            {
+                mkdir(folderPath.c_str());
+            }
+
+            std::vector<std::ostream*> streams;
+            streams.push_back(new std::ofstream(folderPath + m_sDataPointsFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sBKTFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sGraphFilename, std::ios::binary));
+            streams.push_back(new std::ofstream(folderPath + m_sDeleteDataPointsFilename, std::ios::binary));
+            if (nullptr != m_pMetadata)
+            {
+                streams.push_back(new std::ofstream(folderPath + "metadata.bin", std::ios::binary));
+                streams.push_back(new std::ofstream(folderPath + "metadataIndex.bin", std::ios::binary));
+            }
+
+            for (size_t i = 0; i < streams.size(); i++)
+                if (!(((std::ofstream*)streams[i])->is_open())) return ErrorCode::FailedCreateFile;
+
+            ErrorCode ret = RefineIndex(streams);
+
+            for (size_t i = 0; i < streams.size(); i++)
+            {
+                ((std::ofstream*)streams[i])->close();
+                delete streams[i];
+            }
+            return ret;
         }
 
         template <typename T>
@@ -268,35 +345,6 @@ namespace SPTAG
             }
             if (p_start != nullptr) *p_start = begin;
             std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
-            return ErrorCode::Success;
-        }
-
-        template<typename T>
-        ErrorCode
-            Index<T>::SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout)
-        {
-            m_sDataPointsFilename = "vectors.bin";
-            m_sBKTFilename = "tree.bin";
-            m_sGraphFilename = "graph.bin";
-
-#define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    p_configout << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
-
-#include "inc/Core/BKT/ParameterDefinitionList.h"
-#undef DefineBKTParameter
-
-            p_configout << std::endl;
- 
-            if (m_deletedID.size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine)) return RefineIndex(p_folderPath);
-            
-            std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
-
-            if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!m_pTrees.SaveTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
-            if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            if (!m_deletedID.save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
-
             return ErrorCode::Success;
         }
 

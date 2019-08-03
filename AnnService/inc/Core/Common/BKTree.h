@@ -187,19 +187,30 @@ namespace SPTAG
                 }
             }
 
+            inline std::uint64_t BufferSize() const
+            {
+                return sizeof(int) + sizeof(SizeType) * m_iTreeNumber +
+                    sizeof(SizeType) + sizeof(BKTNode) * m_pTreeRoots.size();
+            }
+
+            bool SaveTrees(std::ostream& p_outstream) const
+            {
+                p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
+                p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
+                p_outstream.write((char*)&treeNodeSize, sizeof(SizeType));
+                p_outstream.write((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                std::cout << "Save BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                return true;
+            }
+
             bool SaveTrees(std::string sTreeFileName) const
             {
                 std::cout << "Save BKT to " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "wb");
-                if (fp == NULL) return false;
-
-                fwrite(&m_iTreeNumber, sizeof(int), 1, fp);
-                fwrite(m_pTreeStart.data(), sizeof(SizeType), m_iTreeNumber, fp);
-                SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
-                fwrite(&treeNodeSize, sizeof(SizeType), 1, fp);
-                fwrite(m_pTreeRoots.data(), sizeof(BKTNode), treeNodeSize, fp);
-                fclose(fp);
-                std::cout << "Save BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                std::ofstream output(sTreeFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                SaveTrees(output);
+                output.close();
                 return true;
             }
 
@@ -215,6 +226,7 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
+                std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 

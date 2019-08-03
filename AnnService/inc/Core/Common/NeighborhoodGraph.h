@@ -27,7 +27,10 @@ namespace SPTAG
                                  m_iCEFScale(2),
                                  m_iRefineIter(0),
                                  m_iCEF(1000),
-                                 m_iMaxCheckForRefineGraph(10000) {}
+                                 m_iMaxCheckForRefineGraph(10000) 
+            {
+                m_pNeighborhoodGraph.SetName("Graph");
+            }
 
             ~NeighborhoodGraph() {}
 
@@ -148,7 +151,7 @@ namespace SPTAG
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::string graphFileName, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::ostream& output, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 SizeType R = (SizeType)indices.size();
 
@@ -166,14 +169,7 @@ namespace SPTAG
                     nodes[m_iNeighborhoodSize - 1] = -2 - idmap->at(-1 - indices[i]);
                 }
 
-                std::ofstream graphOut(graphFileName, std::ios::binary);
-                if (!graphOut.is_open()) return ErrorCode::FailedCreateFile;
-                graphOut.write((char*)&R, sizeof(SizeType));
-                graphOut.write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
-                for (SizeType i = 0; i < R; i++) {
-                    graphOut.write((char*)m_pNeighborhoodGraph[indices[i]], sizeof(SizeType) * m_iNeighborhoodSize);
-                }
-                graphOut.close();
+                m_pNeighborhoodGraph.Refine(indices, output);
                 return ErrorCode::Success;
             }
 
@@ -336,54 +332,39 @@ namespace SPTAG
                 }
             }
 
+            inline std::uint64_t BufferSize() const
+            {
+                return m_pNeighborhoodGraph.BufferSize();
+            }
+
             bool LoadGraph(std::string sGraphFilename)
             {
-                std::cout << "Load Graph From " << sGraphFilename << std::endl;
-                FILE * fp = fopen(sGraphFilename.c_str(), "rb");
-                if (fp == NULL) return false;
+                if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;
 
-                fread(&m_iGraphSize, sizeof(SizeType), 1, fp);
-                fread(&m_iNeighborhoodSize, sizeof(DimensionType), 1, fp);
-                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 m_dataUpdateLock.resize(m_iGraphSize);
-
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                {
-                    fread((m_pNeighborhoodGraph)[i], sizeof(SizeType), m_iNeighborhoodSize, fp);
-                }
-                fclose(fp);
-                std::cout << "Load Graph (" << m_iGraphSize << "," << m_iNeighborhoodSize << ") Finish!" << std::endl;
                 return true;
             }
             
-            bool SetGraph(char* pGraphMemFile)
+            bool LoadGraph(char* pGraphMemFile)
             {
-                m_iGraphSize = *((SizeType*)pGraphMemFile);
-                pGraphMemFile += sizeof(SizeType);
+                m_pNeighborhoodGraph.Load(pGraphMemFile);
 
-                m_iNeighborhoodSize = *((DimensionType*)pGraphMemFile);
-                pGraphMemFile += sizeof(DimensionType);
-
-                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, (SizeType*)pGraphMemFile);
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 m_dataUpdateLock.resize(m_iGraphSize);
                 return true;
             }
             
             bool SaveGraph(std::string sGraphFilename) const
             {
-                std::cout << "Save Graph To " << sGraphFilename << std::endl;
-                FILE *fp = fopen(sGraphFilename.c_str(), "wb");
-                if (fp == NULL) return false;
+                return m_pNeighborhoodGraph.Save(sGraphFilename);
+            }
 
-                fwrite(&m_iGraphSize, sizeof(SizeType), 1, fp);
-                fwrite(&m_iNeighborhoodSize, sizeof(DimensionType), 1, fp);
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                {
-                    fwrite((m_pNeighborhoodGraph)[i], sizeof(SizeType), m_iNeighborhoodSize, fp);
-                }
-                fclose(fp);
-                std::cout << "Save Graph (" << m_iGraphSize << "," << m_iNeighborhoodSize << ") Finish!" << std::endl;
-                return true;
+            bool SaveGraph(std::ostream& output) const
+            {
+                return m_pNeighborhoodGraph.Save(output);
             }
 
             inline ErrorCode AddBatch(SizeType num)

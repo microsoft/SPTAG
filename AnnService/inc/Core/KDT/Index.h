@@ -72,6 +72,7 @@ namespace SPTAG
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
 				
+                m_pSamples.SetName("Vector");
 				m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
 			}
 
@@ -88,14 +89,27 @@ namespace SPTAG
             
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
-            inline const bool ContainSample(const SizeType idx) const { return !m_deletedID.contains(idx); }
+            inline bool ContainSample(const SizeType idx) const { return !m_deletedID.contains(idx); }
+            inline bool NeedRefine() const { return m_deletedID.size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            std::vector<std::uint64_t> CalculateBufferSize() const
+            {
+                std::vector<std::uint64_t> buffersize;
+                buffersize.push_back(m_pSamples.BufferSize());
+                buffersize.push_back(m_pTrees.BufferSize());
+                buffersize.push_back(m_pGraph.BufferSize());
+                buffersize.push_back(m_deletedID.bufferSize());
+                return buffersize;
+            }
+
+            ErrorCode SaveConfig(std::ostream& p_configout) const;
+            ErrorCode SaveIndexData(const std::string& p_folderPath);
+            ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams);
+
+            ErrorCode LoadConfig(Helper::IniReader& p_reader);
+            ErrorCode LoadIndexData(const std::string& p_folderPath);
+            ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
-
-            ErrorCode LoadIndexFromMemory(const std::vector<void*>& p_indexBlobs);
-
-            ErrorCode SaveIndex(const std::string& p_folderPath, std::ofstream& p_configout);
-            ErrorCode LoadIndex(const std::string& p_folderPath, Helper::IniReader& p_reader);
             ErrorCode SearchIndex(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
@@ -104,8 +118,10 @@ namespace SPTAG
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;
 
-        private:
             ErrorCode RefineIndex(const std::string& p_folderPath);
+            ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams);
+
+        private:
             void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<SizeType> &p_deleted) const;
             void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };

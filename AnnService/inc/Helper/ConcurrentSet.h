@@ -27,11 +27,15 @@ namespace SPTAG
 
             std::shared_timed_mutex& getLock();
 
+            bool save(std::ostream& output);
+
             bool save(std::string filename);
 
             bool load(std::string filename);
 
             bool load(char* pmemoryFile);
+
+            std::uint64_t bufferSize() const;
 
         private:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
@@ -77,18 +81,30 @@ namespace SPTAG
         }
 
         template<typename T>
+        std::uint64_t ConcurrentSet<T>::bufferSize() const
+        {
+            return sizeof(SizeType) + sizeof(T) * m_data.size();
+        }
+
+        template<typename T>
+        bool ConcurrentSet<T>::save(std::ostream& output)
+        {
+            SizeType count = (SizeType)m_data.size();
+            output.write((char*)&count, sizeof(SizeType));
+            for (auto iter = m_data.begin(); iter != m_data.end(); iter++)
+                output.write((char*)&(*iter), sizeof(T));
+            std::cout << "Save DeleteID (" << count << ") Finish!" << std::endl;
+            return true;
+        }
+
+        template<typename T>
         bool ConcurrentSet<T>::save(std::string filename)
         {
             std::cout << "Save DeleteID To " << filename << std::endl;
-            FILE * fp = fopen(filename.c_str(), "wb");
-            if (fp == NULL) return false;
-
-            SizeType count = (SizeType)m_data.size();
-            fwrite(&count, sizeof(SizeType), 1, fp);
-            for (auto iter = m_data.begin(); iter != m_data.end(); iter++)
-                fwrite(&(*iter), sizeof(T), 1, fp);
-            fclose(fp);
-            std::cout << "Save DeleteID (" << count << ") Finish!" << std::endl;
+            std::ofstream output(filename, std::ios::binary);
+            if (!output.is_open()) return false;
+            save(output);
+            output.close();
             return true;
         }
 
@@ -121,7 +137,7 @@ namespace SPTAG
 
             m_data.insert((T*)pmemoryFile, ((T*)pmemoryFile) + count);
             pmemoryFile += sizeof(T) * count;
-
+            std::cout << "Load DeleteID (" << count << ") Finish!" << std::endl;
             return true;
         }
     }
