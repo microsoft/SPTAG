@@ -127,7 +127,7 @@ int Process(Helper::IniReader& reader, VectorIndex& index)
 
         std::cout << "    \t[avg]      \t[99%] \t[95%] \t[recall] \t[mem]" << std::endl;
 
-        SizeType subSize = (numQuerys - 1) / index.GetNumThreads() + 1;
+        SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
         for (std::string& mc : maxCheck)
         {
             index.SetParameter("MaxCheck", mc.c_str());
