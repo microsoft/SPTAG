@@ -65,16 +65,16 @@ namespace SPTAG
             int m_iNumberOfOtherDynamicPivots;
         public:
             Index()
-			{
+            {
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
-				
+                
                 m_pSamples.SetName("Vector");
-				m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-			}
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+            }
 
             ~Index() {}
 
@@ -91,14 +91,14 @@ namespace SPTAG
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.contains(idx); }
             inline bool NeedRefine() const { return m_deletedID.size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
-            std::vector<std::uint64_t> CalculateBufferSize() const
+            std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
-                std::vector<std::uint64_t> buffersize;
-                buffersize.push_back(m_pSamples.BufferSize());
-                buffersize.push_back(m_pTrees.BufferSize());
-                buffersize.push_back(m_pGraph.BufferSize());
-                buffersize.push_back(m_deletedID.bufferSize());
-                return buffersize;
+                std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
+                buffersize->push_back(m_pSamples.BufferSize());
+                buffersize->push_back(m_pTrees.BufferSize());
+                buffersize->push_back(m_pGraph.BufferSize());
+                buffersize->push_back(m_deletedID.bufferSize());
+                return std::move(buffersize);
             }
 
             ErrorCode SaveConfig(std::ostream& p_configout) const;

@@ -261,8 +261,8 @@ namespace SPTAG
             streams.push_back(new std::ofstream(folderPath + m_sDeleteDataPointsFilename, std::ios::binary));
             if (nullptr != m_pMetadata)
             {
-                streams.push_back(new std::ofstream(folderPath + "metadata.bin", std::ios::binary));
-                streams.push_back(new std::ofstream(folderPath + "metadataIndex.bin", std::ios::binary));
+                streams.push_back(new std::ofstream(folderPath + m_sMetadataFile, std::ios::binary));
+                streams.push_back(new std::ofstream(folderPath + m_sMetadataIndexFile, std::ios::binary));
             }
 
             for (size_t i = 0; i < streams.size(); i++) 

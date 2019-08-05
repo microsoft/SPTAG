@@ -120,18 +120,18 @@ namespace SPTAG
             bool LoadTrees(std::string sTreeFileName)
             {
                 std::cout << "Load KDT From " << sTreeFileName << std::endl;
-                FILE *fp = fopen(sTreeFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::ifstream input(sTreeFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                fread(&m_iTreeNumber, sizeof(int), 1, fp);
+                input.read((char*)&m_iTreeNumber, sizeof(int));
                 m_pTreeStart.resize(m_iTreeNumber);
-                fread(m_pTreeStart.data(), sizeof(SizeType), m_iTreeNumber, fp);
+                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
 
                 SizeType treeNodeSize;
-                fread(&treeNodeSize, sizeof(SizeType), 1, fp);
+                input.read((char*)&treeNodeSize, sizeof(SizeType));
                 m_pTreeRoots.resize(treeNodeSize);
-                fread(m_pTreeRoots.data(), sizeof(KDTNode), treeNodeSize, fp);
-                fclose(fp);
+                input.read((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
+                input.close();
                 std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }

@@ -45,7 +45,7 @@ public:
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
 
-    virtual std::vector<std::uint64_t> BufferSize() const;
+    virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
     virtual ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
 
@@ -85,7 +85,7 @@ public:
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
 protected:
-    virtual std::vector<std::uint64_t> CalculateBufferSize() const = 0;
+    virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
     virtual ErrorCode SaveConfig(std::ostream& p_configout) const = 0;
 

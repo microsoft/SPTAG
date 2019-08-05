@@ -112,18 +112,18 @@ namespace SPTAG
         bool ConcurrentSet<T>::load(std::string filename)
         {
             std::cout << "Load DeleteID From " << filename << std::endl;
-            FILE * fp = fopen(filename.c_str(), "rb");
-            if (fp == NULL) return true;
-
+            std::ifstream input(filename, std::ios::binary);
+            if (!input.is_open()) return false;
+       
             SizeType count;
             T ID;
-            fread(&count, sizeof(SizeType), 1, fp);
+            input.read((char*)&count, sizeof(SizeType));
             for (SizeType i = 0; i < count; i++)
             {
-                fread(&ID, sizeof(T), 1, fp);
+                input.read((char*)&ID, sizeof(T));
                 m_data.insert(ID);
             }
-            fclose(fp);
+            input.close();
             std::cout << "Load DeleteID (" << count << ") Finish!" << std::endl;
             return true;
         }

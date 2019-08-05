@@ -28,7 +28,7 @@ namespace SPTAG
         class Dataset
         {
         private:
-            std::string name;
+            std::string name = "Data";
             SizeType rows = 0;
             DimensionType cols = 1;
             bool ownData = false;
@@ -38,7 +38,7 @@ namespace SPTAG
             static const SizeType rowsInBlock = 1024 * 1024;
         public:
             Dataset()
-            { 
+            {
                 incBlocks.reserve(MaxSize / rowsInBlock + 1); 
             }
             Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
@@ -65,7 +65,7 @@ namespace SPTAG
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
-            void SetName(std::string name_) { name = name_; }
+            void SetName(const std::string name_) { name = name_; }
             void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
@@ -171,20 +171,15 @@ namespace SPTAG
             bool Load(std::string sDataPointsFileName)
             {
                 std::cout << "Load " << name << " From " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::ifstream input(sDataPointsFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                SizeType R;
-                DimensionType C;
-                fread(&R, sizeof(SizeType), 1, fp);
-                fread(&C, sizeof(DimensionType), 1, fp);
+                input.read((char*)&rows, sizeof(SizeType));
+                input.read((char*)&cols, sizeof(DimensionType));
 
-                Initialize(R, C);
-                R = 0;
-                while (R < rows) {
-                    R += (SizeType)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
-                }
-                fclose(fp);
+                Initialize(rows, cols);
+                input.read((char*)data, sizeof(T) * cols * rows);
+                input.close();
                 std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }

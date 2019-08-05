@@ -23,9 +23,14 @@ namespace SPTAG
         class obufferstream : public std::ostream
         {
         public:
-            obufferstream(char* buffer, size_t size) : m_buf(new streambuf(buffer, size)), std::ostream(m_buf.get()) {}
+            obufferstream(streambuf* buf, bool transferOwnership) : std::ostream(buf)
+            {
+                if (transferOwnership)
+                    m_bufHolder.reset(buf, std::default_delete<streambuf>());
+            }
+
         private:
-            std::unique_ptr<streambuf> m_buf;
+            std::shared_ptr<streambuf> m_bufHolder;
         };
     } // namespace Helper
 } // namespace SPTAG

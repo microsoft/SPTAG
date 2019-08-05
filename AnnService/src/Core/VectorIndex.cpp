@@ -56,16 +56,16 @@ VectorIndex::GetMetadata(SizeType p_vectorID) const {
 }
 
 
-std::vector<std::uint64_t> VectorIndex::BufferSize() const
+std::shared_ptr<std::vector<std::uint64_t>> VectorIndex::CalculateBufferSize() const
 {
-    std::vector<std::uint64_t> ret = CalculateBufferSize();
+    std::shared_ptr<std::vector<std::uint64_t>> ret = BufferSize();
     if (m_pMetadata != nullptr)
     {
         auto metasize = m_pMetadata->BufferSize();
-        ret.push_back(metasize.first);
-        ret.push_back(metasize.second);
+        ret->push_back(metasize.first);
+        ret->push_back(metasize.second);
     }
-    return ret;
+    return std::move(ret);
 }
 
 
@@ -188,11 +188,9 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     p_config = p_configStream.str();
     
     std::vector<std::ostream*> p_indexStreams;
-    std::vector<Helper::streambuf*> p_buffers;
     for (size_t i = 0; i < p_indexBlobs.size(); i++)
     {
-        p_buffers.push_back(new Helper::streambuf((char*)p_indexBlobs[i].Data(), p_indexBlobs[i].Length()));
-        p_indexStreams.push_back(new std::ostream(p_buffers[i]));
+        p_indexStreams.push_back(new Helper::obufferstream(new Helper::streambuf((char*)p_indexBlobs[i].Data(), p_indexBlobs[i].Length()), true));
     }
 
     ErrorCode ret = ErrorCode::Success;
@@ -211,7 +209,6 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     for (size_t i = 0; i < p_indexStreams.size(); i++)
     {
         delete p_indexStreams[i];
-        delete p_buffers[i];
     }
     return ret;
 }

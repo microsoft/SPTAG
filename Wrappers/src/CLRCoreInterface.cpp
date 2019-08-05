@@ -104,12 +104,12 @@ namespace Microsoft
 
             array<array<Byte>^>^ AnnIndex::Dump()
             {
-                std::vector<std::uint64_t> buffersize = (*m_Instance)->BufferSize();
-                array<array<Byte>^>^ res = gcnew array<array<Byte>^>(buffersize.size() + 1);
+                std::shared_ptr<std::vector<std::uint64_t>> buffersize = (*m_Instance)->CalculateBufferSize();
+                array<array<Byte>^>^ res = gcnew array<array<Byte>^>(buffersize->size() + 1);
                 std::vector<SPTAG::ByteArray> indexBlobs;
                 for (int i = 1; i < res->Length; i++)
                 {
-                    res[i] = gcnew array<Byte>(buffersize[i-1]);
+                    res[i] = gcnew array<Byte>(buffersize->at(i-1));
                     pin_ptr<Byte> ptr = &res[i][0];
                     indexBlobs.push_back(SPTAG::ByteArray((std::uint8_t*)ptr, res[i]->LongLength, false));
                 }
