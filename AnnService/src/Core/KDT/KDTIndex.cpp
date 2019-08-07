@@ -133,7 +133,7 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<SizeType> &p_deleted) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
         {
             Search(if (!p_deleted.contains(gnode.node)))
         }
@@ -237,6 +237,8 @@ namespace SPTAG
             }
             newTrees.SaveTrees(*p_indexStreams[1]);
 
+            Helper::Concurrent::ConcurrentSet<SizeType> newDeletedID;
+            newDeletedID.save(*p_indexStreams[3]);
             return ErrorCode::Success;
         }
 

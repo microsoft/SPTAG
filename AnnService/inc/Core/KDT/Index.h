@@ -51,7 +51,7 @@ namespace SPTAG
             std::string m_sDeleteDataPointsFilename;
 
             std::mutex m_dataAddLock; // protect data and graph
-            COMMON::ConcurrentSet<SizeType> m_deletedID;
+            Helper::Concurrent::ConcurrentSet<SizeType> m_deletedID;
             float m_fDeletePercentageForRefine;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
             
@@ -122,7 +122,7 @@ namespace SPTAG
             ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams);
 
         private:
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const COMMON::ConcurrentSet<SizeType> &p_deleted) const;
+            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const;
             void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };
     } // namespace KDT
