@@ -124,7 +124,8 @@ ErrorCode
 VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
 {
     SPTAG::Helper::IniReader p_reader;
-    if (SPTAG::ErrorCode::Success != p_reader.LoadIni(std::istringstream(p_config))) return ErrorCode::FailedParseValue;
+    std::istringstream p_configin(p_config);
+    if (SPTAG::ErrorCode::Success != p_reader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
     LoadIndexConfig(p_reader);
     
     if (p_reader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
@@ -373,7 +374,8 @@ ErrorCode
 VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
     SPTAG::Helper::IniReader iniReader;
-    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(std::istringstream(p_config))) return ErrorCode::FailedParseValue;
+    std::istringstream p_configin(p_config);
+    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);

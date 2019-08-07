@@ -19,8 +19,6 @@ namespace SPTAG
         BasicResult(SizeType p_vid, float p_dist) : VID(p_vid), Dist(p_dist) {}
 
         BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta) {}
-
-        BasicResult(BasicResult& p_result) : VID(p_result.VID), Dist(p_result.Dist), Meta(p_result.Meta) {}
     };
 
 } // namespace SPTAG
