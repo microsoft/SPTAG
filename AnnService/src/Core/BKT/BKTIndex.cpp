@@ -315,14 +315,14 @@ namespace SPTAG
             {
                 std::lock_guard<std::mutex> lock(m_dataAddLock);
 
-                if (GetNumSamples() == 0)
-                    return BuildIndex(p_vectors, p_vectorNum, p_dimension);
-
-                if (p_dimension != GetFeatureDim())
-                    return ErrorCode::FailedParseValue;
-
                 begin = GetNumSamples();
                 end = GetNumSamples() + p_vectorNum;
+
+                if (p_start != nullptr) *p_start = begin;
+                
+                if (begin == 0) return BuildIndex(p_vectors, p_vectorNum, p_dimension);
+
+                if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
 
                 if (m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
@@ -343,7 +343,6 @@ namespace SPTAG
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }
-            if (p_start != nullptr) *p_start = begin;
             std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
         }

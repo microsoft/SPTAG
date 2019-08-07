@@ -131,20 +131,20 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     {
         ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
         m_pMetadata.reset(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
-                                             ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
-                                             *((SizeType*)pMetaIndex.Data())));
-    }
-    if (!m_pMetadata->Available())
-    {
-        std::cerr << "Error: Failed to load metadata." << std::endl;
-        return ErrorCode::Fail;
-    }
+            ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
+            *((SizeType*)pMetaIndex.Data())));
 
-    if (p_reader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
-    {
-        BuildMetaMapping();
-    }
+        if (!m_pMetadata->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
 
+        if (p_reader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+        {
+            BuildMetaMapping();
+        }
+    }
     return LoadIndexDataFromMemory(p_indexBlobs);
 }
 
@@ -163,19 +163,20 @@ VectorIndex::LoadIndex(const std::string& p_folderPath)
     LoadIndexConfig(p_configReader);
     
     if (p_configReader.DoesSectionExist("MetaData"))
+    {
         m_pMetadata.reset(new FileMetadataSet(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile));
 
-    if (!m_pMetadata->Available())
-    {
-        std::cerr << "Error: Failed to load metadata." << std::endl;
-        return ErrorCode::Fail;
-    }
+        if (!m_pMetadata->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
 
-    if (p_configReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
-    {
-        BuildMetaMapping();
+        if (p_configReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+        {
+            BuildMetaMapping();
+        }
     }
-
     return LoadIndexData(folderPath);
 }
 
