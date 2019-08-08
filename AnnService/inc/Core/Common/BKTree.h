@@ -354,25 +354,35 @@ namespace SPTAG
                     for (int i = 1; i < threads; i++) {
                         float* currCenter = args.newCenters + i*m_iBKTKmeansK*p_index->GetFeatureDim();
                         for (size_t j = 0; j < ((size_t)m_iBKTKmeansK) * p_index->GetFeatureDim(); j++) args.newCenters[j] += currCenter[j];
+
+                        for (int k = 0; k < m_iBKTKmeansK; k++) {
+                            if (args.clusterIdx[i*m_iBKTKmeansK + k] != -1 && args.clusterDist[i*m_iBKTKmeansK + k] > args.clusterDist[k]) {
+                                args.clusterDist[k] = args.clusterDist[i*m_iBKTKmeansK + k];
+                                args.clusterIdx[k] = args.clusterIdx[i*m_iBKTKmeansK + k];
+                            }
+                        }
                     }
 
-                    int maxcluster = 0;
-                    for (int k = 1; k < m_iBKTKmeansK; k++) if (args.newCounts[maxcluster] < args.newCounts[k]) maxcluster = k;
-
-                    SizeType maxid = (SizeType)maxcluster;
-                    for (int tid = 1; tid < threads; tid++) {
-                        if (args.clusterDist[maxid] < args.clusterDist[tid * m_iBKTKmeansK + maxcluster]) maxid = tid * m_iBKTKmeansK + maxcluster;
+                    int maxcluster = -1;
+                    SizeType maxCount = 0;
+                    for (int k = 0; k < m_iBKTKmeansK; k++) {
+                        void* currCenter = (void*)(args.centers + k * p_index->GetFeatureDim());
+                        if (args.newCounts[k] > maxCount && args.clusterDist[k] > p_index->ComputeDistance(currCenter, currCenter) + lambda*args.counts[k])
+                        {
+                            maxcluster = k;
+                            maxCount = args.newCounts[k];
+                        }
                     }
-                    if (args.clusterIdx[maxid] < 0 || args.clusterIdx[maxid] >= p_index->GetNumSamples())
-                        std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error maxid:" << maxid << " dist:" << args.clusterDist[maxid] << std::endl;
-                    maxid = args.clusterIdx[maxid];
+
+                    if (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= p_index->GetNumSamples())
+                        std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error dist:" << args.clusterDist[maxcluster] << std::endl;
 
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
                         T* TCenter = args.newTCenters + k * p_index->GetFeatureDim();
                         if (args.newCounts[k] == 0) {
                             //int nextid = Utils::rand_int(last, first);
                             //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
-                            SizeType nextid = maxid;
+                            SizeType nextid = args.clusterIdx[maxcluster];
                             std::memcpy(TCenter, p_index->GetSample(nextid), sizeof(T)*p_index->GetFeatureDim());
                         }
                         else {
