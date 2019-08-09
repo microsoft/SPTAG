@@ -102,7 +102,7 @@ public:
     }
 
 
-    inline void SetResult(int p_index, int p_VID, float p_dist)
+    inline void SetResult(int p_index, SizeType p_VID, float p_dist)
     {
         if (p_index < m_resultNum)
         {

@@ -74,7 +74,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup>
-    <TargetName>CLRSPTAG</TargetName>
+    <TargetName>Microsoft.ANN.SPTAGManaged</TargetName>
     <TargetExt>.dll</TargetExt>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
     <IncludePath>$(ProjectDir);$(SolutionDir)AnnService\;$(IncludePath)</IncludePath>

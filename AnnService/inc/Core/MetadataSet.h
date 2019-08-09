@@ -25,13 +25,17 @@ public:
 
     virtual bool Available() const = 0;
 
+    virtual std::pair<std::uint64_t, std::uint64_t> BufferSize() const = 0;
+
     virtual void AddBatch(MetadataSet& data) = 0;
+
+    virtual ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut) = 0;
 
     virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
 
-    virtual ErrorCode RefineMetadata(std::vector<int>& indices, const std::string& p_folderPath);
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
-    static ErrorCode MetaCopy(const std::string& p_src, const std::string& p_dst);
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile);
 };
 
 
@@ -48,7 +52,11 @@ public:
 
     bool Available() const;
 
+    std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
+
     void AddBatch(MetadataSet& data);
+
+    ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
@@ -80,7 +88,11 @@ public:
 
     bool Available() const;
 
+    std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
+
     void AddBatch(MetadataSet& data);
+
+    ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 

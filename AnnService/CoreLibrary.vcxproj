@@ -154,6 +154,7 @@
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
     <ClInclude Include="inc\Helper\Base64Encode.h" />
+    <ClInclude Include="inc\Helper\BufferStream.h" />
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />

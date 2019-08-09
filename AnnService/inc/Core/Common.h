@@ -56,8 +56,8 @@ inline bool fileexists(const char* path) {
 
 namespace SPTAG
 {
-
 typedef std::int32_t SizeType;
+typedef std::int32_t DimensionType;
 
 const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();

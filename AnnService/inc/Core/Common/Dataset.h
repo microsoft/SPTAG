@@ -28,8 +28,9 @@ namespace SPTAG
         class Dataset
         {
         private:
+            std::string name = "Data";
             SizeType rows = 0;
-            SizeType cols = 1;
+            DimensionType cols = 1;
             bool ownData = false;
             T* data = nullptr;
             SizeType incRows = 0;
@@ -37,10 +38,10 @@ namespace SPTAG
             static const SizeType rowsInBlock = 1024 * 1024;
         public:
             Dataset()
-            { 
+            {
                 incBlocks.reserve(MaxSize / rowsInBlock + 1); 
             }
-            Dataset(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
                 incBlocks.reserve(MaxSize / rowsInBlock + 1);
@@ -51,7 +52,7 @@ namespace SPTAG
                 for (T* ptr : incBlocks) aligned_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, SizeType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -64,6 +65,7 @@ namespace SPTAG
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
+            void SetName(const std::string name_) { name = name_; }
             void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
@@ -75,8 +77,9 @@ namespace SPTAG
                 }
             }
             inline SizeType R() const { return rows + incRows; }
-            inline SizeType C() const { return cols; }
-            
+            inline DimensionType C() const { return cols; }
+            inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
+
             inline const T* At(SizeType index) const
             {
                 if (index >= rows) {
@@ -103,7 +106,7 @@ namespace SPTAG
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
-                    if (curBlockIdx >= incBlocks.size()) {
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
@@ -124,7 +127,7 @@ namespace SPTAG
                 SizeType written = 0;
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
-                    if (curBlockIdx >= incBlocks.size()) {
+                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
@@ -138,85 +141,85 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            bool Save(std::string sDataPointsFileName)
+            bool Save(std::ostream& p_outstream) const
             {
-                std::cout << "Save Data To " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
-                if (fp == NULL) return false;
-
                 SizeType CR = R();
-                fwrite(&CR, sizeof(SizeType), 1, fp);
-                fwrite(&cols, sizeof(SizeType), 1, fp);
+                p_outstream.write((char*)&CR, sizeof(SizeType));
+                p_outstream.write((char*)&cols, sizeof(DimensionType));
+                p_outstream.write((char*)data, sizeof(T) * cols * rows);
 
-                SizeType written = 0;
-                while (written < rows) 
-                {
-                    written += (SizeType)fwrite(data + ((size_t)written) * cols, sizeof(T) * cols, rows - written, fp);
-                }
+                SizeType blocks = incRows / rowsInBlock;
+                for (int i = 0; i < blocks; i++)
+                    p_outstream.write((char*)incBlocks[i], sizeof(T) * cols * rowsInBlock);
 
-                written = 0;
-                while (written < incRows)
-                {
-                    SizeType pos = written % rowsInBlock;
-                    written += (SizeType)fwrite(incBlocks[written / rowsInBlock] + ((size_t)pos) * cols, sizeof(T) * cols, min(rowsInBlock - pos, incRows - written), fp);
-                }
-                fclose(fp);
+                SizeType remain = incRows % rowsInBlock;
+                if (remain > 0) p_outstream.write((char*)incBlocks[blocks], sizeof(T) * cols * remain);
+                std::cout << "Save " << name << " (" << CR << ", " << cols << ") Finish!" << std::endl;
+                return true;
+            }
 
-                std::cout << "Save Data (" << CR << ", " << cols << ") Finish!" << std::endl;
+            bool Save(std::string sDataPointsFileName) const
+            {
+                std::cout << "Save " << name << " To " << sDataPointsFileName << std::endl;
+                std::ofstream output(sDataPointsFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                Save(output);
+                output.close();
                 return true;
             }
 
             bool Load(std::string sDataPointsFileName)
             {
-                std::cout << "Load Data From " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "rb");
-                if (fp == NULL) return false;
+                std::cout << "Load " << name << " From " << sDataPointsFileName << std::endl;
+                std::ifstream input(sDataPointsFileName, std::ios::binary);
+                if (!input.is_open()) return false;
 
-                SizeType R, C;
-                fread(&R, sizeof(SizeType), 1, fp);
-                fread(&C, sizeof(SizeType), 1, fp);
+                input.read((char*)&rows, sizeof(SizeType));
+                input.read((char*)&cols, sizeof(DimensionType));
 
-                Initialize(R, C);
-                R = 0;
-                while (R < rows) {
-                    R += (SizeType)fread(data + ((size_t)R) * C, sizeof(T) * C, rows - R, fp);
-                }
-                fclose(fp);
-                std::cout << "Load Data (" << rows << ", " << cols << ") Finish!" << std::endl;
+                Initialize(rows, cols);
+                input.read((char*)data, sizeof(T) * cols * rows);
+                input.close();
+                std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }
 
             // Functions for loading models from memory mapped files
             bool Load(char* pDataPointsMemFile)
             {
-                SizeType R, C;
+                SizeType R;
+                DimensionType C;
                 R = *((SizeType*)pDataPointsMemFile);
                 pDataPointsMemFile += sizeof(SizeType);
 
-                C = *((SizeType*)pDataPointsMemFile);
-                pDataPointsMemFile += sizeof(SizeType);
+                C = *((DimensionType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(DimensionType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
+                std::cout << "Load " << name << " (" << R << ", " << C << ") Finish!" << std::endl;
+                return true;
+            }
+
+            bool Refine(const std::vector<SizeType>& indices, std::ostream& output)
+            {
+                SizeType R = (SizeType)(indices.size());
+                output.write((char*)&R, sizeof(SizeType));
+                output.write((char*)&cols, sizeof(DimensionType));
+
+                for (SizeType i = 0; i < R; i++) {
+                    output.write((char*)At(indices[i]), sizeof(T) * cols);
+                }
+                std::cout << "Save Refine " << name << " (" << R << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }
 
             bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName)
             {
-                std::cout << "Save Refine Data To " << sDataPointsFileName << std::endl;
-                FILE * fp = fopen(sDataPointsFileName.c_str(), "wb");
-                if (fp == NULL) return false;
-
-                SizeType R = (SizeType)(indices.size());
-                fwrite(&R, sizeof(SizeType), 1, fp);
-                fwrite(&cols, sizeof(SizeType), 1, fp);
-
-                // write point one by one in case for cache miss
-                for (SizeType i = 0; i < R; i++) {
-                    fwrite(At(indices[i]), sizeof(T) * cols, 1, fp);
-                }
-                fclose(fp);
-
-                std::cout << "Save Refine Data (" << R << ", " << cols << ") Finish!" << std::endl;
+                std::cout << "Save Refine " << name << " To " << sDataPointsFileName << std::endl;
+                std::ofstream output(sDataPointsFileName, std::ios::binary);
+                if (!output.is_open()) return false;
+                Refine(indices, output);
+                output.close();
                 return true;
             }
         };
