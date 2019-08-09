@@ -374,12 +374,12 @@ namespace SPTAG
                         }
                     }
 
-                    if (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= p_index->GetNumSamples())
+                    if (maxcluster != -1 && (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= p_index->GetNumSamples()))
                         std::cout << "first:" << first << " last:" << last << " maxcluster:" << maxcluster << "(" << args.newCounts[maxcluster] << ") Error dist:" << args.clusterDist[maxcluster] << std::endl;
 
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
                         T* TCenter = args.newTCenters + k * p_index->GetFeatureDim();
-                        if (args.newCounts[k] == 0) {
+                        if (args.newCounts[k] == 0 && maxcluster != -1) {
                             //int nextid = Utils::rand_int(last, first);
                             //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
                             SizeType nextid = args.clusterIdx[maxcluster];
