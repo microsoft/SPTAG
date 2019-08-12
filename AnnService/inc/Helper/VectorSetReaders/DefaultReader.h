@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
-#define _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULTREADER_H_
+#ifndef _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
+#define _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
 
 #include "../VectorSetReader.h"
 #include "inc/Helper/Concurrent.h"
@@ -13,19 +13,15 @@
 
 namespace SPTAG
 {
-namespace IndexBuilder
+namespace Helper
 {
 
 class DefaultReader : public VectorSetReader
 {
 public:
-    DefaultReader(std::shared_ptr<BuilderOptions> p_options);
-
-    DefaultReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
+    DefaultReader(std::shared_ptr<ReaderOptions> p_options);
 
     virtual ~DefaultReader();
-
-    virtual void Init();
 
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 
@@ -106,7 +102,7 @@ private:
 
 
 
-} // namespace IndexBuilder
+} // namespace Helper
 } // namespace SPTAG
 
-#endif // _SPTAG_INDEXBUILDER_VECTORSETREADERS_DEFAULT_H_
+#endif // _SPTAG_HELPER_VECTORSETREADERS_DEFAULT_H_

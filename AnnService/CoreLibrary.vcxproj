@@ -164,6 +164,8 @@
     <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\BKTree.h" />
     <ClInclude Include="inc\Core\Common\KDTree.h" />
+    <ClInclude Include="inc\Helper\VectorSetReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
@@ -178,6 +180,8 @@
     <ClCompile Include="src\Helper\CommonHelper.cpp" />
     <ClCompile Include="src\Helper\Concurrent.cpp" />
     <ClCompile Include="src\Helper\SimpleIniReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

@@ -1,17 +1,17 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/IndexBuilder/VectorSetReaders/DefaultReader.h"
+#include "inc/Helper/VectorSetReaders/DefaultReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
-#include "inc/IndexBuilder/ThreadPool.h"
 
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <omp.h>
 
 using namespace SPTAG;
-using namespace SPTAG::IndexBuilder;
+using namespace SPTAG::Helper;
 
 namespace
 {
@@ -139,9 +139,12 @@ private:
 } // namespace Local
 } // namespace
 
-void DefaultReader::Init()
+
+DefaultReader::DefaultReader(std::shared_ptr<ReaderOptions> p_options)
+    : VectorSetReader(std::move(p_options)),
+    m_subTaskBlocksize(0)
 {
-    ThreadPool::Init(m_options->m_threadNum);
+    omp_set_num_threads(m_options->m_threadNum);
 
     std::string tempFolder("tempfolder");
     if (!direxists(tempFolder.c_str()))
@@ -153,22 +156,6 @@ void DefaultReader::Init()
     m_vectorOutput = tempFolder + "vectorset.bin";
     m_metadataConentOutput = tempFolder + "metadata.bin";
     m_metadataIndexOutput = tempFolder + "metadataindex.bin";
-}
-
-
-DefaultReader::DefaultReader(std::shared_ptr<BuilderOptions> p_options)
-    : VectorSetReader(std::move(p_options)),
-    m_subTaskBlocksize(0)
-{
-    Init();
-}
-
-
-DefaultReader::DefaultReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter, std::uint32_t p_threadNum)
-    : VectorSetReader(p_valueType, p_dimension, p_vectorDelimiter, p_threadNum),
-      m_subTaskBlocksize(0)
-{
-    Init();
 }
 
 
@@ -196,7 +183,7 @@ DefaultReader::LoadFile(const std::string& p_filePaths)
 {
     const auto& files = GetFileSizes(p_filePaths);
     std::vector<std::function<void()>> subWorks;
-    subWorks.reserve(files.size() * ThreadPool::CurrentThreadNum());
+    subWorks.reserve(files.size() * m_options->m_threadNum);
 
     m_subTaskCount = 0;
     for (const auto& fileInfo : files)
@@ -213,7 +200,7 @@ DefaultReader::LoadFile(const std::string& p_filePaths)
         std::size_t blockSize = m_subTaskBlocksize;
         if (0 == blockSize)
         {
-            fileTaskCount = ThreadPool::CurrentThreadNum();
+            fileTaskCount = m_options->m_threadNum;
             blockSize = (fileInfo.second + fileTaskCount - 1) / fileTaskCount;
         }
         else
@@ -239,9 +226,10 @@ DefaultReader::LoadFile(const std::string& p_filePaths)
 
     m_waitSignal.Reset(m_subTaskCount);
 
-    for (auto& workItem : subWorks)
+#pragma omp parallel for schedule(dynamic)
+    for (int64_t i = 0; i < (int64_t)subWorks.size(); i++)
     {
-        ThreadPool::Queue(std::move(workItem));
+        subWorks[i]();
     }
 
     m_waitSignal.Wait();
