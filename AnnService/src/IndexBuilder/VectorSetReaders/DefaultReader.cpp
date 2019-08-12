@@ -141,6 +141,8 @@ private:
 
 void DefaultReader::Init()
 {
+    ThreadPool::Init(m_options->m_threadNum);
+
     std::string tempFolder("tempfolder");
     if (!direxists(tempFolder.c_str()))
     {

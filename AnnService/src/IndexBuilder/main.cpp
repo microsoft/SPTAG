@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/IndexBuilder/ThreadPool.h"
 #include "inc/IndexBuilder/Options.h"
 #include "inc/IndexBuilder/VectorSetReader.h"
 #include "inc/Core/VectorIndex.h"
@@ -20,7 +19,7 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
-    IndexBuilder::ThreadPool::Init(options->m_threadNum);
+
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 
     Helper::IniReader iniReader;
