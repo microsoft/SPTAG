@@ -61,6 +61,8 @@ public:
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
+    virtual const void* GetSample(ByteArray p_meta);
+
     virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual std::string GetParameter(const std::string& p_param) const;

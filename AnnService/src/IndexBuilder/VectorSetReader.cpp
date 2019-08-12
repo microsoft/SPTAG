@@ -14,6 +14,16 @@ VectorSetReader::VectorSetReader(std::shared_ptr<BuilderOptions> p_options)
 }
 
 
+VectorSetReader::VectorSetReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter, std::uint32_t p_threadNum)
+    : m_options(new SPTAG::IndexBuilder::BuilderOptions)
+{
+    m_options->m_threadNum = p_threadNum;
+    m_options->m_dimension = p_dimension;
+    m_options->m_vectorDelimiter = p_vectorDelimiter;
+    m_options->m_inputValueType = p_valueType;
+}
+
+
 VectorSetReader:: ~VectorSetReader()
 {
 }
@@ -23,5 +33,12 @@ std::shared_ptr<VectorSetReader>
 VectorSetReader::CreateInstance(std::shared_ptr<BuilderOptions> p_options)
 {
     return std::shared_ptr<VectorSetReader>(new DefaultReader(std::move(p_options)));
+}
+
+
+std::shared_ptr<VectorSetReader>
+VectorSetReader::CreateInstance(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter, std::uint32_t p_threadNum)
+{
+    return std::shared_ptr<VectorSetReader>(new DefaultReader(p_valueType, p_dimension, p_vectorDelimiter, p_threadNum));
 }
 

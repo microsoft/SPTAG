@@ -21,7 +21,11 @@ class DefaultReader : public VectorSetReader
 public:
     DefaultReader(std::shared_ptr<BuilderOptions> p_options);
 
+    DefaultReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
+
     virtual ~DefaultReader();
+
+    virtual void Init();
 
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 
@@ -44,7 +48,7 @@ private:
     template<typename DataType>
     bool TranslateVector(char* p_str, DataType* p_vector)
     {
-        std::uint32_t eleCount = 0;
+        DimensionType eleCount = 0;
         char* next = p_str;
         while ((*next) != '\0')
         {
@@ -85,11 +89,11 @@ private:
 
     std::size_t m_subTaskBlocksize;
 
-    std::atomic<std::uint32_t> m_totalRecordCount;
+    std::atomic<SizeType> m_totalRecordCount;
 
     std::atomic<std::size_t> m_totalRecordVectorBytes;
 
-    std::vector<std::uint32_t> m_subTaskRecordCount;
+    std::vector<SizeType> m_subTaskRecordCount;
 
     std::string m_vectorOutput;
 

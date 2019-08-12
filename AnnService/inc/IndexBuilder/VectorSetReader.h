@@ -19,6 +19,8 @@ namespace IndexBuilder
 class VectorSetReader
 {
 public:
+    VectorSetReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
+
     VectorSetReader(std::shared_ptr<BuilderOptions> p_options);
 
     virtual ~VectorSetReader();
@@ -30,6 +32,8 @@ public:
     virtual std::shared_ptr<MetadataSet> GetMetadataSet() const = 0;
 
     static std::shared_ptr<VectorSetReader> CreateInstance(std::shared_ptr<BuilderOptions> p_options);
+
+    static std::shared_ptr<VectorSetReader> CreateInstance(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
 
 protected:
     std::shared_ptr<BuilderOptions> m_options;

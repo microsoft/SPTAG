@@ -139,9 +139,7 @@ private:
 } // namespace Local
 } // namespace
 
-DefaultReader::DefaultReader(std::shared_ptr<BuilderOptions> p_options)
-    : VectorSetReader(std::move(p_options)),
-      m_subTaskBlocksize(0)
+void DefaultReader::Init()
 {
     std::string tempFolder("tempfolder");
     if (!direxists(tempFolder.c_str()))
@@ -153,6 +151,22 @@ DefaultReader::DefaultReader(std::shared_ptr<BuilderOptions> p_options)
     m_vectorOutput = tempFolder + "vectorset.bin";
     m_metadataConentOutput = tempFolder + "metadata.bin";
     m_metadataIndexOutput = tempFolder + "metadataindex.bin";
+}
+
+
+DefaultReader::DefaultReader(std::shared_ptr<BuilderOptions> p_options)
+    : VectorSetReader(std::move(p_options)),
+    m_subTaskBlocksize(0)
+{
+    Init();
+}
+
+
+DefaultReader::DefaultReader(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter, std::uint32_t p_threadNum)
+    : VectorSetReader(p_valueType, p_dimension, p_vectorDelimiter, p_threadNum),
+      m_subTaskBlocksize(0)
+{
+    Init();
 }
 
 
@@ -244,7 +258,7 @@ DefaultReader::GetVectorSet() const
 
     std::ifstream inputStream;
     inputStream.open(m_vectorOutput, std::ifstream::binary);
-	inputStream.seekg(sizeof(uint32_t) + sizeof(uint32_t), std::ifstream::beg);
+	inputStream.seekg(sizeof(SizeType) + sizeof(DimensionType), std::ifstream::beg);
     inputStream.read(vecBuf, m_totalRecordVectorBytes);
     inputStream.close();
 
@@ -276,7 +290,7 @@ DefaultReader::LoadFileInternal(const std::string& p_filePath,
     std::ofstream metaStreamContent;
     std::ofstream metaStreamIndex;
 
-    std::uint32_t recordCount = 0;
+    SizeType recordCount = 0;
     std::uint64_t metaOffset = 0;
     std::size_t totalRead = 0;
     std::streamoff startpos = p_fileBlockID * p_fileBlockSize;
@@ -400,11 +414,11 @@ DefaultReader::MergeData()
     std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
     char* buf = bufferHolder.get();
 
-	std::uint32_t uint32Var = m_totalRecordCount;
+    SizeType totalRecordCount = m_totalRecordCount;
 
     outputStream.open(m_vectorOutput, std::ofstream::binary);
 
-	outputStream.write(reinterpret_cast<char*>(&uint32Var), sizeof(uint32Var));
+	outputStream.write(reinterpret_cast<char*>(&totalRecordCount), sizeof(totalRecordCount));
 	outputStream.write(reinterpret_cast<char*>(&(m_options->m_dimension)), sizeof(m_options->m_dimension));
 
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
@@ -442,7 +456,7 @@ DefaultReader::MergeData()
 
     outputStream.open(m_metadataIndexOutput, std::ofstream::binary);
 
-    outputStream.write(reinterpret_cast<char*>(&uint32Var), sizeof(uint32Var));
+    outputStream.write(reinterpret_cast<char*>(&totalRecordCount), sizeof(totalRecordCount));
 
     std::uint64_t totalOffset = 0;
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
@@ -453,18 +467,18 @@ DefaultReader::MergeData()
         file += ".tmp";
 
         inputStream.open(file, std::ifstream::binary);
-        for (std::uint32_t remains = m_subTaskRecordCount[i]; remains > 0;)
+        for (SizeType remains = m_subTaskRecordCount[i]; remains > 0;)
         {
             std::size_t readBytesCount = min(remains * sizeof(std::uint64_t), bufferSizeTrim64);
             inputStream.read(buf, readBytesCount);
             std::uint64_t* offset = reinterpret_cast<std::uint64_t*>(buf);
-            for (std::uint32_t i = 0; i < readBytesCount / sizeof(std::uint64_t); ++i)
+            for (std::uint64_t i = 0; i < readBytesCount / sizeof(std::uint64_t); ++i)
             {
                 offset[i] += totalOffset;
             }
 
             outputStream.write(buf, readBytesCount);
-            remains -= static_cast<std::uint32_t>(readBytesCount / sizeof(std::uint64_t));
+            remains -= static_cast<SizeType>(readBytesCount / sizeof(std::uint64_t));
         }
 
         inputStream.read(buf, sizeof(std::uint64_t));

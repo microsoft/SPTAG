@@ -25,7 +25,7 @@ public:
 
     std::uint32_t m_threadNum;
 
-    std::uint32_t m_dimension;
+    DimensionType m_dimension;
 
     std::string m_vectorDelimiter;
 
