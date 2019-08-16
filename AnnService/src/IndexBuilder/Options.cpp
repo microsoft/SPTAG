@@ -23,6 +23,7 @@ BuilderOptions::BuilderOptions()
     AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
     AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
     AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+    AddOptionalOption(m_append, "-p", "--append", "Append to existing index.");
 }
 
 

@@ -29,6 +29,8 @@ public:
 
     std::string m_vectorDelimiter;
 
+    bool m_append;
+
     SPTAG::VectorValueType m_inputValueType;
 
     std::string m_inputFiles;
