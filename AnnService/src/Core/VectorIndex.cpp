@@ -315,6 +315,17 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 }
 
 
+const void* VectorIndex::GetSample(ByteArray p_meta)
+{
+    if (m_pMetaToVec == nullptr) return nullptr;
+
+    std::string meta((char*)p_meta.Data(), p_meta.Length());
+    auto iter = m_pMetaToVec->find(meta);
+    if (iter != m_pMetaToVec->end()) return GetSample(iter->second);
+    return nullptr;
+}
+
+
 std::shared_ptr<VectorIndex>
 VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 {

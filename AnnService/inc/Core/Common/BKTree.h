@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+ // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 #ifndef _SPTAG_COMMON_BKTREE_H_
@@ -366,8 +366,7 @@ namespace SPTAG
                     int maxcluster = -1;
                     SizeType maxCount = 0;
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
-                        void* currCenter = (void*)(args.centers + k * p_index->GetFeatureDim());
-                        if (args.newCounts[k] > maxCount && args.clusterDist[k] > p_index->ComputeDistance(currCenter, currCenter) + lambda*args.counts[k])
+                        if (args.newCounts[k] > maxCount && DistanceUtils::ComputeL2Distance((T*)p_index->GetSample(args.clusterIdx[k]), args.centers + k * p_index->GetFeatureDim(), p_index->GetFeatureDim()) > 1e-6)
                         {
                             maxcluster = k;
                             maxCount = args.newCounts[k];
