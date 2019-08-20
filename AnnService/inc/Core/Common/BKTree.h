@@ -1,4 +1,4 @@
- // Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 #ifndef _SPTAG_COMMON_BKTREE_H_
@@ -378,11 +378,16 @@ namespace SPTAG
 
                     for (int k = 0; k < m_iBKTKmeansK; k++) {
                         T* TCenter = args.newTCenters + k * p_index->GetFeatureDim();
-                        if (args.newCounts[k] == 0 && maxcluster != -1) {
-                            //int nextid = Utils::rand_int(last, first);
-                            //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
-                            SizeType nextid = args.clusterIdx[maxcluster];
-                            std::memcpy(TCenter, p_index->GetSample(nextid), sizeof(T)*p_index->GetFeatureDim());
+                        if (args.newCounts[k] == 0) {
+                            if (maxcluster != -1) {
+                                //int nextid = Utils::rand_int(last, first);
+                                //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
+                                SizeType nextid = args.clusterIdx[maxcluster];
+                                std::memcpy(TCenter, p_index->GetSample(nextid), sizeof(T)*p_index->GetFeatureDim());
+                            }
+                            else {
+                                std::memcpy(TCenter, args.centers + k * p_index->GetFeatureDim(), sizeof(T)*p_index->GetFeatureDim());
+                            }
                         }
                         else {
                             float* currCenters = args.newCenters + k * p_index->GetFeatureDim();
