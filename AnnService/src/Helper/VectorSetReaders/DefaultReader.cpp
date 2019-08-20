@@ -408,7 +408,7 @@ DefaultReader::MergeData()
 
     outputStream.open(m_vectorOutput, std::ofstream::binary);
 
-	outputStream.write(reinterpret_cast<char*>(&uint32Var), sizeof(uint32Var));
+	outputStream.write(reinterpret_cast<char*>(&totalRecordCount), sizeof(totalRecordCount));
 	outputStream.write(reinterpret_cast<char*>(&(m_options->m_dimension)), sizeof(m_options->m_dimension));
 
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
