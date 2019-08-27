@@ -5,7 +5,7 @@
 #define _SPTAG_INDEXBUILDER_OPTIONS_H_
 
 #include "inc/Core/Common.h"
-#include "inc/Helper/VectorsetReader.h"
+#include "inc/Helper/VectorSetReader.h"
 
 #include <string>
 #include <vector>
