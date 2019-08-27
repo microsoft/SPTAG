@@ -1,4 +1,5 @@
-// This is the main DLL file.
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
 
 #include "inc/CLRCoreInterface.h"
 
