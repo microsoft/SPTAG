@@ -25,7 +25,7 @@ namespace SPTAG
                                  m_iNeighborhoodSize(32),
                                  m_iNeighborhoodScale(2),
                                  m_iCEFScale(2),
-                                 m_iRefineIter(0),
+                                 m_iRefineIter(2),
                                  m_iCEF(1000),
                                  m_iMaxCheckForRefineGraph(10000) 
             {
@@ -120,13 +120,16 @@ namespace SPTAG
                 m_iCEF *= m_iCEFScale;
                 m_iMaxCheckForRefineGraph *= m_iCEFScale;
 
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < m_iGraphSize; i++)
+                for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
-                    RefineNode<T>(index, i, false);
-					if (i % 1000 == 0) std::cout << "\rRefine 1 " << (i * 100 / m_iGraphSize) << "%";
+#pragma omp parallel for schedule(dynamic)
+                    for (SizeType i = 0; i < m_iGraphSize; i++)
+                    {
+                        RefineNode<T>(index, i, false);
+                        if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << (i * 100 / m_iGraphSize) << "%";
+                    }
+                    std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
                 }
-                std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
 
                 m_iCEF /= m_iCEFScale;
                 m_iMaxCheckForRefineGraph /= m_iCEFScale;
@@ -136,7 +139,7 @@ namespace SPTAG
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
                     RefineNode<T>(index, i, false);
-					if (i % 1000 == 0) std::cout << "\rRefine 2 " << (i * 100 / m_iGraphSize) << "%";
+                    if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << (i * 100 / m_iGraphSize) << "%";
                 }
                 std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
 

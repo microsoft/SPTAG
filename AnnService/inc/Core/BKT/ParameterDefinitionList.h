@@ -22,7 +22,7 @@ DefineBKTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimension
 DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
 DefineBKTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
 DefineBKTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
-DefineBKTParameter(m_pGraph.m_iRefineIter, int, 0L, "RefineIterations")
+DefineBKTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineBKTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineBKTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 10000L, "MaxCheckForRefineGraph")
 

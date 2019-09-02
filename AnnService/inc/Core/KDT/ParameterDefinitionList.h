@@ -20,7 +20,7 @@ DefineKDTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimension
 DefineKDTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
 DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
 DefineKDTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
-DefineKDTParameter(m_pGraph.m_iRefineIter, int, 0L, "RefineIterations")
+DefineKDTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineKDTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineKDTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 10000L, "MaxCheckForRefineGraph")
 
