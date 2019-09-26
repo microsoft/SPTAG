@@ -186,7 +186,7 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
 
             m_pTrees.BuildTrees<T>(this);
