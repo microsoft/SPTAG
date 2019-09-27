@@ -118,7 +118,6 @@ namespace SPTAG
             void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 m_iCEF *= m_iCEFScale;
-                m_iMaxCheckForRefineGraph *= m_iCEFScale;
 
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
@@ -132,7 +131,6 @@ namespace SPTAG
                 }
 
                 m_iCEF /= m_iCEFScale;
-                m_iMaxCheckForRefineGraph /= m_iCEFScale;
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
 #pragma omp parallel for schedule(dynamic)
