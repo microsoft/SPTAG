@@ -67,7 +67,7 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
-                m_poolSize = size;
+                m_poolSize = 2 * size - 1;
                 m_secondHash = true;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
@@ -136,7 +136,7 @@ namespace SPTAG
         {
             void Initialize(int maxCheck, SizeType dataSize)
             {
-                nodeCheckStatus.Init(maxCheck * 2);
+                nodeCheckStatus.Init(maxCheck);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
 
