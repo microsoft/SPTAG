@@ -136,7 +136,7 @@ namespace SPTAG
         {
             void Initialize(int maxCheck, SizeType dataSize)
             {
-                nodeCheckStatus.Init(maxCheck);
+                nodeCheckStatus.Init(maxCheck * 2);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
 
