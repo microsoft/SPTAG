@@ -304,41 +304,59 @@ namespace SPTAG
         }
 
         template <typename T>
-        void Index<T>::LockUpdate() {
-            m_dataAddLock.lock();
-        }
-
-        template <typename T>
-        void Index<T>::UnlockUpdate() {
-            m_dataAddLock.unlock();
-        }
-
-        template <typename T>
-        ErrorCode Index<T>::AddBatch(const void* p_vectors, SizeType p_vectorNum)
+        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet)
         {
-            SizeType begin = GetNumSamples(), end = begin + p_vectorNum;
-            if (m_pSamples.AddBatch((const T*)p_vectors, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
-                m_pSamples.SetR(begin);
-                m_pGraph.SetR(begin);
-                return ErrorCode::MemoryOverFlow;
-            }
-            if (DistCalcMethod::Cosine == m_iDistCalcMethod)
+            SizeType begin, end;
+            ErrorCode ret;
             {
-                int base = COMMON::Utils::GetBase<T>();
-                for (SizeType i = begin; i < end; i++) {
-                    COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
+
+                begin = GetNumSamples();
+                end = GetNumSamples() + p_vectorNum;
+
+                if (begin == 0) {
+                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
+                    m_pMetadata = std::move(p_metadataSet);
+                    return ErrorCode::Success;
+                }
+
+                if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
+
+                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
+                    std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
+                    m_pSamples.SetR(begin);
+                    m_pGraph.SetR(begin);
+                    return ErrorCode::MemoryOverFlow;
+                }
+                if (DistCalcMethod::Cosine == m_iDistCalcMethod)
+                {
+                    int base = COMMON::Utils::GetBase<T>();
+                    for (SizeType i = begin; i < end; i++) {
+                        COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
+                    }
+                }
+
+                if (m_pMetadata != nullptr) {
+                    m_pMetadata->AddBatch(*p_metadataSet);
+
+                    if (m_pMetaToVec != nullptr) {
+                        for (SizeType i = begin; i < end; i++) {
+                            ByteArray meta = m_pMetadata->GetMetadata(i);
+                            std::string metastr((char*)meta.Data(), meta.Length());
+                            auto iter = m_pMetaToVec->find(metastr);
+                            if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
+                            m_pMetaToVec->emplace(metastr, i);
+                        }
+                    }
                 }
             }
-            return ErrorCode::Success;
-        }
 
-        template <typename T>
-        void Index<T>::AddRefine(SizeType p_begin, SizeType p_end) {
-            for (SizeType node = p_begin; node < p_end; node++)
+            for (SizeType node = begin; node < end; node++)
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }
+            std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
+            return ErrorCode::Success;
         }
 
         template <typename T>
