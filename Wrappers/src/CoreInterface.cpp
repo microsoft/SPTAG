@@ -170,7 +170,13 @@ AnnIndex::Add(ByteArray p_data, SizeType p_num)
     {
         return false;
     }
-    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension));
+    
+    std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
+        m_inputValueType,
+        static_cast<SPTAG::DimensionType>(m_dimension),
+        static_cast<SPTAG::SizeType>(p_num)));
+
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, nullptr));
 }
 
 

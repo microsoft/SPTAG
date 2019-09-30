@@ -131,7 +131,8 @@ namespace Microsoft
                     return false;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension));
+                std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(SPTAG::ByteArray(ptr, p_data->LongLength, false), (*m_Instance)->GetVectorValueType(), m_dimension, p_num));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(vectors, nullptr));
             }
 
             bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num)

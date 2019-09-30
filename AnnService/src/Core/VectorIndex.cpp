@@ -279,27 +279,43 @@ VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<Me
         return ErrorCode::Fail;
     }
 
-    SizeType currStart;
-    ErrorCode ret = AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), &currStart);
-    if (ret != ErrorCode::Success) return ret;
+    SizeType begin, end;
+    ErrorCode ret;
+    {
+        LockUpdate();
 
-    if (m_pMetadata == nullptr) {
-        if (currStart == 0)
+        begin = GetNumSamples();
+        end = GetNumSamples() + p_vectorSet->Count();
+
+        if (begin == 0) {
+            if ((ret = BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension())) != ErrorCode::Success) return ret;
             m_pMetadata = std::move(p_metadataSet);
-        else
             return ErrorCode::Success;
-    }
-    else {
-        m_pMetadata->AddBatch(*p_metadataSet);
-    }
-    
-    if (m_pMetaToVec != nullptr) {
-        for (SizeType i = 0; i < p_vectorSet->Count(); i++) {
-            ByteArray meta = m_pMetadata->GetMetadata(currStart + i);
-            DeleteIndex(meta);
-            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), currStart + i);
         }
+
+        if (p_vectorSet->Dimension() != GetFeatureDim()) return ErrorCode::FailedParseValue;
+
+        if ((ret = AddBatch(p_vectorSet->GetData(), p_vectorSet->Count())) != ErrorCode::Success) return ret;
+
+        if (m_pMetadata != nullptr) {
+            m_pMetadata->AddBatch(*p_metadataSet);
+
+            if (m_pMetaToVec != nullptr) {
+                for (SizeType i = begin; i < end; i++) {
+                    ByteArray meta = m_pMetadata->GetMetadata(i);
+                    std::string metastr((char*)meta.Data(), meta.Length());
+                    auto iter = m_pMetaToVec->find(metastr);
+                    if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
+                    m_pMetaToVec->emplace(metastr, i);
+                }
+            }
+        }
+
+        UnlockUpdate();
     }
+
+    AddRefine(begin, end);
+    std::cout << "Add " << p_vectorSet->Count() << " vectors" << std::endl;
     return ErrorCode::Success;
 }
 

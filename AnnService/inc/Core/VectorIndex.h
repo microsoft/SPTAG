@@ -23,8 +23,14 @@ public:
     virtual ~VectorIndex();
 
     virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension) = 0;
+    
+    virtual void LockUpdate() = 0;
 
-    virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr) = 0;
+    virtual void UnlockUpdate() = 0;
+
+    virtual ErrorCode AddBatch(const void* p_vectors, SizeType p_vectorNum) = 0;
+
+    virtual  void AddRefine(SizeType p_begin, SizeType p_end) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
@@ -117,7 +123,7 @@ private:
 protected:
     std::string m_sIndexName;
     std::string m_sMetadataFile = "metadata.bin";
-    std::string m_sMetadataIndexFile = "metadataIndex.bin";
+    std::string m_sMetadataIndexFile = "metadataIndex.bin";   
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::unique_ptr<std::unordered_map<std::string, SizeType>> m_pMetaToVec;
 };

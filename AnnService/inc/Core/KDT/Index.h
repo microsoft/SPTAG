@@ -111,7 +111,10 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
             ErrorCode SearchIndex(QueryResult &p_query) const;
-            ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr);
+            void LockUpdate();
+            void UnlockUpdate();
+            ErrorCode AddBatch(const void* p_vectors, SizeType p_vectorNum);
+            void AddRefine(SizeType p_begin, SizeType p_end);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
 
