@@ -22,7 +22,7 @@ DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodSca
 DefineKDTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
 DefineKDTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineKDTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
-DefineKDTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 10000L, "MaxCheckForRefineGraph")
+DefineKDTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")

@@ -24,9 +24,8 @@ namespace SPTAG
             void resize(SizeType n) {
                 SizeType current = (SizeType)locks.size();
                 if (current <= n) {
-                    locks.resize(n);
                     for (SizeType i = current; i < n; i++)
-                        locks[i].reset(new std::mutex);
+                        locks.emplace_back(new std::mutex);
                 }
                 else {
                     for (SizeType i = n; i < current; i++)
