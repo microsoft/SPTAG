@@ -4,6 +4,7 @@
 #ifndef _SPTAG_COMMON_FINEGRAINEDLOCK_H_
 #define _SPTAG_COMMON_FINEGRAINEDLOCK_H_
 
+#include <shared_mutex>
 #include <vector>
 #include <mutex>
 #include <memory>
@@ -14,7 +15,9 @@ namespace SPTAG
     {
         class FineGrainedLock {
         public:
-            FineGrainedLock() {}
+            FineGrainedLock() {
+                rwlock.reset(new std::shared_timed_mutex);
+            }
             ~FineGrainedLock() { 
                 for (size_t i = 0; i < locks.size(); i++)
                     locks[i].reset();
@@ -22,10 +25,12 @@ namespace SPTAG
             }
             
             void resize(SizeType n) {
+                std::unique_lock<std::shared_timed_mutex> lock(*rwlock);
                 SizeType current = (SizeType)locks.size();
                 if (current <= n) {
+                    locks.resize(n);
                     for (SizeType i = current; i < n; i++)
-                        locks.emplace_back(new std::mutex);
+                        locks[i].reset(new std::mutex);
                 }
                 else {
                     for (SizeType i = n; i < current; i++)
@@ -35,13 +40,16 @@ namespace SPTAG
             }
 
             std::mutex& operator[](SizeType idx) {
+                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
                 return *locks[idx];
             }
 
             const std::mutex& operator[](SizeType idx) const {
+                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
                 return *locks[idx];
             }
         private:
+            std::unique_ptr<std::shared_timed_mutex> rwlock;
             std::vector<std::shared_ptr<std::mutex>> locks;
         };
     }
