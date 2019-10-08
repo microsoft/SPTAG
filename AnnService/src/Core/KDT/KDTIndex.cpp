@@ -312,7 +312,7 @@ namespace SPTAG
                 std::lock_guard<std::mutex> lock(m_dataAddLock);
 
                 begin = GetNumSamples();
-                end = GetNumSamples() + p_vectorNum;
+                end = begin + p_vectorNum;
 
                 if (begin == 0) {
                     if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
