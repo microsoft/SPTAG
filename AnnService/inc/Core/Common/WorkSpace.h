@@ -45,7 +45,7 @@ namespace SPTAG
             // Record 2 hash tables.
             // [0~m_poolSize + 1) is the first block.
             // [m_poolSize + 1, 2*(m_poolSize + 1)) is the second block;
-            std::unique_ptr<SizeType> m_hashTable;
+            std::unique_ptr<SizeType[]> m_hashTable;
 
 
             inline unsigned hash_func2(unsigned idx, int loop)
@@ -67,7 +67,7 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
-                m_poolSize = 2 * size - 1;
+                m_poolSize = (int)pow(2, log2(size) + 1) - 1;
                 m_secondHash = true;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
