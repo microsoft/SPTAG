@@ -48,7 +48,7 @@ namespace SPTAG
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = m_iNeighborhoodSize * m_iNeighborhoodScale;
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
-                m_dataUpdateLock.resize(m_iGraphSize);
+                //m_dataUpdateLock.resize(m_iGraphSize);
                 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
@@ -190,7 +190,8 @@ namespace SPTAG
                         if (item->VID < 0) break;
                         if (item->VID == node) continue;
 
-                        std::lock_guard<std::mutex> lock(m_dataUpdateLock[item->VID]);
+                        //std::lock_guard<std::mutex> lock(m_dataUpdateLock[item->VID]);
+                        std::lock_guard<std::mutex> lock(m_dataLock);
                         InsertNeighbors(index, item->VID, node, item->Dist);
                     }
                 }
@@ -344,7 +345,7 @@ namespace SPTAG
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                m_dataUpdateLock.resize(m_iGraphSize);
+                //m_dataUpdateLock.resize(m_iGraphSize);
                 return true;
             }
             
@@ -354,7 +355,7 @@ namespace SPTAG
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                m_dataUpdateLock.resize(m_iGraphSize);
+                //m_dataUpdateLock.resize(m_iGraphSize);
                 return true;
             }
             
@@ -374,7 +375,7 @@ namespace SPTAG
                 if (ret != ErrorCode::Success) return ret;
 
                 m_iGraphSize += num;
-                m_dataUpdateLock.resize(m_iGraphSize);
+                //m_dataUpdateLock.resize(m_iGraphSize);
                 return ErrorCode::Success;
             }
 
@@ -382,7 +383,11 @@ namespace SPTAG
 
             inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph[index]; }
 
-            inline void SetR(SizeType rows) { m_pNeighborhoodGraph.SetR(rows); m_iGraphSize = rows; m_dataUpdateLock.resize(m_iGraphSize); }
+            inline void SetR(SizeType rows) { 
+                m_pNeighborhoodGraph.SetR(rows); 
+                m_iGraphSize = rows; 
+                //m_dataUpdateLock.resize(m_iGraphSize); 
+            }
 
             inline SizeType R() const { return m_iGraphSize; }
 
@@ -392,8 +397,8 @@ namespace SPTAG
             // Graph structure
             SizeType m_iGraphSize;
             COMMON::Dataset<SizeType> m_pNeighborhoodGraph;
-            COMMON::FineGrainedLock m_dataUpdateLock; // protect one row of the graph
-
+            //COMMON::FineGrainedLock m_dataUpdateLock; // protect one row of the graph
+            std::mutex m_dataLock;
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
