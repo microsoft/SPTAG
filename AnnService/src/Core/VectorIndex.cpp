@@ -378,30 +378,20 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
 
 ErrorCode
-VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2)
+VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
-    std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
+    std::shared_ptr<VectorIndex> addIndex;
+    LoadIndex(p_indexFilePath1, p_vectorIndex);
+    LoadIndex(p_indexFilePath2, addIndex);
 
-    std::shared_ptr<VectorIndex> index1, index2;
-    LoadIndex(folderPath1, index1);
-    LoadIndex(folderPath2, index2);
-
-    std::shared_ptr<VectorSet> p_vectorSet;
-    std::shared_ptr<MetadataSet> p_metaSet;
-    size_t vectorSize = GetValueTypeSize(index2->GetVectorValueType()) * index2->GetFeatureDim();
-    std::uint64_t offsets[2] = { 0 };
-    ByteArray metaoffset((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false);
-    for (SizeType i = 0; i < index2->GetNumSamples(); i++)
-        if (index2->ContainSample(i))
+#pragma omp parallel for schedule(dynamic)
+    for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+        if (addIndex->ContainSample(i))
         {
-            p_vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)index2->GetSample(i), vectorSize, false),
-                index2->GetVectorValueType(), index2->GetFeatureDim(), 1));
-            ByteArray meta = index2->GetMetadata(i);
-            offsets[1] = meta.Length();
-            p_metaSet.reset(new MemMetadataSet(meta, metaoffset, 1));
-            index1->AddIndex(p_vectorSet, p_metaSet);
+            ByteArray meta = addIndex->GetMetadata(i);
+            std::uint64_t offsets[2] = { 0, meta.Length() };
+            std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
+            p_vectorIndex->AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
         }
-
-    index1->SaveIndex(folderPath1);
     return ErrorCode::Success;
 }

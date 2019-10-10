@@ -27,11 +27,10 @@ namespace SPTAG
             void resize(SizeType n) {
                 SizeType current = (SizeType)locks.size();
                 if (current <= n) {
-                    if (n > locks.capacity()) {
+                    {
                         std::unique_lock<std::shared_timed_mutex> lock(*rwlock);
                         locks.resize(n);
                     }
-                    else locks.resize(n);
                     for (SizeType i = current; i < n; i++)
                         locks[i].reset(new std::mutex);
                 }

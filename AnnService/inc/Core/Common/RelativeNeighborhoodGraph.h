@@ -35,12 +35,15 @@ namespace SPTAG
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
             {
                 SizeType* nodes = m_pNeighborhoodGraph[node];
+                SizeType tmpNode;
+                float tmpDist;
                 for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
                 {
-                    SizeType tmpNode = nodes[k];
+                    tmpNode = nodes[k];
                     if (tmpNode < -1) break;
 
-                    if (tmpNode < 0)
+                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist 
+                        || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         bool good = true;
                         for (DimensionType t = 0; t < k; t++) {
@@ -51,28 +54,10 @@ namespace SPTAG
                         }
                         if (good) {
                             nodes[k] = insertNode;
-                        }
-                        break;
-                    }
-                    float tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode));
-                    if (insertDist < tmpDist || (insertDist == tmpDist && insertNode < tmpNode))
-                    {
-                        bool good = true;
-                        for (DimensionType t = 0; t < k; t++) {
-                            if (index->ComputeDistance(index->GetSample(insertNode), index->GetSample(nodes[t])) < insertDist) {
-                                good = false;
-                                break;
-                            }
-                        }
-                        if (good) {
-                            nodes[k] = insertNode;
-                            while (++k < m_iNeighborhoodSize) {
-                                if (index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) < tmpDist)
-                                    break;
-
+                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1) {
+                                if (index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) < tmpDist) break;
                                 std::swap(tmpNode, nodes[k]);
-                                if (tmpNode < 0) break;
-                                tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode));
+                                tmpDist = (tmpNode < 0) ? MaxDist: index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode));
                             }
                         }
                         break;
