@@ -100,7 +100,7 @@ namespace Microsoft
 
                 static AnnIndex^ Load(array<array<Byte>^>^ p_index);
 
-                static bool Merge(String^ p_indexFilePath1, String^ p_indexFilePath2);
+                static AnnIndex^ Merge(String^ p_indexFilePath1, String^ p_indexFilePath2);
 
             private:
 
