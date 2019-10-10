@@ -355,7 +355,7 @@ namespace SPTAG
             {
                 m_pGraph.RefineNode<T>(this, node, true);
             }
-            std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
+            //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
         }
 

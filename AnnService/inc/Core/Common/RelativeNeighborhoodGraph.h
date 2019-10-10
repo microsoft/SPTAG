@@ -54,10 +54,11 @@ namespace SPTAG
                         }
                         if (good) {
                             nodes[k] = insertNode;
-                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1) {
-                                if (index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) < tmpDist) break;
+                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1 &&
+                                index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) >=
+                                index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode)))
+                            {
                                 std::swap(tmpNode, nodes[k]);
-                                tmpDist = (tmpNode < 0) ? MaxDist: index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode));
                             }
                         }
                         break;
