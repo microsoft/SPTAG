@@ -179,12 +179,33 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
 }
 
 
+
+MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile)
+{
+    std::ifstream meta(p_metafile, std::ifstream::binary);
+    std::ifstream metaidx(p_metaindexfile, std::ifstream::binary);
+    if (!meta.is_open() || !metaidx.is_open())
+    {
+        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
+        return;
+    }
+
+    metaidx.read((char *)&m_count, sizeof(m_count));
+    m_offsets.resize(m_count + 1);
+    metaidx.read((char *)m_offsets.data(), sizeof(std::uint64_t) * (m_count + 1));
+    metaidx.close();
+
+    m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
+    meta.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    meta.close();
+}
+
+
 MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count)
     : m_metadataHolder(std::move(p_metadata)),
-      m_offsetHolder(std::move(p_offsets)),
       m_count(p_count)
 {
-    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(m_offsetHolder.Data());
+    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(p_offsets.Data());
     m_offsets.insert(m_offsets.end(), newdata, newdata + p_count + 1);
 }
 
@@ -223,7 +244,7 @@ MemMetadataSet::Count() const
 bool
 MemMetadataSet::Available() const
 {
-    return m_metadataHolder.Length() > 0 && m_offsetHolder.Length() > 0;
+    return m_metadataHolder.Length() > 0 && m_offsets.size() > 0;
 }
 
 

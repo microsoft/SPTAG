@@ -80,6 +80,8 @@ class MemMetadataSet : public MetadataSet
 public:
     MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count);
 
+    MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile);
+
     ~MemMetadataSet();
 
     ByteArray GetMetadata(SizeType p_vectorID) const;
@@ -102,8 +104,6 @@ private:
     SizeType m_count;
 
     ByteArray m_metadataHolder;
-
-    ByteArray m_offsetHolder;
 
     std::vector<std::uint8_t> m_newdata;
 };

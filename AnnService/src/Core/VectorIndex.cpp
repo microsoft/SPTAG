@@ -380,17 +380,35 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 ErrorCode
 VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
-    std::shared_ptr<VectorIndex> addIndex;
-    LoadIndex(p_indexFilePath1, p_vectorIndex);
-    LoadIndex(p_indexFilePath2, addIndex);
+    std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
+    LoadIndex(folderPath1, p_vectorIndex);
 
+    Helper::IniReader iniReader;
+    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath2 + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
+
+    std::shared_ptr<VectorIndex> addIndex = CreateInstance(iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined), 
+        iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined));
+    addIndex->LoadConfig(iniReader);
+    addIndex->LoadIndexData(folderPath2);
+
+    std::shared_ptr<MetadataSet> pMetadata;
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        pMetadata.reset(new MemMetadataSet(folderPath2 + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()), 
+            folderPath2 + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
+    }
+
+    omp_set_num_threads(omp_get_max_threads());
 #pragma omp parallel for schedule(dynamic)
     for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
         if (addIndex->ContainSample(i))
         {
-            ByteArray meta = addIndex->GetMetadata(i);
-            std::uint64_t offsets[2] = { 0, meta.Length() };
-            std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
+            std::shared_ptr<MetadataSet> p_metaSet;
+            if (pMetadata != nullptr) {
+                ByteArray meta = pMetadata->GetMetadata(i);
+                std::uint64_t offsets[2] = { 0, meta.Length() };
+                p_metaSet.reset(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
+            }
             p_vectorIndex->AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
         }
     return ErrorCode::Success;
