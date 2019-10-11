@@ -383,6 +383,8 @@ VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePat
     std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
     LoadIndex(folderPath1, p_vectorIndex);
 
+    if (!folderPath2.empty() && *(folderPath2.rbegin()) != FolderSep) folderPath2 += FolderSep;
+
     Helper::IniReader iniReader;
     if (ErrorCode::Success != iniReader.LoadIniFile(folderPath2 + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
 
@@ -398,8 +400,6 @@ VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePat
             folderPath2 + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
     }
 
-    omp_set_num_threads(omp_get_max_threads());
-#pragma omp parallel for schedule(dynamic)
     for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
         if (addIndex->ContainSample(i))
         {
