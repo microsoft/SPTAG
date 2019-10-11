@@ -399,9 +399,8 @@ VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePat
         pMetadata.reset(new MemMetadataSet(folderPath2 + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()), 
             folderPath2 + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
     }
-
-    omp_set_num_threads(omp_get_max_threads());
-#pragma omp parallel for schedule(dynamic)
+    
+#pragma omp parallel for schedule(dynamic,128)
     for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
         if (addIndex->ContainSample(i))
         {
