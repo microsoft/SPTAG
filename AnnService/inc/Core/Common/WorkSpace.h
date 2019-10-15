@@ -67,7 +67,8 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
-                m_poolSize = (int)pow(2, log2(size) + 1) - 1;
+                int ex = (int)log2(size) + 1;
+                m_poolSize = (1 << ex) - 1;
                 m_secondHash = true;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
