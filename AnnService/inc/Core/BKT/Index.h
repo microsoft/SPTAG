@@ -18,6 +18,7 @@
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
+#include "inc/Helper/ThreadPool.h"
 
 #include <functional>
 #include <mutex>
@@ -35,6 +36,31 @@ namespace SPTAG
         template<typename T>
         class Index : public VectorIndex
         {
+            class RebuildJob : public Helper::ThreadPool::Job {
+            public:
+                RebuildJob(VectorIndex* p_index, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_index(p_index), m_tree(p_tree), m_graph(p_graph) {}
+                void exec() {
+                    SizeType numSamples = m_index->GetNumSamples();
+
+                    std::vector<SizeType> localindices(numSamples);
+                    for (SizeType i = 0; i < numSamples; i++) localindices[i] = i;
+
+                    COMMON::BKTree newTrees(*m_tree);
+                    newTrees.BuildTrees<T>(m_index, &localindices);
+                    m_tree->swap(newTrees);
+
+                    const std::unordered_map<SizeType, SizeType>& idmap = newTrees.GetSampleMap();
+                    for (auto iter = idmap.begin(); iter != idmap.end(); iter++)
+                        if (iter->first < 0)
+                            m_graph->Update(-1 - iter->first, m_graph->m_iNeighborhoodSize - 1, -2 - iter->second);
+                    std::cout << "Rebuild finish!" << std::endl;
+                }
+            private:
+                VectorIndex* m_index;
+                COMMON::BKTree* m_tree;
+                COMMON::RelativeNeighborhoodGraph* m_graph;
+            };
+
         private:
             // data points
             COMMON::Dataset<T> m_pSamples;
@@ -54,6 +80,8 @@ namespace SPTAG
             Helper::Concurrent::ConcurrentSet<SizeType> m_deletedID;
             float m_fDeletePercentageForRefine;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
+            int m_addCountForRebuild;
+            Helper::ThreadPool m_threadPool;
 
             int m_iNumberOfThreads;
             DistCalcMethod m_iDistCalcMethod;

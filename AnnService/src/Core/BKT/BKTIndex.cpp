@@ -39,6 +39,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
             return ErrorCode::Success;
         }
 
@@ -53,6 +54,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
             return ErrorCode::Success;
         }
 
@@ -200,7 +202,8 @@ namespace SPTAG
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
-            
+            m_threadPool.init();
+
             m_pTrees.BuildTrees<T>(this);
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
 
@@ -244,7 +247,7 @@ namespace SPTAG
             }
             newTrees.SaveTrees(*p_indexStreams[1]);
 
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, *p_indexStreams[2], &(newTrees.GetSampleMap()));
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], &(newTrees.GetSampleMap()));
 
             Helper::Concurrent::ConcurrentSet<SizeType> newDeletedID;
             newDeletedID.save(*p_indexStreams[3]);
@@ -358,6 +361,10 @@ namespace SPTAG
                         }
                     }
                 }
+            }
+
+            if (begin - m_pTrees.sizePerTree() < m_addCountForRebuild && end - m_pTrees.sizePerTree() >= m_addCountForRebuild) {
+                m_threadPool.add(new RebuildJob(this, &m_pTrees, &m_pGraph));
             }
 
             for (SizeType node = begin; node < end; node++)

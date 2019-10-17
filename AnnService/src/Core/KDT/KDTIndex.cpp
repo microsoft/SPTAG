@@ -39,6 +39,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
             return ErrorCode::Success;
         }
 
@@ -53,6 +54,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
             return ErrorCode::Success;
         }
 
@@ -190,6 +192,7 @@ namespace SPTAG
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
 
             m_pTrees.BuildTrees<T>(this);
             m_pGraph.BuildGraph<T>(this);
@@ -226,7 +229,7 @@ namespace SPTAG
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
             if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
 
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, *p_indexStreams[2]);
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2]);
 
             COMMON::KDTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices);
@@ -351,6 +354,10 @@ namespace SPTAG
                         }
                     }
                 }
+            }
+
+            if (begin - m_pTrees.sizePerTree() < m_addCountForRebuild && end - m_pTrees.sizePerTree() >= m_addCountForRebuild) {
+                m_threadPool.add(new RebuildJob(this, &m_pTrees, &m_pGraph));
             }
 
             for (SizeType node = begin; node < end; node++)

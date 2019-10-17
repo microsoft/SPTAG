@@ -30,6 +30,7 @@ DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
 
 DefineBKTParameter(m_fDeletePercentageForRefine, float, 0.4F, "DeletePercentageForRefine")
+DefineBKTParameter(m_addCountForRebuild, int, 1000, "AddCountForRebuild")
 DefineBKTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineBKTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineBKTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")

@@ -28,6 +28,7 @@ DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
 
 DefineKDTParameter(m_fDeletePercentageForRefine, float, 0.4F, "DeletePercentageForRefine")
+DefineKDTParameter(m_addCountForRebuild, int, 1000, "AddCountForRebuild")
 DefineKDTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")

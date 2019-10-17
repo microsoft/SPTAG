@@ -44,6 +44,14 @@ namespace SPTAG
 
             inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
 
+            inline SizeType sizePerTree() const { return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); }
+
+            void swap(KDTree& p_tree)
+            {
+                m_pTreeRoots.swap(p_tree.m_pTreeRoots);
+                m_pTreeStart.swap(p_tree.m_pTreeStart);
+            }
+
             template <typename T>
             void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr)
             {

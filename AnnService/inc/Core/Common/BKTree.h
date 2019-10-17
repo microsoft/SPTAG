@@ -118,8 +118,16 @@ namespace SPTAG
             inline BKTNode& operator[](SizeType index) { return m_pTreeRoots[index]; }
 
             inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
+            
+            inline SizeType sizePerTree() const { return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); }
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
+
+            void swap(BKTree& p_tree)
+            {
+                m_pTreeRoots.swap(p_tree.m_pTreeRoots);
+                m_pTreeStart.swap(p_tree.m_pTreeStart);
+            }
 
             template <typename T>
             void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr)

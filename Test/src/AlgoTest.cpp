@@ -6,6 +6,7 @@
 #include "inc/Core/VectorIndex.h"
 
 #include <unordered_set>
+#include <ctime>
 
 template <typename T>
 void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
@@ -73,6 +74,28 @@ void Add(const std::string folder, std::shared_ptr<SPTAG::VectorSet>& vec, std::
 }
 
 template <typename T>
+void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    BOOST_CHECK(nullptr != vecIndex);
+
+    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+
+    clock_t start = clock();
+    for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
+        SPTAG::ByteArray metaarr = meta->GetMetadata(i);
+        std::uint64_t offset[2] = { 0, metaarr.Length() };
+        std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+        BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset));
+    }
+    std::cout << "AddIndex time: " << ((float)(clock() - start) / CLOCKS_PER_SEC / vec->Count()) << "s" << std::endl;
+    
+    Sleep(10000);
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+}
+
+template <typename T>
 void Delete(const std::string folder, T* vec, SPTAG::SizeType n, const std::string out)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
@@ -87,7 +110,7 @@ void Delete(const std::string folder, T* vec, SPTAG::SizeType n, const std::stri
 template <typename T>
 void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 {
-    SPTAG::SizeType n = 100, q = 3;
+    SPTAG::SizeType n = 2000, q = 3;
     SPTAG::DimensionType m = 10;
     int k = 3;
     std::vector<T> vec;
@@ -142,6 +165,10 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     Add<T>("testindices", vecset, metaset, "testindices");
     std::string truthmeta5[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta5);
+
+    AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices");
+    std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+    Search<float>("testindices", query.data(), q, k, truthmeta6);
 }
 
 BOOST_AUTO_TEST_SUITE (AlgoTest)

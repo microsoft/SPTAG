@@ -151,7 +151,7 @@ namespace SPTAG
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::ostream& output, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::ostream* output, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 SizeType R = (SizeType)indices.size();
 
@@ -162,14 +162,14 @@ namespace SPTAG
                     SizeType* nodes = m_pNeighborhoodGraph[indices[i]];
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                     {
-                        if (nodes[j] < 0) nodes[j] = -1;
-                        else nodes[j] = reverseIndices[nodes[j]];
+                        if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) nodes[j] = reverseIndices[nodes[j]];
                     }
-                    if (idmap == nullptr || idmap->find(-1 - indices[i]) == idmap->end()) continue;
-                    nodes[m_iNeighborhoodSize - 1] = -2 - idmap->at(-1 - indices[i]);
+                    std::unordered_map<SizeType, SizeType>::const_iterator iter;
+                    if (idmap != nullptr && (iter = idmap->find(-1 - indices[i])) != idmap->end())
+                        nodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                m_pNeighborhoodGraph.Refine(indices, output);
+                if (output != nullptr) m_pNeighborhoodGraph.Refine(indices, *output);
                 return ErrorCode::Success;
             }
 
@@ -189,7 +189,6 @@ namespace SPTAG
                         if (item->VID < 0) break;
                         if (item->VID == node) continue;
 
-                        std::lock_guard<std::mutex> lock(m_dataUpdateLock);
                         InsertNeighbors(index, item->VID, node, item->Dist);
                     }
                 }
@@ -377,6 +376,11 @@ namespace SPTAG
             inline SizeType* operator[](SizeType index) { return m_pNeighborhoodGraph[index]; }
 
             inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph[index]; }
+
+            void Update(SizeType row, DimensionType col, SizeType val) {
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+                m_pNeighborhoodGraph[row][col] = val;
+            }
 
             inline void SetR(SizeType rows) { 
                 m_pNeighborhoodGraph.SetR(rows); 
