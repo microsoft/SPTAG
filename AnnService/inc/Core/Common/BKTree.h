@@ -8,6 +8,7 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <shared_mutex>
 
 #include "../VectorIndex.h"
 
@@ -106,12 +107,13 @@ namespace SPTAG
         class BKTree
         {
         public:
-            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000) {}
+            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
             
             BKTree(BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
                                    m_iBKTKmeansK(other.m_iBKTKmeansK), 
                                    m_iBKTLeafSize(other.m_iBKTLeafSize),
-                                   m_iSamples(other.m_iSamples) {}
+                                   m_iSamples(other.m_iSamples),
+                                   m_lock(new std::shared_timed_mutex) {}
             ~BKTree() {}
 
             inline const BKTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -125,6 +127,7 @@ namespace SPTAG
 
             void swap(BKTree& p_tree)
             {
+                std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(p_tree.m_pTreeRoots);
                 m_pTreeStart.swap(p_tree.m_pTreeStart);
             }
@@ -203,6 +206,7 @@ namespace SPTAG
 
             bool SaveTrees(std::ostream& p_outstream) const
             {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
                 p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
@@ -491,6 +495,7 @@ namespace SPTAG
             std::unordered_map<SizeType, SizeType> m_pSampleCenterMap;
 
         public:
+            std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples;
         };
     }

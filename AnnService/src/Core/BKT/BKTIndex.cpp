@@ -102,6 +102,7 @@ namespace SPTAG
 #pragma region K-NN search
 
 #define Search(CheckDeleted1) \
+        std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_SPTQueue.empty()) { \

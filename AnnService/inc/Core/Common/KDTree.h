@@ -7,6 +7,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <shared_mutex>
 
 #include "../VectorIndex.h"
 
@@ -32,11 +33,11 @@ namespace SPTAG
         class KDTree
         {
         public:
-            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000) {}
+            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
 
             KDTree(KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
                 m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit),
-                m_iSamples(other.m_iSamples) {}
+                m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex) {}
             ~KDTree() {}
 
             inline const KDTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -48,6 +49,7 @@ namespace SPTAG
 
             void swap(KDTree& p_tree)
             {
+                std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(p_tree.m_pTreeRoots);
                 m_pTreeStart.swap(p_tree.m_pTreeStart);
             }
@@ -90,6 +92,7 @@ namespace SPTAG
 
             bool SaveTrees(std::ostream& p_outstream) const
             {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
                 p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
@@ -343,6 +346,7 @@ namespace SPTAG
             std::vector<KDTNode> m_pTreeRoots;
 
         public:
+            std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
         };
     }
