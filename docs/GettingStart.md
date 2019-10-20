@@ -216,7 +216,7 @@ import numpy as np
 import time
 
 def testSPTAGClient():
-    index = SPTAGClient.AnnClient('127.0.0.1', '8100')
+    index = SPTAGClient.AnnClient('127.0.0.1', '8000')
     while not index.IsConnected():
         time.sleep(1)
     index.SetTimeoutMilliseconds(18000)
