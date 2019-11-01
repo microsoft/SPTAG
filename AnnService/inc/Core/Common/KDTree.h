@@ -148,17 +148,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,  const int p_limits) const
+            void InitSearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
-                    KDTSearch(p_index, p_query, p_space, m_pTreeStart[i], true, 0);
-                }
-
-                while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
-                {
-                    auto& tcell = p_space.m_SPTQueue.pop();
-                    if (p_query.worstDist() < tcell.distance) break;
-                    KDTSearch(p_index, p_query, p_space, tcell.node, true, tcell.distance);
+                    KDTSearch(p_index, p_query, p_space, m_pTreeStart[i], 0);
                 }
             }
 
@@ -168,7 +161,7 @@ namespace SPTAG
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
                     auto& tcell = p_space.m_SPTQueue.pop();
-                    KDTSearch(p_index, p_query, p_space, tcell.node, false, tcell.distance);
+                    KDTSearch(p_index, p_query, p_space, tcell.node, tcell.distance);
                 }
             }
 
@@ -176,7 +169,7 @@ namespace SPTAG
 
             template <typename T>
             void KDTSearch(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query,
-                           COMMON::WorkSpace& p_space, const SizeType node, const bool isInit, const float distBound) const {
+                           COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
                     SizeType index = -node - 1;
@@ -210,11 +203,8 @@ namespace SPTAG
                     bestChild = tnode.right;
                 }
 
-                if (!isInit || distanceBound < p_query.worstDist())
-                {
-                    p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
-                }
-                KDTSearch(p_index, p_query, p_space, bestChild, isInit, distBound);
+                p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
+                KDTSearch(p_index, p_query, p_space, bestChild, distBound);
             }
 
 

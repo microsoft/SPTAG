@@ -4,6 +4,7 @@
 #include "inc/Test.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Core/VectorIndex.h"
+#include "inc/Core/Common/CommonUtils.h"
 
 #include <unordered_set>
 #include <ctime>

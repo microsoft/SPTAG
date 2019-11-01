@@ -21,6 +21,7 @@ namespace SPTAG
             class Job
             {
             public:
+                virtual ~Job() {}
                 virtual void exec() = 0;
             };
 

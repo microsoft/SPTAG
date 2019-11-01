@@ -282,7 +282,7 @@ namespace SPTAG
             void SearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, 
                 COMMON::WorkSpace &p_space, const int p_limits) const
             {
-                do
+                while (!p_space.m_SPTQueue.empty())
                 {
                     COMMON::HeapCell bcell = p_space.m_SPTQueue.pop();
                     const BKTNode& tnode = m_pTreeRoots[bcell.node];
@@ -302,7 +302,7 @@ namespace SPTAG
                             p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(index))));
                         } 
                     }
-                } while (!p_space.m_SPTQueue.empty());
+                }
             }
 
         private:

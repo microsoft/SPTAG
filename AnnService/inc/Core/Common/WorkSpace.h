@@ -67,7 +67,7 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
-                int ex = (int)log2(size) + 1;
+                int ex = (int)log2(size) + 2;
                 m_poolSize = (1 << ex) - 1;
                 m_secondHash = true;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
@@ -167,7 +167,6 @@ namespace SPTAG
             }
 
             OptHashPosVector nodeCheckStatus;
-            //OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting
             int m_iNumOfContinuousNoBetterPropagation;
@@ -179,7 +178,7 @@ namespace SPTAG
             // Prioriy queue used for neighborhood graph
             Heap<HeapCell> m_NGQueue;
 
-            // Priority queue Used for BKT-Tree
+            // Priority queue Used for Tree
             Heap<HeapCell> m_SPTQueue;
         };
     }

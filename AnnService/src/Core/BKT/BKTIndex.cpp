@@ -104,45 +104,43 @@ namespace SPTAG
 #define Search(CheckDeleted1) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
+        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
-        while (!p_space.m_SPTQueue.empty()) { \
-            m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
-            while (!p_space.m_NGQueue.empty()) { \
-                COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
-                const SizeType *node = m_pGraph[gnode.node]; \
-                _mm_prefetch((const char *)node, _MM_HINT_T0); \
-                CheckDeleted1 { \
-                    if (p_query.AddPoint(gnode.node, gnode.distance)) { \
-                        p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
-                        SizeType checkNode = node[checkPos]; \
-                        if (checkNode < -1) { \
-                            const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
-                            for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
-                                if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
-                            } \
-                        } \
-                    } \
-                    else { \
-                        p_space.m_iNumOfContinuousNoBetterPropagation++; \
-                        if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
-                            p_query.SortResult(); return; \
+        while (!p_space.m_NGQueue.empty()) { \
+            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            const SizeType *node = m_pGraph[gnode.node]; \
+            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            CheckDeleted1 { \
+                if (p_query.AddPoint(gnode.node, gnode.distance)) { \
+                    p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
+                    SizeType checkNode = node[checkPos]; \
+                    if (checkNode < -1) { \
+                        const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
+                            if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
                         } \
                     } \
                 } \
-                for (DimensionType i = 0; i <= checkPos; i++) { \
-                    _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+                else { \
+                    p_space.m_iNumOfContinuousNoBetterPropagation++; \
+                    if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
+                        p_query.SortResult(); return; \
+                    } \
                 } \
-                for (DimensionType i = 0; i <= checkPos; i++) { \
-                    SizeType nn_index = node[i]; \
-                    if (nn_index < 0) break; \
-                    if (p_space.CheckAndSet(nn_index)) continue; \
-                    float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
-                    p_space.m_iNumberOfCheckedLeaves++; \
-                    p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
-                } \
-                if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
-                    break; \
-                } \
+            } \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                SizeType nn_index = node[i]; \
+                if (nn_index < 0) break; \
+                if (p_space.CheckAndSet(nn_index)) continue; \
+                float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                p_space.m_iNumberOfCheckedLeaves++; \
+                p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+            } \
+            if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
+                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
@@ -317,7 +315,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet)
+        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false)
         {
             SizeType begin, end;
             ErrorCode ret;
@@ -330,6 +328,10 @@ namespace SPTAG
                 if (begin == 0) {
                     if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     m_pMetadata = std::move(p_metadataSet);
+                    if (p_withMetaIndex && m_pMetadata != nullptr)
+                    {
+                        BuildMetaMapping();
+                    }
                     return ErrorCode::Success;
                 }
 

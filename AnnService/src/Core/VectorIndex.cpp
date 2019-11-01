@@ -279,14 +279,7 @@ VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<Me
         return ErrorCode::Fail;
     }
 
-    ErrorCode ret = AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet);
-    if (ret != ErrorCode::Success) return ret;
-
-    if (p_withMetaIndex && m_pMetadata != nullptr && m_pMetaToVec == nullptr) 
-    {
-        BuildMetaMapping();
-    }
-    return ErrorCode::Success;
+    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex);
 }
 
 
