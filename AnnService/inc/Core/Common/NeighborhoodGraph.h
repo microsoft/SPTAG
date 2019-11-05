@@ -160,11 +160,12 @@ namespace SPTAG
                 {
                     RefineNode<T>(index, indices[i], false);
                     SizeType* nodes = m_pNeighborhoodGraph[indices[i]];
+                    std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                     {
                         if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) nodes[j] = reverseIndices[nodes[j]];
+                        if (idmap != nullptr && (iter = idmap->find(nodes[j])) != idmap->end()) nodes[j] = iter->second;
                     }
-                    std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     if (idmap != nullptr && (iter = idmap->find(-1 - indices[i])) != idmap->end())
                         nodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
