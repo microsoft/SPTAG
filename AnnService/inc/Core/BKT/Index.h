@@ -48,12 +48,6 @@ namespace SPTAG
                     COMMON::BKTree newTrees(*m_tree);
                     newTrees.BuildTrees<T>(m_index, &localindices);
                     m_tree->swap(newTrees);
-
-                    const std::unordered_map<SizeType, SizeType>& idmap = newTrees.GetSampleMap();
-                    for (auto iter = idmap.begin(); iter != idmap.end(); iter++)
-                        if (iter->first < 0)
-                            m_graph->Update(-1 - iter->first, m_graph->m_iNeighborhoodSize - 1, -2 - iter->second);
-                    std::cout << "Rebuild finish!" << std::endl;
                 }
             private:
                 VectorIndex* m_index;

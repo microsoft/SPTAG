@@ -101,7 +101,7 @@ namespace SPTAG
 
 #pragma region K-NN search
 
-#define Search(CheckDeleted1) \
+#define Search(CheckDeleted1, CheckDeleted2) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
@@ -110,14 +110,18 @@ namespace SPTAG
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
-            CheckDeleted1 { \
+            CheckDeleted1 \
+            { \
                 if (p_query.AddPoint(gnode.node, gnode.distance)) { \
                     p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                     SizeType checkNode = node[checkPos]; \
                     if (checkNode < -1) { \
                         const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
                         for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
-                            if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
+                            CheckDeleted2 \
+                            { \
+                                if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
+                            } \
                         } \
                     } \
                 } \
@@ -148,13 +152,13 @@ namespace SPTAG
         template <typename T>
         void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
         {
-            Search(if (!p_deleted.contains(gnode.node)))
+            Search(if (!p_deleted.contains(gnode.node)), if (!p_deleted.contains(m_pTrees[i].centerid)))
         }
 
         template <typename T>
         void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
         {
-            Search(;)
+            Search(; , ;)
         }
 
         template<typename T>
