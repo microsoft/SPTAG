@@ -29,6 +29,20 @@ def get_filenames(glob_pattern, recursive=True):
 
 
 def expand2square(pil_img, background_color):
+    """Function to pad an image to square using specific bg clr.
+    
+    Parameters
+    ----------
+    pil_img : PIL.Image
+        Pillow Image object that should be processed
+    background_color : int
+        Integer value representing bg color
+    
+    Returns
+    -------
+    PIL.Image
+        Square-padded image object
+    """
     width, height = pil_img.size
     if width == height:
         return pil_img
@@ -43,6 +57,25 @@ def expand2square(pil_img, background_color):
 
 
 def get_images(filenames, target_size=(200,200), color='RGB', bg_clr=0):
+    """Reads image files from provided file paths list, applies square-padding,
+    resizes all images into target size and returns them as a single numpy array
+    
+    Parameters
+    ----------
+    filenames : list
+        List of image file paths
+    target_size : tuple, optional
+        Target size for all the images to be resized to, by default (200,200)
+    color : str, optional
+        Color mode strategy for PIL when loading images, by default 'RGB'
+    bg_clr : int, optional
+        Integer representing background color used for square-padding, by default 0
+    
+    Returns
+    -------
+    numpy.array
+        Numpy array with resized images
+    """
     imgs_list = []
     for filename in filenames:
         img = Image.open(filename).convert(color)
@@ -54,6 +87,20 @@ def get_images(filenames, target_size=(200,200), color='RGB', bg_clr=0):
 
 
 def create_feat_extractor(base_model, pooling_method='avg'):
+    """Creates a features extractor based on the provided base network.
+    
+    Parameters
+    ----------
+    base_model : keras.Model
+        Base network for feature extraction
+    pooling_method : str, optional
+        Pooling method that will be used as the last layer, by default 'avg'
+    
+    Returns
+    -------
+    keras.Model
+        Ready to use feature extractor
+    """
     assert pooling_method in ['avg', 'max']
     
     x = base_model.output
@@ -67,6 +114,25 @@ def create_feat_extractor(base_model, pooling_method='avg'):
 
 
 def extract_features(imgs_np, pretrained_model="resnet50", pooling_method='avg'):    
+    """Takes in an array of fixed size images and returns features/embeddings
+    returned by one of the selected pretrained networks.
+    
+    Parameters
+    ----------
+    imgs_np : numpy.array
+        Numpy array of images
+    pretrained_model : str, optional
+        Name of the pretrained model to be used, by default "resnet50"
+        ['resnet50', 'inception_v3', 'vgg19']
+    pooling_method : str, optional
+        Defines the last pooling layer that should be applied, by default 'avg'
+        ['avg', 'max']
+    
+    Returns
+    -------
+    numpy.array
+        Array of embeddings vectors. Each row represents embeddings for single input image
+    """
     print('Input images shape: ', imgs_np.shape)
     pretrained_model = pretrained_model.lower()
     assert pretrained_model in ['resnet50', 'inception_v3', 'vgg19']
