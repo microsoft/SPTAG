@@ -44,6 +44,14 @@ The searches in the trees and the graph are iteratively conducted.
 * cmake >= 3.12.0
 * boost >= 1.67.0
 
+### **Clone the repository**
+Create a local copy of the repository to work on it.
+Start with copying 
+
+Open the terminal and run the following command:
+```git clone "URL you have copied"
+```
+
 ### **Install**
 
 > For Linux:
@@ -62,6 +70,31 @@ It will generate a SPTAGLib.sln in the build directory.
 Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will generate a Release directory which contains all the build targets.
 
 > Using Docker:
+
+Build and compile a docker image:
+```
+docker build -t sptag .
+```
+Once the image is built, verify by:
+```
+docker images
+```
+Run the docker container by:
+```
+docker run -it <CONTAINER_NAME> 
+```
+It should go into bash shell. 
+Run LS verify the files are there"
+```
+ls
+```
+Do a test run:
+```
+./test
+```
+
+
+
 ```bash
 docker build -t sptag .
 ```
