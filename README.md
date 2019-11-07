@@ -42,7 +42,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 * swig >= 3.0
 * cmake >= 3.12.0
-* boost >= 1.67.0
+* boost == 1.67.0
 
 ### **Clone the repository**
 Create a local copy of the repository to work on it.
@@ -68,6 +68,8 @@ cd build && cmake -A x64 ..
 ```
 It will generate a SPTAGLib.sln in the build directory. 
 Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will generate a Release directory which contains all the build targets.
+
+For detailed instructions on installing Windows binaries, please see [here](docs/WindowsInstallation.md)
 
 > Using Docker:
 
