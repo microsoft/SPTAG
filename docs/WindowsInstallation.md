@@ -10,7 +10,7 @@
 1. we recommend to install Visual Studio 2019 (will be needed to build components)
 2. cmake.exe is already installed with Visual Studio 2019 when you select `Desktop Development with C++`, just ensure this option is enabled in the installation workloads
 
-![Visual Studio](.\img\visualstudio.png)
+![Visual Studio](/img/visualstudio.png)
 
 ### boost == 1.67.0
 
