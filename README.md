@@ -75,6 +75,8 @@ Build and compile a docker image:
 ```
 docker build -t sptag .
 ```
+Will build a docker container with binaries in `/app/Release/`.
+
 Once the image is built, verify by:
 ```
 docker images
@@ -84,7 +86,7 @@ Run the docker container by:
 docker run -it <CONTAINER_NAME> 
 ```
 It should go into bash shell. 
-Run LS verify the files are there"
+Run LS verify the files are there.
 ```
 ls
 ```
@@ -93,12 +95,6 @@ Do a test run:
 ./test
 ```
 
-
-
-```bash
-docker build -t sptag .
-```
-Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
