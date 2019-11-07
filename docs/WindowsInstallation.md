@@ -5,9 +5,7 @@
 Steps to install SWIG: 
 
 1. Download the latest SWIG binary from http://www.swig.org/download.html, if you need a specific version, windows binaries are located at https://sourceforge.net/projects/swig/files/swigwin/. Once downloaded, please unzip to a local folder (prefarably inside the SPTAG folder) 
-2. Add the path where it was unzipped to the environment PATH example: `C:\Sptag\swigwin-3.0.12\` in System properties:
-
-![swigpath](img/swigpath.png)
+2. Add the path where it was unzipped to the environment PATH example: `C:\Sptag\swigwin-3.0.12\` in System properties
 
 ### cmake >= 3.12.0
 
