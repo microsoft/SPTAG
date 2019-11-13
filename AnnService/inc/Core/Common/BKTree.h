@@ -121,7 +121,10 @@ namespace SPTAG
 
             inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
             
-            inline SizeType sizePerTree() const { return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); }
+            inline SizeType sizePerTree() const {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
+            }
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 

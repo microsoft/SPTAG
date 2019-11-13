@@ -94,6 +94,12 @@ namespace SPTAG
                 return !m_stopped;
             }
 
+            size_t jobsize()
+            {
+                std::lock_guard<std::mutex> lock(m_lock);
+                return m_jobs.size();
+            }
+
         protected:
             std::queue<Job*> m_jobs;
             bool m_stopped;

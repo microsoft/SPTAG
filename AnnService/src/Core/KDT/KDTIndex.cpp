@@ -362,7 +362,7 @@ namespace SPTAG
                 }
             }
 
-            if (begin - m_pTrees.sizePerTree() < m_addCountForRebuild && end - m_pTrees.sizePerTree() >= m_addCountForRebuild) {
+            if (end - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0) {
                 m_threadPool.add(new RebuildJob(this, &m_pTrees, &m_pGraph));
             }
 
