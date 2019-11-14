@@ -36,11 +36,11 @@ namespace SPTAG
             // Max loop number in one hash block.
             static const int m_maxLoop = 8;
 
-            // Max pool size.
-            int m_poolSize = 8191;
-
             // Could we use the second hash block.
             bool m_secondHash;
+
+            // Max pool size.
+            int m_poolSize;
 
             // Record 2 hash tables.
             // [0~m_poolSize + 1) is the first block.
@@ -67,9 +67,13 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
-                int ex = (int)log2(size) + 2;
-                m_poolSize = (1 << ex) - 1;
+                int ex = 0;
+                while (size != 0) {
+                    ex++;
+                    size >>= 1;
+                }
                 m_secondHash = true;
+                m_poolSize = (1 << (ex + 1)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
             }
@@ -84,8 +88,8 @@ namespace SPTAG
                 else
                 {
                     // Clear all blocks.
-                    memset(m_hashTable.get(), 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                     m_secondHash = false;
+                    memset(m_hashTable.get(), 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                 }
             }
 
@@ -99,10 +103,7 @@ namespace SPTAG
 
             inline int _CheckAndSet(SizeType* hashTable, SizeType idx)
             {
-                unsigned index;
-
-                // Get first hash position.
-                index = hash_func((unsigned)idx);
+                unsigned index = hash_func((unsigned)idx);
                 for (int loop = 0; loop < m_maxLoop; ++loop)
                 {
                     if (!hashTable[index])
