@@ -9,7 +9,7 @@
 
 #include "CommonUtils.h"
 
-#define SSE
+#define AVX
 
 #ifndef _MSC_VER
 #define DIFF128 diff128
