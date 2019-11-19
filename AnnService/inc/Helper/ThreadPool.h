@@ -34,6 +34,7 @@ namespace SPTAG
                 for (auto && t : m_threads) t.join();
                 m_threads.clear();
 
+                /*
                 while (!m_jobs.empty())
                 {
                     Job* j = m_jobs.front();
@@ -49,6 +50,7 @@ namespace SPTAG
                     
                     delete j;
                 }
+                */
             }
 
             void init(int numberOfThreads = 1)
