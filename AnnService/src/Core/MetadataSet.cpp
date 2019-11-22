@@ -128,7 +128,7 @@ FileMetadataSet::AddBatch(MetadataSet& data)
     {
         ByteArray newdata = data.GetMetadata(i);
         m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_pOffsets.push_back(m_pOffsets[m_pOffsets.size() - 1] + newdata.Length());
+        m_pOffsets.push_back(m_pOffsets.back() + newdata.Length());
     }
 }
 
@@ -262,7 +262,7 @@ MemMetadataSet::AddBatch(MetadataSet& data)
     {
         ByteArray newdata = data.GetMetadata(i);
         m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_offsets.push_back(m_offsets[m_offsets.size() - 1] + newdata.Length());
+        m_offsets.push_back(m_offsets.back() + newdata.Length());
     }
 }
 

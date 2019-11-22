@@ -123,7 +123,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false);
+                        RefineNode<T>(index, i, false, false);
                         if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << (i * 100 / m_iGraphSize) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -135,7 +135,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
-                    RefineNode<T>(index, i, false);
+                    RefineNode<T>(index, i, false, false);
                     if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << (i * 100 / m_iGraphSize) << "%";
                 }
                 std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -158,7 +158,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
-                    RefineNode<T>(index, indices[i], false);
+                    RefineNode<T>(index, indices[i], false, false);
                     SizeType* nodes = m_pNeighborhoodGraph[indices[i]];
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
@@ -176,10 +176,10 @@ namespace SPTAG
 
 
             template <typename T>
-            void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors)
+            void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), m_iCEF + 1);
-                index->SearchIndex(query);
+                index->SearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), m_iCEF + 1);
 
                 if (updateNeighbors) {

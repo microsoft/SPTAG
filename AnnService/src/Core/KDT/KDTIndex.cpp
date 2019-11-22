@@ -139,28 +139,28 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
+        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
         {
             Search(if (!p_deleted.contains(gnode.node)))
         }
 
         template <typename T>
-        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
         {
             Search(;)
         }
 
         template<typename T>
         ErrorCode
-            Index<T>::SearchIndex(QueryResult &p_query) const
+            Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            if (m_deletedID.size() > 0)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, m_deletedID);
+            if (m_deletedID.size() == 0 || p_searchDeleted)
+                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
             else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, m_deletedID);
 
             m_workSpacePool->Return(workSpace);
 
@@ -356,7 +356,7 @@ namespace SPTAG
                             std::string metastr((char*)meta.Data(), meta.Length());
                             auto iter = m_pMetaToVec->find(metastr);
                             if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-                            m_pMetaToVec->emplace(metastr, i);
+                            m_pMetaToVec->at(metastr) = i;
                         }
                     }
                 }
@@ -368,7 +368,7 @@ namespace SPTAG
 
             for (SizeType node = begin; node < end; node++)
             {
-                m_pGraph.RefineNode<T>(this, node, true);
+                m_pGraph.RefineNode<T>(this, node, true, true);
             }
             //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
