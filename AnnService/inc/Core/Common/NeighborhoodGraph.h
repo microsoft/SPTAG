@@ -124,7 +124,7 @@ namespace SPTAG
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false);
-                        if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << (i * 100 / m_iGraphSize) << "%";
+                        if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
                 }
@@ -136,7 +136,7 @@ namespace SPTAG
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
                     RefineNode<T>(index, i, false, false);
-                    if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << (i * 100 / m_iGraphSize) << "%";
+                    if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                 }
                 std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
 
