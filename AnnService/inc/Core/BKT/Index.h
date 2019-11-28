@@ -15,7 +15,7 @@
 #include "../Common/WorkSpacePool.h"
 #include "../Common/RelativeNeighborhoodGraph.h"
 #include "../Common/BKTree.h"
-#include "inc/Helper/ConcurrentSet.h"
+#include "../Common/Labelset.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
@@ -71,7 +71,7 @@ namespace SPTAG
             std::string m_sDeleteDataPointsFilename;
 
             std::mutex m_dataAddLock; // protect data and graph
-            Helper::Concurrent::ConcurrentSet<SizeType> m_deletedID;
+            COMMON::Labelset m_deletedID;
             float m_fDeletePercentageForRefine;
             std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
             int m_addCountForRebuild;
@@ -111,15 +111,15 @@ namespace SPTAG
             
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
-            inline bool ContainSample(const SizeType idx) const { return !m_deletedID.contains(idx); }
-            inline bool NeedRefine() const { return m_deletedID.size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
+            inline bool NeedRefine() const { return m_deletedID.Size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
                 buffersize->push_back(m_pSamples.BufferSize());
                 buffersize->push_back(m_pTrees.BufferSize());
                 buffersize->push_back(m_pGraph.BufferSize());
-                buffersize->push_back(m_deletedID.bufferSize());
+                buffersize->push_back(m_deletedID.BufferSize());
                 return std::move(buffersize);
             }
 
@@ -145,7 +145,7 @@ namespace SPTAG
 
         private:
             void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
-            void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const;
+            void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
         };
     } // namespace BKT
 } // namespace SPTAG

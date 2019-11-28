@@ -34,7 +34,7 @@ namespace SPTAG
             if (!m_pSamples.Load((char*)p_indexBlobs[0].Data())) return ErrorCode::FailedParseValue;
             if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data())) return ErrorCode::FailedParseValue;
             if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data())) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() > 3 && !m_deletedID.load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && !m_deletedID.Load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
@@ -49,7 +49,7 @@ namespace SPTAG
             if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
             if (!m_pTrees.LoadTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
             if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            if (!m_deletedID.load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.Load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
@@ -75,12 +75,12 @@ namespace SPTAG
             Index<T>::SaveIndexData(const std::string& p_folderPath)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
 
             if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
             if (!m_pTrees.SaveTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
             if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            if (!m_deletedID.save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
+            if (!m_deletedID.Save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -90,12 +90,12 @@ namespace SPTAG
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
             
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
 
             if (!m_pSamples.Save(*p_indexStreams[0])) return ErrorCode::Fail;
             if (!m_pTrees.SaveTrees(*p_indexStreams[1])) return ErrorCode::Fail;
             if (!m_pGraph.SaveGraph(*p_indexStreams[2])) return ErrorCode::Fail;
-            if (!m_deletedID.save(*p_indexStreams[3])) return ErrorCode::Fail;
+            if (!m_deletedID.Save(*p_indexStreams[3])) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -150,9 +150,9 @@ namespace SPTAG
         p_query.SortResult(); \
 
         template <typename T>
-        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const Helper::Concurrent::ConcurrentSet<SizeType> &p_deleted) const
+        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
         {
-            Search(if (!p_deleted.contains(gnode.node)), if (!p_deleted.contains(m_pTrees[i].centerid)))
+            Search(if (!m_deletedID.Contains(gnode.node)), if (!m_deletedID.Contains(m_pTrees[i].centerid)))
         }
 
         template <typename T>
@@ -168,10 +168,10 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            if (m_deletedID.size() == 0 || p_searchDeleted)
+            if (m_deletedID.Size() == 0 || p_searchDeleted)
                 SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
             else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, m_deletedID);
+                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
 
             m_workSpacePool->Return(workSpace);
 
@@ -193,6 +193,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
 
             m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
+            m_deletedID.Initialize(p_vectorNum);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod)
             {
@@ -217,19 +218,19 @@ namespace SPTAG
         ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::shared_lock<std::shared_timed_mutex> sharedlock(m_deletedID.getLock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
 
             SizeType newR = GetNumSamples();
 
             std::vector<SizeType> indices;
             std::vector<SizeType> reverseIndices(newR);
             for (SizeType i = 0; i < newR; i++) {
-                if (!m_deletedID.contains(i)) {
+                if (!m_deletedID.Contains(i)) {
                     indices.push_back(i);
                     reverseIndices[i] = i;
                 }
                 else {
-                    while (m_deletedID.contains(newR - 1) && newR > i) newR--;
+                    while (m_deletedID.Contains(newR - 1) && newR > i) newR--;
                     if (newR == i) break;
                     indices.push_back(newR - 1);
                     reverseIndices[newR - 1] = i;
@@ -252,8 +253,9 @@ namespace SPTAG
 
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], &(newTrees.GetSampleMap()));
 
-            Helper::Concurrent::ConcurrentSet<SizeType> newDeletedID;
-            newDeletedID.save(*p_indexStreams[3]);
+            COMMON::Labelset newDeletedID;
+            newDeletedID.Initialize(newR);
+            newDeletedID.Save(*p_indexStreams[3]);
             return ErrorCode::Success;
         }
 
@@ -305,7 +307,7 @@ namespace SPTAG
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        m_deletedID.insert(query.GetResult(i)->VID);
+                        m_deletedID.Insert(query.GetResult(i)->VID);
                     }
                 }
             }
@@ -314,7 +316,7 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
-            m_deletedID.insert(p_id);
+            m_deletedID.Insert(p_id);
             return ErrorCode::Success;
         }
 
@@ -341,10 +343,13 @@ namespace SPTAG
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
 
-                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success) {
+                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || 
+                    m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success || 
+                    m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
+                    m_deletedID.SetR(begin);
                     return ErrorCode::MemoryOverFlow;
                 }
                 if (DistCalcMethod::Cosine == m_iDistCalcMethod)

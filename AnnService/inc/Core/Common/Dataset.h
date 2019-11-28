@@ -66,6 +66,8 @@ namespace SPTAG
                 }
             }
             void SetName(const std::string name_) { name = name_; }
+            std::string Name() const { return name; }
+
             void SetR(SizeType R_) 
             {
                 if (R_ >= rows)
@@ -168,19 +170,24 @@ namespace SPTAG
                 return true;
             }
 
+            bool Load(std::ifstream& p_instream)
+            {
+                p_instream.read((char*)&rows, sizeof(SizeType));
+                p_instream.read((char*)&cols, sizeof(DimensionType));
+
+                Initialize(rows, cols);
+                p_instream.read((char*)data, sizeof(T) * cols * rows);
+                std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
+                return true;
+            }
+
             bool Load(std::string sDataPointsFileName)
             {
                 std::cout << "Load " << name << " From " << sDataPointsFileName << std::endl;
                 std::ifstream input(sDataPointsFileName, std::ios::binary);
                 if (!input.is_open()) return false;
-
-                input.read((char*)&rows, sizeof(SizeType));
-                input.read((char*)&cols, sizeof(DimensionType));
-
-                Initialize(rows, cols);
-                input.read((char*)data, sizeof(T) * cols * rows);
+                Load(input);
                 input.close();
-                std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
                 return true;
             }
 

@@ -170,7 +170,14 @@ namespace SPTAG
                         nodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                if (output != nullptr) m_pNeighborhoodGraph.Refine(indices, *output);
+                if (output != nullptr) {
+                    output->write((char*)&R, sizeof(SizeType));
+                    output->write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
+                    for (SizeType i = 0; i < R; i++) {
+                        output->write((char*)m_pNeighborhoodGraph[indices[i]], sizeof(SizeType) * m_iNeighborhoodSize);
+                    }
+                    std::cout << "Save Refine " << m_pNeighborhoodGraph.Name() << " (" << R << ", " << m_iNeighborhoodSize << ") Finish!" << std::endl;
+                }
                 return ErrorCode::Success;
             }
 
@@ -357,12 +364,24 @@ namespace SPTAG
             
             bool SaveGraph(std::string sGraphFilename) const
             {
-                return m_pNeighborhoodGraph.Save(sGraphFilename);
+                std::cout << "Save " << m_pNeighborhoodGraph.Name() << " To " << sGraphFilename << std::endl;
+                std::ofstream output(sGraphFilename, std::ios::binary);
+                if (!output.is_open()) return false;
+                SaveGraph(output);
+                output.close();
+                return true;
             }
 
             bool SaveGraph(std::ostream& output) const
             {
-                return m_pNeighborhoodGraph.Save(output);
+                output.write((char*)&m_iGraphSize, sizeof(SizeType));
+                output.write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
+
+                for (SizeType i = 0; i < m_iGraphSize; i++)
+                    output.write((char*)m_pNeighborhoodGraph[i], sizeof(SizeType) * m_iNeighborhoodSize);
+
+                std::cout << "Save " << m_pNeighborhoodGraph.Name() << " (" << m_iGraphSize << ", " << m_iNeighborhoodSize << ") Finish!" << std::endl;
+                return true;
             }
 
             inline ErrorCode AddBatch(SizeType num)
