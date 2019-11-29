@@ -30,6 +30,8 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
+
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
@@ -81,7 +83,7 @@ public:
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex);
-    
+
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);

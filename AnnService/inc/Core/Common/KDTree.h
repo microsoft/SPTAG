@@ -63,7 +63,7 @@ namespace SPTAG
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(p_index->GetNumSamples());
-                    for (SizeType i = 0; i < p_index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());

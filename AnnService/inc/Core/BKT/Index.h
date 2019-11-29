@@ -40,13 +40,8 @@ namespace SPTAG
             public:
                 RebuildJob(VectorIndex* p_index, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_index(p_index), m_tree(p_tree), m_graph(p_graph) {}
                 void exec() {
-                    SizeType numSamples = m_index->GetNumSamples();
-
-                    std::vector<SizeType> localindices(numSamples);
-                    for (SizeType i = 0; i < numSamples; i++) localindices[i] = i;
-
                     COMMON::BKTree newTrees(*m_tree);
-                    newTrees.BuildTrees<T>(m_index, &localindices);
+                    newTrees.BuildTrees<T>(m_index);
                     m_tree->swap(newTrees);
                 }
             private:
@@ -142,6 +137,7 @@ namespace SPTAG
 
             ErrorCode RefineIndex(const std::string& p_folderPath);
             ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams);
+            ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:
             void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;

@@ -151,23 +151,32 @@ namespace SPTAG
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::ostream* output, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 SizeType R = (SizeType)indices.size();
+
+                if (newGraph != nullptr)
+                {
+                    newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
+                    newGraph->m_iGraphSize = R;
+                    newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
+                }
 
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
                     RefineNode<T>(index, indices[i], false, false);
-                    SizeType* nodes = m_pNeighborhoodGraph[indices[i]];
+                    SizeType *nodes, *outnodes; 
+                    nodes = outnodes = m_pNeighborhoodGraph[indices[i]];
+                    if (newGraph != nullptr) outnodes = newGraph->m_pNeighborhoodGraph[i];
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                     {
-                        if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) nodes[j] = reverseIndices[nodes[j]];
-                        if (idmap != nullptr && (iter = idmap->find(nodes[j])) != idmap->end()) nodes[j] = iter->second;
+                        if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[nodes[j]];
+                        if (idmap != nullptr && (iter = idmap->find(outnodes[j])) != idmap->end()) outnodes[j] = iter->second;
                     }
-                    if (idmap != nullptr && (iter = idmap->find(-1 - indices[i])) != idmap->end())
-                        nodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
+                    if (idmap != nullptr && (iter = idmap->find(-1 - i)) != idmap->end())
+                        outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
                 if (output != nullptr) {

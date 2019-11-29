@@ -207,6 +207,15 @@ namespace SPTAG
                 return true;
             }
 
+            bool Refine(const std::vector<SizeType>& indices, Dataset<T>& data)
+            {
+                SizeType R = (SizeType)(indices.size());
+                data.Initialize(R, cols);
+                for (SizeType i = 0; i < R; i++) {
+                    std::memcpy((void*)data.At(i), (void*)At(indices[i]), sizeof(T) * cols);
+                }
+            }
+
             bool Refine(const std::vector<SizeType>& indices, std::ostream& output)
             {
                 SizeType R = (SizeType)(indices.size());

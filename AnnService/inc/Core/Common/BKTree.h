@@ -136,7 +136,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr)
+            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr)
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
@@ -147,7 +147,7 @@ namespace SPTAG
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(index->GetNumSamples());
-                    for (SizeType i = 0; i < index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
@@ -170,7 +170,8 @@ namespace SPTAG
                         m_pTreeRoots[item.index].childStart = newBKTid;
                         if (item.last - item.first <= m_iBKTLeafSize) {
                             for (SizeType j = item.first; j < item.last; j++) {
-                                m_pTreeRoots.push_back(BKTNode(localindices[j]));
+                                SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
+                                m_pTreeRoots.push_back(BKTNode(cid));
                             }
                         }
                         else { // clustering the data into BKTKmeansK clusters
@@ -178,18 +179,20 @@ namespace SPTAG
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
-                                m_pTreeRoots[item.index].centerid = localindices[item.first];
+                                m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
                                 m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
                                 for (SizeType j = item.first + 1; j < end; j++) {
-                                    m_pTreeRoots.push_back(BKTNode(localindices[j]));
-                                    m_pSampleCenterMap[localindices[j]] = m_pTreeRoots[item.index].centerid;
+                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                    m_pTreeRoots.push_back(BKTNode(cid));
+                                    m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
                                 }
                                 m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
                             }
                             else {
                                 for (int k = 0; k < m_iBKTKmeansK; k++) {
                                     if (args.counts[k] == 0) continue;
-                                    m_pTreeRoots.push_back(BKTNode(localindices[item.first + args.counts[k] - 1]));
+                                    SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
+                                    m_pTreeRoots.push_back(BKTNode(cid));
                                     if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
                                     item.first += args.counts[k];
                                 }

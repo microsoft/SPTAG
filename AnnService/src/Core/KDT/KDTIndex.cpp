@@ -204,6 +204,51 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex)
+        {
+            p_newIndex.reset(new Index<T>());
+            Index<T>* ptr = (Index<T>*)p_newIndex.get();
+
+#define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
+            ptr->VarName =  VarName; \
+
+#include "inc/Core/KDT/ParameterDefinitionList.h"
+#undef DefineKDTParameter
+
+            std::lock_guard<std::mutex> lock(m_dataAddLock);
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
+
+            SizeType newR = GetNumSamples();
+
+            std::vector<SizeType> indices;
+            std::vector<SizeType> reverseIndices(newR);
+            for (SizeType i = 0; i < newR; i++) {
+                if (!m_deletedID.Contains(i)) {
+                    indices.push_back(i);
+                    reverseIndices[i] = i;
+                }
+                else {
+                    while (m_deletedID.Contains(newR - 1) && newR > i) newR--;
+                    if (newR == i) break;
+                    indices.push_back(newR - 1);
+                    reverseIndices[newR - 1] = i;
+                    newR--;
+                }
+            }
+
+            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+
+            if (false == m_pSamples.Refine(indices, ptr->m_pSamples)) return ErrorCode::Fail;
+            if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) return ErrorCode::Fail;
+
+            ptr->m_deletedID.Initialize(newR);
+            ptr->m_pTrees.BuildTrees<T>(ptr);
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
+            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
@@ -232,8 +277,6 @@ namespace SPTAG
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
             if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
 
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2]);
-
             COMMON::KDTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices);
 #pragma omp parallel for
@@ -244,6 +287,8 @@ namespace SPTAG
                     newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
             }
             newTrees.SaveTrees(*p_indexStreams[1]);
+
+            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr);
 
             COMMON::Labelset newDeletedID;
             newDeletedID.Initialize(newR);

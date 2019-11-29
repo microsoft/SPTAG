@@ -9,6 +9,16 @@
 using namespace SPTAG;
 
 ErrorCode
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata)
+{
+    p_newMetadata.reset(new MemMetadataSet());
+    for (SizeType& t : indices) {
+        p_newMetadata->Add(GetMetadata(t));
+    }
+    return ErrorCode::Success;
+}
+
+ErrorCode
 MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
 {
     SizeType R = (SizeType)indices.size();
@@ -39,6 +49,16 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p
     if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
     std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
     return ErrorCode::Success;
+}
+
+
+void
+MetadataSet::AddBatch(MetadataSet& data)
+{
+    for (SizeType i = 0; i < data.Count(); i++)
+    {
+        Add(data.GetMetadata(i));
+    }
 }
 
 
@@ -122,16 +142,11 @@ FileMetadataSet::BufferSize() const
 
 
 void
-FileMetadataSet::AddBatch(MetadataSet& data)
+FileMetadataSet::Add(ByteArray& data)
 {
-    for (SizeType i = 0; i < data.Count(); i++) 
-    {
-        ByteArray newdata = data.GetMetadata(i);
-        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_pOffsets.push_back(m_pOffsets.back() + newdata.Length());
-    }
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_pOffsets.push_back(m_pOffsets.back() + data.Length());
 }
-
 
 
 ErrorCode
@@ -178,6 +193,11 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
     return ErrorCode::Success;
 }
 
+
+MemMetadataSet::MemMetadataSet(): m_count(0), m_metadataHolder(ByteArray::c_empty)
+{
+    m_offsets.push_back(0);
+}
 
 
 MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile)
@@ -255,15 +275,12 @@ MemMetadataSet::BufferSize() const
         sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
+
 void
-MemMetadataSet::AddBatch(MetadataSet& data)
+MemMetadataSet::Add(ByteArray& data)
 {
-    for (SizeType i = 0; i < data.Count(); i++)
-    {
-        ByteArray newdata = data.GetMetadata(i);
-        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_offsets.push_back(m_offsets.back() + newdata.Length());
-    }
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_offsets.push_back(m_offsets.back() + data.Length());
 }
 
 
