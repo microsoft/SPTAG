@@ -40,6 +40,7 @@ namespace SPTAG
             public:
                 RebuildJob(VectorIndex* p_index, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_index(p_index), m_tree(p_tree), m_graph(p_graph) {}
                 void exec() {
+                    omp_set_num_threads(1);
                     COMMON::BKTree newTrees(*m_tree);
                     newTrees.BuildTrees<T>(m_index);
                     m_tree->swap(newTrees);
