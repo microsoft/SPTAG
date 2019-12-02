@@ -58,7 +58,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr)
+            void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr, int numOfThreads = omp_get_num_threads())
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
@@ -71,7 +71,7 @@ namespace SPTAG
 
                 m_pTreeRoots.resize(m_iTreeNumber * localindices.size());
                 m_pTreeStart.resize(m_iTreeNumber, 0);
-#pragma omp parallel for
+#pragma omp parallel for num_threads(numOfThreads)
                 for (int i = 0; i < m_iTreeNumber; i++)
                 {
                     Sleep(i * 100); std::srand(clock());

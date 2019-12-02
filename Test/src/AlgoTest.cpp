@@ -81,8 +81,11 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "16");
 
+    omp_set_num_threads(16);
     clock_t start = clock();
+#pragma omp parallel for schedule(dynamic)
     for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
         SPTAG::ByteArray metaarr = meta->GetMetadata(i);
         std::uint64_t offset[2] = { 0, metaarr.Length() };

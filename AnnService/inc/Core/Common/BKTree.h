@@ -136,7 +136,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr)
+            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, int numOfThreads = omp_get_num_threads())
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
@@ -152,7 +152,7 @@ namespace SPTAG
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
-                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (SizeType)localindices.size(), omp_get_num_threads());
+                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (SizeType)localindices.size(), numOfThreads);
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
@@ -318,11 +318,11 @@ namespace SPTAG
                                std::vector<SizeType>& indices,
                                const SizeType first, const SizeType last, KmeansArgs<T>& args, const bool updateCenters) const {
                 float currDist = 0;
-                int threads = omp_get_num_threads();
+                int threads = args._T;
                 float lambda = (updateCenters) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (last - first)) : 0.0f;
                 SizeType subsize = (last - first - 1) / threads + 1;
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(threads)
                 for (int tid = 0; tid < threads; tid++)
                 {
                     SizeType istart = first + tid * subsize;
