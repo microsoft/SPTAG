@@ -214,6 +214,7 @@ namespace SPTAG
                 for (SizeType i = 0; i < R; i++) {
                     std::memcpy((void*)data.At(i), (void*)At(indices[i]), sizeof(T) * cols);
                 }
+                return true;
             }
 
             bool Refine(const std::vector<SizeType>& indices, std::ostream& output)
