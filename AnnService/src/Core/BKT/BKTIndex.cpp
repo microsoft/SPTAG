@@ -410,7 +410,7 @@ namespace SPTAG
                             std::string metastr((char*)meta.Data(), meta.Length());
                             auto iter = m_pMetaToVec->find(metastr);
                             if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-                            m_pMetaToVec->at(metastr) = i;
+                            (*m_pMetaToVec)[metastr] = i;
                         }
                     }
                 }
