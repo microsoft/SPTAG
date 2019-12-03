@@ -90,7 +90,8 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
         SPTAG::ByteArray metaarr = meta->GetMetadata(i);
         std::uint64_t offset[2] = { 0, metaarr.Length() };
         std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
-        BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset));
+        SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset);
+        if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
     }
     std::cout << "AddIndex time: " << ((float)(clock() - start) / CLOCKS_PER_SEC / vec->Count()) << "s" << std::endl;
     
