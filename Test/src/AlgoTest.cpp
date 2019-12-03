@@ -81,11 +81,8 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
-    vecIndex->SetParameter("NumberOfThreads", "16");
 
-    omp_set_num_threads(16);
     clock_t start = clock();
-#pragma omp parallel for schedule(dynamic)
     for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
         SPTAG::ByteArray metaarr = meta->GetMetadata(i);
         std::uint64_t offset[2] = { 0, metaarr.Length() };
@@ -150,7 +147,7 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
         SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
         n));
-
+    
     Build<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta1);
@@ -162,7 +159,7 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     Delete<T>("testindices", query.data(), q, "testindices");
     std::string truthmeta3[] = { "1", "1", "3", "1", "3", "1", "3", "5", "3" };
     Search<T>("testindices", query.data(), q, k, truthmeta3);
-
+    
     BuildWithMetaMapping<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta4[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta4);
@@ -170,7 +167,7 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     Add<T>("testindices", vecset, metaset, "testindices");
     std::string truthmeta5[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta5);
-
+    
     AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<float>("testindices", query.data(), q, k, truthmeta6);
