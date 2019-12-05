@@ -238,6 +238,10 @@ namespace SPTAG
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
 
+            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(ptr->m_pGraph.m_iMaxCheckForRefineGraph, newR));
+            ptr->m_workSpacePool->Init(m_iNumberOfThreads);
+            ptr->m_threadPool.init();
+
             if (false == m_pSamples.Refine(indices, ptr->m_pSamples)) return ErrorCode::Fail;
             if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) return ErrorCode::Fail;
 
