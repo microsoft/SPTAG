@@ -42,7 +42,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 * swig >= 3.0
 * cmake >= 3.12.0
-* boost == 1.67.0
+* boost >= 1.67.0
 
 ### **Install**
 
