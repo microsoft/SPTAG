@@ -14,13 +14,13 @@ namespace SPTAG
         class Labelset
         {
         private:
-            std::atomic<SizeType> m_deleted;
+            std::atomic<SizeType> m_inserted;
             Dataset<std::int8_t> m_data;
             
         public:
             Labelset() 
             {
-                m_deleted = 0;
+                m_inserted = 0;
                 m_data.SetName("DeleteID");
             }
 
@@ -29,7 +29,7 @@ namespace SPTAG
                 m_data.Initialize(capacity, 1);
             }
 
-            inline size_t Count() const { return m_deleted.load(); }
+            inline size_t Count() const { return m_inserted.load(); }
 
             inline bool Contains(const SizeType& key) const
             {
@@ -41,13 +41,13 @@ namespace SPTAG
                 if (*m_data[key] != 1)
                 {
                     *m_data[key] = 1;
-                    m_deleted++;
+                    m_inserted++;
                 }
             }
 
             inline bool Save(std::ostream& output)
             {
-                SizeType deleted = m_deleted.load();
+                SizeType deleted = m_inserted.load();
                 output.write((char*)&deleted, sizeof(SizeType));
                 return m_data.Save(output);
             }
@@ -69,7 +69,7 @@ namespace SPTAG
                 if (!input.is_open()) return false;          
                 SizeType deleted;
                 input.read((char*)&deleted, sizeof(SizeType));
-                m_deleted = deleted;
+                m_inserted = deleted;
                 m_data.Load(input);
                 input.close();
                 return true;
@@ -77,7 +77,7 @@ namespace SPTAG
 
             inline bool Load(char* pmemoryFile) 
             {
-                m_deleted = *((SizeType*)pmemoryFile);
+                m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType));
             }
 
