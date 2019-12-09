@@ -50,11 +50,15 @@ namespace SPTAG
                 return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
             }
 
-            void swap(KDTree& p_tree)
+            template <typename T>
+            void Rebuild(VectorIndex* p_index)
             {
+                COMMON::KDTree newTrees(*this);
+                newTrees.BuildTrees<T>(p_index, nullptr, 1);
+
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
-                m_pTreeRoots.swap(p_tree.m_pTreeRoots);
-                m_pTreeStart.swap(p_tree.m_pTreeStart);
+                m_pTreeRoots.swap(newTrees.m_pTreeRoots);
+                m_pTreeStart.swap(newTrees.m_pTreeStart);
             }
 
             template <typename T>

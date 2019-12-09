@@ -21,7 +21,7 @@
 #include "inc/Helper/ThreadPool.h"
 
 #include <functional>
-#include <mutex>
+#include <shared_mutex>
 
 namespace SPTAG
 {
@@ -40,9 +40,7 @@ namespace SPTAG
             public:
                 RebuildJob(VectorIndex* p_index, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_index(p_index), m_tree(p_tree), m_graph(p_graph) {}
                 void exec() {
-                    COMMON::BKTree newTrees(*m_tree);
-                    newTrees.BuildTrees<T>(m_index, nullptr, nullptr, 1);
-                    m_tree->swap(newTrees);
+                    m_tree->Rebuild<T>(m_index);
                 }
             private:
                 VectorIndex* m_index;
@@ -65,14 +63,16 @@ namespace SPTAG
             std::string m_sDataPointsFilename;
             std::string m_sDeleteDataPointsFilename;
 
-            std::mutex m_dataAddLock; // protect data and graph
-            COMMON::Labelset m_deletedID;
-            float m_fDeletePercentageForRefine;
-            std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
             int m_addCountForRebuild;
-            Helper::ThreadPool m_threadPool;
+            float m_fDeletePercentageForRefine;
+            std::mutex m_dataAddLock; // protect data and graph
+            std::shared_timed_mutex m_dataDeleteLock;
+            COMMON::Labelset m_deletedID;
 
+            std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
+            Helper::ThreadPool m_threadPool;
             int m_iNumberOfThreads;
+
             DistCalcMethod m_iDistCalcMethod;
             float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
         
@@ -107,7 +107,7 @@ namespace SPTAG
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
-            inline bool NeedRefine() const { return m_deletedID.Size() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            inline bool NeedRefine() const { return m_deletedID.Count() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);

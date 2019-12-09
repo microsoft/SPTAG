@@ -128,11 +128,16 @@ namespace SPTAG
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
-            void swap(BKTree& p_tree)
+            template <typename T>
+            void Rebuild(VectorIndex* p_index)
             {
+                BKTree newTrees(*this);
+                newTrees.BuildTrees<T>(p_index, nullptr, nullptr, 1);
+
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
-                m_pTreeRoots.swap(p_tree.m_pTreeRoots);
-                m_pTreeStart.swap(p_tree.m_pTreeStart);
+                m_pTreeRoots.swap(newTrees.m_pTreeRoots);
+                m_pTreeStart.swap(newTrees.m_pTreeStart);
+                m_pSampleCenterMap.swap(newTrees.m_pSampleCenterMap);
             }
 
             template <typename T>

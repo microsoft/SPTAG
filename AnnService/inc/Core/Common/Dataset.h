@@ -65,8 +65,8 @@ namespace SPTAG
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
             }
-            void SetName(const std::string name_) { name = name_; }
-            std::string Name() const { return name; }
+            void SetName(const std::string& name_) { name = name_; }
+            const std::string& Name() const { return name; }
 
             void SetR(SizeType R_) 
             {
@@ -212,7 +212,7 @@ namespace SPTAG
                 SizeType R = (SizeType)(indices.size());
                 data.Initialize(R, cols);
                 for (SizeType i = 0; i < R; i++) {
-                    std::memcpy((void*)data.At(i), (void*)At(indices[i]), sizeof(T) * cols);
+                    std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
                 }
                 return true;
             }

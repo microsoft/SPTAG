@@ -75,7 +75,7 @@ namespace SPTAG
             Index<T>::SaveIndexData(const std::string& p_folderPath)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
             if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
             if (!m_pTrees.SaveTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
@@ -90,7 +90,7 @@ namespace SPTAG
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
             
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
             if (!m_pSamples.Save(*p_indexStreams[0])) return ErrorCode::Fail;
             if (!m_pTrees.SaveTrees(*p_indexStreams[1])) return ErrorCode::Fail;
@@ -168,7 +168,7 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            if (m_deletedID.Size() == 0 || p_searchDeleted)
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
                 SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
             else
                 SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
@@ -227,7 +227,7 @@ namespace SPTAG
 #undef DefineBKTParameter
 
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
             SizeType newR = GetNumSamples();
 
@@ -267,7 +267,7 @@ namespace SPTAG
         ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::unique_lock<std::shared_timed_mutex> uniquelock(m_deletedID.Lock());
+            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
             SizeType newR = GetNumSamples();
 
@@ -352,7 +352,7 @@ namespace SPTAG
 
                 for (int i = 0; i < m_pGraph.m_iCEF; i++) {
                     if (query.GetResult(i)->Dist < 1e-6) {
-                        m_deletedID.Insert(query.GetResult(i)->VID);
+                        DeleteIndex(query.GetResult(i)->VID);
                     }
                 }
             }
@@ -361,6 +361,7 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
+            std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
             m_deletedID.Insert(p_id);
             return ErrorCode::Success;
         }

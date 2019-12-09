@@ -5,7 +5,6 @@
 #define _SPTAG_COMMON_LABELSET_H_
 
 #include <atomic>
-#include <shared_mutex>
 #include "Dataset.h"
 
 namespace SPTAG
@@ -17,14 +16,12 @@ namespace SPTAG
         private:
             std::atomic<SizeType> m_deleted;
             Dataset<std::int8_t> m_data;
-            std::unique_ptr<std::shared_timed_mutex> m_lock;
-
+            
         public:
             Labelset() 
             {
                 m_deleted = 0;
                 m_data.SetName("DeleteID");
-                m_lock.reset(new std::shared_timed_mutex);
             }
 
             void Initialize(SizeType capacity)
@@ -32,7 +29,7 @@ namespace SPTAG
                 m_data.Initialize(capacity, 1);
             }
 
-            inline size_t Size() const { return m_deleted.load(); }
+            inline size_t Count() const { return m_deleted.load(); }
 
             inline bool Contains(const SizeType& key) const
             {
@@ -43,9 +40,8 @@ namespace SPTAG
             {
                 if (*m_data[key] != 1)
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    m_deleted++;
                     *m_data[key] = 1;
+                    m_deleted++;
                 }
             }
 
@@ -98,11 +94,6 @@ namespace SPTAG
             inline void SetR(SizeType num)
             {
                 m_data.SetR(num);
-            }
-            
-            inline std::shared_timed_mutex& Lock()
-            {
-                return *m_lock;
             }
         };
     }
