@@ -9,6 +9,16 @@
 using namespace SPTAG;
 
 ErrorCode
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata)
+{
+    p_newMetadata.reset(new MemMetadataSet());
+    for (SizeType& t : indices) {
+        p_newMetadata->Add(GetMetadata(t));
+    }
+    return ErrorCode::Success;
+}
+
+ErrorCode
 MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
 {
     SizeType R = (SizeType)indices.size();
@@ -39,6 +49,16 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p
     if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
     std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
     return ErrorCode::Success;
+}
+
+
+void
+MetadataSet::AddBatch(MetadataSet& data)
+{
+    for (SizeType i = 0; i < data.Count(); i++)
+    {
+        Add(data.GetMetadata(i));
+    }
 }
 
 
@@ -122,16 +142,11 @@ FileMetadataSet::BufferSize() const
 
 
 void
-FileMetadataSet::AddBatch(MetadataSet& data)
+FileMetadataSet::Add(ByteArray& data)
 {
-    for (SizeType i = 0; i < data.Count(); i++) 
-    {
-        ByteArray newdata = data.GetMetadata(i);
-        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_pOffsets.push_back(m_pOffsets[m_pOffsets.size() - 1] + newdata.Length());
-    }
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_pOffsets.push_back(m_pOffsets.back() + data.Length());
 }
-
 
 
 ErrorCode
@@ -179,12 +194,38 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
 }
 
 
+MemMetadataSet::MemMetadataSet(): m_count(0), m_metadataHolder(ByteArray::c_empty)
+{
+    m_offsets.push_back(0);
+}
+
+
+MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile)
+{
+    std::ifstream meta(p_metafile, std::ifstream::binary);
+    std::ifstream metaidx(p_metaindexfile, std::ifstream::binary);
+    if (!meta.is_open() || !metaidx.is_open())
+    {
+        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
+        return;
+    }
+
+    metaidx.read((char *)&m_count, sizeof(m_count));
+    m_offsets.resize(m_count + 1);
+    metaidx.read((char *)m_offsets.data(), sizeof(std::uint64_t) * (m_count + 1));
+    metaidx.close();
+
+    m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
+    meta.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    meta.close();
+}
+
+
 MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count)
     : m_metadataHolder(std::move(p_metadata)),
-      m_offsetHolder(std::move(p_offsets)),
       m_count(p_count)
 {
-    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(m_offsetHolder.Data());
+    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(p_offsets.Data());
     m_offsets.insert(m_offsets.end(), newdata, newdata + p_count + 1);
 }
 
@@ -223,7 +264,7 @@ MemMetadataSet::Count() const
 bool
 MemMetadataSet::Available() const
 {
-    return m_metadataHolder.Length() > 0 && m_offsetHolder.Length() > 0;
+    return m_metadataHolder.Length() > 0 && m_offsets.size() > 0;
 }
 
 
@@ -234,15 +275,12 @@ MemMetadataSet::BufferSize() const
         sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
+
 void
-MemMetadataSet::AddBatch(MetadataSet& data)
+MemMetadataSet::Add(ByteArray& data)
 {
-    for (SizeType i = 0; i < data.Count(); i++)
-    {
-        ByteArray newdata = data.GetMetadata(i);
-        m_newdata.insert(m_newdata.end(), newdata.Data(), newdata.Data() + newdata.Length());
-        m_offsets.push_back(m_offsets[m_offsets.size() - 1] + newdata.Length());
-    }
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_offsets.push_back(m_offsets.back() + data.Length());
 }
 
 
