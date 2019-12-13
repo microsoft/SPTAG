@@ -198,7 +198,7 @@ def Test(algo, distmethod):
     print ("AddWithMetaData.............................")
     testAddWithMetaData(None, x, m, 'testindices', algo, distmethod)
     testSearchWithMetaData('testindices', q, k)
-	print ("Delete.............................")
+    print ("Delete.............................")
     testDelete('testindices', q, 'testindices')
     testSearchWithMetaData('testindices', q, k)
 
