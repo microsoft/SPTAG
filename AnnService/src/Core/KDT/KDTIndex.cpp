@@ -246,7 +246,8 @@ namespace SPTAG
             if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) return ErrorCode::Fail;
 
             ptr->m_deletedID.Initialize(newR);
-            ptr->m_pTrees.BuildTrees<T>(ptr);
+            COMMON::KDTree* newtree = &(ptr->m_pTrees);
+            (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
             if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
             return ErrorCode::Success;
