@@ -428,7 +428,7 @@ namespace SPTAG
 
             for (SizeType node = begin; node < end; node++)
             {
-                m_pGraph.RefineNode<T>(this, node, true, true);
+                m_pGraph.RefineNode<T>(this, node, true, true, m_pGraph.m_iAddCEF);
             }
             //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
