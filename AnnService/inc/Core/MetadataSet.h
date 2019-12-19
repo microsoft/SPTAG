@@ -27,7 +27,7 @@ public:
 
     virtual std::pair<std::uint64_t, std::uint64_t> BufferSize() const = 0;
 
-    virtual void Add(ByteArray& data) = 0;
+    virtual void Add(const ByteArray& data) = 0;
 
     virtual ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut) = 0;
 
@@ -58,7 +58,7 @@ public:
 
     std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
     
-    void Add(ByteArray& data);
+    void Add(const ByteArray& data);
 
     ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
@@ -98,7 +98,7 @@ public:
 
     std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
 
-    void Add(ByteArray& data);
+    void Add(const ByteArray& data);
 
     ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
