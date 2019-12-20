@@ -108,13 +108,13 @@ namespace SPTAG
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             CheckDeleted1 { \
                 if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                     p_query.SortResult(); return; \
                 } \
             } \
-            for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
-                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             float upperBound = max(p_query.worstDist(), gnode.distance); \
             bool bLocalOpt = true; \
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \

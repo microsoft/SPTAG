@@ -110,6 +110,9 @@ namespace SPTAG
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
             CheckDeleted1 \
             { \
                 if (p_query.AddPoint(gnode.node, gnode.distance)) { \
@@ -131,9 +134,6 @@ namespace SPTAG
                         p_query.SortResult(); return; \
                     } \
                 } \
-            } \
-            for (DimensionType i = 0; i <= checkPos; i++) { \
-                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             } \
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \

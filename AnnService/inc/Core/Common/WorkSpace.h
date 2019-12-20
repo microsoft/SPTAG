@@ -155,11 +155,11 @@ namespace SPTAG
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
 
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                m_iContinuousLimit = maxCheck / 64;
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
-                m_iContinuousLimit = maxCheck / 64;
                 m_iMaxCheck = maxCheck;
-                m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
             inline bool CheckAndSet(SizeType idx)
