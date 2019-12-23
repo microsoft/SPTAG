@@ -22,7 +22,7 @@ namespace SPTAG
                 length = size;
                 heap.reset(new T[length + 1]);  // heap uses 1-based indexing
                 count = 0;
-                lastlevel = int(pow(2.0, floor(log2(size))));
+                lastlevel = int(pow(2.0, floor(log2((float)size))));
             }
             ~Heap() {}
             inline int size() { return count; }

@@ -23,6 +23,8 @@
 #ifndef _SPTAG_COMMON_CUDA_THREADHEAP_H_
 #define _SPTAG_COMMON_CUDA_THREADHEAP_H_
 
+#include <float.h>
+
 // Object used to store id,distance combination for KNN graph
 class DistPair {
 public:
