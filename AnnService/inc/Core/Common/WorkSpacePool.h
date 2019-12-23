@@ -27,6 +27,8 @@ public:
 
     void Init(int size);
 
+	inline int GetMaxCheck() const { return m_maxCheck; }
+
 private:
     std::list<std::shared_ptr<WorkSpace>> m_workSpacePool;
 

@@ -108,10 +108,7 @@ namespace SPTAG
                     TptreeDataIndices.clear();
                     TptreeLeafNodes.clear();
                 }
-
-                if (m_iMaxCheckForRefineGraph > 0) {
-                    RefineGraph<T>(index, idmap);
-                }
+                RefineGraph<T>(index, idmap);
             }
 
             template <typename T>
@@ -193,7 +190,7 @@ namespace SPTAG
             void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
-                index->SearchIndex(query, searchDeleted);
+                index->RefineSearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
 
                 if (updateNeighbors) {
