@@ -142,7 +142,7 @@ FileMetadataSet::BufferSize() const
 
 
 void
-FileMetadataSet::Add(ByteArray& data)
+FileMetadataSet::Add(const ByteArray& data)
 {
     m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
     m_pOffsets.push_back(m_pOffsets.back() + data.Length());
@@ -277,7 +277,7 @@ MemMetadataSet::BufferSize() const
 
 
 void
-MemMetadataSet::Add(ByteArray& data)
+MemMetadataSet::Add(const ByteArray& data)
 {
     m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
     m_offsets.push_back(m_offsets.back() + data.Length());

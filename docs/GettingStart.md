@@ -124,14 +124,14 @@ def testBuild(algo, distmethod, x, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    ret = i.Build(x, x.shape[0])
-    i.Save(out)
+    if i.Build(x, x.shape[0]):
+        i.Save(out)
 
 def testBuildWithMetaData(algo, distmethod, x, s, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.BuildWithMetaData(x, s, x.shape[0]):
+    if i.BuildWithMetaData(x, s, x.shape[0], False):
         i.Save(out)
 
 def testSearch(index, q, k):
@@ -165,7 +165,6 @@ def testAddWithMetaData(index, x, s, out, algo, distmethod):
         i = SPTAG.AnnIndex.Load(index)
     else:
         i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
-    i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
     i.SetBuildParam("NumberOfThreads", '4')
     i.SetBuildParam("DistCalcMethod", distmethod)
     if i.AddWithMetaData(x, s, x.shape[0]):
@@ -198,8 +197,8 @@ def Test(algo, distmethod):
 
     print ("AddWithMetaData.............................")
     testAddWithMetaData(None, x, m, 'testindices', algo, distmethod)
-    print ("Delete.............................")
     testSearchWithMetaData('testindices', q, k)
+    print ("Delete.............................")
     testDelete('testindices', q, 'testindices')
     testSearchWithMetaData('testindices', q, k)
 
@@ -216,7 +215,7 @@ import numpy as np
 import time
 
 def testSPTAGClient():
-    index = SPTAGClient.AnnClient('127.0.0.1', '8100')
+    index = SPTAGClient.AnnClient('127.0.0.1', '8000')
     while not index.IsConnected():
         time.sleep(1)
     index.SetTimeoutMilliseconds(18000)
@@ -268,7 +267,7 @@ public class test
             idx.SetBuildParam("DistCalcMethod", "L2");
             byte[] data = createFloatArray(n);
             byte[] meta = createMetadata(n);
-            idx.BuildWithMetaData(data, meta, n);
+            idx.BuildWithMetaData(data, meta, n, false);
             idx.Save("testcsharp");
         }
 
