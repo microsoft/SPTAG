@@ -16,9 +16,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\IndexBuilder\Options.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\IndexBuilder\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
