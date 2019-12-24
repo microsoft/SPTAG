@@ -1,0 +1,106 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Common">
+      <UniqueIdentifier>{fa15db3c-a8a3-49c2-99da-e0fab6fe53a4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SelectHead_BKT">
+      <UniqueIdentifier>{faacd599-8de2-4e17-b8ef-550bb465bce5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Common\Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Common\Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="SelectHead_BKT\Header Files">
+      <UniqueIdentifier>{fb8f8586-b4ee-4634-b042-ac290d448a9d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SelectHead_BKT\Source Files">
+      <UniqueIdentifier>{78b3bae9-18a4-4376-abcc-5ef73815b17f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IndexBuildManager">
+      <UniqueIdentifier>{62bf0292-8022-4be0-9ccb-cb6aed06a8e3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IndexBuildManager\Header Files">
+      <UniqueIdentifier>{016786b0-e2ca-4b12-b811-dc897388d11e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="IndexBuildManager\Source Files">
+      <UniqueIdentifier>{aebe0558-4157-4517-a35b-05353edc3172}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="BuildHead">
+      <UniqueIdentifier>{64670bba-db52-4898-a46a-3b7e83a4490c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="BuildHead\Header Files">
+      <UniqueIdentifier>{da061d55-d526-46b4-9fe3-09a05cc3fbae}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="BuildHead\Source Files">
+      <UniqueIdentifier>{f7b4682c-0d87-4083-951a-b5d0128b4136}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="inc\SSDServing\Common\stdafx.h">
+      <Filter>Common\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\SelectHead.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\AnalyzeTree.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BKTNodeInfo.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\ParameterDefinitionList.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\Options.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BuildBKT.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\BuildHead\Options.h">
+      <Filter>BuildHead\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h">
+      <Filter>BuildHead\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h">
+      <Filter>SelectHead_BKT\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h">
+      <Filter>BuildHead\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\Common\Utils.h">
+      <Filter>Common\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h">
+      <Filter>IndexBuildManager\Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp">
+      <Filter>SelectHead_BKT\Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\AnalyzeTree.cpp">
+      <Filter>SelectHead_BKT\Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp">
+      <Filter>SelectHead_BKT\Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SSDServing\BuildHead\BootBuildHead.cpp">
+      <Filter>BuildHead\Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SSDServing\Common\Utils.cpp">
+      <Filter>Common\Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SSDServing\IndexBuildManager\main.cpp">
+      <Filter>IndexBuildManager\Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

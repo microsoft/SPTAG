@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/VectorSet.h"
+#include <fstream>
 
 using namespace SPTAG;
 
@@ -29,6 +30,31 @@ BasicVectorSet::BasicVectorSet(const ByteArray& p_bytesArray,
 {
 }
 
+// copied from src/IndexBuilder/main.cpp
+BasicVectorSet::BasicVectorSet(const char* p_filePath, VectorValueType p_valueType)
+    : m_valueType(p_valueType) 
+{
+    std::ifstream inputStream(p_filePath, std::ifstream::binary);
+    if (!inputStream.is_open()) {
+        fprintf(stderr, "Failed to read input file.\n");
+        exit(1);
+    }
+    SizeType row;
+    DimensionType col;
+    inputStream.read((char*)&row, sizeof(SizeType));
+    inputStream.read((char*)&col, sizeof(DimensionType));
+    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(p_valueType)) * row * col;
+
+    m_data = ByteArray::Alloc(totalRecordVectorBytes);
+    char* vecBuf = reinterpret_cast<char*>(m_data.Data());
+    inputStream.read(vecBuf, totalRecordVectorBytes);
+    inputStream.close();
+
+    m_valueType = p_valueType;
+    m_dimension = col;
+    m_vectorCount = row;
+    m_perVectorDataSize = static_cast<SizeType>(col * GetValueTypeSize(p_valueType));
+}
 
 BasicVectorSet::~BasicVectorSet()
 {
@@ -93,4 +119,8 @@ BasicVectorSet::Save(const std::string& p_vectorFile) const
     fwrite((const void*)(m_data.Data()), m_data.Length(), 1, fp);
     fclose(fp);
     return ErrorCode::Success;
+}
+
+SizeType BasicVectorSet::PerVectorDataSize() const {
+    return m_perVectorDataSize;
 }

@@ -16,6 +16,8 @@
 #include "QueryResultSet.h"
 #include "WorkSpace.h"
 
+#include "DataSet.h"
+
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 
 namespace SPTAG
@@ -104,6 +106,43 @@ namespace SPTAG
             }
         };
 
+        class Simp {
+        public:
+            virtual SizeType GetNumSamples() = 0;
+            virtual DimensionType GetFeatureDim() = 0;
+            virtual float ComputeDistance(const void* pX, const void* pY) = 0;
+            virtual DistCalcMethod GetDistCalcMethod() = 0;
+            virtual const void* GetSample(const SizeType idx) = 0;
+        };
+
+        class DefaultSimp: public Simp{
+        private:
+            VectorIndex* m_index;
+        public:
+            DefaultSimp(VectorIndex* p_index) : m_index(p_index) {}
+            ~DefaultSimp() {}
+
+            SizeType GetNumSamples() {
+                return m_index->GetNumSamples();
+            }
+            
+            DimensionType GetFeatureDim() {
+                return m_index->GetFeatureDim();
+            }
+            
+            float ComputeDistance(const void* pX, const void* pY) {
+                return m_index->ComputeDistance(pX, pY);
+            }
+            
+            DistCalcMethod GetDistCalcMethod() {
+                return m_index->GetDistCalcMethod();
+            }
+
+            const void* GetSample(const SizeType idx) {
+                return m_index->GetSample(idx);
+            }
+        };
+
         class BKTree
         {
         public:
@@ -141,7 +180,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, int numOfThreads = omp_get_num_threads())
+            void BuildTrees(Simp* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, int numOfThreads = omp_get_num_threads())
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
@@ -175,7 +214,7 @@ namespace SPTAG
                         m_pTreeRoots[item.index].childStart = newBKTid;
                         if (item.last - item.first <= m_iBKTLeafSize) {
                             for (SizeType j = item.first; j < item.last; j++) {
-                                SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
+                                SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
                                 m_pTreeRoots.push_back(BKTNode(cid));
                             }
                         }
@@ -207,6 +246,14 @@ namespace SPTAG
                     }
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
+            }
+
+            template <typename T>
+            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, int numOfThreads = omp_get_num_threads())
+            {
+                DefaultSimp* ds = new DefaultSimp(index);
+                BuildTrees<T>(ds, indices, reverseIndices, numOfThreads);
+                delete ds;
             }
 
             inline std::uint64_t BufferSize() const
@@ -319,7 +366,7 @@ namespace SPTAG
         private:
 
             template <typename T>
-            float KmeansAssign(VectorIndex* p_index,
+            float KmeansAssign(Simp* p_index,
                                std::vector<SizeType>& indices,
                                const SizeType first, const SizeType last, KmeansArgs<T>& args, const bool updateCenters) const {
                 float currDist = 0;
@@ -437,7 +484,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            int KmeansClustering(VectorIndex* p_index, 
+            int KmeansClustering(Simp* p_index, 
                 std::vector<SizeType>& indices, const SizeType first, const SizeType last, KmeansArgs<T>& args) const {
                 int iterLimit = 100;
 

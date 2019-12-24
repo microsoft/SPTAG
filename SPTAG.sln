@@ -1,6 +1,6 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.29613.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CoreLibrary", "AnnService\CoreLibrary.vcxproj", "{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}"
 EndProject
@@ -49,10 +49,6 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IndexSearcher", "AnnService
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Test", "Test\Test.vcxproj", "{29A25655-CCF2-47F8-8BC8-DFE1B5CF993C}"
-	ProjectSection(ProjectDependencies) = postProject
-		{F9A72303-6381-4C80-86FF-606A2F6F7B96} = {F9A72303-6381-4C80-86FF-606A2F6F7B96}
-		{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9} = {C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}
-	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JavaCore", "Wrappers\JavaCore.vcxproj", "{93FEB26B-965E-4157-8BE5-052F5CA112BB}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -80,6 +76,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRCore", "Wrappers\CLRCore
 	ProjectSection(ProjectDependencies) = postProject
 		{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9} = {C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SSDServing", "AnnService\SSDServing.vcxproj", "{217B42B7-8F2B-4323-804C-08992CA2F65E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -201,6 +199,14 @@ Global
 		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x64.Build.0 = Release|x64
 		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x86.ActiveCfg = Release|Win32
 		{38ACBA6C-2E50-44D4-9A6D-DC735B56E38F}.Release|x86.Build.0 = Release|Win32
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Debug|x64.ActiveCfg = Debug|x64
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Debug|x64.Build.0 = Debug|x64
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Debug|x86.ActiveCfg = Debug|Win32
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Debug|x86.Build.0 = Debug|Win32
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Release|x64.ActiveCfg = Release|x64
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Release|x64.Build.0 = Release|x64
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Release|x86.ActiveCfg = Release|Win32
+		{217B42B7-8F2B-4323-804C-08992CA2F65E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

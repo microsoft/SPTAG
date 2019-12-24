@@ -29,6 +29,8 @@ public:
     virtual bool Available() const = 0;
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const = 0;
+
+    virtual SizeType PerVectorDataSize() const = 0;
 };
 
 
@@ -39,6 +41,8 @@ public:
                    VectorValueType p_valueType,
                    DimensionType p_dimension,
                    SizeType p_vectorCount);
+
+    BasicVectorSet(const char* p_filePath, VectorValueType p_valueType);
 
     virtual ~BasicVectorSet();
 
@@ -55,6 +59,8 @@ public:
     virtual bool Available() const;
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const;
+
+    virtual SizeType PerVectorDataSize() const;
 
 private:
     ByteArray m_data;

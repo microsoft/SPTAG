@@ -47,6 +47,8 @@ public:
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
 
+    virtual int GetNumThreads() const = 0;
+
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
     virtual ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);

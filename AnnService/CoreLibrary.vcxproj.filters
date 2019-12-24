@@ -157,6 +157,9 @@
     <ClInclude Include="inc\Core\Common\Labelset.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Helper\DynamicNeighbors.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -199,6 +202,9 @@
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\VectorSetReader.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="inc\Helper\DynamicNeighbors.cpp">
       <Filter>Source Files\Helper</Filter>
     </ClCompile>
   </ItemGroup>

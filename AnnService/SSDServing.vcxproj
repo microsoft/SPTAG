@@ -1,5 +1,5 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -18,15 +18,36 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\SSDServing\BuildHead\BootBuildHead.cpp" />
+    <ClCompile Include="src\SSDServing\Common\Utils.cpp" />
+    <ClCompile Include="src\SSDServing\IndexBuildManager\main.cpp" />
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\AnalyzeTree.cpp" />
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp" />
+    <ClCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h" />
+    <ClInclude Include="inc\SSDServing\BuildHead\Options.h" />
+    <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\SSDServing\Common\Utils.h" />
+    <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\AnalyzeTree.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BKTNodeInfo.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BuildBKT.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\Options.h" />
+    <ClInclude Include="inc\SSDServing\Common\stdafx.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\SelectHead.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
-    <ProjectGuid>{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}</ProjectGuid>
-    <RootNamespace>CoreLibrary</RootNamespace>
+    <ProjectGuid>{217B42B7-8F2B-4323-804C-08992CA2F65E}</ProjectGuid>
+    <RootNamespace>SSDServing</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
-    <ProjectName>CoreLibrary</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <Import Project="$(SolutionDir)\AnnService.users.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -47,7 +68,7 @@
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -71,125 +92,89 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup>
-    <IncludePath>$(IncludePath);$(ProjectDir)</IncludePath>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(ProjectDir);$(IncludePath)</IncludePath>
+    <LibraryPath>$(OutDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
-  <PropertyGroup>
-    <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <OutDir>$(OutLibDir)</OutDir>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
-  </ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(ProjectDir)</IncludePath>
+    <LibraryPath>$(OutDir);$(LibraryPath)</LibraryPath>
+    <ReferencePath>$(ReferencePath)</ReferencePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
-      <SDLCheck>true</SDLCheck>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <OpenMPSupport>true</OpenMPSupport>
-      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <ControlFlowGuard>Guard</ControlFlowGuard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
+      <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <OpenMPSupport>true</OpenMPSupport>
-      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>inc/SSDServing/Common/stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
+      <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
-    <ClInclude Include="inc\Core\Common\Labelset.h" />
-    <ClInclude Include="inc\Core\Common\WorkSpace.h" />
-    <ClInclude Include="inc\Core\Common\CommonUtils.h" />
-    <ClInclude Include="inc\Core\Common\Dataset.h" />
-    <ClInclude Include="inc\Core\Common\DataUtils.h" />
-    <ClInclude Include="inc\Core\Common\DistanceUtils.h" />
-    <ClInclude Include="inc\Core\Common\Heap.h" />
-    <ClInclude Include="inc\Core\Common\QueryResultSet.h" />
-    <ClInclude Include="inc\Core\Common\WorkSpacePool.h" />
-    <ClInclude Include="inc\Core\BKT\Index.h" />
-    <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\Core\KDT\Index.h" />
-    <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\Core\Common.h" />
-    <ClInclude Include="inc\Core\CommonDataStructure.h" />
-    <ClInclude Include="inc\Core\DefinitionList.h" />
-    <ClInclude Include="inc\Core\MetadataSet.h" />
-    <ClInclude Include="inc\Core\SearchQuery.h" />
-    <ClInclude Include="inc\Core\SearchResult.h" />
-    <ClInclude Include="inc\Core\VectorIndex.h" />
-    <ClInclude Include="inc\Core\VectorSet.h" />
-    <ClInclude Include="inc\Helper\ArgumentsParser.h" />
-    <ClInclude Include="inc\Helper\Base64Encode.h" />
-    <ClInclude Include="inc\Helper\BufferStream.h" />
-    <ClInclude Include="inc\Helper\CommonHelper.h" />
-    <ClInclude Include="inc\Helper\Concurrent.h" />
-    <ClInclude Include="inc\Helper\ConcurrentSet.h" />
-    <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
-    <ClInclude Include="inc\Helper\SimpleIniReader.h" />
-    <ClInclude Include="inc\Helper\StringConvert.h" />
-    <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />
-    <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
-    <ClInclude Include="inc\Core\Common\BKTree.h" />
-    <ClInclude Include="inc\Core\Common\KDTree.h" />
-    <ClInclude Include="inc\Helper\ThreadPool.h" />
-    <ClInclude Include="inc\Helper\VectorSetReader.h" />
-    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="inc\Helper\DynamicNeighbors.cpp" />
-    <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
-    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
-    <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
-    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
-    <ClCompile Include="src\Core\MetadataSet.cpp" />
-    <ClCompile Include="src\Core\VectorIndex.cpp" />
-    <ClCompile Include="src\Core\VectorSet.cpp" />
-    <ClCompile Include="src\Helper\ArgumentsParser.cpp" />
-    <ClCompile Include="src\Helper\Base64Encode.cpp" />
-    <ClCompile Include="src\Helper\CommonHelper.cpp" />
-    <ClCompile Include="src\Helper\Concurrent.cpp" />
-    <ClCompile Include="src\Helper\SimpleIniReader.cpp" />
-    <ClCompile Include="src\Helper\VectorSetReader.cpp" />
-    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
