@@ -187,7 +187,7 @@ namespace SPTAG
         }
 
 		template<typename T>
-		ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const
+		ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
 		{
 			auto workSpace = m_workSpacePool->Rent();
 			workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
