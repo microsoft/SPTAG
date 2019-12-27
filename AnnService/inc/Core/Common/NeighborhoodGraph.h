@@ -161,6 +161,7 @@ namespace SPTAG
                 for (SizeType i = 0; i < R; i++)
                 {
                     RefineNode<T>(index, indices[i], false, false, m_iCEF);
+					if (i % 1000 == 0) std::cout << "\rRefine " << static_cast<int>(i * 1.0 / R * 100) << "%";
                     SizeType *nodes, *outnodes; 
                     nodes = outnodes = m_pNeighborhoodGraph[indices[i]];
                     if (newGraph != nullptr) outnodes = newGraph->m_pNeighborhoodGraph[i];
