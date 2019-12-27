@@ -186,19 +186,19 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
-		template<typename T>
-		ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
-		{
-			auto workSpace = m_workSpacePool->Rent();
-			workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+        template<typename T>
+        ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
 
-			if (m_deletedID.Count() == 0 || p_searchDeleted)
-				SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
-			else
-				SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            else
+                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
 
-			m_workSpacePool->Return(workSpace);
-		}
+            m_workSpacePool->Return(workSpace);
+        }
 #pragma endregion
 
         template <typename T>
