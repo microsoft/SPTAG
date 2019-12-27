@@ -129,7 +129,7 @@ namespace SPTAG
                 }
 
                 // Do not include this item.
-				std::cout << "Hash table is full!" << std::endl;
+                std::cout << "Hash table is full!" << std::endl;
                 return -1;
             }
         };
