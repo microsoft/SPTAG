@@ -100,7 +100,7 @@ namespace SPTAG
 
 #pragma region K-NN search
 
-#define Search(CheckDeleted1) \
+#define Search(CheckDeleted) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
@@ -110,7 +110,7 @@ namespace SPTAG
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
-            CheckDeleted1 { \
+            CheckDeleted { \
                 if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                     p_query.SortResult(); return; \
                 } \
@@ -187,6 +187,7 @@ namespace SPTAG
                 SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
 
             m_workSpacePool->Return(workSpace);
+            return ErrorCode::Success;
         }
 #pragma endregion
 

@@ -97,36 +97,44 @@ namespace SPTAG
             if (!m_pGraph.SaveGraph(*p_indexStreams[2])) return ErrorCode::Fail;
             if (!m_deletedID.Save(*p_indexStreams[3])) return ErrorCode::Fail;
             return ErrorCode::Success;
-        }
+		}
 
 #pragma region K-NN search
 
-#define Search(CheckDeleted1, CheckDeleted2) \
+#define VisitDuplicated(CheckDeleted) \
+                   { \
+                        SizeType checkNode = node[checkPos]; \
+                        if (checkNode < -1) { \
+                            const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                            for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
+                                tmpNode = m_pTrees[i].centerid; \
+                                CheckDeleted \
+                                { \
+                                    if (!p_query.AddPoint(tmpNode, gnode.distance)) break; \
+                                } \
+                            } \
+                        } \
+                    } \
+
+
+#define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
-            const SizeType *node = m_pGraph[gnode.node]; \
+            SizeType tmpNode = gnode.node; \
+            const SizeType *node = m_pGraph[tmpNode]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             } \
-            CheckDeleted1 \
+            CheckDeleted \
             { \
-                if (p_query.AddPoint(gnode.node, gnode.distance)) { \
+                if (p_query.AddPoint(tmpNode, gnode.distance)) { \
                     p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
-                    SizeType checkNode = node[checkPos]; \
-                    if (checkNode < -1) { \
-                        const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
-                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
-                            CheckDeleted2 \
-                            { \
-                                if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
-                            } \
-                        } \
-                    } \
+                    CheckDuplicated \
                 } \
                 else { \
                     p_space.m_iNumOfContinuousNoBetterPropagation++; \
@@ -149,29 +157,41 @@ namespace SPTAG
         } \
         p_query.SortResult(); \
 
-        template <typename T>
-        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
-        {
-            Search(if (!m_deletedID.Contains(gnode.node)), if (!m_deletedID.Contains(m_pTrees[i].centerid)))
-        }
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
         {
-            Search(; , ;)
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+            {
+                if (p_searchDuplicated)
+                {
+					Search(;, VisitDuplicated(;))
+                }
+                else
+                {
+					Search(; , ;)
+                }
+            }
+            else
+            {
+                if (p_searchDuplicated)
+                {
+                    Search(if (!m_deletedID.Contains(tmpNode)), VisitDuplicated(if (!m_deletedID.Contains(tmpNode))))
+                }
+                else
+                {
+					Search(if (!m_deletedID.Contains(tmpNode)), ;)
+                }
+            }
         }
 
         template<typename T>
-        ErrorCode
-            Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
-            else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
 
             m_workSpacePool->Return(workSpace);
 
@@ -192,12 +212,10 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
-            else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
 
             m_workSpacePool->Return(workSpace);
+            return ErrorCode::Success;
         }
 #pragma endregion
 
