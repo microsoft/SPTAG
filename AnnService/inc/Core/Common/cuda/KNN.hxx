@@ -408,7 +408,6 @@ void buildGraph(T* mtx, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhood
 
     tptree->destroy();
     cudaFree(tptree);
-    cudaFree(data);
 
     LOG("Total TPT construction time: %.2f\n", tree_time);
     LOG("Total KNN time: %.2f\n", KNN_time);
@@ -425,10 +424,12 @@ void buildGraph(T* mtx, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhood
     DistPair* tmp = (DistPair*)malloc(sizeof(DistPair) * m_iGraphSize * m_iNeighborhoodSize);
     cudaMemcpy(tmp, bfresults, sizeof(DistPair) * m_iGraphSize * m_iNeighborhoodSize, cudaMemcpyDeviceToHost);
     cudaFree(bfresults);
-    calc_topX_accuracy<T>(results, m_iGraphSize, m_iNeighborhoodSize, tmp, 5);
+	calc_topX_accuracy<T>(results, m_iGraphSize, m_iNeighborhoodSize, tmp, 5);
     calc_topX_accuracy<T>(results, m_iGraphSize, m_iNeighborhoodSize, tmp, 32);
     free(tmp);
 #endif
+
+	cudaFree(data);
 }
 
 #endif
