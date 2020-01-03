@@ -122,11 +122,11 @@ namespace SPTAG
 					do { \
                         CheckDeleted \
                         { \
-                            p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                             if (CheckDuplicated) break; \
                         } \
                         tmpNode = m_pTrees[i].centerid; \
 					} while (i++ < tnode.childEnd); \
+                    p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                } else { \
 				   CheckDeleted \
 				   { \
