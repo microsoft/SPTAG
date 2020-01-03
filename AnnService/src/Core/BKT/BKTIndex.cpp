@@ -101,22 +101,6 @@ namespace SPTAG
 
 #pragma region K-NN search
 
-#define VisitDuplicated(CheckDeleted) \
-                   { \
-                        SizeType checkNode = node[checkPos]; \
-                        if (checkNode < -1) { \
-                            const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
-                            for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
-                                tmpNode = m_pTrees[i].centerid; \
-                                CheckDeleted \
-                                { \
-                                    if (!p_query.AddPoint(tmpNode, gnode.distance)) break; \
-                                } \
-                            } \
-                        } \
-                    } \
-
-
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
@@ -130,13 +114,29 @@ namespace SPTAG
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             } \
-            CheckDeleted \
-            { \
-                if (p_query.AddPoint(tmpNode, gnode.distance)) { \
-                    p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
-                    CheckDuplicated \
-                } \
-                else { \
+            if (gnode.distance <= p_query.worstDist()) { \
+			    SizeType checkNode = node[checkPos]; \
+			    if (checkNode < -1) { \
+					const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+					SizeType i = -tnode.childStart; \
+					do { \
+                        CheckDeleted \
+                        { \
+                            p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
+                            if (CheckDuplicated) break; \
+                        } \
+                        tmpNode = m_pTrees[i].centerid; \
+					} while (i++ < tnode.childEnd); \
+               } else { \
+				   CheckDeleted \
+				   { \
+                       p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
+					   p_query.AddPoint(tmpNode, gnode.distance); \
+				   } \
+               } \
+            } else { \
+                CheckDeleted \
+                { \
                     p_space.m_iNumOfContinuousNoBetterPropagation++; \
                     if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                         p_query.SortResult(); return; \
@@ -158,32 +158,32 @@ namespace SPTAG
         p_query.SortResult(); \
 
 
-        template <typename T>
-        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
-        {
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-            {
-                if (p_searchDuplicated)
-                {
-					Search(;, VisitDuplicated(;))
-                }
-                else
-                {
-					Search(; , ;)
-                }
-            }
-            else
-            {
-                if (p_searchDuplicated)
-                {
-                    Search(if (!m_deletedID.Contains(tmpNode)), VisitDuplicated(if (!m_deletedID.Contains(tmpNode))))
-                }
-                else
-                {
-					Search(if (!m_deletedID.Contains(tmpNode)), ;)
-                }
-            }
-        }
+		template <typename T>
+		void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
+		{
+			if (m_deletedID.Count() == 0 || p_searchDeleted)
+			{
+				if (p_searchDuplicated)
+				{
+					Search(; , !p_query.AddPoint(tmpNode, gnode.distance))
+				}
+				else
+				{
+					Search(;, p_query.AddPoint(tmpNode, gnode.distance))
+				}
+			}
+			else
+			{
+				if (p_searchDuplicated)
+				{
+					Search(if (!m_deletedID.Contains(tmpNode)), !p_query.AddPoint(tmpNode, gnode.distance))
+				}
+				else
+				{
+					Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance))
+				}
+			}
+		}
 
         template<typename T>
         ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
