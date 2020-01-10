@@ -36,16 +36,16 @@ namespace SPTAG
             // Max loop number in one hash block.
             static const int m_maxLoop = 8;
 
-            // Max pool size.
-            static const int m_poolSize = 8191;
-
             // Could we use the second hash block.
             bool m_secondHash;
+
+            // Max pool size.
+            int m_poolSize;
 
             // Record 2 hash tables.
             // [0~m_poolSize + 1) is the first block.
             // [m_poolSize + 1, 2*(m_poolSize + 1)) is the second block;
-            SizeType m_hashTable[(m_poolSize + 1) * 2];
+            std::unique_ptr<SizeType[]> m_hashTable;
 
 
             inline unsigned hash_func2(unsigned idx, int loop)
@@ -67,7 +67,14 @@ namespace SPTAG
 
             void Init(SizeType size)
             {
+                int ex = 0;
+                while (size != 0) {
+                    ex++;
+                    size >>= 1;
+                }
                 m_secondHash = true;
+                m_poolSize = (1 << (ex + 1)) - 1;
+                m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
             }
 
@@ -76,13 +83,13 @@ namespace SPTAG
                 if (!m_secondHash)
                 {
                     // Clear first block.
-                    memset(&m_hashTable[0], 0, sizeof(SizeType)*(m_poolSize + 1));
+                    memset(m_hashTable.get(), 0, sizeof(SizeType) * (m_poolSize + 1));
                 }
                 else
                 {
                     // Clear all blocks.
-                    memset(&m_hashTable[0], 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                     m_secondHash = false;
+                    memset(m_hashTable.get(), 0, 2 * sizeof(SizeType) * (m_poolSize + 1));
                 }
             }
 
@@ -90,16 +97,13 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1
-                return _CheckAndSet(&m_hashTable[0], idx + 1) == 0;
+                return _CheckAndSet(m_hashTable.get(), idx + 1) == 0;
             }
 
 
             inline int _CheckAndSet(SizeType* hashTable, SizeType idx)
             {
-                unsigned index;
-
-                // Get first hash position.
-                index = hash_func((unsigned)idx);
+                unsigned index = hash_func((unsigned)idx);
                 for (int loop = 0; loop < m_maxLoop; ++loop)
                 {
                     if (!hashTable[index])
@@ -117,11 +121,11 @@ namespace SPTAG
                     index = hash_func2(index, loop);
                 }
 
-                if (hashTable == &m_hashTable[0])
+                if (hashTable == m_hashTable.get())
                 {
                     // Use second hash block.
                     m_secondHash = true;
-                    return _CheckAndSet(&m_hashTable[m_poolSize + 1], idx);
+                    return _CheckAndSet(m_hashTable.get() + m_poolSize + 1, idx);
                 }
 
                 // Do not include this item.
@@ -134,7 +138,7 @@ namespace SPTAG
         {
             void Initialize(int maxCheck, SizeType dataSize)
             {
-                nodeCheckStatus.Init(dataSize);
+                nodeCheckStatus.Init(maxCheck);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
 
@@ -164,7 +168,6 @@ namespace SPTAG
             }
 
             OptHashPosVector nodeCheckStatus;
-            //OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting
             int m_iNumOfContinuousNoBetterPropagation;
@@ -176,7 +179,7 @@ namespace SPTAG
             // Prioriy queue used for neighborhood graph
             Heap<HeapCell> m_NGQueue;
 
-            // Priority queue Used for BKT-Tree
+            // Priority queue Used for Tree
             Heap<HeapCell> m_SPTQueue;
         };
     }

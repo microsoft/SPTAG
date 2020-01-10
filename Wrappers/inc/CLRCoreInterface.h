@@ -54,7 +54,7 @@ namespace Microsoft
                     array<Byte>^ get()
                     {
                         array<Byte>^ buf = gcnew array<Byte>(m_Instance->Meta.Length());
-                        Marshal::Copy((IntPtr)m_Instance->Meta.Data(), buf, 0, (int)m_Instance->Meta.Length());
+                        if (buf->LongLength != 0) Marshal::Copy((IntPtr)m_Instance->Meta.Data(), buf, 0, (int)m_Instance->Meta.Length());
                         return buf;
                     }
                 private:
@@ -100,7 +100,7 @@ namespace Microsoft
 
                 static AnnIndex^ Load(array<array<Byte>^>^ p_index);
 
-                static bool Merge(String^ p_indexFilePath1, String^ p_indexFilePath2);
+                static AnnIndex^ Merge(String^ p_indexFilePath1, String^ p_indexFilePath2);
 
             private:
 

@@ -23,13 +23,15 @@ public:
     virtual ~VectorIndex();
 
     virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension) = 0;
-
-    virtual ErrorCode AddIndex(const void* p_vectors, SizeType p_vectorNum, DimensionType p_dimension, SizeType* p_start = nullptr) = 0;
+    
+    virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
-    virtual ErrorCode SearchIndex(QueryResult& p_results) const = 0;
+    virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
+
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
@@ -57,7 +59,7 @@ public:
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
-    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet);
+    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
@@ -80,8 +82,8 @@ public:
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
-    static ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2);
-    
+    static ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
@@ -107,9 +109,9 @@ protected:
 
     virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
 
-private:
     void BuildMetaMapping();
 
+private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
     ErrorCode SaveIndexConfig(std::ostream& p_configOut);

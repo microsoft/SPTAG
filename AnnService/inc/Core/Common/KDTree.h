@@ -7,6 +7,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <shared_mutex>
 
 #include "../VectorIndex.h"
 
@@ -32,11 +33,11 @@ namespace SPTAG
         class KDTree
         {
         public:
-            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000) {}
+            KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
 
             KDTree(KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
                 m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit),
-                m_iSamples(other.m_iSamples) {}
+                m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex) {}
             ~KDTree() {}
 
             inline const KDTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
@@ -44,13 +45,29 @@ namespace SPTAG
 
             inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
 
+            inline SizeType sizePerTree() const { 
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
+            }
+
             template <typename T>
-            void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr)
+            void Rebuild(VectorIndex* p_index)
+            {
+                COMMON::KDTree newTrees(*this);
+                newTrees.BuildTrees<T>(p_index, nullptr, 1);
+
+                std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                m_pTreeRoots.swap(newTrees.m_pTreeRoots);
+                m_pTreeStart.swap(newTrees.m_pTreeStart);
+            }
+
+            template <typename T>
+            void BuildTrees(VectorIndex* p_index, std::vector<SizeType>* indices = nullptr, int numOfThreads = omp_get_num_threads())
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(p_index->GetNumSamples());
-                    for (SizeType i = 0; i < p_index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
@@ -58,7 +75,7 @@ namespace SPTAG
 
                 m_pTreeRoots.resize(m_iTreeNumber * localindices.size());
                 m_pTreeStart.resize(m_iTreeNumber, 0);
-#pragma omp parallel for
+#pragma omp parallel for num_threads(numOfThreads)
                 for (int i = 0; i < m_iTreeNumber; i++)
                 {
                     Sleep(i * 100); std::srand(clock());
@@ -82,6 +99,7 @@ namespace SPTAG
 
             bool SaveTrees(std::ostream& p_outstream) const
             {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
                 p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
@@ -137,17 +155,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space,  const int p_limits) const
+            void InitSearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
-                    KDTSearch(p_index, p_query, p_space, m_pTreeStart[i], true, 0);
-                }
-
-                while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
-                {
-                    auto& tcell = p_space.m_SPTQueue.pop();
-                    if (p_query.worstDist() < tcell.distance) break;
-                    KDTSearch(p_index, p_query, p_space, tcell.node, true, tcell.distance);
+                    KDTSearch(p_index, p_query, p_space, m_pTreeStart[i], 0);
                 }
             }
 
@@ -157,7 +168,7 @@ namespace SPTAG
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
                     auto& tcell = p_space.m_SPTQueue.pop();
-                    KDTSearch(p_index, p_query, p_space, tcell.node, false, tcell.distance);
+                    KDTSearch(p_index, p_query, p_space, tcell.node, tcell.distance);
                 }
             }
 
@@ -165,7 +176,7 @@ namespace SPTAG
 
             template <typename T>
             void KDTSearch(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query,
-                           COMMON::WorkSpace& p_space, const SizeType node, const bool isInit, const float distBound) const {
+                           COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
                     SizeType index = -node - 1;
@@ -199,11 +210,8 @@ namespace SPTAG
                     bestChild = tnode.right;
                 }
 
-                if (!isInit || distanceBound < p_query.worstDist())
-                {
-                    p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
-                }
-                KDTSearch(p_index, p_query, p_space, bestChild, isInit, distBound);
+                p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
+                KDTSearch(p_index, p_query, p_space, bestChild, distBound);
             }
 
 
@@ -335,6 +343,7 @@ namespace SPTAG
             std::vector<KDTNode> m_pTreeRoots;
 
         public:
+            std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
         };
     }
