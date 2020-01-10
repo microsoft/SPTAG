@@ -34,13 +34,18 @@ namespace SPTAG
 
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
             {
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+
                 SizeType* nodes = m_pNeighborhoodGraph[node];
+                SizeType tmpNode;
+                float tmpDist;
                 for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
                 {
-                    SizeType tmpNode = nodes[k];
-                    if (tmpNode < -1) continue;
+                    tmpNode = nodes[k];
+                    if (tmpNode < -1) break;
 
-                    if (tmpNode < 0)
+                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist 
+                        || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         bool good = true;
                         for (DimensionType t = 0; t < k; t++) {
@@ -51,27 +56,14 @@ namespace SPTAG
                         }
                         if (good) {
                             nodes[k] = insertNode;
+                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1 &&
+                                index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) >=
+                                index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode)))
+                            {
+                                std::swap(tmpNode, nodes[k]);
+                            }
                         }
                         break;
-                    }
-                    float tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode));
-                    if (insertDist < tmpDist || (insertDist == tmpDist && insertNode < tmpNode))
-                    {
-                        bool good = true;
-                        for (DimensionType t = 0; t < k; t++) {
-                            if (index->ComputeDistance(index->GetSample(insertNode), index->GetSample(nodes[t])) < insertDist) {
-                                good = false;
-                                break;
-                            }
-                        }
-                        if (good) {
-                            nodes[k] = insertNode;
-                            insertNode = tmpNode;
-                            insertDist = tmpDist;
-                        }
-                        else {
-                            break;
-                        }
                     }
                 }
             }

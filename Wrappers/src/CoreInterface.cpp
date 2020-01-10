@@ -170,7 +170,8 @@ AnnIndex::Add(ByteArray p_data, SizeType p_num)
     {
         return false;
     }
-    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension));
+
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension, nullptr));
 }
 
 
@@ -223,8 +224,14 @@ AnnIndex::DeleteByMetaData(ByteArray p_meta)
 }
 
 
-bool
+AnnIndex
 AnnIndex::Merge(const char* p_indexFilePath1, const char* p_indexFilePath2)
 {
-    return (SPTAG::ErrorCode::Success == SPTAG::VectorIndex::MergeIndex(p_indexFilePath1, p_indexFilePath2));
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::MergeIndex(p_indexFilePath1, p_indexFilePath2, vecIndex))
+    {
+        return AnnIndex(0);
+    }
+
+    return AnnIndex(vecIndex);
 }
