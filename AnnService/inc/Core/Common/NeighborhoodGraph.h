@@ -321,6 +321,7 @@ namespace SPTAG
                 if (m_iMaxCheckForRefineGraph > 0) {
                     RefineGraph<T>(index, idmap);
                 }
+				std::cout << "BuildGraph time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
             }
 
             template <typename T>
@@ -342,13 +343,15 @@ namespace SPTAG
                 m_iCEF /= m_iCEFScale;
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
+				if (m_iRefineIter > 0) {
 #pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                {
-                    RefineNode<T>(index, i, false, false);
-                    if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
-                }
-                std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+					for (SizeType i = 0; i < m_iGraphSize; i++)
+					{
+						RefineNode<T>(index, i, false, false);
+						if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
+					}
+					std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+				}
 
                 if (idmap != nullptr) {
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
