@@ -65,6 +65,8 @@ public:
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
+    virtual ErrorCode MergeIndex(const char* p_indexFilePath);
+
     virtual const void* GetSample(ByteArray p_meta);
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
@@ -83,8 +85,6 @@ public:
     virtual void SetIndexName(std::string p_name) { m_sIndexName = p_name; }
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
-
-    static ErrorCode MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 

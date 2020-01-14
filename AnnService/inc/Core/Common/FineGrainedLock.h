@@ -13,31 +13,31 @@ namespace SPTAG
 {
     namespace COMMON
     {
-		class FineGrainedLock {
-		public:
-			FineGrainedLock() {
-				m_locks.reset(new std::mutex[m_poolSize + 1]);
-			}
-			~FineGrainedLock() {}
+        class FineGrainedLock {
+        public:
+            FineGrainedLock() {
+                m_locks.reset(new std::mutex[m_poolSize + 1]);
+            }
+            ~FineGrainedLock() {}
 
-			std::mutex& operator[](SizeType idx) {
-				unsigned index = hash_func((unsigned)idx);
-				return m_locks[index];
-			}
+            std::mutex& operator[](SizeType idx) {
+                unsigned index = hash_func((unsigned)idx);
+                return m_locks[index];
+            }
 
-			const std::mutex& operator[](SizeType idx) const {
-				unsigned index = hash_func((unsigned)idx);
-				return m_locks[index];
-			}
-		private:
-			static const int m_poolSize = 16383;
-			std::unique_ptr<std::mutex[]> m_locks;
+            const std::mutex& operator[](SizeType idx) const {
+                unsigned index = hash_func((unsigned)idx);
+                return m_locks[index];
+            }
+        private:
+            static const int m_poolSize = 16383;
+            std::unique_ptr<std::mutex[]> m_locks;
 
-			inline unsigned hash_func(unsigned idx) const
-			{
-				return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
-			}
-		};
+            inline unsigned hash_func(unsigned idx) const
+            {
+                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
+            }
+        };
     }
 }
 

@@ -205,7 +205,7 @@ namespace SPTAG
                         }
                         m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
-					m_pTreeRoots.push_back(BKTNode(-1));
+                    m_pTreeRoots.push_back(BKTNode(-1));
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
             }
@@ -250,7 +250,7 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
-				if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -270,7 +270,7 @@ namespace SPTAG
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
                 input.close();
-				if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
