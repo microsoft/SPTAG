@@ -13,47 +13,31 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        class FineGrainedLock {
-        public:
-            FineGrainedLock() {
-                rwlock.reset(new std::shared_timed_mutex);
-            }
-            ~FineGrainedLock() { 
-                for (size_t i = 0; i < locks.size(); i++)
-                    locks[i].reset();
-                locks.clear();
-            }
-            
-            void resize(SizeType n) {
-                SizeType current = (SizeType)locks.size();
-                if (current <= n) {
-                    {
-                        std::unique_lock<std::shared_timed_mutex> lock(*rwlock);
-                        locks.resize(n);
-                    }
-                    for (SizeType i = current; i < n; i++)
-                        locks[i].reset(new std::mutex);
-                }
-                else {
-                    for (SizeType i = n; i < current; i++)
-                        locks[i].reset();
-                    locks.resize(n);
-                }
-            }
+		class FineGrainedLock {
+		public:
+			FineGrainedLock() {
+				m_locks.reset(new std::mutex[m_poolSize + 1]);
+			}
+			~FineGrainedLock() {}
 
-            std::mutex& operator[](SizeType idx) {
-                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
-                return *locks[idx];
-            }
+			std::mutex& operator[](SizeType idx) {
+				unsigned index = hash_func((unsigned)idx);
+				return m_locks[index];
+			}
 
-            const std::mutex& operator[](SizeType idx) const {
-                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
-                return *locks[idx];
-            }
-        private:
-            std::unique_ptr<std::shared_timed_mutex> rwlock;
-            std::vector<std::shared_ptr<std::mutex>> locks;
-        };
+			const std::mutex& operator[](SizeType idx) const {
+				unsigned index = hash_func((unsigned)idx);
+				return m_locks[index];
+			}
+		private:
+			static const int m_poolSize = 16383;
+			std::unique_ptr<std::mutex[]> m_locks;
+
+			inline unsigned hash_func(unsigned idx) const
+			{
+				return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
+			}
+		};
     }
 }
 

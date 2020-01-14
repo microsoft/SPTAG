@@ -403,7 +403,7 @@ namespace SPTAG
             inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph[index]; }
 
             void Update(SizeType row, DimensionType col, SizeType val) {
-                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock[row]);
                 m_pNeighborhoodGraph[row][col] = val;
             }
 
@@ -420,7 +420,7 @@ namespace SPTAG
             // Graph structure
             SizeType m_iGraphSize;
             COMMON::Dataset<SizeType> m_pNeighborhoodGraph;
-            std::mutex m_dataUpdateLock;
+            FineGrainedLock m_dataUpdateLock;
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
