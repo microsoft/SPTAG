@@ -1,0 +1,5 @@
+numpy==1.15.0
+matplotlib==2.2.2
+Keras==2.2.4
+Pillow==6.2.1
+scikit_learn==0.21.3
