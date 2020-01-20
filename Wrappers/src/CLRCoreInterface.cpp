@@ -131,7 +131,7 @@ namespace Microsoft
                     return false;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension, nullptr));
             }
 
             bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num)
@@ -203,9 +203,14 @@ namespace Microsoft
                 return gcnew AnnIndex(vecIndex);
             }
 
-            bool AnnIndex::Merge(String^ p_indexFilePath1, String^ p_indexFilePath2)
+            AnnIndex^ AnnIndex::Merge(String^ p_indexFilePath1, String^ p_indexFilePath2)
             {
-                return (SPTAG::ErrorCode::Success == SPTAG::VectorIndex::MergeIndex(string_to_char_array(p_indexFilePath1), string_to_char_array(p_indexFilePath2)));
+                std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+                if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::MergeIndex(string_to_char_array(p_indexFilePath1), string_to_char_array(p_indexFilePath2), vecIndex))
+                {
+                    return gcnew AnnIndex(nullptr);
+                }
+                return gcnew AnnIndex(vecIndex);
             }
         }
     }

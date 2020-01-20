@@ -8,6 +8,7 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <shared_mutex>
 
 #include "../VectorIndex.h"
 
@@ -46,25 +47,25 @@ namespace SPTAG
             T* newTCenters;
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum) : _K(k), _D(dim), _T(threadnum) {
-                centers = new T[k * dim];
+                centers = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
+                newTCenters = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
                 counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
                 newCounts = new SizeType[threadnum * k];
                 label = new int[datasize];
                 clusterIdx = new SizeType[threadnum * k];
                 clusterDist = new float[threadnum * k];
-                newTCenters = new T[k * dim];
             }
 
             ~KmeansArgs() {
-                delete[] centers;
+                aligned_free(centers);
+                aligned_free(newTCenters);
                 delete[] counts;
                 delete[] newCenters;
                 delete[] newCounts;
                 delete[] label;
                 delete[] clusterIdx;
                 delete[] clusterDist;
-                delete[] newTCenters;
             }
 
             inline void ClearCounts() {
@@ -106,23 +107,41 @@ namespace SPTAG
         class BKTree
         {
         public:
-            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000) {}
+            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
             
             BKTree(BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
                                    m_iBKTKmeansK(other.m_iBKTKmeansK), 
                                    m_iBKTLeafSize(other.m_iBKTLeafSize),
-                                   m_iSamples(other.m_iSamples) {}
+                                   m_iSamples(other.m_iSamples),
+                                   m_lock(new std::shared_timed_mutex) {}
             ~BKTree() {}
 
             inline const BKTNode& operator[](SizeType index) const { return m_pTreeRoots[index]; }
             inline BKTNode& operator[](SizeType index) { return m_pTreeRoots[index]; }
 
             inline SizeType size() const { return (SizeType)m_pTreeRoots.size(); }
+            
+            inline SizeType sizePerTree() const {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                return (SizeType)m_pTreeRoots.size() - m_pTreeStart.back(); 
+            }
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
             template <typename T>
-            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr)
+            void Rebuild(VectorIndex* p_index)
+            {
+                BKTree newTrees(*this);
+                newTrees.BuildTrees<T>(p_index, nullptr, nullptr, 1);
+
+                std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                m_pTreeRoots.swap(newTrees.m_pTreeRoots);
+                m_pTreeStart.swap(newTrees.m_pTreeStart);
+                m_pSampleCenterMap.swap(newTrees.m_pSampleCenterMap);
+            }
+
+            template <typename T>
+            void BuildTrees(VectorIndex* index, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, int numOfThreads = omp_get_num_threads())
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
@@ -133,12 +152,12 @@ namespace SPTAG
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(index->GetNumSamples());
-                    for (SizeType i = 0; i < index->GetNumSamples(); i++) localindices[i] = i;
+                    for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
-                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (SizeType)localindices.size(), omp_get_num_threads());
+                KmeansArgs<T> args(m_iBKTKmeansK, index->GetFeatureDim(), (SizeType)localindices.size(), numOfThreads);
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
@@ -156,7 +175,8 @@ namespace SPTAG
                         m_pTreeRoots[item.index].childStart = newBKTid;
                         if (item.last - item.first <= m_iBKTLeafSize) {
                             for (SizeType j = item.first; j < item.last; j++) {
-                                m_pTreeRoots.push_back(BKTNode(localindices[j]));
+                                SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
+                                m_pTreeRoots.push_back(BKTNode(cid));
                             }
                         }
                         else { // clustering the data into BKTKmeansK clusters
@@ -164,18 +184,20 @@ namespace SPTAG
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
-                                m_pTreeRoots[item.index].centerid = localindices[item.first];
+                                m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
                                 m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
                                 for (SizeType j = item.first + 1; j < end; j++) {
-                                    m_pTreeRoots.push_back(BKTNode(localindices[j]));
-                                    m_pSampleCenterMap[localindices[j]] = m_pTreeRoots[item.index].centerid;
+                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                    m_pTreeRoots.push_back(BKTNode(cid));
+                                    m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
                                 }
                                 m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
                             }
                             else {
                                 for (int k = 0; k < m_iBKTKmeansK; k++) {
                                     if (args.counts[k] == 0) continue;
-                                    m_pTreeRoots.push_back(BKTNode(localindices[item.first + args.counts[k] - 1]));
+                                    SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
+                                    m_pTreeRoots.push_back(BKTNode(cid));
                                     if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
                                     item.first += args.counts[k];
                                 }
@@ -195,6 +217,7 @@ namespace SPTAG
 
             bool SaveTrees(std::ostream& p_outstream) const
             {
+                std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
                 p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
@@ -270,7 +293,7 @@ namespace SPTAG
             void SearchTrees(const VectorIndex* p_index, const COMMON::QueryResultSet<T> &p_query, 
                 COMMON::WorkSpace &p_space, const int p_limits) const
             {
-                do
+                while (!p_space.m_SPTQueue.empty())
                 {
                     COMMON::HeapCell bcell = p_space.m_SPTQueue.pop();
                     const BKTNode& tnode = m_pTreeRoots[bcell.node];
@@ -290,7 +313,7 @@ namespace SPTAG
                             p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, p_index->ComputeDistance((const void*)p_query.GetTarget(), p_index->GetSample(index))));
                         } 
                     }
-                } while (!p_space.m_SPTQueue.empty());
+                }
             }
 
         private:
@@ -300,11 +323,11 @@ namespace SPTAG
                                std::vector<SizeType>& indices,
                                const SizeType first, const SizeType last, KmeansArgs<T>& args, const bool updateCenters) const {
                 float currDist = 0;
-                int threads = omp_get_num_threads();
+                int threads = args._T;
                 float lambda = (updateCenters) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (last - first)) : 0.0f;
                 SizeType subsize = (last - first - 1) / threads + 1;
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(threads)
                 for (int tid = 0; tid < threads; tid++)
                 {
                     SizeType istart = first + tid * subsize;
@@ -483,6 +506,7 @@ namespace SPTAG
             std::unordered_map<SizeType, SizeType> m_pSampleCenterMap;
 
         public:
+            std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples;
         };
     }

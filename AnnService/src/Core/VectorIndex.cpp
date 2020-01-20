@@ -273,34 +273,13 @@ VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, bool p_withM
 
 
 ErrorCode 
-VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet) {
+VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex) {
     if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
     {
         return ErrorCode::Fail;
     }
 
-    SizeType currStart;
-    ErrorCode ret = AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), &currStart);
-    if (ret != ErrorCode::Success) return ret;
-
-    if (m_pMetadata == nullptr) {
-        if (currStart == 0)
-            m_pMetadata = std::move(p_metadataSet);
-        else
-            return ErrorCode::Success;
-    }
-    else {
-        m_pMetadata->AddBatch(*p_metadataSet);
-    }
-    
-    if (m_pMetaToVec != nullptr) {
-        for (SizeType i = 0; i < p_vectorSet->Count(); i++) {
-            ByteArray meta = m_pMetadata->GetMetadata(currStart + i);
-            DeleteIndex(meta);
-            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), currStart + i);
-        }
-    }
-    return ErrorCode::Success;
+    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex);
 }
 
 
@@ -399,30 +378,39 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
 
 ErrorCode
-VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2)
+VectorIndex::MergeIndex(const char* p_indexFilePath1, const char* p_indexFilePath2, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
     std::string folderPath1(p_indexFilePath1), folderPath2(p_indexFilePath2);
+    LoadIndex(folderPath1, p_vectorIndex);
 
-    std::shared_ptr<VectorIndex> index1, index2;
-    LoadIndex(folderPath1, index1);
-    LoadIndex(folderPath2, index2);
+    if (!folderPath2.empty() && *(folderPath2.rbegin()) != FolderSep) folderPath2 += FolderSep;
 
-    std::shared_ptr<VectorSet> p_vectorSet;
-    std::shared_ptr<MetadataSet> p_metaSet;
-    size_t vectorSize = GetValueTypeSize(index2->GetVectorValueType()) * index2->GetFeatureDim();
-    std::uint64_t offsets[2] = { 0 };
-    ByteArray metaoffset((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false);
-    for (SizeType i = 0; i < index2->GetNumSamples(); i++)
-        if (index2->ContainSample(i))
+    Helper::IniReader iniReader;
+    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath2 + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
+
+    std::shared_ptr<VectorIndex> addIndex = CreateInstance(iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined), 
+        iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined));
+    addIndex->LoadConfig(iniReader);
+    addIndex->LoadIndexData(folderPath2);
+
+    std::shared_ptr<MetadataSet> pMetadata;
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        pMetadata.reset(new MemMetadataSet(folderPath2 + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()), 
+            folderPath2 + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
+    }
+    
+#pragma omp parallel for schedule(dynamic,128)
+    for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+        if (addIndex->ContainSample(i))
         {
-            p_vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)index2->GetSample(i), vectorSize, false),
-                index2->GetVectorValueType(), index2->GetFeatureDim(), 1));
-            ByteArray meta = index2->GetMetadata(i);
-            offsets[1] = meta.Length();
-            p_metaSet.reset(new MemMetadataSet(meta, metaoffset, 1));
-            index1->AddIndex(p_vectorSet, p_metaSet);
+            std::shared_ptr<MetadataSet> p_metaSet;
+            if (pMetadata != nullptr) {
+                ByteArray meta = pMetadata->GetMetadata(i);
+                std::uint64_t offsets[2] = { 0, meta.Length() };
+                p_metaSet.reset(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
+            }
+            p_vectorIndex->AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
         }
-
-    index1->SaveIndex(folderPath1);
     return ErrorCode::Success;
 }

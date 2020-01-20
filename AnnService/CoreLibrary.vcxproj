@@ -132,6 +132,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
+    <ClInclude Include="inc\Core\Common\Labelset.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />
@@ -164,6 +165,7 @@
     <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\BKTree.h" />
     <ClInclude Include="inc\Core\Common\KDTree.h" />
+    <ClInclude Include="inc\Helper\ThreadPool.h" />
     <ClInclude Include="inc\Helper\VectorSetReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
   </ItemGroup>

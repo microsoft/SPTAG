@@ -27,11 +27,15 @@ public:
 
     virtual std::pair<std::uint64_t, std::uint64_t> BufferSize() const = 0;
 
-    virtual void AddBatch(MetadataSet& data) = 0;
+    virtual void Add(const ByteArray& data) = 0;
 
     virtual ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut) = 0;
 
     virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
+ 
+    virtual void AddBatch(MetadataSet& data);
+    
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata);
 
     virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
@@ -53,8 +57,8 @@ public:
     bool Available() const;
 
     std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
-
-    void AddBatch(MetadataSet& data);
+    
+    void Add(const ByteArray& data);
 
     ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
@@ -78,7 +82,11 @@ private:
 class MemMetadataSet : public MetadataSet
 {
 public:
+    MemMetadataSet();
+
     MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count);
+
+    MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile);
 
     ~MemMetadataSet();
 
@@ -90,7 +98,7 @@ public:
 
     std::pair<std::uint64_t, std::uint64_t> BufferSize() const;
 
-    void AddBatch(MetadataSet& data);
+    void Add(const ByteArray& data);
 
     ErrorCode SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
 
@@ -102,8 +110,6 @@ private:
     SizeType m_count;
 
     ByteArray m_metadataHolder;
-
-    ByteArray m_offsetHolder;
 
     std::vector<std::uint8_t> m_newdata;
 };

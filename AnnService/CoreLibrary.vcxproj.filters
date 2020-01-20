@@ -151,6 +151,12 @@
     <ClInclude Include="inc\Helper\VectorSetReader.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Helper\ThreadPool.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Labelset.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">

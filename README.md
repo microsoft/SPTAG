@@ -61,6 +61,8 @@ cd build && cmake -A x64 ..
 It will generate a SPTAGLib.sln in the build directory. 
 Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will generate a Release directory which contains all the build targets.
 
+For detailed instructions on installing Windows binaries, please see [here](docs/WindowsInstallation.md)
+
 > Using Docker:
 ```bash
 docker build -t sptag .
@@ -73,7 +75,7 @@ Run the test (or Test.exe) in the Release folder to verify all the tests have pa
 
 ### **Usage**
 
-The detailed usage can be found in [Get started](docs/GettingStart.md).
+The detailed usage can be found in [Get started](docs/GettingStart.md). There is also an end-to-end tutorial for building vector search online service using Python Wrapper in [Python Tutorial](docs/Tutorial.ipynb).
 The detailed parameters tunning can be found in [Parameters](docs/Parameters.md).
 
 ## **References**

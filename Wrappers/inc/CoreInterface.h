@@ -46,7 +46,7 @@ public:
 
     static AnnIndex Load(const char* p_loaderFile);
 
-    static bool Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);
+    static AnnIndex Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);
 
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
