@@ -134,6 +134,48 @@ namespace SPTAG
             }
         };
 
+        class DistPriorityQueue {
+            float* data;
+            int size;
+            int count;
+        public:
+            DistPriorityQueue() {}
+
+            void Resize(int size_) {
+                data = new float[size_ + 1];
+                for (int i = 0; i <= size_; i++) data[i] = MaxDist;
+                size = size_;
+                count = size_;
+            }
+            void clear(int count_) {
+                count = count_;
+                for (int i = 0; i <= count; i++) data[i] = MaxDist;
+            }
+            ~DistPriorityQueue() {
+                delete[] data;
+            }
+            bool insert(float dist) {
+                if (dist > data[1]) return false;
+
+                data[1] = dist;
+                int parent = 1, next = 2;
+                while (next < count) {
+                    if (data[next] < data[next + 1]) next++;
+                    if (data[parent] < data[next]) {
+                        std::swap(data[next], data[parent]);
+                        parent = next;
+                        next <<= 1;
+                    }
+                    else break;
+                }
+                if (next == count && data[parent] < data[next]) std::swap(data[parent], data[next]);
+                return true;
+            }
+            float worst() {
+                return data[1];
+            }
+        };
+
         // Variables for each single NN search
         struct WorkSpace
         {
@@ -142,6 +184,7 @@ namespace SPTAG
                 nodeCheckStatus.Init(maxCheck);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
+                m_Results.Resize(maxCheck / 16);
 
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
@@ -155,6 +198,7 @@ namespace SPTAG
                 nodeCheckStatus.clear();
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
+                m_Results.clear(maxCheck / 16);
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
                 m_iContinuousLimit = maxCheck / 64;
@@ -182,6 +226,8 @@ namespace SPTAG
 
             // Priority queue Used for Tree
             Heap<HeapCell> m_SPTQueue;
+
+            DistPriorityQueue m_Results;
         };
     }
 }
