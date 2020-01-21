@@ -228,8 +228,8 @@ AnnIndex
 AnnIndex::Merge(const char* p_indexFilePath1, const char* p_indexFilePath2)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-	if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::LoadIndex(p_indexFilePath1, vecIndex))
-		return AnnIndex(0);
+    if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::LoadIndex(p_indexFilePath1, vecIndex))
+        return AnnIndex(0);
 
     if (SPTAG::ErrorCode::Success != vecIndex->MergeIndex(p_indexFilePath2))
         return AnnIndex(0);
