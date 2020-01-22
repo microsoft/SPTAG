@@ -135,10 +135,7 @@ namespace SPTAG
                     } \
                 } \
             } else { \
-                CheckDeleted \
-                { \
-                    p_space.m_iNumOfContinuousNoBetterPropagation++; \
-                } \
+                p_space.m_iNumOfContinuousNoBetterPropagation++; \
                 if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                     p_query.SortResult(); return; \
                 } \

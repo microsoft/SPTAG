@@ -300,7 +300,7 @@ VectorIndex::MergeIndex(const char* p_indexFilePath)
     std::shared_ptr<VectorIndex> addIndex;
     LoadIndex(p_indexFilePath, addIndex);
 
-#pragma omp parallel for schedule(dynamic,128)
+//#pragma omp parallel for schedule(dynamic,128)
     for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
         if (addIndex->ContainSample(i))
         {
