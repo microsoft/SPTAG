@@ -36,7 +36,7 @@ namespace SPTAG
         class DistanceUtils
         {
         public:
-#if defined(SSE2)
+#if defined(SSE2) || defined(AVX2)
             static inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
             {
                 __m128i zero = _mm_setzero_si128();
@@ -120,7 +120,7 @@ namespace SPTAG
                 return _mm_add_ps(_mm_mul_ps(dlo, dlo), _mm_mul_ps(dhi, dhi));
             }
 #endif
-#if defined(SSE)
+#if defined(SSE) || defined(AVX)
             static inline __m128 _mm_sqdf_ps(__m128 X, __m128 Y)
             {
                 __m128 d = _mm_sub_ps(X, Y);
