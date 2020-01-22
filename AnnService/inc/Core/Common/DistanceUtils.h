@@ -10,8 +10,14 @@
 #include "CommonUtils.h"
 
 #if defined(__AVX2__)
+#define AVX2
+#elif defined(__SSE2__)
+#define SSE2
+#endif
+
+#if defined(__AVX__)
 #define AVX
-#else
+#elif defined(__SSE__)
 #define SSE
 #endif
 
@@ -30,6 +36,7 @@ namespace SPTAG
         class DistanceUtils
         {
         public:
+#if defined(SSE2)
             static inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
             {
                 __m128i zero = _mm_setzero_si128();
@@ -112,12 +119,15 @@ namespace SPTAG
 
                 return _mm_add_ps(_mm_mul_ps(dlo, dlo), _mm_mul_ps(dhi, dhi));
             }
+#endif
+#if defined(SSE)
             static inline __m128 _mm_sqdf_ps(__m128 X, __m128 Y)
             {
                 __m128 d = _mm_sub_ps(X, Y);
                 return _mm_mul_ps(d, d);
             }
-#if defined(AVX)
+#endif
+#if defined(AVX2)
             static inline __m256 _mm256_mul_epi8(__m256i X, __m256i Y)
             {
                 __m256i zero = _mm256_setzero_si256();
@@ -195,6 +205,8 @@ namespace SPTAG
 
                 return _mm256_add_ps(_mm256_mul_ps(dlo, dlo), _mm256_mul_ps(dhi, dhi));
             }
+#endif
+#if defined(AVX)
             static inline __m256 _mm256_sqdf_ps(__m256 X, __m256 Y)
             {
                 __m256 d = _mm256_sub_ps(X, Y);
@@ -227,7 +239,7 @@ namespace SPTAG
                 const std::int8_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::int8_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::int8_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_sqdf_epi8, _mm_add_ps, diff128)
@@ -237,7 +249,7 @@ namespace SPTAG
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_sqdf_epi8, _mm_add_ps, diff128)
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m256i, __m256i, 32, _mm256_loadu_si256, _mm256_sqdf_epi8, _mm256_add_ps, diff256)
@@ -268,7 +280,7 @@ namespace SPTAG
                 const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::uint8_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::uint8_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_sqdf_epu8, _mm_add_ps, diff128)
@@ -278,7 +290,7 @@ namespace SPTAG
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_sqdf_epu8, _mm_add_ps, diff128)
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m256i, __m256i, 32, _mm256_loadu_si256, _mm256_sqdf_epu8, _mm256_add_ps, diff256)
@@ -309,7 +321,7 @@ namespace SPTAG
                 const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
                 const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::int16_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd16) {
                     REPEAT(__m128i, __m128i, 8, _mm_loadu_si128, _mm_sqdf_epi16, _mm_add_ps, diff128)
@@ -319,7 +331,7 @@ namespace SPTAG
                     REPEAT(__m128i, __m128i, 8, _mm_loadu_si128, _mm_sqdf_epi16, _mm_add_ps, diff128)
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd16) {
                     REPEAT(__m256i, __m256i, 16, _mm256_loadu_si256, _mm256_sqdf_epi16, _mm256_add_ps, diff256)
@@ -405,7 +417,7 @@ namespace SPTAG
                 const std::int8_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::int8_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::int8_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
 
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd32) {
@@ -416,7 +428,7 @@ namespace SPTAG
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epi8, _mm_add_ps, diff128)
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m256i, __m256i, 32, _mm256_loadu_si256, _mm256_mul_epi8, _mm256_add_ps, diff256)
@@ -445,7 +457,7 @@ namespace SPTAG
                 const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
                 const std::uint8_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::uint8_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
 
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd32) {
@@ -456,7 +468,7 @@ namespace SPTAG
                     REPEAT(__m128i, __m128i, 16, _mm_loadu_si128, _mm_mul_epu8, _mm_add_ps, diff128)
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd32) {
                     REPEAT(__m256i, __m256i, 32, _mm256_loadu_si256, _mm256_mul_epu8, _mm256_add_ps, diff256)
@@ -485,7 +497,7 @@ namespace SPTAG
                 const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
                 const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
                 const std::int16_t* pEnd1 = pX + length;
-#if defined(SSE)
+#if defined(SSE2)
                 __m128 diff128 = _mm_setzero_ps();
                 while (pX < pEnd16) {
                     REPEAT(__m128i, __m128i, 8, _mm_loadu_si128, _mm_mul_epi16, _mm_add_ps, diff128)
@@ -496,7 +508,7 @@ namespace SPTAG
                 }
                 float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
 
-#elif defined(AVX)
+#elif defined(AVX2)
                 __m256 diff256 = _mm256_setzero_ps();
                 while (pX < pEnd16) {
                     REPEAT(__m256i, __m256i, 16, _mm256_loadu_si256, _mm256_mul_epi16, _mm256_add_ps, diff256)

@@ -367,7 +367,7 @@ namespace SPTAG
                             }
                         }
                     }
-					currDist += idist;
+                    currDist += idist;
                 }
 
                 for (int i = 1; i < args._T; i++) {
