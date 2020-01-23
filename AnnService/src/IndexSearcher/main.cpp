@@ -102,12 +102,8 @@ public:
 		if (m_isBinary) {
 			QStrings.resize(readQuerys, "");
 			for (int i = 0; i < readQuerys; i++) {
-				if (!m_inStream.eof()) {
-					m_inStream.read((char*)Query[i].data(), sizeof(T)*m_featureDim);
-				}
-				else {
-					readQuerys = i;
-				}
+				m_inStream.read((char*)Query[i].data(), sizeof(T)*m_featureDim);
+				if (m_inStream.eof()) readQuerys = i;
 			}
 		}
 		else {
@@ -217,6 +213,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     while ((numQuerys = reader.ReadBatch()) != 0)
     {
         for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(reader.Query[i].data());
+		if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, options->m_K);
 
         SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
         for (int mc = 0; mc < maxCheck.size(); mc++)
@@ -263,7 +260,6 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             float recall = 0;
             if (ftruth.is_open())
             {
-				LoadTruth(ftruth, truth, numQuerys, options->m_K);
                 recall = CalcRecall<T>(results, truth, numQuerys, options->m_K, log);
             }
 
