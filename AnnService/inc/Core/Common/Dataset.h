@@ -132,7 +132,7 @@ namespace SPTAG
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)aligned_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-						std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
+                        std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
                         incBlocks.push_back(newBlock);
                     }
                     written += min(rowsInBlock - ((incRows + written) % rowsInBlock), num - written);
