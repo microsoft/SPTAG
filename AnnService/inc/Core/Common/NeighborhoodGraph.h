@@ -4,12 +4,11 @@
 #ifndef _SPTAG_COMMON_NG_H_
 #define _SPTAG_COMMON_NG_H_
 
-#include <mutex>
-
 #include "../VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "Dataset.h"
+#include "FineGrainedLock.h"
 #include "QueryResultSet.h"
 
 #if defined(GPU)
@@ -38,6 +37,7 @@ namespace SPTAG
                                  m_iCEFScale(2),
                                  m_iRefineIter(2),
                                  m_iCEF(1000),
+                                 m_iAddCEF(500),
                                  m_iMaxCheckForRefineGraph(10000) 
             {
                 m_pNeighborhoodGraph.SetName("Graph");
@@ -327,27 +327,24 @@ namespace SPTAG
             template <typename T>
             void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                m_iCEF *= m_iCEFScale;
-
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false, false);
+                        RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
                         if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
                 }
 
-                m_iCEF /= m_iCEFScale;
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
 				if (m_iRefineIter > 0) {
 #pragma omp parallel for schedule(dynamic)
 					for (SizeType i = 0; i < m_iGraphSize; i++)
 					{
-						RefineNode<T>(index, i, false, false);
+						RefineNode<T>(index, i, false, false, m_iCEF);
 						if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
 					}
 					std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -378,7 +375,8 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
-                    RefineNode<T>(index, indices[i], false, false);
+                    RefineNode<T>(index, indices[i], false, false, m_iCEF);
+                    if (i % 1000 == 0) std::cout << "\rRefine " << static_cast<int>(i * 1.0 / R * 100) << "%";
                     SizeType *nodes, *outnodes; 
                     nodes = outnodes = m_pNeighborhoodGraph[indices[i]];
                     if (newGraph != nullptr) outnodes = newGraph->m_pNeighborhoodGraph[i];
@@ -405,15 +403,15 @@ namespace SPTAG
 
 
             template <typename T>
-            void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted)
+            void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
-                COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), m_iCEF + 1);
-                index->SearchIndex(query, searchDeleted);
-                RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), m_iCEF + 1);
+                COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
+                index->RefineSearchIndex(query, searchDeleted);
+                RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
 
                 if (updateNeighbors) {
                     // update neighbors
-                    for (int j = 0; j <= m_iCEF; j++)
+                    for (int j = 0; j <= CEF; j++)
                     {
                         BasicResult* item = query.GetResult(j);
                         if (item->VID < 0) break;
@@ -483,7 +481,7 @@ namespace SPTAG
             inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph[index]; }
 
             void Update(SizeType row, DimensionType col, SizeType val) {
-                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock[row]);
                 m_pNeighborhoodGraph[row][col] = val;
             }
 
@@ -500,11 +498,11 @@ namespace SPTAG
             // Graph structure
             SizeType m_iGraphSize;
             COMMON::Dataset<SizeType> m_pNeighborhoodGraph;
-            std::mutex m_dataUpdateLock;
+            FineGrainedLock m_dataUpdateLock;
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iMaxCheckForRefineGraph;
+            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph;
         };
     }
 }

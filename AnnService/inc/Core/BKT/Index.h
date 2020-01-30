@@ -128,6 +128,7 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
@@ -140,8 +141,7 @@ namespace SPTAG
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
-            void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
+            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const;
         };
     } // namespace BKT
 } // namespace SPTAG

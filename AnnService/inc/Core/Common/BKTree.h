@@ -205,6 +205,7 @@ namespace SPTAG
                         }
                         m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
+                    m_pTreeRoots.push_back(BKTNode(-1));
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
             }
@@ -249,6 +250,7 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -268,6 +270,7 @@ namespace SPTAG
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
                 input.close();
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -323,12 +326,11 @@ namespace SPTAG
                                std::vector<SizeType>& indices,
                                const SizeType first, const SizeType last, KmeansArgs<T>& args, const bool updateCenters) const {
                 float currDist = 0;
-                int threads = args._T;
                 float lambda = (updateCenters) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (last - first)) : 0.0f;
-                SizeType subsize = (last - first - 1) / threads + 1;
+                SizeType subsize = (last - first - 1) / args._T + 1;
 
-#pragma omp parallel for num_threads(threads)
-                for (int tid = 0; tid < threads; tid++)
+#pragma omp parallel for num_threads(args._T) shared(indices) reduction(+:currDist)
+                for (int tid = 0; tid < args._T; tid++)
                 {
                     SizeType istart = first + tid * subsize;
                     SizeType iend = min(first + (tid + 1) * subsize, last);
@@ -365,16 +367,16 @@ namespace SPTAG
                             }
                         }
                     }
-                    COMMON::Utils::atomic_float_add(&currDist, idist);
+                    currDist += idist;
                 }
 
-                for (int i = 1; i < threads; i++) {
+                for (int i = 1; i < args._T; i++) {
                     for (int k = 0; k < m_iBKTKmeansK; k++)
                         args.newCounts[k] += args.newCounts[i*m_iBKTKmeansK + k];
                 }
 
                 if (updateCenters) {
-                    for (int i = 1; i < threads; i++) {
+                    for (int i = 1; i < args._T; i++) {
                         float* currCenter = args.newCenters + i*m_iBKTKmeansK*p_index->GetFeatureDim();
                         for (size_t j = 0; j < ((size_t)m_iBKTKmeansK) * p_index->GetFeatureDim(); j++) args.newCenters[j] += currCenter[j];
 
@@ -424,7 +426,7 @@ namespace SPTAG
                     }
                 }
                 else {
-                    for (int i = 1; i < threads; i++) {
+                    for (int i = 1; i < args._T; i++) {
                         for (int k = 0; k < m_iBKTKmeansK; k++) {
                             if (args.clusterIdx[i*m_iBKTKmeansK + k] != -1 && args.clusterDist[i*m_iBKTKmeansK + k] <= args.clusterDist[k]) {
                                 args.clusterDist[k] = args.clusterDist[i*m_iBKTKmeansK + k];
