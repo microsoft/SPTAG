@@ -187,11 +187,8 @@ namespace SPTAG
                    } \
                } \
             } else { \
-                CheckDeleted \
-                { \
-                    if (gnode.distance > p_space.m_Results.worst()) { \
-                        p_query.SortResult(); return; \
-                    } \
+                if (gnode.distance > p_space.m_Results.worst()) { \
+                    p_query.SortResult(); return; \
                 } \
             } \
             for (DimensionType i = 0; i <= checkPos; i++) { \

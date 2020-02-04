@@ -22,7 +22,7 @@ public:
 	{
 		AddRequiredOption(m_queryFile, "-i", "--input", "Input raw data.");
 		AddRequiredOption(m_indexFolder, "-x", "--index", "Index folder.");
-		AddOptionalOption(m_truthFile, "-t", "--truth", "Truth file.");
+		AddOptionalOption(m_truthFile, "-r", "--truth", "Truth file.");
 		AddOptionalOption(m_resultFile, "-o", "--result", "Output result file.");
 		AddOptionalOption(m_maxCheck, "-m", "--maxcheck", "MaxCheck for index.");
 		AddOptionalOption(m_withMeta, "-a", "--withmeta", "Output metadata instead of vector id.");
@@ -41,7 +41,7 @@ public:
 
 	std::string m_resultFile = "";
 
-	std::string m_maxCheck = "2048";
+	std::string m_maxCheck = "8192";
 
 	int m_withMeta = 0;
 

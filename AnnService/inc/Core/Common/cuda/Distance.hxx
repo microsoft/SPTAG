@@ -53,7 +53,7 @@ __forceinline__ __device__ __host__ float l2(T* trans_p1, T* p2, int dim) {
     float total = 0;
 #pragma unroll
     for (int i = 0; i < dim; ++i) {
-        total += (trans_p1[i*Stride] - p2[i]) * (trans_p1[i*Stride] - p2[i]);
+        total += ((float)trans_p1[i*Stride] - (float)p2[i]) * ((float)trans_p1[i*Stride] - (float)p2[i]);
     }
     return total;
 }
@@ -69,9 +69,9 @@ __forceinline__ __device__ __host__ float cosine(T* trans_p1, T* p2, int dim) {
     float b = 0;
 #pragma unroll
     for (int i = 0; i < dim; ++i) {
-        a += trans_p1[i*Stride] * trans_p1[i*Stride];
-        b += p2[i] * p2[i];
-        prod += trans_p1[i*Stride] * p2[i];
+        a += (float)trans_p1[i*Stride] * (float)trans_p1[i*Stride];
+        b += (float)p2[i] * (float)p2[i];
+        prod += (float)trans_p1[i*Stride] * (float)p2[i];
     }
 
     return 1 - (prod / (sqrt(a*b)));
