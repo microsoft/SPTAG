@@ -100,6 +100,7 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
+/*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
@@ -114,6 +115,7 @@ namespace SPTAG
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             } \
             if (gnode.distance <= p_query.worstDist()) { \
+                p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                 SizeType checkNode = node[checkPos]; \
                 if (checkNode < -1) { \
                     const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
@@ -121,7 +123,6 @@ namespace SPTAG
                     do { \
                         CheckDeleted \
                         { \
-                            p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                             CheckDuplicated \
                             break; \
                         } \
@@ -130,7 +131,6 @@ namespace SPTAG
                 } else { \
                     CheckDeleted \
                     { \
-                        p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
                         p_query.AddPoint(tmpNode, gnode.distance); \
                     } \
                 } \
@@ -153,9 +153,9 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
-/*
+*/
+
 #define Search(CheckDeleted, CheckDuplicated) \
-        std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
@@ -187,11 +187,8 @@ namespace SPTAG
                    } \
                } \
             } else { \
-                CheckDeleted \
-                { \
-                    if (gnode.distance > p_space.m_Results.worst()) { \
-                        p_query.SortResult(); return; \
-                    } \
+                if (gnode.distance > p_space.m_Results.worst()) { \
+                    p_query.SortResult(); return; \
                 } \
             } \
             for (DimensionType i = 0; i <= checkPos; i++) { \
@@ -209,7 +206,7 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
-*/
+
 
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
