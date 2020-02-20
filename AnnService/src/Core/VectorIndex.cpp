@@ -297,16 +297,30 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 ErrorCode
 VectorIndex::MergeIndex(const char* p_indexFilePath)
 {
-    std::shared_ptr<VectorIndex> addIndex;
-    LoadIndex(p_indexFilePath, addIndex);
+    std::string folderPath(p_indexFilePath);
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
+    Helper::IniReader iniReader;
+    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath + "indexloader.ini")) return ErrorCode::FailedOpenFile;
 
-//#pragma omp parallel for schedule(dynamic,128)
+    std::shared_ptr<VectorIndex> addIndex = CreateInstance(iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined),
+        iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined));
+    addIndex->LoadConfig(iniReader);
+    addIndex->LoadIndexData(folderPath);
+
+    std::shared_ptr<MetadataSet> pMetadata;
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        pMetadata.reset(new MemMetadataSet(folderPath + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()),
+            folderPath + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
+    }
+
+#pragma omp parallel for schedule(dynamic,128)
     for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
         if (addIndex->ContainSample(i))
         {
             std::shared_ptr<MetadataSet> p_metaSet;
-            if (addIndex->m_pMetadata != nullptr) {
-                ByteArray meta = addIndex->m_pMetadata->GetMetadata(i);
+            if (pMetadata != nullptr) {
+                ByteArray meta = pMetadata->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
                 p_metaSet.reset(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
             }
