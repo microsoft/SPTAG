@@ -193,7 +193,8 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
 
-    std::ofstream log(index.GetIndexName() + "_" + std::to_string(options->m_K) + ".txt");
+//    std::ofstream log(index.GetIndexName() + "_" + std::to_string(options->m_K) + ".txt");
+    std::ofstream log("Recall-result.out", std::ios::app);
     if (!log.is_open())
     {
         std::cerr << "ERROR: Cannot open logging file!" << std::endl;
