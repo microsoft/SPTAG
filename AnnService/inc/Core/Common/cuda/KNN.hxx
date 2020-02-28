@@ -640,14 +640,14 @@ void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoo
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
-    std::cout << "NeighborhoodSize (with scaling factor applied) must be a power of 2 for GPU construction." << std::endl;
+    std::cout << "NeighborhoodSize (with scaling factor applied) is " << m_iNeighborhoodSize << " but must be a power of 2 for GPU construction." << std::endl;
     exit(1);
   }
 
   // Have to give compiler-time known bounds on dimensions so that we can store points in registers
   // This significantly speeds up distance comparisons.
-  // For other commonly-used dimension values, create other options here.
-  // TODO: Create generic, slower, non-register version that can be used for very large dimensional data
+  // Create other options here for other commonly-used dimension values.
+  // TODO: Create slower, non-register version that can be used for very high-dimensional data
   if(m_iFeatureDim > 100) {
     std::cout << ">100 dimensions not currently supported for GPU construction." << std::endl;
     exit(1);
