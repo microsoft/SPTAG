@@ -6,7 +6,9 @@ if (CUDA_FOUND)
     message (STATUS "Found cuda.")
     message (STATUS "Include Path:" ${CUDA_INCLUDE_DIRS})
     message (STATUS "Library Path:" ${CUDA_LIBRARIES})
-    set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math --gpu-architecture=sm_70")
+    set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math  -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_70,code=sm_70" )
+   
+   
     message (STATUS "CUDA_NVCC_FLAGS:" ${CUDA_NVCC_FLAGS})
 
     file(GLOB GPUBUILDER_HDR_FILES ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/VectorSetReaders/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/IndexBuilder/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/cuda/*)

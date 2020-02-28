@@ -38,7 +38,7 @@ class DistPair {
 
 // Swap the values of two DistPair<SUMTYPE> objects
 template<typename SUMTYPE>
-__forceinline__ __device__ void swap(DistPair<SUMTYPE>* a, DistPair<SUMTYPE>* b) {
+__device__ void swap(DistPair<SUMTYPE>* a, DistPair<SUMTYPE>* b) {
         DistPair<SUMTYPE> temp;
         temp.dist = a->dist;
         temp.idx = a->idx;

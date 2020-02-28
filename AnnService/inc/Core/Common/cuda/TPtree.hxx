@@ -97,7 +97,6 @@ class TPtree {
   public:
 // for each level of the tree, contains the dimensions and weights that defines the hyperplane
     int* partition_dims;
-//    float** weight_list;
     KEY_T** weight_list;
 
 // for each node, defines the value of the partitioning hyperplane.  Laid out in breadth-first order
@@ -293,8 +292,6 @@ __global__ void update_node_assignments(Point<T,SUMTYPE,Dim>* points, KEY_T* wei
   
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<N; i+=blockDim.x*gridDim.x) {
     node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(points[i],weights,partition_dims) > split_keys[node_ids[i]]);
-//    node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T,Dim,PART_DIMS>(points[i],weights,partition_dims) > split_keys[node_ids[i]]/node_sizes[node_ids[i]]);
-//    atomicAdd(&node_sizes[node_ids[i]], 1);
   }
 }
 

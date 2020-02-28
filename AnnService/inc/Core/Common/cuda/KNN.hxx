@@ -49,7 +49,6 @@ __global__ void findKNN_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
   bool dup; // Is the target already in the KNN list?
 
   DistPair<SUMTYPE> target;
-//  long long int src_id; // Id of query vector
 
   int blocks_per_leaf = gridDim.x / tptree->num_leaves;
   int threads_per_leaf = blocks_per_leaf*blockDim.x;
@@ -233,22 +232,18 @@ __global__ void refine_KNN(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
  e****************************************************************************************/
 template<typename T>
 __device__ int compute_accessibility(int* results, int id, int target, int KVAL) {
-//  int access=0;
+  int access=0;
   int* ptr;
   for(int i=0; i<KVAL; i++) {
-    if(results[id*KVAL+i] == target)
-      return 1;
-//    access += (results[id*KVAL+i] == target);
+    access += (results[id*KVAL+i] == target);
     if(results[id*KVAL+i] != -1) {
       ptr = &results[results[id*KVAL+i]*KVAL];
       for(int j=0; j<KVAL; j++) {
-        if(ptr[j] == target)
-          return 1;
-//        access += (ptr[j] == target);
+        access += (ptr[j] == target);
       }
     }
   }
-  return 0;
+  return access;
 }
 
 
@@ -290,7 +285,6 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
     nearest_dist = INFTY<SUMTYPE>();
 
     heapMem.reset();
-//    src_id = tptree->leaf_points[leaf_offset + i];
 
     // Load results from previous iterations into shared memory heap
     // and re-compute distances since they are not stored in result set
@@ -519,7 +513,7 @@ __global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
   }
 }
 
-/***************************************************************************************
+/****************************************************************************************
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
@@ -644,6 +638,7 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
 template<typename T>
 void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int m_disttype, int refines, int graph) {
 
+  // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
     std::cout << "NeighborhoodSize (with scaling factor applied) must be a power of 2 for GPU construction." << std::endl;
     exit(1);

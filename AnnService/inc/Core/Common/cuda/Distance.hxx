@@ -32,7 +32,7 @@
 using namespace std;
 
 // Templated infinity value
-template<typename T> __forceinline__ __host__ __device__ T INFTY() {}
+template<typename T> __host__ __device__ T INFTY() {}
 template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;}
 template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() {return LLONG_MAX;}
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
@@ -72,23 +72,28 @@ class Point {
     return *this;
   }
 
+  // Computes euclidean dist.  Uses 2 registers to increase pipeline efficiency and ILP
   __device__ __host__ SUMTYPE l2(Point<T,SUMTYPE,Dim>* other) {
-    SUMTYPE total=0;
-#pragma unroll
-    for(int i=0; i<Dim; ++i) {
-      total += (coords[i]-other->coords[i])*(coords[i]-other->coords[i]);
-    }
+    SUMTYPE total[2]={0,0};
 
-    return total;
+    for(int i=0; i<Dim; i+=2) {
+      total[0] += (coords[i]-other->coords[i])*(coords[i]-other->coords[i]);
+      total[1] += (coords[i+1]-other->coords[i+1])*(coords[i+1]-other->coords[i+1]);
+    }
+    return total[0]+total[1];
   }
 
+  // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
+  // Assumes coordinates are normalized so each vector is of unit length.  This lets us
+  // perform a dot-product instead of the full cosine distance computation.
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
-    SUMTYPE total=0;
-#pragma unroll
-    for(int i=0; i<Dim; ++i) {
-      total += ((float)(coords[i] * other->coords[i]));
+    SUMTYPE total[2]={0,0};
+
+    for(int i=0; i<Dim; i+=2) {
+      total[0] += ((float)(coords[i] * other->coords[i]));
+      total[1] += ((float)(coords[i+1] * other->coords[i+1]));
     }
-    return 1.0-total;
+    return 1.0 - (total[0]+total[1]);
   }
 
 };
@@ -140,8 +145,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
 
   __device__ __host__ SUMTYPE l2(Point<uint8_t,SUMTYPE,Dim>* other) {
 
-    SUMTYPE totals[4];
-    totals[0]=0;totals[1]=0;totals[2]=0;totals[3]=0;
+    SUMTYPE totals[4] = {0,0,0,0};
     SUMTYPE temp[4];
     SUMTYPE temp_other[4];
 
@@ -166,6 +170,8 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return totals[0]+totals[1]+totals[2]+totals[3];
   }
 
+  // Cosine distance measure for uint8_t datatype is more complex because it cannot be normalized.
+  // So, we have to perform the formal computation, not just dot-product
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
     SUMTYPE a[4];
