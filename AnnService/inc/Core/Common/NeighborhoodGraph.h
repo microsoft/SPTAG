@@ -94,6 +94,18 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
+				SizeType initSize;
+				SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
+				Dataset<SizeType> initSearchPoints(m_iGraphSize, initSize);
+#pragma omp parallel for schedule(dynamic)
+				for (SizeType i = 0; i < m_iGraphSize; i++)
+				{
+					COMMON::QueryResultSet<T> query((const T*)index->GetSample(i), initSize);
+					index->RefineSearchIndex(query, false);
+					SizeType* nodes = initSearchPoints[i];
+					for (DimensionType j = 0; j < initSize; j++) nodes[j] = query.GetResult(j)->VID;
+				}
+
                 buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize,
                     m_iTPTNumber, m_numTopDimensionTPTSplit, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod());
 
