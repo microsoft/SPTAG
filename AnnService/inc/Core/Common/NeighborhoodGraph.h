@@ -11,6 +11,8 @@
 #include "FineGrainedLock.h"
 #include "QueryResultSet.h"
 
+#include <chrono>
+
 #if defined(GPU)
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -19,7 +21,9 @@
 #include <cuda_fp16.h>
 
 #include "inc/Core/Common/cuda/KNN.hxx"
+#include "inc/Core/Common/cuda/params.h"
 #endif
+
 
 namespace SPTAG
 {
@@ -38,7 +42,9 @@ namespace SPTAG
                                  m_iRefineIter(2),
                                  m_iCEF(1000),
                                  m_iAddCEF(500),
-                                 m_iMaxCheckForRefineGraph(10000) 
+                                 m_iMaxCheckForRefineGraph(10000),
+                                 m_iGPUGraphType(0),
+                                 m_iGPURefineSteps(0)
             {
                 m_pNeighborhoodGraph.SetName("Graph");
             }
@@ -94,8 +100,9 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
-                buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize,
-                    m_iTPTNumber, m_numTopDimensionTPTSplit, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod());
+                buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod(), m_iGPURefineSteps, m_iGPUGraphType);
+
+                // TODO: Make init graph type for GPU and input option...
 
                 std::unordered_map<SizeType, SizeType>::const_iterator iter;
                 for (SizeType i = 0; i< m_iGraphSize; i++) {
@@ -315,13 +322,20 @@ namespace SPTAG
                 }
 
                 time_t start = clock();
+                auto t1 = std::chrono::high_resolution_clock::now();
                 BuildInitKNNGraph<T>(index, idmap);
-                std::cout << "BuildInitKNNGraph time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
+                auto t2 = std::chrono::high_resolution_clock::now();
+
+                std::cout << "BuildInitKNNGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
+                std::cout << "BuildInitKNNGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
 
                 if (m_iMaxCheckForRefineGraph > 0) {
                     RefineGraph<T>(index, idmap);
                 }
-				std::cout << "BuildGraph time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
+
+                t2 = std::chrono::high_resolution_clock::now();
+				std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
+				std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
             }
 
             template <typename T>
@@ -401,11 +415,11 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-
             template <typename T>
             void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
+
                 index->RefineSearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
 
@@ -502,7 +516,7 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph;
+            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps;
         };
     }
 }
