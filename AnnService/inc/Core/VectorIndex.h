@@ -34,6 +34,8 @@ public:
 
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
 
+    virtual ErrorCode SearchTree(QueryResult& p_results) const = 0;
+
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;

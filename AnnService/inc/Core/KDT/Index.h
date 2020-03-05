@@ -132,6 +132,7 @@ namespace SPTAG
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
+            ErrorCode SearchTree(QueryResult& p_results) const;
 
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;

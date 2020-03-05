@@ -570,21 +570,21 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     cudaDeviceSynchronize();
 
     LOG("Starting TPT construction timer\n");
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Create TPT
     tptree->reset();
     create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels);
     cudaDeviceSynchronize();
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    LOG("TPT construction time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
+    //LOG("TPT construction time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
 
 
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Compute the KNN for each leaf node
     if(graphtype == 0) {
@@ -595,14 +595,14 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     }
     cudaDeviceSynchronize();
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
+    //LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
   } // end TPT loop
 
-  clock_gettime(CLOCK_MONOTONIC, &start);
+  //clock_gettime(CLOCK_MONOTONIC, &start);
   start_t = clock();
 
   for(int r=0; r<refines; r++) {
@@ -616,7 +616,7 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     cudaDeviceSynchronize();
   }
 
-  clock_gettime(CLOCK_MONOTONIC, &end);
+  //clock_gettime(CLOCK_MONOTONIC, &end);
   end_t = clock();
   refine_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
 
