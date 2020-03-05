@@ -100,28 +100,43 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
-				SizeType initSize;
+              SizeType initSize;
 				SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
-				Dataset<SizeType> initSearchPoints(m_iGraphSize, initSize);
-#pragma omp parallel for schedule(dynamic)
-				for (SizeType i = 0; i < m_iGraphSize; i++)
-				{
-					COMMON::QueryResultSet<T> query((const T*)index->GetSample(i), initSize);
-					index->RefineSearchIndex(query, false);
-					SizeType* nodes = initSearchPoints[i];
-					for (DimensionType j = 0; j < initSize; j++) nodes[j] = query.GetResult(j)->VID;
-				}
+				      Dataset<SizeType> initSearchPoints(m_iGraphSize, initSize);
 
-				buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod(), m_iGPURefineSteps, m_iGPUGraphType);
-				// TODO: Make init graph type for GPU and input option...
+              printf("initSize:%d, graphSize:%d\n", initSize, m_iGraphSize);
 
-                std::unordered_map<SizeType, SizeType>::const_iterator iter;
-                for (SizeType i = 0; i< m_iGraphSize; i++) {
-                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
-                        if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
-                            m_pNeighborhoodGraph[i][j] = iter->second;
-                    }
+//#pragma omp parallel for schedule(dynamic)
+				      for (SizeType i = 0; i < m_iGraphSize; i++)
+				      {
+					      COMMON::QueryResultSet<T> query((const T*)index->GetSample(i), initSize);
+					      index->RefineSearchIndex(query, false);
+                
+					      SizeType* nodes = initSearchPoints[i];
+					      for (DimensionType j = 0; j < initSize; j++) nodes[j] = query.GetResult(j)->VID;
+
+                if(i < 10) {
+                  printf("node:%d - ", i);
+                  for(int j=0; j<10; j++) {
+                    printf("%d, ", nodes[j]);
+                  }
+                printf("\n");
                 }
+                
+				      }
+              printf("done.\n");
+
+				      buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod(), m_iGPURefineSteps, m_iGPUGraphType);
+				      // TODO: Make init graph type for GPU and input option...
+
+              std::unordered_map<SizeType, SizeType>::const_iterator iter;
+              for (SizeType i = 0; i< m_iGraphSize; i++) {
+                for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
+                  if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
+                    m_pNeighborhoodGraph[i][j] = iter->second;
+                }
+              }
+              
             }
 #else
             template <typename T>
@@ -432,6 +447,7 @@ namespace SPTAG
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
 
                 index->RefineSearchIndex(query, searchDeleted);
+                
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
 
                 if (updateNeighbors) {

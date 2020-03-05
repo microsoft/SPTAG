@@ -308,6 +308,7 @@ namespace SPTAG
                         if (p_space.m_iNumberOfCheckedLeaves >= p_limits) break;
                     }
                     else {
+//                      printf("internal\n");
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
                         }

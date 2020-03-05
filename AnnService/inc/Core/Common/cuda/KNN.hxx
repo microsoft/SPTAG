@@ -527,7 +527,7 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
 
   int KNN_blocks; // number of threadblocks used
 
-  LOG("Copying to Point array\n");
+  printf("Copying to Point array\n");
   Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
@@ -654,13 +654,16 @@ void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoo
   }
   else {
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
+      printf("Calling buildGraphGPU!\n");
       buildGraphGPU<T, float, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
     }
+    /*
     else {
       if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
         buildGraphGPU<T, int32_t, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
       }
     }
+    */
   }
 }
 
