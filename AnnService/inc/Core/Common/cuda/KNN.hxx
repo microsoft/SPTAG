@@ -25,10 +25,12 @@
 #ifndef _SPTAG_COMMON_CUDA_KNN_H_
 #define _SPTAG_COMMON_CUDA_KNN_H_
 
+#include "../../VectorIndex.h"
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 #include "Distance.hxx"
 
+#include<cub/cub.cuh>
 
 
 /*****************************************************************************************
@@ -513,6 +515,416 @@ __global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
   }
 }
 
+using namespace SPTAG;
+
+template <typename SUMTYPE>
+class ListElt {
+  public:
+  int id;
+  SUMTYPE dist;
+  bool checkedFlag;
+
+  __device__ ListElt& operator=(const ListElt& other) {
+    id = other.id;
+    dist = other.dist;
+    checkedFlag = other.checkedFlag;
+    return *this;
+  }
+};
+
+
+
+template<typename T>
+void getCandidates(SPTAG::VectorIndex* index, int numVectors, int candidatesPerVector, int* candidates) {
+
+#pragma omp parallel for schedule(dynamic)
+  for (SizeType i = 0; i < numVectors; i++)
+  {
+    SPTAG::COMMON::QueryResultSet<T> query((const T*)index->GetSample(i), candidatesPerVector);
+     index->SearchTree(query);
+     for (SPTAG::DimensionType j = 0; j < candidatesPerVector; j++) {
+       candidates[i*candidatesPerVector+j] = query.GetResult(j)->VID;
+     }
+  }
+}
+
+template<typename SUMTYPE, int NUM_REGS, int NUM_THREADS>
+__device__ void loadRegisters(ListElt<SUMTYPE>* regs, ListElt<SUMTYPE>* listMem, int* listSize) {
+  for(int i=0; i<NUM_REGS; i++) {
+    if(i*NUM_THREADS + threadIdx.x < *listSize) {
+      regs[i] = listMem[i*NUM_THREADS + threadIdx.x];
+    }
+    else {
+      regs[i].id = INFTY<int>();
+      regs[i].dist = INFTY<SUMTYPE>();
+    }
+  }
+}
+
+template<typename SUMTYPE, int NUM_REGS, int NUM_THREADS>
+__device__ void storeRegisters(ListElt<SUMTYPE>* regs, ListElt<SUMTYPE>* listMem, int* listSize) {
+  for(int i=0; i<NUM_REGS; i++) {
+    if(i*NUM_THREADS + threadIdx.x < *listSize) {
+      listMem[i*NUM_THREADS + threadIdx.x] = regs[i];
+    }
+    else {
+      listMem[i*NUM_THREADS+threadIdx.x].id = INFTY<int>();
+      listMem[i*NUM_THREADS+threadIdx.x].dist = INFTY<int>();
+    }
+  }
+}
+
+
+#define LISTCAP 2048
+#define LISTSIZE 1024
+
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void sortListById(ListElt<SUMTYPE>* listMem, int* listSize, void* temp_storage) {
+
+  ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
+  int sortKeys[LISTCAP/NUM_THREADS];
+
+// Sort list by ID to remove duplicates
+  // Load list into registers to sort
+  loadRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
+
+  for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+    sortKeys[i] = sortMem[i].id;
+  }
+
+  // Sort by ID in registers
+  typedef cub::BlockRadixSort<int, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSort;
+  BlockRadixSort(*(static_cast<typename BlockRadixSort::TempStorage*>(temp_storage))).SortBlockedToStriped(sortKeys, sortMem);
+
+  __syncthreads();
+
+
+  // Write back to list
+  storeRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
+  __syncthreads();
+
+}
+
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void sortListByDist(ListElt<SUMTYPE>* listMem, int* listSize, void* temp_storage) {
+
+  ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
+  SUMTYPE sortKeys[LISTCAP/NUM_THREADS];
+
+// Sort list by ID to remove duplicates
+  // Load list into registers to sort
+  loadRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
+
+  for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+    sortKeys[i] = sortMem[i].dist;
+  }
+
+  // Sort by ID in registers
+  typedef cub::BlockRadixSort<SUMTYPE, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSort;
+  BlockRadixSort(*(static_cast<typename BlockRadixSort::TempStorage*>(temp_storage))).SortBlockedToStriped(sortKeys, sortMem);
+  __syncthreads();
+
+  // Write back to list
+  storeRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
+  __syncthreads();
+}
+
+
+
+// Remove duplicates and compact list with prefix sums
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listSize, void *temp_storage) {
+
+  ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
+  int sortKeys[LISTCAP/NUM_THREADS];
+
+  // Copy weather is duplicate or not into registers
+  for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+    sortKeys[i] = 0;
+    if(listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i].id == -1) {
+      sortKeys[i] = 0;
+    }
+    else if(i==0 && threadIdx.x==0) {
+      sortKeys[i] = 1;
+    }
+    else if(threadIdx.x*(LISTCAP/NUM_THREADS) + i < *listSize && listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i].id != INFTY<int>()) {
+      sortMem[i] = listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i];
+      sortKeys[i] = (sortMem[i].id != listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i - 1].id);
+    }
+  }
+
+  __syncthreads();
+  typedef cub::BlockScan<int, NUM_THREADS> BlockScan;
+  BlockScan(*(static_cast<typename BlockScan::TempStorage*>(temp_storage))).InclusiveSum(sortKeys, sortKeys);
+
+  __syncthreads();
+  for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+    listMem[threadIdx.x*(LISTCAP/NUM_THREADS)+i] = sortMem[i];
+  }
+
+  // Share boarders of prefix sums
+  __shared__ int borderVals[NUM_THREADS];
+  borderVals[threadIdx.x] = sortKeys[LISTCAP/NUM_THREADS - 1];
+
+  __syncthreads();
+
+  if(threadIdx.x==0 || borderVals[threadIdx.x-1] != sortMem[0].id) {
+    listMem[sortKeys[0]-1] = sortMem[0];
+  }
+  for(int i=1; i<LISTCAP/NUM_THREADS; i++) {
+    if(sortKeys[i] > sortKeys[i-1]) {
+      listMem[sortKeys[i]-1] = sortMem[i];
+    }
+  }
+  __syncthreads();
+  *listSize = borderVals[NUM_THREADS-1]-1;
+  __syncthreads(); 
+
+}
+
+
+#define MAX_CHECK_COUNT 32
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void checkClosestNeighbors(Point<T,SUMTYPE,MAX_DIM>* d_points, int src, int* d_graph, ListElt<SUMTYPE>* listMem, int* listSize, int KVAL, int metric) {
+  int max_check = min(MAX_CHECK_COUNT, (LISTCAP-*listSize)/KVAL);
+
+  int write_offset;
+  __shared__ int check_count;
+  check_count=0;
+  __shared__ int new_listSize;
+  new_listSize = *listSize;
+  __syncthreads();
+  
+  for(int i=threadIdx.x; i<LISTSIZE && check_count < max_check; i+=NUM_THREADS) {
+    if(!listMem[i].checkedFlag) {
+      if(atomicAdd(&check_count, 1) < max_check) {
+        write_offset = atomicAdd(&new_listSize, KVAL);
+        listMem[i].checkedFlag=true;
+        for(int j=0; j<KVAL; j++) {
+          listMem[write_offset+j].id = d_points[i*KVAL+j].id;
+        }
+      }
+    }
+  }
+  __syncthreads();
+  if(metric == 0) {
+    for(int i=*listSize+threadIdx.x; i<new_listSize; i+=NUM_THREADS) {
+      /*
+      if(listMem[i].id == src) {
+        listMem[i].id = -1;
+        listMem[i].dist = INFTY<SUMTYPE>();
+      }
+      */
+      if (metric == 0){
+        listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
+      }
+      else {
+        listMem[i].dist = d_points[src].cosine(&d_points[listMem[i].id]);
+      }
+    }
+  }
+  __syncthreads();
+  *listSize = new_listSize;
+  __syncthreads();
+
+}
+
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void shrinkListRNG_OLD(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int src, ListElt<SUMTYPE>* listMem, int listSize, int KVAL, int metric) {
+  bool good=true;
+  int write_idx=0;
+  int read_idx=0;
+
+  // Test sequential version of this...
+  if(threadIdx.x==0) {
+    for(read_idx=0; write_idx < KVAL && read_idx < listSize; read_idx++) {
+      if(listMem[read_idx].id == -1) break;
+      if(listMem[read_idx].id == src) continue;
+
+      good = true;
+      if(metric == 0) {
+      for(int j=0; j<write_idx; j++) {
+        // If it violates RNG
+        if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].l2(&d_points[d_graph[src*KVAL+j]])) {
+          good=false;
+          continue;
+        }
+      }
+      }
+      else {
+      for(int j=0; j<write_idx; j++) {
+        // If it violates RNG
+        if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].cosine(&d_points[d_graph[src*KVAL+j]])) {
+          good=false;
+          continue;
+        }
+      }
+      }
+      if(good) {
+        d_graph[src*KVAL+write_idx] = listMem[read_idx].id;
+        write_idx++;
+      }
+    }
+    if(write_idx < KVAL) {
+      for(int i=write_idx; i<KVAL; i++) {
+        d_graph[src*KVAL+i] = -1;
+      }
+    }
+  }
+  __syncthreads();
+}
+
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int src, ListElt<SUMTYPE>* listMem, int listSize, int KVAL, int metric) {
+  __shared__ bool good;
+  int write_idx=0;
+  int read_idx=0;
+
+  for(read_idx=0; write_idx < KVAL && read_idx < listSize; read_idx++) {
+    if(listMem[read_idx].id == -1) break;
+    if(listMem[read_idx].id == src) continue;
+
+    good = true;
+    __syncthreads();
+
+    if(metric == 0) {
+    for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
+      // If it violates RNG
+      if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].l2(&d_points[d_graph[src*KVAL+j]])) {
+        good=false;
+      }
+    }
+    }
+    else {
+    for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
+      // If it violates RNG
+      if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].cosine(&d_points[d_graph[src*KVAL+j]])) {
+        good=false;
+      }
+    }
+    }
+    __syncthreads();
+    if(good) {
+      write_idx++;
+      d_graph[src*KVAL+write_idx] = listMem[read_idx].id;
+    }
+    __syncthreads();
+  }
+  if(write_idx < KVAL) {
+    for(int i=write_idx+threadIdx.x; i<KVAL; i+=NUM_THREADS) {
+      d_graph[src*KVAL+i] = -1;
+    }
+  }
+  __syncthreads();
+}
+
+#define TEST_THREADS 64
+#define TEST_BLOCKS 1024
+template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
+__global__ void refineBatchGPU(Point<T,SUMTYPE,MAX_DIM>* d_points, int batchSize, int batchOffset, int* d_graph, int* candidates, ListElt<SUMTYPE>* listMemAll, int candidatesPerVector, int KVAL, int refineDepth, int metric) {
+
+  // Offset to the memory allocated for this block's list
+  ListElt<SUMTYPE>* listMem = &listMemAll[blockIdx.x*LISTCAP];
+
+  __shared__ int listSize;
+  typedef cub::BlockRadixSort<SUMTYPE, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSortT;
+  __shared__ typename BlockRadixSortT::TempStorage temp_storage;
+
+  for(int src=blockIdx.x+batchOffset; src<batchOffset+batchSize; src+=gridDim.x) {
+
+    // Initialize listMem for the source vertex
+    /*
+    for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
+      listMem[i].id = d_graph[src*KVAL+i];
+      listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
+      listMem[i].checkedFlag = false;
+      listSize = KVAL;
+    }
+    */
+    for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
+      listMem[i].id = d_graph[src*KVAL+i];
+      if(metric=0) {
+        listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
+      }
+      else {
+        listMem[i].dist = d_points[src].cosine(&d_points[listMem[i].id]);
+      }
+      listMem[i].checkedFlag = false;
+    }
+    listSize = KVAL;
+/*
+    for(int i=threadIdx.x; i<candidatesPerVector; i+=NUM_THREADS) {
+      listMem[i+KVAL].id = candidates[src*candidatesPerVector+i];
+      if(metric == 0) {
+        listMem[i+1].dist = d_points[src].l2(&d_points[listMem[i+1].id]);
+      }
+      else {
+        listMem[i+1].dist = d_points[src].cosine(&d_points[listMem[i+1].id]);
+      }
+      listMem[i+1].checkedFlag = false;
+      listSize = candidatesPerVector+1;
+    }
+    */
+    __syncthreads();
+    sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+
+    for(int iter=0; iter < refineDepth; iter++) {
+      listSize = min(LISTSIZE, listSize);
+      __syncthreads();
+      checkClosestNeighbors<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, src, d_graph, listMem, &listSize, KVAL, metric);
+      sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+      removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+      sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+      __syncthreads();
+    }
+  
+    // Prune nearest RNG vectors and write them to d_graph
+//    shrinkListRNG<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, d_graph, src, listMem, listSize, KVAL, metric);
+    for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
+      d_graph[src*KVAL+i] = listMem[i].id;
+    }
+  }
+}
+
+
+template<typename T, typename SUMTYPE, int MAX_DIM>
+void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int dataSize, int KVAL, int candidatesPerVector, int refineDepth, int refines, int metric) {
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+  int* candidates = (int*)malloc(dataSize*candidatesPerVector*sizeof(int));
+  getCandidates<T>(index, dataSize, candidatesPerVector, candidates);
+
+  int* d_candidates;
+  cudaMalloc(&d_candidates, dataSize*candidatesPerVector*sizeof(int));
+  cudaMemcpy(d_candidates, candidates, dataSize*candidatesPerVector*sizeof(int), cudaMemcpyHostToDevice);
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  std::cout << "find candidates time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+
+  int NUM_BATCHES = 1;
+  int batch_size = dataSize/NUM_BATCHES;
+
+  ListElt<SUMTYPE>* listMem;
+
+  cudaMalloc(&listMem, TEST_BLOCKS*LISTCAP*sizeof(ListElt<SUMTYPE>));
+
+  t1 = std::chrono::high_resolution_clock::now();
+  for(int iter=0; iter < refines; iter++) {
+
+    for(int i=0; i<NUM_BATCHES; i++) {
+      refineBatchGPU<T,SUMTYPE,MAX_DIM, TEST_THREADS><<<TEST_BLOCKS,TEST_THREADS>>>(d_points, batch_size, i*batch_size, d_graph, d_candidates, listMem, candidatesPerVector, KVAL, refineDepth, metric);
+      cudaDeviceSynchronize();
+    }
+  }
+  t2 = std::chrono::high_resolution_clock::now();
+  std::cout << "GPU refine time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+
+  cudaFree(listMem);
+  cudaFree(d_candidates);
+  free(candidates);
+}
+
+
 /****************************************************************************************
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
@@ -520,7 +932,12 @@ __global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int* results, int metric, int refines, int graphtype) {
+//void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int* results, int metric, int refines, int graphtype) {
+void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
+
+  int dim = index->GetFeatureDim();
+  int metric = (int)index->GetDistCalcMethod();
+  DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
   int levels = (int)std::log2(dataSize/500);
@@ -570,41 +987,44 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     cudaDeviceSynchronize();
 
     LOG("Starting TPT construction timer\n");
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Create TPT
     tptree->reset();
     create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels);
     cudaDeviceSynchronize();
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    LOG("TPT construction time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
+    //LOG("TPT construction time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
 
 
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Compute the KNN for each leaf node
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
+    /*
     else {
       findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
+    */
     cudaDeviceSynchronize();
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
+    //LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
   } // end TPT loop
 
-  clock_gettime(CLOCK_MONOTONIC, &start);
+  //clock_gettime(CLOCK_MONOTONIC, &start);
   start_t = clock();
 
+  /*
   for(int r=0; r<refines; r++) {
   // Perform a final refinement step of KNN graph
     if(graphtype == 0) {
@@ -615,10 +1035,16 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     }
     cudaDeviceSynchronize();
   }
+  */
 
-  clock_gettime(CLOCK_MONOTONIC, &end);
+  //clock_gettime(CLOCK_MONOTONIC, &end);
   end_t = clock();
   refine_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+
+  if(refines > 0) {
+  refineGraphGPU<DTYPE, SUMTYPE, MAX_DIM>(index, d_points, d_results, dataSize, KVAL, initSize, refineDepth, refines, metric);
+  }
+
 
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
@@ -636,7 +1062,12 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int m_disttype, int refines, int graph) {
+//void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int m_disttype, int refines, int graph) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int initSize) {
+
+  int m_iFeatureDim = index->GetFeatureDim();
+  int m_disttype = (int)index->GetDistCalcMethod();
+//  T* data = (T*)index->GetSample(0);
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
@@ -653,17 +1084,15 @@ void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoo
     exit(1);
   }
   else {
+    
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
-      printf("Calling buildGraphGPU!\n");
-      buildGraphGPU<T, float, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
+      buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
     }
-    /*
     else {
       if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
-        buildGraphGPU<T, int32_t, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
+        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
       }
     }
-    */
   }
 }
 

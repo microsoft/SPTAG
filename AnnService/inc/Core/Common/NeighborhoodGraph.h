@@ -44,7 +44,8 @@ namespace SPTAG
                                  m_iAddCEF(500),
                                  m_iMaxCheckForRefineGraph(10000),
                                  m_iGPUGraphType(0),
-                                 m_iGPURefineSteps(0)
+                                 m_iGPURefineSteps(0),
+                                 m_iGPURefineDepth(2)
             {
                 m_pNeighborhoodGraph.SetName("Graph");
             }
@@ -100,12 +101,33 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
-              SizeType initSize;
-				SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
-				      Dataset<SizeType> initSearchPoints(m_iGraphSize, initSize);
+                SizeType initSize;
+                SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-              printf("initSize:%d, graphSize:%d\n", initSize, m_iGraphSize);
+              // Build initial KNN graph
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, initSize);
 
+                /*
+                // Get the candidate points to perform refinement
+//                Dataset<SizeType> initSearchPoints(m_iGraphSize, initSize);
+                int* candidates = (int*)malloc(m_iGraphSize*initSize*sizeof(int));
+                
+#pragma omp parallel for schedule(dynamic)
+                for (SizeType i = 0; i < m_iGraphSize; i++)
+                {
+                    COMMON::QueryResultSet<T> query((const T*)index->GetSample(i), initSize);
+                    index->SearchTree(query);
+//                    SizeType* nodes = initSearchPoints[i];
+                    for (DimensionType j = 0; j < initSize; j++) {
+//                      nodes[j] = query.GetResult(j)->VID;
+                      candidates[i*initSize+j] = query.GetResult(j)->VID;
+                    }
+                }
+                */
+
+                // TODO: Make init graph type for GPU and input option...
+
+                /*
 //#pragma omp parallel for schedule(dynamic)
 				      for (SizeType i = 0; i < m_iGraphSize; i++)
 				      {
@@ -128,6 +150,7 @@ namespace SPTAG
 
 				      buildGraph<T>((T*)index->GetSample(0), index->GetFeatureDim(), m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], (int)index->GetDistCalcMethod(), m_iGPURefineSteps, m_iGPUGraphType);
 				      // TODO: Make init graph type for GPU and input option...
+*/
 
               std::unordered_map<SizeType, SizeType>::const_iterator iter;
               for (SizeType i = 0; i< m_iGraphSize; i++) {
@@ -360,8 +383,25 @@ namespace SPTAG
                 }
 
                 t2 = std::chrono::high_resolution_clock::now();
-				std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
-				std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+                std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
+                std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+
+                for(int i=0; i<10; i++) {
+                  for(int j=0; j<m_iNeighborhoodSize; j++) {
+                    printf("%d, ", m_pNeighborhoodGraph[i][j]);
+                  }
+                  printf("\n");
+                }
+
+                bool dup=false;
+                for(int i=0; i<m_iGraphSize; i++) {
+                  for(int j=1; j<m_iNeighborhoodSize; j++) {
+                    if(m_pNeighborhoodGraph[i][j] == m_pNeighborhoodGraph[i][j-1])
+                      dup = true;
+                  }
+                }
+                if(dup == true)
+                  printf("Duplicate found!\n");
             }
 
             template <typename T>
@@ -380,15 +420,15 @@ namespace SPTAG
 
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
-				if (m_iRefineIter > 0) {
+                if (m_iRefineIter > 0) {
 #pragma omp parallel for schedule(dynamic)
-					for (SizeType i = 0; i < m_iGraphSize; i++)
-					{
-						RefineNode<T>(index, i, false, false, m_iCEF);
-						if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
-					}
-					std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
-				}
+                    for (SizeType i = 0; i < m_iGraphSize; i++)
+                    {
+                        RefineNode<T>(index, i, false, false, m_iCEF);
+                        if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
+                    }
+                    std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+                }
 
                 if (idmap != nullptr) {
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
@@ -543,7 +583,7 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps;
+            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth;
         };
     }
 }
