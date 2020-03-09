@@ -213,7 +213,7 @@ namespace SPTAG
             {
                 if (last - first <= m_iTPTLeafSize)
                 {
-                    leaves.push_back(std::make_pair(first, last));
+                    leaves.emplace_back(first, last);
                 }
                 else
                 {
@@ -239,7 +239,7 @@ namespace SPTAG
                     Variance.reserve(index->GetFeatureDim());
                     for (DimensionType j = 0; j < index->GetFeatureDim(); j++)
                     {
-                        Variance.push_back(BasicResult(j, 0));
+                        Variance.emplace_back(j, 0.0f);
                     }
                     // calculate the variance of each dimension
                     for (SizeType j = first; j <= end; j++)

@@ -304,8 +304,9 @@ VectorIndex::MergeIndex(const char* p_indexFilePath)
 
     std::shared_ptr<VectorIndex> addIndex = CreateInstance(iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined),
         iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined));
-    addIndex->LoadConfig(iniReader);
-    addIndex->LoadIndexData(folderPath);
+    if (addIndex == nullptr) return ErrorCode::Fail;
+    if (ErrorCode::Success != addIndex->LoadConfig(iniReader)) return ErrorCode::Fail;
+    if (ErrorCode::Success != addIndex->LoadIndexData(folderPath)) return ErrorCode::Fail;
 
     std::shared_ptr<MetadataSet> pMetadata;
     if (iniReader.DoesSectionExist("MetaData"))
@@ -313,19 +314,25 @@ VectorIndex::MergeIndex(const char* p_indexFilePath)
         pMetadata.reset(new MemMetadataSet(folderPath + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()),
             folderPath + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
     }
-
+    if (pMetadata != nullptr) {
 #pragma omp parallel for schedule(dynamic,128)
-    for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
-        if (addIndex->ContainSample(i))
-        {
-            std::shared_ptr<MetadataSet> p_metaSet;
-            if (pMetadata != nullptr) {
+        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+            if (addIndex->ContainSample(i))
+            {
                 ByteArray meta = pMetadata->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
-                p_metaSet.reset(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), false), 1));
+                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
+                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
             }
-            AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
-        }
+    }
+    else {
+#pragma omp parallel for schedule(dynamic,128)
+        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+            if (addIndex->ContainSample(i))
+            {
+                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), nullptr);
+            }
+    }
     return ErrorCode::Success;
 }
 
