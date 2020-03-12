@@ -386,17 +386,19 @@ namespace SPTAG
                 std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
                 std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
 
+                /*
                 for(int i=0; i<10; i++) {
                   for(int j=0; j<m_iNeighborhoodSize; j++) {
                     printf("%d, ", m_pNeighborhoodGraph[i][j]);
                   }
                   printf("\n");
                 }
+                */
 
                 bool dup=false;
                 for(int i=0; i<m_iGraphSize; i++) {
                   for(int j=1; j<m_iNeighborhoodSize; j++) {
-                    if(m_pNeighborhoodGraph[i][j] == m_pNeighborhoodGraph[i][j-1])
+                    if(m_pNeighborhoodGraph[i][j] != -1 && m_pNeighborhoodGraph[i][j] == m_pNeighborhoodGraph[i][j-1])
                       dup = true;
                   }
                 }

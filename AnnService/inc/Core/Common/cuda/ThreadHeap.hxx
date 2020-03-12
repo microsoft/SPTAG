@@ -25,6 +25,7 @@
 #ifndef _SPTAG_COMMON_CUDA_THREADHEAP_H_
 #define _SPTAG_COMMON_CUDA_THREADHEAP_H_
 
+#include <stdio.h>
 #include "Distance.hxx"
 
 
