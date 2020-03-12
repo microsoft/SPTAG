@@ -30,7 +30,9 @@
 #include "TPtree.hxx"
 #include "Distance.hxx"
 
-#include<cub/cub.cuh>
+//#include<cub/cub.cuh>
+
+#include "/home/bkarsin/cub-1.8.0/cub/cub.cuh"
 
 
 /*****************************************************************************************
@@ -633,13 +635,14 @@ __device__ void sortListByDist(ListElt<SUMTYPE>* listMem, int* listSize, void* t
 
 // Remove duplicates and compact list with prefix sums
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
-__device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listSize, void *temp_storage) {
+__device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listSize, void *temp_storage, int src, int* /*borderVals*/) {
 
   ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
   int sortKeys[LISTCAP/NUM_THREADS];
 
   // Copy weather is duplicate or not into registers
   for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+    sortMem[i] = listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i];
     sortKeys[i] = 0;
     if(listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i].id == -1) {
       sortKeys[i] = 0;
@@ -648,10 +651,15 @@ __device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listS
       sortKeys[i] = 1;
     }
     else if(threadIdx.x*(LISTCAP/NUM_THREADS) + i < *listSize && listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i].id != INFTY<int>()) {
-      sortMem[i] = listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i];
       sortKeys[i] = (sortMem[i].id != listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i - 1].id);
     }
   }
+
+__syncthreads();
+for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
+	listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i] = sortMem[i];
+//	listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i].checkedFlag = sortKeys[i];
+}
 
   __syncthreads();
   typedef cub::BlockScan<int, NUM_THREADS> BlockScan;
@@ -677,7 +685,7 @@ __device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listS
     }
   }
   __syncthreads();
-  *listSize = borderVals[NUM_THREADS-1]-1;
+  *listSize = borderVals[NUM_THREADS-1];
   __syncthreads(); 
 
 }
@@ -686,6 +694,8 @@ __device__ void removeDuplicatesAndCompact(ListElt<SUMTYPE>* listMem, int* listS
 #define MAX_CHECK_COUNT 32
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __device__ void checkClosestNeighbors(Point<T,SUMTYPE,MAX_DIM>* d_points, int src, int* d_graph, ListElt<SUMTYPE>* listMem, int* listSize, int KVAL, int metric) {
+
+// Maximum number of vertices to check before list fills up
   int max_check = min(MAX_CHECK_COUNT, (LISTCAP-*listSize)/KVAL);
 
   int write_offset;
@@ -695,27 +705,28 @@ __device__ void checkClosestNeighbors(Point<T,SUMTYPE,MAX_DIM>* d_points, int sr
   new_listSize = *listSize;
   __syncthreads();
   
+// Fill up list with neighbors of nearest unchecked vectices
   for(int i=threadIdx.x; i<LISTSIZE && check_count < max_check; i+=NUM_THREADS) {
     if(!listMem[i].checkedFlag) {
       if(atomicAdd(&check_count, 1) < max_check) {
         write_offset = atomicAdd(&new_listSize, KVAL);
         listMem[i].checkedFlag=true;
         for(int j=0; j<KVAL; j++) {
-          listMem[write_offset+j].id = d_points[i*KVAL+j].id;
+//          listMem[write_offset+j].id = d_graph[i*KVAL+j];
+          listMem[write_offset+j].id = d_graph[i*KVAL+j];
         }
       }
     }
   }
   __syncthreads();
+// Compute distance to all newly added vetrices
   if(metric == 0) {
     for(int i=*listSize+threadIdx.x; i<new_listSize; i+=NUM_THREADS) {
-      /*
       if(listMem[i].id == src) {
         listMem[i].id = -1;
         listMem[i].dist = INFTY<SUMTYPE>();
       }
-      */
-      if (metric == 0){
+      else if (metric == 0){
         listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
       }
       else {
@@ -776,15 +787,22 @@ __device__ void shrinkListRNG_OLD(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_gra
 
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int src, ListElt<SUMTYPE>* listMem, int listSize, int KVAL, int metric) {
+
   __shared__ bool good;
   int write_idx=0;
   int read_idx=0;
 
   for(read_idx=0; write_idx < KVAL && read_idx < listSize; read_idx++) {
+/*
     if(listMem[read_idx].id == -1) break;
     if(listMem[read_idx].id == src) continue;
-
-    good = true;
+*/
+	if(listMem[read_idx].id == -1 || listMem[read_idx].id == src) {
+		good = false;
+	}
+	else {
+	    good = true;
+	}
     __syncthreads();
 
     if(metric == 0) {
@@ -823,24 +841,21 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __global__ void refineBatchGPU(Point<T,SUMTYPE,MAX_DIM>* d_points, int batchSize, int batchOffset, int* d_graph, int* candidates, ListElt<SUMTYPE>* listMemAll, int candidatesPerVector, int KVAL, int refineDepth, int metric) {
 
+if(threadIdx.x==0 && blockIdx.x==0) {
+printf("refineBatchGPU! batchSize:%d, batchOffset:%d\n", batchSize, batchOffset);
+}
+
   // Offset to the memory allocated for this block's list
   ListElt<SUMTYPE>* listMem = &listMemAll[blockIdx.x*LISTCAP];
 
   __shared__ int listSize;
+  __shared__ int borderVals[NUM_THREADS];
   typedef cub::BlockRadixSort<SUMTYPE, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSortT;
   __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
   for(int src=blockIdx.x+batchOffset; src<batchOffset+batchSize; src+=gridDim.x) {
 
     // Initialize listMem for the source vertex
-    /*
-    for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
-      listMem[i].id = d_graph[src*KVAL+i];
-      listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
-      listMem[i].checkedFlag = false;
-      listSize = KVAL;
-    }
-    */
     for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
       listMem[i].id = d_graph[src*KVAL+i];
       if(metric=0) {
@@ -852,32 +867,59 @@ __global__ void refineBatchGPU(Point<T,SUMTYPE,MAX_DIM>* d_points, int batchSize
       listMem[i].checkedFlag = false;
     }
     listSize = KVAL;
-/*
+
     for(int i=threadIdx.x; i<candidatesPerVector; i+=NUM_THREADS) {
       listMem[i+KVAL].id = candidates[src*candidatesPerVector+i];
       if(metric == 0) {
-        listMem[i+1].dist = d_points[src].l2(&d_points[listMem[i+1].id]);
+        listMem[i+KVAL].dist = d_points[src].l2(&d_points[listMem[i+KVAL].id]);
       }
       else {
-        listMem[i+1].dist = d_points[src].cosine(&d_points[listMem[i+1].id]);
+        listMem[i+KVAL].dist = d_points[src].cosine(&d_points[listMem[i+KVAL].id]);
       }
-      listMem[i+1].checkedFlag = false;
-      listSize = candidatesPerVector+1;
+      listMem[i+KVAL].checkedFlag = false;
+      listSize = KVAL+candidatesPerVector;
     }
-    */
+    
     __syncthreads();
     sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+
+if(src==0 && threadIdx.x==0) {
+	for(int i=0; i<KVAL; i++) {
+		printf("%d (%0.3f), ", listMem[i].id, listMem[i].dist);
+	}
+printf("\n");
+}
 
     for(int iter=0; iter < refineDepth; iter++) {
       listSize = min(LISTSIZE, listSize);
       __syncthreads();
       checkClosestNeighbors<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, src, d_graph, listMem, &listSize, KVAL, metric);
+/*
+      sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+__syncthreads();
+if(src==0 && threadIdx.x==0) {
+printf("listSize:%d\n", listSize);
+	for(int i=0; i<KVAL; i++) {
+		printf("%d (%0.3f), ", listMem[i].id, listMem[i].dist);
+	}
+printf("\n");
+}
+__syncthreads();
+*/
+
       sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
-      removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
+      removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage, src, borderVals);
       sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
       __syncthreads();
     }
-  
+
+if(src==0 && threadIdx.x==0) {
+	for(int i=0; i<KVAL; i++) {
+		printf("%d (%0.3f), ", listMem[i].id, listMem[i].dist);
+	}
+printf("\n");
+}
+__syncthreads();
     // Prune nearest RNG vectors and write them to d_graph
 //    shrinkListRNG<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, d_graph, src, listMem, listSize, KVAL, metric);
     for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
@@ -972,8 +1014,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   cudaDeviceSynchronize();
 
-  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-//  srand(1); // random number seed for TP tree random hyperplane partitions
+//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+  srand(1); // random number seed for TP tree random hyperplane partitions
 
 
   double tree_time=0.0;
@@ -1045,6 +1087,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   refineGraphGPU<DTYPE, SUMTYPE, MAX_DIM>(index, d_points, d_results, dataSize, KVAL, initSize, refineDepth, refines, metric);
   }
 
+printf("Done building, copying memory back to CPU...\n");
 
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
@@ -1088,11 +1131,13 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
       buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
     }
+/*
     else {
       if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
         buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
       }
     }
+*/
   }
 }
 
