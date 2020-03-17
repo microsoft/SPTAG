@@ -34,7 +34,7 @@ namespace SPTAG
 
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
             {
-                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock[node]);
 
                 SizeType* nodes = m_pNeighborhoodGraph[node];
                 SizeType tmpNode;

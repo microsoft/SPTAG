@@ -131,8 +131,8 @@ namespace SPTAG
                     if (currentLine.length() <= 1 || (index = ProcessLine(currentLine, arr, NumDim, base, distCalcMethod)) < 0) {
                         continue;
                     }
-                    qString.push_back(currentLine.substr(0, index));
-                    if ((SizeType)Query.size() < i + 1) Query.push_back(std::vector<T>(NumDim, 0));
+                    qString.emplace_back(currentLine.substr(0, index));
+                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, 0);
 
                     for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
                     i++;

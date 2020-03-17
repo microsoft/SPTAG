@@ -16,43 +16,27 @@ namespace SPTAG
         class FineGrainedLock {
         public:
             FineGrainedLock() {
-                rwlock.reset(new std::shared_timed_mutex);
+                m_locks.reset(new std::mutex[PoolSize + 1]);
             }
-            ~FineGrainedLock() { 
-                for (size_t i = 0; i < locks.size(); i++)
-                    locks[i].reset();
-                locks.clear();
-            }
-            
-            void resize(SizeType n) {
-                SizeType current = (SizeType)locks.size();
-                if (current <= n) {
-                    {
-                        std::unique_lock<std::shared_timed_mutex> lock(*rwlock);
-                        locks.resize(n);
-                    }
-                    for (SizeType i = current; i < n; i++)
-                        locks[i].reset(new std::mutex);
-                }
-                else {
-                    for (SizeType i = n; i < current; i++)
-                        locks[i].reset();
-                    locks.resize(n);
-                }
-            }
+            ~FineGrainedLock() {}
 
             std::mutex& operator[](SizeType idx) {
-                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
-                return *locks[idx];
+                unsigned index = hash_func((unsigned)idx);
+                return m_locks[index];
             }
 
             const std::mutex& operator[](SizeType idx) const {
-                std::shared_lock<std::shared_timed_mutex> lock(*rwlock);
-                return *locks[idx];
+                unsigned index = hash_func((unsigned)idx);
+                return m_locks[index];
             }
         private:
-            std::unique_ptr<std::shared_timed_mutex> rwlock;
-            std::vector<std::shared_ptr<std::mutex>> locks;
+            static const int PoolSize = 16383;
+            std::unique_ptr<std::mutex[]> m_locks;
+
+            inline unsigned hash_func(unsigned idx) const
+            {
+                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & PoolSize;
+            }
         };
     }
 }
