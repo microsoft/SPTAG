@@ -245,14 +245,22 @@ __device__ void shrinkListRNG_sequential(Point<T,SUMTYPE,MAX_DIM>* d_points, int
     for(int j=0; j<listSize && j < KVAL; j++) {
       nodes = &d_graph[src*KVAL];
       ListElt<SUMTYPE> item = listMem[j];
-      if(item.id < 0) break;
+//      if(item.id < 0) break;
       bool good = true;
-      if(item.id == src) good = false;
+      if(item.id == src || item.id == -1) good = false;
 
       for(int k=0; k<count && good; k++) {
-        if(d_points[nodes[k]].l2(&d_points[item.id]) <= item.dist) {
-	  good = false;
-          break;
+	if(metric == 0) {
+          if(d_points[nodes[k]].l2(&d_points[item.id]) <= item.dist) {
+	    good = false;
+            break;
+	  }
+        }
+	if(metric == 1) {
+          if(d_points[nodes[k]].cosine(&d_points[item.id]) <= item.dist) {
+	    good = false;
+            break;
+	  }
         }
       } 
       if(good) nodes[count++] = item.id;
@@ -270,13 +278,11 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
   int read_idx=0;
 
   for(read_idx=0; write_idx < KVAL && read_idx < listSize; read_idx++) {
-
-        if(listMem[read_idx].id == -1 || listMem[read_idx].id == src) {
-            good = false;
-        }
-        else {
-            good = true;
-        }
+    good = true;
+    __syncthreads();
+    if(listMem[read_idx].id == -1 || listMem[read_idx].id == src) {
+        good = false;
+    }
     __syncthreads();
 
     if(metric == 0) {
@@ -325,13 +331,17 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
   __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
   for(int src=blockIdx.x+batchOffset; src<batchOffset+batchSize; src+=gridDim.x) {
+	for(int i=threadIdx.x; i<LISTCAP;i+=blockDim.x)
+	  listMem[i].id = -1;
 
 // Place source vector in list
     listMem[0].id = src;
     listMem[0].dist = 0;
     listMem[0].checkedFlag = false;
+//    listSize = 1;
 
     // Place all candidates into the list of neighbors to check during refinement
+    
     for(int i=threadIdx.x; i<candidatesPerVector; i+=NUM_THREADS) {
       listMem[i+1].id = candidates[src*candidatesPerVector+i];
       if(listMem[i+1].id == -1) {
@@ -363,39 +373,16 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
       sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
     }
 
-// Place original graph neirhbors into list to compute the new RNG set of neighbors
-/*
-    if(listSize > LISTCAP - KVAL) listSize = LISTCAP-KVAL;
-    __syncthreads();
-    for(int i=threadIdx.x; i<KVAL; i+=NUM_THREADS) {
-      listMem[listSize+i].id = d_graph[src*KVAL+i];
-      if(listMem[listSize+i].id == -1 || listMem[listSize+i].id == src) {
-        listMem[listSize+i].dist = INFTY<SUMTYPE>();
-      }
-      else {
-      if(metric==0) {
-        listMem[listSize+i].dist = d_points[src].l2(&d_points[listMem[listSize+i].id]);
-      }
-      else {
-        listMem[listSize+i].dist = d_points[src].cosine(&d_points[listMem[listSize+i].id]);
-      }
-      }
-    }
-    __syncthreads();
-    listSize += KVAL;
-
-    __syncthreads();
-
-    sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
-    removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage, src, borderVals);
-    __syncthreads();
-    sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
-    __syncthreads();
-
-*/
-
 //     Prune nearest RNG vectors and write them to d_graph
-    shrinkListRNG_sequential<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, d_graph, src, listMem, listSize, KVAL, metric);
+
+if(src==0 && threadIdx.x==0) {
+  printf("length:%d, top elt:%d\n", listSize, listMem[0]);
+}
+
+    __syncthreads();
+    __threadfence();
+    shrinkListRNG<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, d_graph, src, listMem, listSize, KVAL, metric);
+    __syncthreads();
 
   }
 }

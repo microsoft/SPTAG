@@ -667,7 +667,6 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     exit(1);
   }
   else {
-
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
       buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
     }
