@@ -383,7 +383,7 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
     }
     __syncthreads();
     listSize += KVAL;
-*/
+
     __syncthreads();
 
     sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
@@ -392,6 +392,7 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
     sortListByDist<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
     __syncthreads();
 
+*/
 
 //     Prune nearest RNG vectors and write them to d_graph
     shrinkListRNG_sequential<T,SUMTYPE,MAX_DIM,NUM_THREADS>(d_points, d_graph, src, listMem, listSize, KVAL, metric);
