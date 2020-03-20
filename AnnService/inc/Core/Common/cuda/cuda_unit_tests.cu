@@ -15,7 +15,7 @@ __device__ void printList(ListElt<int>* list, int size) {
   __syncthreads();
 }
 
-__global__ void testKernel(ListElt<int>* listMem) {
+__global__ void test_removeDuplicates(ListElt<int>* listMem) {
   ListElt<int>* list = &listMem[blockIdx.x*LISTSIZE*2];
 
   typedef cub::BlockRadixSort<int, T_THREADS, LISTCAP/T_THREADS, ListElt<int>> BlockRadixSortT;
@@ -42,14 +42,16 @@ __shared__ typename BlockRadixSortT::TempStorage temp_storage;
   printList(list, listSize);
 }
 
+__global__ void test_
+
+
 int main(int argc, char* argv[]) {
 
   ListElt<int>* listMem;
   cudaMalloc(&listMem, T_BLOCKS*LISTSIZE*2*sizeof(ListElt<int>));
 
-  testKernel<<<T_BLOCKS, T_THREADS>>>(listMem);
+  testRemoveDuplicates<<<T_BLOCKS, T_THREADS>>>(listMem);
   cudaDeviceSynchronize();
-
 
 }
 */
