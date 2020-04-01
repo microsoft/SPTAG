@@ -47,8 +47,8 @@ namespace SPTAG
             T* newTCenters;
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum) : _K(k), _D(dim), _T(threadnum) {
-                centers = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
-                newTCenters = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
+                centers = (T*)simde_mm_malloc(sizeof(T) * k * dim, ALIGN);
+                newTCenters = (T*)simde_mm_malloc(sizeof(T) * k * dim, ALIGN);
                 counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
                 newCounts = new SizeType[threadnum * k];
@@ -58,8 +58,8 @@ namespace SPTAG
             }
 
             ~KmeansArgs() {
-                aligned_free(centers);
-                aligned_free(newTCenters);
+                simde_mm_free(centers);
+                simde_mm_free(newTCenters);
                 delete[] counts;
                 delete[] newCenters;
                 delete[] newCounts;

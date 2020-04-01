@@ -6,16 +6,17 @@
 
 #include <fstream>
 
-#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
+// #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
 #include <malloc.h>
-#else
-#include <mm_malloc.h>
-#endif // defined(__GNUC__)
+// #else
+// #include <mm_malloc.h>
+#include "malloc_aligned.hpp"
+// #endif // defined(__GNUC__)
 
 #define ALIGN 32
-
-#define aligned_malloc(a, b) _mm_malloc(a, b)
-#define aligned_free(a) _mm_free(a)
+//
+// #define aligned_malloc(a, b) _mm_malloc(a, b)
+// #define aligned_free(a) _mm_free(a)
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 
@@ -48,8 +49,8 @@ namespace SPTAG
             }
             ~Dataset()
             {
-                if (ownData) aligned_free(data);
-                for (T* ptr : incBlocks) aligned_free(ptr);
+                if (ownData) simde_mm_free(data);
+                for (T* ptr : incBlocks) simde_mm_free(ptr);
                 incBlocks.clear();
             }
             void Initialize(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
@@ -60,7 +61,7 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)aligned_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    data = (T*)simde_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
@@ -109,7 +110,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        T* newBlock = (T*)simde_mm_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
                     }
@@ -130,7 +131,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)aligned_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
+                        T* newBlock = (T*)simde_mm_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
                         incBlocks.push_back(newBlock);

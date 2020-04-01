@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/KDT/Index.h"
+#include "../../../../simde/simde/x86/sse4.2.h"
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -107,9 +108,9 @@ namespace SPTAG
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
-            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            __builtin_prefetch((const char *)node); \
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
-                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+                __builtin_prefetch((const char *)(m_pSamples)[node[i]]); \
             CheckDeleted { \
                 if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                     p_query.SortResult(); return; \

@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <shared_mutex>
+#include "../../../../simde/simde/x86/sse4.2.h"
 
 #include "../VectorIndex.h"
 
@@ -183,8 +184,8 @@ namespace SPTAG
                     if (index >= p_index->GetNumSamples()) return;
 #ifdef PREFETCH
                     const char* data = (const char *)(p_index->GetSample(index));
-                    _mm_prefetch(data, _MM_HINT_T0);
-                    _mm_prefetch(data + 64, _MM_HINT_T0);
+                    __builtin_prefetch(data);
+                    __builtin_prefetch(data + 64);
 #endif
                     if (p_space.CheckAndSet(index)) return;
 
