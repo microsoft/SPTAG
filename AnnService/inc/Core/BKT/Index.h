@@ -133,6 +133,7 @@ namespace SPTAG
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
             ErrorCode SearchTree(QueryResult& p_results) const;
+            ErrorCode SearchTreeRefine(QueryResult& p_results, const SizeType node) const;
 
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;

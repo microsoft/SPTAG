@@ -105,7 +105,6 @@ namespace SPTAG
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
-        int i=0; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
@@ -152,7 +151,6 @@ namespace SPTAG
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
                 m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
-          i++; \
         } \
         p_query.SortResult(); \
 /*
@@ -160,9 +158,6 @@ namespace SPTAG
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
-	while(!p_space.m_NGQueue.empty()) { \
-		printf("%d\n", p_space.m_NGQueue.pop().node); \
-        } \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
@@ -289,6 +284,58 @@ namespace SPTAG
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
+            m_workSpacePool->Return(workSpace);
+			return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::SearchTreeRefine(QueryResult& p_query, const SizeType in_node) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
+            m_pTrees.InitSearchTrees(this, *p_results, *workSpace);
+            m_pTrees.SearchTrees(this, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+			
+			std::vector<COMMON::HeapCell> tmpres(m_iNumberOfInitialDynamicPivots);
+
+
+			for (int i = 0; i < m_iNumberOfInitialDynamicPivots; i++)
+				tmpres[i] = workSpace->m_NGQueue.pop();
+			while (!workSpace->m_NGQueue.empty()) workSpace->m_NGQueue.pop();
+			for (int i = 0; i < m_iNumberOfInitialDynamicPivots; i++)
+				workSpace->m_NGQueue.insert(tmpres[i]);
+
+			while (!workSpace->m_NGQueue.empty()) {
+				COMMON::HeapCell gnode = workSpace->m_NGQueue.pop();
+//if(in_node==93) printf("%d, %0.3f\n", gnode.node, gnode.distance);
+				const SizeType *node = m_pGraph[gnode.node];
+				_mm_prefetch((const char *)node, _MM_HINT_T0);
+				for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) {
+					_mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0);
+				}
+				if (p_results->AddPoint(gnode.node, gnode.distance)) {
+					workSpace->m_iNumOfContinuousNoBetterPropagation = 0;
+				}
+				else {
+					workSpace->m_iNumOfContinuousNoBetterPropagation++; 
+					if (workSpace->m_iNumOfContinuousNoBetterPropagation > workSpace->m_iContinuousLimit || workSpace->m_iNumberOfCheckedLeaves > workSpace->m_iMaxCheck) {
+						break;
+					}
+				}
+				for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) {
+					SizeType nn_index = node[i];
+//if(in_node==93)printf("%d, ", nn_index);
+					if (nn_index < 0) break;
+					if (workSpace->CheckAndSet(nn_index)) continue;
+					float distance2leaf = m_fComputeDistance(p_results->GetTarget(), (m_pSamples)[nn_index], GetFeatureDim());
+					workSpace->m_iNumberOfCheckedLeaves++;
+					workSpace->m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf));
+				}
+//if(in_node==93)printf("\n");
+			}
+			p_results->SortResult();
             m_workSpacePool->Return(workSpace);
 			return ErrorCode::Success;
         }

@@ -333,7 +333,7 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
               }
             }
 // Only consider it if not already in the KNN list and it is not already accessible
-            if(!dup && (target.dist < nearest_dist || compute_accessibility<T>(results, query.id, tptree->leaf_points[leaf_offset+j], KVAL) == 0)) { 
+            if(!dup && (target.dist < nearest_dist || compute_accessibility<T>(results, query.id, tptree->leaf_points[leaf_offset+j], KVAL) == 0)) {
               write_dist = INFTY<SUMTYPE>();
               write_id=0;
 
@@ -525,6 +525,7 @@ template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 //void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int* results, int metric, int refines, int graphtype) {
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
 
+
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
   DTYPE* data = (DTYPE*)index->GetSample(0);
@@ -568,7 +569,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   double tree_time=0.0;
   double KNN_time=0.0;
   double refine_time = 0.0;
-  struct timespec start, end;
+//  struct timespec start, end;
   time_t start_t, end_t;
 
 
@@ -591,7 +592,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
-    
     else {
       findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
@@ -606,18 +606,18 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   } // end TPT loop
 
 // Removed Depricated neighbor's neighbor KNN improvement code for now
-  /*
-  for(int r=0; r<imp_steps; r++) {
+//  int imp_steps = 2; 
+//  for(int r=0; r<imp_steps; r++) {
   // Perform a final step of checking neighbors to improve KNN graph
-    if(graphtype == 0) {
-      neighbors_KNN<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, d_results, dataSize, KVAL, (int)metric);
-    }
-    else {
-      neighbors_RNG<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, KVAL*THREADS*sizeof(int)*2>>>(d_points, d_results, dataSize, KVAL, (int)metric);
-    }
-    cudaDeviceSynchronize();
-  }
-  */
+//    if(graphtype == 0) {
+//      neighbors_KNN<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, d_results, dataSize, KVAL, (int)metric);
+//    }
+////    else {
+//      neighbors_RNG<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, KVAL*THREADS*sizeof(int)*2>>>(d_points, d_results, dataSize, KVAL, (int)metric);
+//    }
+//    cudaDeviceSynchronize();
+//  }
+  
 
   start_t = clock();
 

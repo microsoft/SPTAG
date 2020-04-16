@@ -341,19 +341,25 @@ namespace SPTAG
                 t2 = std::chrono::high_resolution_clock::now();
                 std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
                 std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
-
-                
-                bool dup=false;
-                for(int i=0; i<m_iGraphSize; i++) {
-                  for(int j=1; j<m_iNeighborhoodSize; j++) {
-                    if(m_pNeighborhoodGraph[i][j] != -1 && m_pNeighborhoodGraph[i][j] == m_pNeighborhoodGraph[i][j-1]) {
-                      dup = true;
-                    }
-                  }
-                }
-                if(dup == true)
-                  printf("Duplicate found!\n");
             }
+
+			template <typename T>
+			void RefineNodeSimple(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
+			{
+				COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
+				index->SearchTreeRefine(query, node);
+/*
+		if(node == 93) {
+			printf("CEF+1:%d\n", CEF+1);
+			for(int i=0; i<CEF+1; i++) {
+				printf("%d\n", query.GetResults()[i].VID);
+			}
+		}
+*/
+
+
+				RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
+			}
 
             template <typename T>
             void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
@@ -363,7 +369,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
+                        RefineNodeSimple<T>(index, i, false, false, m_iCEF * m_iCEFScale);
                         if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -375,7 +381,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false, false, m_iCEF);
+                        RefineNodeSimple<T>(index, i, false, false, m_iCEF);
                         if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -436,10 +442,11 @@ namespace SPTAG
             void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
+
                 index->RefineSearchIndex(query, searchDeleted);
-                
+
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
-		
+
                 if (updateNeighbors) {
                     // update neighbors
                     for (int j = 0; j <= CEF; j++)
