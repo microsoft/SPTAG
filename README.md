@@ -61,6 +61,8 @@ cd build && cmake -A x64 ..
 It will generate a SPTAGLib.sln in the build directory. 
 Compiling the ALL_BUILD project in the Visual Studio (at least 2015) will generate a Release directory which contains all the build targets.
 
+For detailed instructions on installing Windows binaries, please see [here](docs/WindowsInstallation.md)
+
 > Using Docker:
 ```bash
 docker build -t sptag .
