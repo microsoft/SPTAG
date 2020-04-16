@@ -227,10 +227,10 @@ __global__ void neighbors_KNN(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
  * This is computed as the number of neighbors that have an edge to the target.
  * Costly operation but useful to improve the accuracy of the graph by increasing the
  * connectivity.
+ * DEPRICATED AND NO LONGER USED
  e****************************************************************************************/
 template<typename T>
 __device__ int compute_accessibility(int* results, int id, int target, int KVAL) {
-/*
   int access=0;
   int* ptr;
   for(int i=0; i<KVAL; i++) {
@@ -243,8 +243,6 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
     }
   }
   return access;
-*/
-  return 0;
 }
 
 
@@ -298,7 +296,6 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
     }
 
     max_K.idx = results[((long long int)query.id+1)*KVAL-1];
-//    max_K.idx = results[((long long int)query.id)*KVAL]; 
     if(max_K.idx == -1) {
       max_K.dist = INFTY<SUMTYPE>();
     }
@@ -333,7 +330,7 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
               }
             }
 // Only consider it if not already in the KNN list and it is not already accessible
-            if(!dup && (target.dist < nearest_dist || compute_accessibility<T>(results, query.id, tptree->leaf_points[leaf_offset+j], KVAL) == 0)) {
+            if(!dup) {
               write_dist = INFTY<SUMTYPE>();
               write_id=0;
 
@@ -522,7 +519,6 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-//void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int* results, int metric, int refines, int graphtype) {
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
 
 
@@ -562,8 +558,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   cudaDeviceSynchronize();
 
-//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-  srand(1); // random number seed for TP tree random hyperplane partitions
+  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+//  srand(1); // random number seed for TP tree random hyperplane partitions
 
 
   double tree_time=0.0;
@@ -602,10 +598,9 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     end_t = clock();
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    //LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
   } // end TPT loop
 
-// Removed Depricated neighbor's neighbor KNN improvement code for now
+// Depricated neighbor's neighbor KNN improvement - removed for now
 //  int imp_steps = 2; 
 //  for(int r=0; r<imp_steps; r++) {
   // Perform a final step of checking neighbors to improve KNN graph
@@ -621,8 +616,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   start_t = clock();
 
-  if(refines > 0) {
-  refineGraphGPU<DTYPE, SUMTYPE, MAX_DIM>(index, d_points, d_results, dataSize, KVAL, initSize, refineDepth, refines, metric);
+  if(refines > 0) { // Only call refinement if need to do at least 1 step
+    refineGraphGPU<DTYPE, SUMTYPE, MAX_DIM>(index, d_points, d_results, dataSize, KVAL, initSize, refineDepth, refines, metric);
   }
 
   end_t = clock();
@@ -645,12 +640,10 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-//void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int m_disttype, int refines, int graph) {
 void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int initSize) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
-//  T* data = (T*)index->GetSample(0);
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {

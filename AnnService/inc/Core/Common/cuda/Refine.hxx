@@ -15,8 +15,8 @@
 #define LISTCAP 2048 // Maximum size of buffer for each threadblock during refinemnt
 #define LISTSIZE 1024 // Maximum size of nearest neighbors stored during refinement
 
-#define TEST_THREADS 64
-#define TEST_BLOCKS 1024
+#define REFINE_THREADS 64
+#define REFINE_BLOCKS 1024
 
 
 using namespace SPTAG;
@@ -37,9 +37,6 @@ class ListElt {
   }
 };
 
-
-//typedef cub::BlockRadixSort<int, TEST_THREADS, LISTCAP/TEST_THREADS, ListElt<float>> BlockRadixSort;
-//__device__ typename BlockRadixSort::TempStorage temp_storage_mem[TEST_BLOCKS];
 
 template<typename T>
 void getCandidates(SPTAG::VectorIndex* index, int numVectors, int candidatesPerVector, int* candidates) {
@@ -64,7 +61,6 @@ __device__ void loadRegisters( ListElt<SUMTYPE>* regs,  ListElt<SUMTYPE>* listMe
     }
     else {
       regs[i].id = INFTY<int>();
-//      regs[i].id = -1;
       regs[i].dist = INFTY<SUMTYPE>();
     }
   }
@@ -157,9 +153,6 @@ __device__ void removeDuplicatesAndCompact( ListElt<SUMTYPE>* listMem, int* list
     sortMem[i] = listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i];
   }
 
-//  typedef cub::BlockLoad<ListElt<SUMTYPE>, NUM_THREADS, LISTCAP/NUM_THREADS, cub::BLOCK_LOAD_TRANSPOSE> BlockLoad;
-//  BlockLoad(*(static_cast<typename BlockLoad::TempStorage*>(temp_storage))).Load(listMem, sortMem);
-
   if(threadIdx.x==0) {
     sortKeys[0] = 0;
   }
@@ -204,7 +197,6 @@ __device__ void checkClosestNeighbors(Point<T,SUMTYPE,MAX_DIM>* d_points, int sr
 //  int max_check = min(MAX_CHECK_COUNT, (LISTCAP-*listSize)/KVAL);
   int max_check = (LISTCAP-*listSize)/KVAL;
 
-//  int write_offset=0;
   int check_count=0;
   int new_listSize = *listSize;
 
@@ -224,31 +216,12 @@ __syncthreads();
         }
 
       }
-//__syncthreads();
       check_count++;
       new_listSize+=KVAL;
       __syncthreads();
       listMem[i].checkedFlag=true;
     }
   }
-/*
-  __syncthreads();
-
-  for(int i=(*listSize)+threadIdx.x; i<new_listSize; i+=NUM_THREADS) {
-    if(listMem[i].id == INFTY<int>()) {
-      listMem[i].dist = INFTY<SUMTYPE>();
-    }
-    else if (metric == 0){
-      listMem[i].checkedFlag=false;
-      listMem[i].dist = d_points[src].l2(&d_points[listMem[i].id]);
-    }
-    else {
-      listMem[i].checkedFlag=false;
-      listMem[i].dist = d_points[src].cosine(&d_points[listMem[i].id]);
-    }
-
-  }
-*/
   __syncthreads();
   *listSize = new_listSize;
   __syncthreads();
@@ -265,7 +238,7 @@ __device__ void shrinkListRNG_sequential(Point<T,SUMTYPE,MAX_DIM>* d_points, int
     for(int j=0; j<listSize && j < KVAL; j++) {
       nodes = &d_graph[src*KVAL];
       ListElt<SUMTYPE> item = listMem[j];
-//      if(item.id < 0) break;
+
       bool good = true;
       if(item.id == src || item.id == INFTY<int>()) good = false;
 
@@ -299,19 +272,12 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
   int write_idx=0;
   int read_idx=0;
 
-//  Point<T,SUMTYPE,MAX_DIM> query;
-
   for(read_idx=0; write_idx < KVAL && read_idx < listSize; read_idx++) {
-
-//    good = (listMem[read_idx].id != INFTY<int>() && listMem[read_idx].id != src);
 
     good = true;
     if(listMem[read_idx].id == INFTY<int>() || listMem[read_idx].id == src) {
         good = false;
     }
-//    else {
-//      *query = d_points[listMem[read_idx].id];
-//    }
 
     __syncthreads();
 
@@ -319,7 +285,6 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
     if(metric == 0) {
       for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
         /* If it violates RNG */
-//        good = (good && listMem[read_idx].dist < d_points[listMem[read_idx].id].l2(&d_points[listMem[j].id]));
         if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].l2(&d_points[listMem[j].id])) {
           good=false;
         }
@@ -328,16 +293,13 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
     else {
       for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
         /* If it violates RNG */
-//        if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].cosine(&d_points[listMem[j].id])) {
         if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].cosine(&d_points[listMem[j].id])) {
           good=false;
         }
-//        good = (good && listMem[read_idx].dist < d_points[listMem[read_idx].id].cosine(&d_points[listMem[j].id]));
       }
     }
     __syncthreads();
     if(good) {
-//      if(threadIdx.x==0) printf("%d good! writing to listMem:%d\n", listMem[read_idx].id, write_idx);
       listMem[write_idx].id = listMem[read_idx].id;
       write_idx++;
     }
@@ -369,7 +331,6 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
   typedef cub::BlockRadixSort<SUMTYPE, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSortT;
   __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
-//  __shared__ Point<T,SUMTYPE,MAX_DIM> src_point;
   for(int src=blockIdx.x+batchOffset; src<batchOffset+batchSize; src+=gridDim.x) {
 
 //    src_point.id = d_points[src].id;
@@ -406,6 +367,7 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
       sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
       removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage, borderVals, src);
 
+// Compute distance of all new unique neighbors
     if(metric == 0) {
       for(int i=threadIdx.x; i<listSize; i+=NUM_THREADS) {
         if(listMem[i].dist == INFTY<SUMTYPE>() && listMem[i].id != INFTY<int>()) {
@@ -455,14 +417,14 @@ void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_point
 
 // Allocate scratch space memory to store large KNN lists before refining
   ListElt<SUMTYPE>* listMem;
-  cudaMalloc(&listMem, TEST_BLOCKS*LISTCAP*sizeof(ListElt<SUMTYPE>));
+  cudaMalloc(&listMem, REFINE_BLOCKS*LISTCAP*sizeof(ListElt<SUMTYPE>));
 
   t1 = std::chrono::high_resolution_clock::now();
   for(int iter=0; iter < refines; iter++) {
 
     for(int i=0; i<NUM_BATCHES; i++) {
 // Kernel that refines a batch of points' KNN neighbors into RNG neighbors
-      refineBatch_kernel<T,SUMTYPE,MAX_DIM, TEST_THREADS><<<TEST_BLOCKS,TEST_THREADS>>>(d_points, batch_size, i*batch_size, d_graph, d_candidates, listMem, candidatesPerVector, KVAL, refineDepth, metric);
+      refineBatch_kernel<T,SUMTYPE,MAX_DIM, REFINE_THREADS><<<REFINE_BLOCKS,REFINE_THREADS>>>(d_points, batch_size, i*batch_size, d_graph, d_candidates, listMem, candidatesPerVector, KVAL, refineDepth, metric);
       cudaError_t status = cudaDeviceSynchronize();
       if(status != cudaSuccess) {
         printf("Refine error code:%d\n", status);
