@@ -9,6 +9,7 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
+//#include "../../inc/Helper/SimpleIniReader.h"
 
 #include <unordered_map>
 
@@ -35,6 +36,8 @@ public:
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
 
     virtual ErrorCode SearchTree(QueryResult& p_results) const = 0;
+
+    virtual ErrorCode SearchTreeRefine(QueryResult& p_results, const SizeType node) const = 0;
 
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;

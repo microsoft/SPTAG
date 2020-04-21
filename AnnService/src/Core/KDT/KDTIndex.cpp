@@ -209,6 +209,12 @@ namespace SPTAG
             m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
+
+	template<typename T>
+ 	ErrorCode Index<T>::SearchTreeRefine(QueryResult& p_query, const SizeType node) const
+	{
+		return ErrorCode::Success;
+	}
 #pragma endregion
 
         template <typename T>

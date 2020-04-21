@@ -25,10 +25,9 @@
 #ifndef _SPTAG_COMMON_CUDA_KNN_H_
 #define _SPTAG_COMMON_CUDA_KNN_H_
 
+#include "Refine.hxx"
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
-#include "Distance.hxx"
-
 
 
 /*****************************************************************************************
@@ -165,12 +164,11 @@ __device__ void check_neighbors(Point<T,SUMTYPE,Dim>* data, int* results, int KV
 }
 
 /*****************************************************************************************
- * Refine KNN graph using neighbors' neighbors lookup process
+ * Improve KNN graph using neighbors' neighbors lookup process
  * Significantly improves accuracy once the approximate KNN is created.
- * DEPTH macro controls the depth of refinement that is performed.
  *****************************************************************************************/
 template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void refine_KNN(Point<T,SUMTYPE,Dim>* data, int* results, int N, int KVAL, int metric) {
+__global__ void neighbors_KNN(Point<T,SUMTYPE,Dim>* data, int* results, int N, int KVAL, int metric) {
 
   extern __shared__ char sharememory[];
   ThreadHeap<T, SUMTYPE, Dim, BLOCK_DIM> heapMem;
@@ -229,6 +227,7 @@ __global__ void refine_KNN(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
  * This is computed as the number of neighbors that have an edge to the target.
  * Costly operation but useful to improve the accuracy of the graph by increasing the
  * connectivity.
+ * DEPRICATED AND NO LONGER USED
  e****************************************************************************************/
 template<typename T>
 __device__ int compute_accessibility(int* results, int id, int target, int KVAL) {
@@ -297,7 +296,6 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
     }
 
     max_K.idx = results[((long long int)query.id+1)*KVAL-1];
-//    max_K.idx = results[((long long int)query.id)*KVAL]; 
     if(max_K.idx == -1) {
       max_K.dist = INFTY<SUMTYPE>();
     }
@@ -332,7 +330,7 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
               }
             }
 // Only consider it if not already in the KNN list and it is not already accessible
-            if(!dup && (target.dist < nearest_dist || compute_accessibility<T>(results, query.id, tptree->leaf_points[leaf_offset+j], KVAL) == 0)) { 
+            if(!dup) {
               write_dist = INFTY<SUMTYPE>();
               write_id=0;
 
@@ -471,7 +469,7 @@ __device__ void check_neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, in
  * Refine graph by performing check_neighbors_RNG on every node in the graph
  ************************************************************************/
 template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int KVAL, int metric) {
+__global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int KVAL, int metric) {
 
   extern __shared__ char sharememory[];
   int* RNG_id = &((int*)sharememory)[2*KVAL*threadIdx.x];
@@ -513,6 +511,7 @@ __global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
   }
 }
 
+
 /****************************************************************************************
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
@@ -520,14 +519,18 @@ __global__ void refine_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int 
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int* results, int metric, int refines, int graphtype) {
+void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
+
+
+  int dim = index->GetFeatureDim();
+  int metric = (int)index->GetDistCalcMethod();
+  DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
   int levels = (int)std::log2(dataSize/500);
 
   int KNN_blocks; // number of threadblocks used
 
-  LOG("Copying to Point array\n");
   Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
@@ -549,7 +552,7 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
 
   LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
-  cudaMalloc(&d_results, (long long int)dataSize*KVAL*sizeof(int));
+  cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int));
   // Initialize results to all -1 (special value that is set to distance INFTY)
   cudaMemset(d_results, -1, (long long int)dataSize*KVAL*sizeof(int));
 
@@ -562,7 +565,7 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
   double tree_time=0.0;
   double KNN_time=0.0;
   double refine_time = 0.0;
-  struct timespec start, end;
+//  struct timespec start, end;
   time_t start_t, end_t;
 
 
@@ -570,21 +573,16 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     cudaDeviceSynchronize();
 
     LOG("Starting TPT construction timer\n");
-    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Create TPT
     tptree->reset();
     create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels);
     cudaDeviceSynchronize();
 
-    //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    //LOG("TPT construction time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
 
-
-    //clock_gettime(CLOCK_MONOTONIC, &start);
     start_t = clock();
    // Compute the KNN for each leaf node
     if(graphtype == 0) {
@@ -593,32 +591,38 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
     else {
       findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
+    
     cudaDeviceSynchronize();
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-    //LOG("KNN Leaf time (ms): %lf\n", (1000*end.tv_sec + 1e-6*end.tv_nsec) - (1000*start.tv_sec + 1e-6*start.tv_nsec));
   } // end TPT loop
 
-  //clock_gettime(CLOCK_MONOTONIC, &start);
+// Depricated neighbor's neighbor KNN improvement - removed for now
+//  int imp_steps = 2; 
+//  for(int r=0; r<imp_steps; r++) {
+  // Perform a final step of checking neighbors to improve KNN graph
+//    if(graphtype == 0) {
+//      neighbors_KNN<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, d_results, dataSize, KVAL, (int)metric);
+//    }
+////    else {
+//      neighbors_RNG<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, KVAL*THREADS*sizeof(int)*2>>>(d_points, d_results, dataSize, KVAL, (int)metric);
+//    }
+//    cudaDeviceSynchronize();
+//  }
+  
+
   start_t = clock();
 
-  for(int r=0; r<refines; r++) {
-  // Perform a final refinement step of KNN graph
-    if(graphtype == 0) {
-      refine_KNN<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, d_results, dataSize, KVAL, (int)metric);
-    }
-    else {
-      refine_RNG<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, KVAL*THREADS*sizeof(int)*2>>>(d_points, d_results, dataSize, KVAL, (int)metric);
-    }
-    cudaDeviceSynchronize();
+  if(refines > 0) { // Only call refinement if need to do at least 1 step
+    refineGraphGPU<DTYPE, SUMTYPE, MAX_DIM>(index, d_points, d_results, dataSize, KVAL, initSize, refineDepth, refines, metric);
   }
 
-  //clock_gettime(CLOCK_MONOTONIC, &end);
   end_t = clock();
   refine_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+
 
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
@@ -636,7 +640,10 @@ void buildGraphGPU(DTYPE* data, int dataSize, int dim, int KVAL, int trees, int*
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int m_disttype, int refines, int graph) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int initSize) {
+
+  int m_iFeatureDim = index->GetFeatureDim();
+  int m_disttype = (int)index->GetDistCalcMethod();
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
@@ -654,11 +661,11 @@ void buildGraph(T* data, int m_iFeatureDim, int m_iGraphSize, int m_iNeighborhoo
   }
   else {
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
-      buildGraphGPU<T, float, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
+      buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
     }
     else {
       if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
-        buildGraphGPU<T, int32_t, 100>(data, m_iGraphSize, m_iFeatureDim, m_iNeighborhoodSize, trees, results, m_disttype, refines, graph);
+        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
       }
     }
   }
