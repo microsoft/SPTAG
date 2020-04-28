@@ -246,6 +246,139 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
 }
 
 
+template<typename T, typename SUMTYPE, int Dim>
+__device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
+  SUMTYPE between;
+  if(metric == 0) {
+    between = data[closer.idx].l2(&data[farther.idx]);
+  }
+  else {
+    between = data[closer.idx].cosine(&data[farther.idx]);
+  }
+  return between <= farther.dist;
+}
+
+/*****************************************************************************************
+ * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
+ *****************************************************************************************/
+template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
+__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric) {
+
+  extern __shared__ char sharememory[];
+
+  DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[KVAL*threadIdx.x]);
+  SUMTYPE max_dist = INFTY<SUMTYPE>();
+  DistPair<SUMTYPE> temp;
+  int read_id, write_id;
+
+  for(int i=0; i<KVAL; i++) {
+    threadList[i].dist = INFTY<SUMTYPE>();
+  }
+
+  Point<T,SUMTYPE,Dim> query;
+  DistPair<SUMTYPE> target;
+  DistPair<SUMTYPE> candidate;
+
+  int blocks_per_leaf = gridDim.x / tptree->num_leaves;
+  int threads_per_leaf = blocks_per_leaf*blockDim.x;
+  int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
+  int leafIdx= blockIdx.x / blocks_per_leaf;
+  long long int leaf_offset = tptree->leafs[leafIdx].offset;
+
+  bool good;
+
+  // Each point in the leaf is handled by a separate thread
+  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
+    query = data[tptree->leaf_points[leaf_offset + i]];
+
+    // Load results from previous iterations into shared memory heap
+    // and re-compute distances since they are not stored in result set
+    for(int j=0; j<KVAL; j++) {
+      threadList[j].idx = results[(long long int)query.id*KVAL+j];
+      if(threadList[j].idx != -1) {
+        if(metric == 0) {
+          threadList[j].dist = query.l2(&data[threadList[j].idx]);
+	}
+	else {
+          threadList[j].dist = query.cosine(&data[threadList[j].idx]);
+	}
+      }
+      else {
+        threadList[j].dist = INFTY<SUMTYPE>();
+      }
+    }
+    max_dist = threadList[KVAL-1].dist;
+
+    // Compare source query with all points in the leaf
+    for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
+      if(j!=i) {
+        good = true;
+	candidate.idx = tptree->leaf_points[leaf_offset+j];
+        if(metric == 0) {
+          candidate.dist = query.l2(&data[candidate.idx]);
+        }
+        else if(metric == 1) {
+          candidate.dist = query.cosine(&data[candidate.idx]);
+       }
+
+        if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
+
+  // TODO: handle if two different points have same dist
+	  for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
+            if(violatesRNG<T, SUMTYPE, Dim>(data, candidate, threadList[read_id], metric)) {
+              good = false;
+	    }
+	  }
+	  if(candidate.idx == threadList[read_id].idx)  // Ignore duplicates
+            good = false;
+
+	  if(good) { // candidate should be in RNG list
+            target = threadList[read_id];
+	    threadList[read_id] = candidate;
+	    read_id++;
+            for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
+              if(!violatesRNG<T, SUMTYPE, Dim>(data, threadList[read_id], candidate, metric)) {
+                if(read_id == write_id) {
+                  temp = threadList[read_id];
+		  threadList[write_id] = target;
+		  target = temp;
+		}
+		else {
+                  threadList[write_id] = target;
+		  target = threadList[read_id];
+		}
+		write_id++;
+              }
+	    }
+	    if(write_id < KVAL) {
+              threadList[write_id] = target;
+	      write_id++;
+	    }
+	    for(int k=write_id; k<KVAL; k++) {
+              threadList[write_id].dist = INFTY<SUMTYPE>();
+	      threadList[write_id].idx = -1;
+	    }
+	    max_dist = threadList[KVAL-1].dist;
+	  }
+	}
+      }
+    }
+/*
+    if(query.id == 0) {
+      for(int j=0; j<KVAL; j++) {
+	      printf("%d, ", threadList[j].idx);
+      }
+      printf("\n");
+    }
+    */
+	    
+    for(int j=0; j<KVAL; j++) {
+      results[(long long int)query.id*KVAL+j] = threadList[j].idx;
+    }
+
+  }
+}
+
 /*****************************************************************************************
  * Perform the brute-force graph construction on each leaf node, but tries to maintain 
  * RNG properties when adding/removing vectors from the neighbor list.  Also only
@@ -589,7 +722,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
     else {
-      findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+//      findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
     
     cudaDeviceSynchronize();
@@ -626,6 +760,10 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
+
+  for(int i=0; i<KVAL; i++) 
+	  printf("%d, ", results[i]);
+  printf("\n");
 
   tptree->destroy();
   cudaFree(tptree);
