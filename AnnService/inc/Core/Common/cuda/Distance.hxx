@@ -84,6 +84,21 @@ class Point {
     return total[0]+total[1];
   }
 
+  __device__ SUMTYPE l2_block(Point<T,SUMTYPE,Dim>* other) {
+    SUMTYPE total=0;
+    __shared__ SUMTYPE final_val;
+    final_val=0;
+    __syncthreads();
+
+    for(int i=threadIdx.x; i<Dim; i+=blockDim.x) {
+      total += (coords[i]-other->coords[i])*(coords[i]-other->coords[i]);
+    }
+    atomicAdd(&final_val, total);
+    __syncthreads();
+    return final_val;
+  }
+
+
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
@@ -95,6 +110,21 @@ class Point {
       total[1] += ((float)(coords[i+1] * other->coords[i+1]));
     }
     return 1.0 - (total[0]+total[1]);
+  }
+
+  __device__ SUMTYPE cosine_block(Point<T,SUMTYPE,Dim>* other) {
+    SUMTYPE total=0;
+    __shared__ SUMTYPE final_val;
+    final_val=0;
+    __syncthreads();
+
+    for(int i=threadIdx.x; i<Dim; i+=blockDim.x) {
+      total += ((float)(coords[i]*other->coords[i]));
+    }
+    
+    atomicAdd(&final_val, total);
+    __syncthreads();
+    return 1.0 - final_val;
   }
 
 };
@@ -144,6 +174,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return *this;
   }
 
+  __device__ __host__ SUMTYPE l2_block(Point<uint8_t,SUMTYPE,Dim>* other) {return 0;}
   __device__ __host__ SUMTYPE l2(Point<uint8_t,SUMTYPE,Dim>* other) {
 
     SUMTYPE totals[4] = {0,0,0,0};
@@ -173,6 +204,8 @@ class Point<uint8_t, SUMTYPE, Dim> {
 
   // Cosine distance measure for uint8_t datatype is more complex because it cannot be normalized.
   // So, we have to perform the formal computation, not just dot-product
+  __device__ SUMTYPE cosine_block(Point<uint8_t, SUMTYPE,Dim>* other) { return 0;}
+
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
     SUMTYPE a[4];
