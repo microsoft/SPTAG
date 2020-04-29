@@ -258,6 +258,8 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
   return between <= farther.dist;
 }
 
+#define DIST_FACTOR 10
+
 /*****************************************************************************************
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
@@ -321,7 +323,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
           candidate.dist = query.cosine(&data[candidate.idx]);
        }
 
-        if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
+       if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
 
   // TODO: handle if two different points have same dist
 	  for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
@@ -352,13 +354,14 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
 	    }
 	    if(write_id < KVAL) {
               threadList[write_id] = target;
-	      write_id++;
-	    }
-	    for(int k=write_id; k<KVAL; k++) {
-              threadList[write_id].dist = INFTY<SUMTYPE>();
-	      threadList[write_id].idx = -1;
+              write_id++;
+            }
+	    for(int k=write_id; k<KVAL && threadList[k].idx != -1; k++) {
+              threadList[k].dist = INFTY<SUMTYPE>();
+	      threadList[k].idx = -1;
 	    }
 	    max_dist = threadList[KVAL-1].dist;
+//	    if(max_dist==INFTY<SUMTYPE>()) max_dist = threadList[0].dist*DIST_FACTOR;
 	  }
 	}
       }
@@ -660,7 +663,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
-  int levels = (int)std::log2(dataSize/500);
+  int levels = (int)std::log2(dataSize/2000);
 
   int KNN_blocks; // number of threadblocks used
 
@@ -691,8 +694,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   cudaDeviceSynchronize();
 
-  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-//  srand(1); // random number seed for TP tree random hyperplane partitions
+//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+  srand(1); // random number seed for TP tree random hyperplane partitions
 
 
   double tree_time=0.0;
@@ -721,12 +724,15 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
+    else if(graphtype==1) {
+      findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+    }
     else {
-//      findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
       findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
     
     cudaDeviceSynchronize();
+
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
@@ -761,9 +767,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
 
-  for(int i=0; i<KVAL; i++) 
-	  printf("%d, ", results[i]);
-  printf("\n");
 
   tptree->destroy();
   cudaFree(tptree);
