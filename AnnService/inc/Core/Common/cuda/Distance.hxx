@@ -106,10 +106,10 @@ class Point {
     SUMTYPE total[2]={0,0};
 
     for(int i=0; i<Dim; i+=2) {
-      total[0] += ((float)(coords[i] * other->coords[i]));
-      total[1] += ((float)(coords[i+1] * other->coords[i+1]));
+      total[0] += ((SUMTYPE)((SUMTYPE)coords[i] * (SUMTYPE)other->coords[i]));
+      total[1] += ((SUMTYPE)((SUMTYPE)coords[i+1] * (SUMTYPE)other->coords[i+1]));
     }
-    return 1.0 - (total[0]+total[1]);
+    return (SUMTYPE)1.0 - (total[0]+total[1]);
   }
 
   __device__ SUMTYPE cosine_block(Point<T,SUMTYPE,Dim>* other) {
@@ -119,7 +119,7 @@ class Point {
     __syncthreads();
 
     for(int i=threadIdx.x; i<Dim; i+=blockDim.x) {
-      total += ((float)(coords[i]*other->coords[i]));
+      total += ((SUMTYPE)(coords[i]*other->coords[i]));
     }
     
     atomicAdd(&final_val, total);
@@ -233,7 +233,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
       prod[0] += prod[1]+prod[2]+prod[3];
     }
 
-    return 1-(prod[0] / (sqrt((float)a[0]*b[0])));
+    return (SUMTYPE)1-(prod[0] / (SUMTYPE)(sqrt((float)(a[0]*b[0]))));
   }
 
 };

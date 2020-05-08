@@ -190,6 +190,7 @@ class TPtree {
      * then compute, for each element, which child node it belongs to (storing in node_ids)
     ************************************************************************************/
     __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points) {
+//      int min_leaf, max_leaf;
 
       int nodes_on_level=1;
       for(int i=0; i<levels; ++i) {
@@ -207,6 +208,17 @@ class TPtree {
       count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
       cudaDeviceSynchronize();
 
+      /*
+      min_leaf=9999;
+      max_leaf=0;
+
+      for(int i=0; i<num_leaves; i++) {
+	      if(leafs[i].size < min_leaf) min_leaf = leafs[i].size;
+	      if(leafs[i].size > max_leaf) max_leaf = leafs[i].size;
+      }
+
+      printf("min_leaf:%d, max_leaf:%d\n", min_leaf,max_leaf);
+      */
 
       leafs[0].offset=0;
       for(int i=1; i<num_leaves; ++i) {

@@ -30,6 +30,7 @@ DefineBKTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForR
 DefineBKTParameter(m_pGraph.m_iGPUGraphType, int, 0, "GPUGraphType") // Have GPU construct KNN or RNG
 DefineBKTParameter(m_pGraph.m_iGPURefineSteps, int, 1, "GPURefineSteps") // Steps of GPU neighbor-refinement
 DefineBKTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
+DefineBKTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 
 DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")

@@ -30,6 +30,19 @@
 #include "TPtree.hxx"
 
 
+template<typename T, typename SUMTYPE, int Dim>
+__device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
+  SUMTYPE between;
+  if(metric == 0) {
+    between = data[closer.idx].l2(&data[farther.idx]);
+  }
+  else {
+    between = data[closer.idx].cosine(&data[farther.idx]);
+  }
+  return between <= farther.dist;
+}
+
+
 /*****************************************************************************************
  * Perform brute-force KNN on each leaf node, where only list of point ids is stored as leafs.
  * Returns for each point: the K nearest neighbors within the leaf node containing it.
@@ -117,6 +130,177 @@ __global__ void findKNN_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
       results[(long long int)query.id*KVAL+j] = heapMem.vals[0].idx;
       heapMem.vals[0].dist=-1;
       heapMem.heapify();
+    }
+  }
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__device__ void mergeIntoRNG(Point<T,SUMTYPE,Dim>* data, Point<T,SUMTYPE,Dim> query, DistPair<SUMTYPE>* RNGList, DistPair<SUMTYPE>* candidates, int KVAL, int metric) {
+
+  DistPair<SUMTYPE> target, temp;
+  int read_id, write_id;
+  bool good;
+  SUMTYPE max_dist;
+  for(int i=0; i<32; i++) {
+    good = true;
+    for(read_id=0; candidates[i].dist > RNGList[read_id].dist && good; read_id++) {
+      if(violatesRNG<T, SUMTYPE, Dim>(data, candidates[i], RNGList[read_id], metric)) {
+        good = false;
+      }
+    }
+    if(candidates[i].idx == RNGList[read_id].idx)  // Ignore duplicates
+      good = false;
+
+    if(good) { // candidate should be in RNG list
+      target = RNGList[read_id];
+      RNGList[read_id] = candidates[i];
+      read_id++;
+      for(write_id = read_id; read_id < KVAL && RNGList[read_id].idx != -1; read_id++) {
+        if(!violatesRNG<T, SUMTYPE, Dim>(data, RNGList[read_id], candidates[i], metric)) {
+          if(read_id == write_id) {
+            temp = RNGList[read_id];
+            RNGList[write_id] = target;
+            target = temp;
+          }
+          else {
+            RNGList[write_id] = target;
+            target = RNGList[read_id];
+          }
+          write_id++;
+        }
+      }
+      if(write_id < KVAL) {
+        RNGList[write_id] = target;
+        write_id++;
+      }
+      for(int k=write_id; k<KVAL && RNGList[k].idx != -1; k++) {
+        RNGList[k].dist = INFTY<SUMTYPE>();
+        RNGList[k].idx = -1;
+      }
+      max_dist = RNGList[KVAL-1].dist;
+//	    if(max_dist==INFTY<SUMTYPE>()) max_dist = threadList[0].dist*DIST_FACTOR;
+    }
+  }
+}
+
+template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
+__global__ void findRNG_hybrid(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric) {
+
+  extern __shared__ char sharememory[];
+  ThreadHeap<T, SUMTYPE, Dim, BLOCK_DIM> heapMem;
+
+  heapMem.initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL) * threadIdx.x], KVAL-1);
+
+  Point<T,SUMTYPE,Dim> query;
+
+  DistPair<SUMTYPE> max_K; // Stores largest of the K nearest neighbor of the query point
+  bool dup; // Is the target already in the KNN list?
+
+  DistPair<SUMTYPE> target;
+
+  int blocks_per_leaf = gridDim.x / tptree->num_leaves;
+  int threads_per_leaf = blocks_per_leaf*blockDim.x;
+  int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
+  int leafIdx= blockIdx.x / blocks_per_leaf;
+  long long int leaf_offset = tptree->leafs[leafIdx].offset;
+
+  // Each point in the leaf is handled by a separate thread
+  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
+    query = data[tptree->leaf_points[leaf_offset + i]];
+
+    heapMem.reset();
+    for(int k=0; k<KVAL-1; k++)
+	    heapMem.vals[k].idx = -1;
+    max_K.idx=-1;
+    max_K.dist=INFTY<SUMTYPE>();
+
+    // Load results from previous iterations into shared memory heap
+    // and re-compute distances since they are not stored in result set
+/*
+    heapMem.load_mem_sorted(data, &results[(long long int)query.id*KVAL], query, metric);
+
+    max_K.idx = results[((long long int)query.id+1)*KVAL-1];
+    if(max_K.idx == -1) {
+      max_K.dist = INFTY<SUMTYPE>();
+    }
+    else {
+      if(metric == 0) {
+        max_K.dist = query.l2(&data[max_K.idx]);
+      }
+      else if(metric == 1) {
+        max_K.dist = query.cosine(&data[max_K.idx]);
+      }
+    }
+    */
+
+    // Compare source query with all points in the leaf
+    for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
+      if(j!=i) {
+        dup=false;
+        target.idx = tptree->leaf_points[leaf_offset+j];
+	for(int k=0;k<KVAL && !dup; k++) {
+		if(target.idx == results[query.id*KVAL+k])
+			dup=true;
+	}
+	if(!dup) {
+        if(metric == 0) {
+          target.dist = query.l2(&data[tptree->leaf_points[leaf_offset+j]]);
+        }
+        else if (metric == 1) {
+          target.dist = query.cosine(&data[tptree->leaf_points[leaf_offset+j]]);
+        }
+        if(target.dist < max_K.dist) {
+
+          if(target.dist <= heapMem.top()) {
+            dup=false;
+            for(int dup_id=0; dup_id < KVAL-1; ++dup_id) {
+              if(heapMem.vals[dup_id].idx == target.idx) {
+                dup = true;
+                dup_id=KVAL;
+              }
+            }
+            if(!dup) { // Only consider it if not already in the KNN list
+              max_K.dist = heapMem.vals[0].dist;
+              max_K.idx = heapMem.vals[0].idx;
+              heapMem.insert(target.dist, target.idx);
+            }
+          }
+          else {
+            max_K.dist = target.dist;
+            max_K.idx = target.idx;
+          }
+        }
+	}
+      }
+    }
+   
+    DistPair<SUMTYPE> temp_results[32];
+    temp_results[31] = max_K;
+    for(int j=KVAL-2; j>=0; j--) {
+	    temp_results[j] = heapMem.vals[0];
+	    heapMem.heapify();
+    }
+    for(int j=0; j<KVAL; j++) {
+      heapMem.vals[j].idx = results[query.id*KVAL + j];
+      if(heapMem.vals[j].idx != -1) {
+        if(metric == 0) {
+          heapMem.vals[j].dist = query.l2(&data[heapMem.vals[j].idx]);
+        }
+	else {
+          heapMem.vals[j].dist = query.cosine(&data[heapMem.vals[j].idx]);
+	}
+      }
+      else {
+        heapMem.vals[j].dist = INFTY<SUMTYPE>();
+      }
+    }
+    mergeIntoRNG<T,SUMTYPE,Dim>(data, query, heapMem.vals, temp_results, KVAL, metric);
+    for(int j=0; j<KVAL; j++) {
+	    results[query.id*KVAL+j] = heapMem.vals[j].idx;
+    }
+    if(query.id == 0) {
+	    for(int j=0; j<KVAL; j++) printf("%d, ", heapMem.vals[j].idx);
+	    printf("\n");
     }
   }
 }
@@ -246,17 +430,6 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
 }
 
 
-template<typename T, typename SUMTYPE, int Dim>
-__device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
-  SUMTYPE between;
-  if(metric == 0) {
-    between = data[closer.idx].l2(&data[farther.idx]);
-  }
-  else {
-    between = data[closer.idx].cosine(&data[farther.idx]);
-  }
-  return between <= farther.dist;
-}
 
 #define DIST_FACTOR 10
 
@@ -269,6 +442,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
   extern __shared__ char sharememory[];
 
   DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[KVAL*threadIdx.x]);
+//  DistPair<SUMTYPE> threadList[32];
   SUMTYPE max_dist = INFTY<SUMTYPE>();
   DistPair<SUMTYPE> temp;
   int read_id, write_id;
@@ -655,7 +829,7 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
+void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
 
   int dim = index->GetFeatureDim();
@@ -663,7 +837,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
-  int levels = (int)std::log2(dataSize/2000);
+  int levels = (int)std::log2(dataSize/leafSize);
 
   int KNN_blocks; // number of threadblocks used
 
@@ -694,8 +868,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   cudaDeviceSynchronize();
 
-//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-  srand(1); // random number seed for TP tree random hyperplane partitions
+  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+//  srand(1); // random number seed for TP tree random hyperplane partitions
 
 
   double tree_time=0.0;
@@ -727,12 +901,14 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     else if(graphtype==1) {
       findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
-    else {
+    else if(graphtype==2) {
       findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+//      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS>>>(d_points, tptree, KVAL, d_results, metric);
+    }
+    else {
+      findRNG_hybrid<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
     
-    cudaDeviceSynchronize();
-
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
@@ -781,7 +957,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int initSize) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
@@ -802,11 +978,11 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   }
   else {
     if(m_disttype == 1 || typeid(T) == typeid(float)) {
-      buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
+      buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth, leafSize);
     }
     else {
       if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
-        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
+        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth, leafSize);
       }
     }
   }
