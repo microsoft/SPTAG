@@ -96,6 +96,7 @@ namespace SPTAG
             ~Index() {}
 
             inline SizeType GetNumSamples() const { return m_pSamples.R(); }
+			inline SizeType GetNumDeletedSamples() const { return (SizeType)m_deletedID.Count(); }
             inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
         
             inline int GetCurrMaxCheck() const { return m_iMaxCheck; }
@@ -104,6 +105,7 @@ namespace SPTAG
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::BKT; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
             
+			inline bool IsIdenticalVector(const void* pX, const void* pY, float eps) const { return COMMON::DistanceUtils::ComputeL2Distance((const T*)pX, (const T*)pY, m_pSamples.C()) < eps; }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }

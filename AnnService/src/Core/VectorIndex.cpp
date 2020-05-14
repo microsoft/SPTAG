@@ -348,6 +348,20 @@ const void* VectorIndex::GetSample(ByteArray p_meta)
 }
 
 
+const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
+{
+	if (m_pMetaToVec == nullptr) return nullptr;
+
+	std::string meta((char*)p_meta.Data(), p_meta.Length());
+	auto iter = m_pMetaToVec->find(meta);
+	if (iter != m_pMetaToVec->end()) {
+		deleteFlag = !ContainSample(iter->second);
+		return GetSample(iter->second);
+	}
+	return nullptr;
+}
+
+
 std::shared_ptr<VectorIndex>
 VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 {
@@ -417,4 +431,42 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
 
     return p_vectorIndex->LoadIndex(p_config, p_indexBlobs);
+}
+
+
+std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize)
+{
+	size_t treeNodeSize;
+	if (p_algo == IndexAlgoType::BKT) {
+		treeNodeSize = sizeof(SizeType) * 3;
+	}
+	else if (p_algo == IndexAlgoType::KDT) {
+		treeNodeSize = sizeof(SizeType) * 2 + sizeof(DimensionType) + sizeof(float);
+	}
+	else {
+		return 0;
+	}
+	std::uint64_t unit = GetValueTypeSize(p_valuetype) * p_dimension + sizeof(std::uint64_t) + sizeof(SizeType) * p_neighborhoodSize + 1 + treeNodeSize * p_treeNumber;
+	return p_memory / unit;
+}
+
+
+std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize)
+{
+	size_t treeNodeSize;
+	if (p_algo == IndexAlgoType::BKT) {
+		treeNodeSize = sizeof(SizeType) * 3;
+	}
+	else if (p_algo == IndexAlgoType::KDT) {
+		treeNodeSize = sizeof(SizeType) * 2 + sizeof(DimensionType) + sizeof(float);
+	}
+	else {
+		return 0;
+	}
+	std::uint64_t ret = GetValueTypeSize(p_valuetype) * p_dimension * p_vectorCount; //Vector Size
+	ret += sizeof(std::uint64_t) * p_vectorCount; // MetaIndex Size
+	ret += sizeof(SizeType) * p_neighborhoodSize * p_vectorCount; // Graph Size
+	ret += p_vectorCount; // DeletedFlag Size
+	ret += treeNodeSize * p_treeNumber * p_vectorCount; // Tree Size
+	return ret;
 }
