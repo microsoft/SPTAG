@@ -35,6 +35,12 @@ class DistPair {
   public:
     SUMTYPE dist;
     int idx;
+
+  __device__ __host__ DistPair& operator=( const DistPair& other ) {
+    dist = other.dist;
+    idx = other.idx;
+    return *this;
+  }
 };
 
 // Swap the values of two DistPair<SUMTYPE> objects

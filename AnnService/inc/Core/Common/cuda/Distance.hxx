@@ -37,6 +37,8 @@ template<typename T> __host__ __device__ T INFTY() {}
 template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;}
 template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() {return LLONG_MAX;}
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
+template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
+template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
 /*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
@@ -102,6 +104,7 @@ class Point {
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
+  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
 
@@ -207,34 +210,19 @@ class Point<uint8_t, SUMTYPE, Dim> {
   __device__ SUMTYPE cosine_block(Point<uint8_t, SUMTYPE,Dim>* other) { return 0;}
 
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
-    SUMTYPE prod[4];
-    SUMTYPE a[4];
-    SUMTYPE b[4];
-    prod[0]=0; a[0]=0; b[0]=0;
+    uint32_t prod=0;
+    uint32_t src=0;
+    uint32_t target=0;
 
     for(int i=0; i<Dim/4; ++i) {
-      a[0] += (coords[i] & 0x000000FF)*(coords[i] & 0x000000FF);
-      a[1] = ((coords[i] & 0x0000FF00) >> 8)*((coords[i] & 0x0000FF00) >> 8);
-      a[2] = ((coords[i] & 0x00FF0000) >> 16)*((coords[i] & 0x00FF0000) >> 16);
-      a[3] = ((coords[i]) >> 24)*((coords[i]) >> 24);
-
-      b[0] += (other->coords[i] & 0x000000FF)*(other->coords[i] & 0x000000FF);
-      b[1] = ((other->coords[i] & 0x0000FF00) >> 8)*((other->coords[i] & 0x0000FF00) >> 8);
-      b[2] = ((other->coords[i] & 0x00FF0000) >> 16)*((other->coords[i] & 0x00FF0000) >> 16);
-      b[3] = ((other->coords[i]) >> 24)*((other->coords[i]) >> 24);
-
-      prod[0] += (coords[i] & 0x000000FF)*(other->coords[i] & 0x000000FF);
-      prod[1] = ((coords[i] & 0x0000FF00) >> 8)*((other->coords[i] & 0x0000FF00) >> 8);
-      prod[2] = ((coords[i] & 0x00FF0000) >> 16)*((other->coords[i] & 0x00FF0000) >> 16);
-      prod[3] = ((coords[i]) >> 24)*((other->coords[i]) >> 24);
-
-      a[0] += a[1]+a[2]+a[3];
-      b[0] += b[1]+b[2]+b[3];
-      prod[0] += prod[1]+prod[2]+prod[3];
+      src = coords[i];
+      target = other->coords[i];
+      prod = __dp4a(src, target, prod);
     }
 
-    return (SUMTYPE)1-(prod[0] / (SUMTYPE)(sqrt((float)(a[0]*b[0]))));
+    return ((SUMTYPE)65536) - prod;
   }
+
 
 };
 

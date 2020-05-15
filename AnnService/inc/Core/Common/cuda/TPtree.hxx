@@ -265,10 +265,10 @@ __host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE
  * Helper function to calculated the porjected value of point onto the partitioning hyperplane
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ float weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
-  float val=0.0;
+__device__ KEY_T weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
+  KEY_T val=0.0;
   for(int i=0; i<PART_DIMS; ++i) {
-    val += (weights[i] * point.coords[i]);
+    val += (weights[i] * (KEY_T)point.coords[i]);
   }
   return val;
 }
