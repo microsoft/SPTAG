@@ -540,6 +540,7 @@ namespace SPTAG
 #undef DefineBKTParameter
 
             m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             return ErrorCode::Success;
         }
 
