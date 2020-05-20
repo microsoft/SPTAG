@@ -107,7 +107,14 @@ namespace SPTAG
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::KDT; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
             
-            inline float AccurateDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()) / m_iBaseSquare; }
+            inline float AccurateDistance(const void* pX, const void* pY) const {
+                if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+
+                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_pSamples.C());
+                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_pSamples.C());
+                return 1.0 - xy / (sqrt(xx) * sqrt(yy));
+            }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
