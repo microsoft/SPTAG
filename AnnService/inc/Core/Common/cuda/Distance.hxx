@@ -115,21 +115,6 @@ class Point {
     return (SUMTYPE)1.0 - (total[0]+total[1]);
   }
 
-  __device__ SUMTYPE cosine_block(Point<T,SUMTYPE,Dim>* other) {
-    SUMTYPE total=0;
-    __shared__ SUMTYPE final_val;
-    final_val=0;
-    __syncthreads();
-
-    for(int i=threadIdx.x; i<Dim; i+=blockDim.x) {
-      total += ((SUMTYPE)(coords[i]*other->coords[i]));
-    }
-    
-    atomicAdd(&final_val, total);
-    __syncthreads();
-    return 1.0 - final_val;
-  }
-
 };
 
 // Less-than operator between two points.
@@ -207,8 +192,6 @@ class Point<uint8_t, SUMTYPE, Dim> {
 
   // Cosine distance measure for uint8_t datatype is more complex because it cannot be normalized.
   // So, we have to perform the formal computation, not just dot-product
-  __device__ SUMTYPE cosine_block(Point<uint8_t, SUMTYPE,Dim>* other) { return 0;}
-
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     uint32_t prod=0;
     uint32_t src=0;
