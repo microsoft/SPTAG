@@ -160,7 +160,6 @@ class TPtree {
       cudaMalloc(&leaf_points, N*sizeof(int));
       tree_mem+=N*sizeof(int);
 
-      printf("Total memory of TPtree:%lld, mem per elt:%lld\n", tree_mem, tree_mem/N);
     }
 
     /***********************************************************
@@ -199,25 +198,38 @@ class TPtree {
       int nodes_on_level=1;
       for(int i=0; i<levels; ++i) {
 
-if(i==0) printf("BEFORE: %0.3f, %d\n", split_keys[0], node_sizes[0]);
-
         find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level);
         cudaDeviceSynchronize();
 
-if(i==0) printf("SUM: %0.3f, %d\n", split_keys[0], node_sizes[0]);
+
 
         compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
 
         cudaDeviceSynchronize();
-if(i==0) printf("MEAN: %0.3f, %d\n", split_keys[0], node_sizes[0]);
+/*
+for(int i=0; i<10; i++) {
+  printf("%0.3f, ", split_keys[i]);
+}
+printf("\n");
+*/
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N);
         cudaDeviceSynchronize();
+for(int i=0;i<100; i++)
+  printf("%d, ", node_ids[i]);
+printf("\n");
 
         nodes_on_level*=2;
       }
       count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
       cudaDeviceSynchronize();
+
+
+for(int i=0; i<10; i++) {
+  printf("%d, ", leafs[i].size);
+}
+printf("\n");
+
 
       /*
       min_leaf=9999;
@@ -287,13 +299,13 @@ __device__ KEY_T weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* d
   return val;
 }
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ int weighted_val(Point<uint8_t,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
-  float val=0.0;
+__device__ KEY_T weighted_val(Point<uint8_t,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
+  KEY_T val=0.0;
   for(int i=0; i<PART_DIMS/4; ++i) {
-    val += (weights[i*4] * (point.coords[i] & 0x000000FF));
-    val += (weights[i*4+1] * ((point.coords[i] & 0x0000FF00) >> 8));
-    val += (weights[i*4+2] * ((point.coords[i] & 0x00FF0000) >> 16));
-    val += (weights[i*4+3] * ((point.coords[i] & 0xFF000000) >> 24));
+    val += (weights[i*4] * (unsigned(point.coords[i]) & 0x000000FF));
+    val += (weights[i*4+1] * ((unsigned(point.coords[i]) & 0x0000FF00) >> 8));
+    val += (weights[i*4+2] * ((unsigned(point.coords[i]) & 0x00FF0000) >> 16));
+    val += (weights[i*4+3] * ((unsigned(point.coords[i]) & 0xFF000000) >> 24));
   }
   return val;
 }
