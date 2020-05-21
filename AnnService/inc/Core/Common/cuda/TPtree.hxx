@@ -63,6 +63,9 @@ __global__ void count_leaf_sizes(LeafNode* leafs, int* node_ids, int N, int inte
  ************************************************************************************/
 __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes);
 
+__global__ void assign_leaf_points_in_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id);
+__global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id);
+
 
 /************************************************************************************
  * Set of functions to compute mean to pick dividing hyperplanes
@@ -126,7 +129,7 @@ class TPtree {
       levels = levels_;
       num_leaves = pow(2,levels);
 
-      cudaMalloc(&node_ids, (N)*sizeof(int));
+      cudaMallocManaged(&node_ids, (N)*sizeof(int));
       cudaMemset(node_ids, 0, N*sizeof(int));
       tree_mem+= N*sizeof(int);
 
@@ -145,10 +148,10 @@ class TPtree {
       tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEY_T);
 
       tree_mem+= N*sizeof(int);
-      cudaMalloc(&node_sizes, num_nodes*sizeof(int));
+      cudaMallocManaged(&node_sizes, num_nodes*sizeof(int));
       cudaMemset(node_sizes, 0, num_nodes*sizeof(int));
 
-      cudaMalloc(&split_keys, num_internals*sizeof(KEY_T));
+      cudaMallocManaged(&split_keys, num_internals*sizeof(KEY_T));
       tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEY_T);
 
       cudaMallocManaged(&leafs, num_leaves*sizeof(LeafNode));
@@ -157,7 +160,7 @@ class TPtree {
       cudaMalloc(&leaf_points, N*sizeof(int));
       tree_mem+=N*sizeof(int);
 
-      LOG("Total memory of TPtree:%lld, mem per elt:%lld\n", tree_mem, tree_mem/N);
+      printf("Total memory of TPtree:%lld, mem per elt:%lld\n", tree_mem, tree_mem/N);
     }
 
     /***********************************************************
@@ -167,6 +170,7 @@ class TPtree {
 
       cudaMemset(node_ids, 0, N*sizeof(int));
       cudaMemset(node_sizes, 0, num_nodes*sizeof(int));
+      cudaMemset(split_keys, 0.0, num_nodes*sizeof(float));
       for(int i=0; i<num_leaves; ++i) {
         leafs[i].size=0;
       }
@@ -189,24 +193,43 @@ class TPtree {
      * For each level of the tree, compute the mean for each node and set it as the split_key,
      * then compute, for each element, which child node it belongs to (storing in node_ids)
     ************************************************************************************/
-    __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points) {
+    __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points, int min_id, int max_id) {
+//      int min_leaf, max_leaf;
 
       int nodes_on_level=1;
       for(int i=0; i<levels; ++i) {
 
+if(i==0) printf("BEFORE: %0.3f, %d\n", split_keys[0], node_sizes[0]);
+
         find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level);
         cudaDeviceSynchronize();
+
+if(i==0) printf("SUM: %0.3f, %d\n", split_keys[0], node_sizes[0]);
+
         compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
 
         cudaDeviceSynchronize();
+if(i==0) printf("MEAN: %0.3f, %d\n", split_keys[0], node_sizes[0]);
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N);
         cudaDeviceSynchronize();
+
         nodes_on_level*=2;
       }
       count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
       cudaDeviceSynchronize();
 
+      /*
+      min_leaf=9999;
+      max_leaf=0;
+
+      for(int i=0; i<num_leaves; i++) {
+	      if(leafs[i].size < min_leaf) min_leaf = leafs[i].size;
+	      if(leafs[i].size > max_leaf) max_leaf = leafs[i].size;
+      }
+
+      printf("min_leaf:%d, max_leaf:%d\n", min_leaf,max_leaf);
+      */
 
       leafs[0].offset=0;
       for(int i=1; i<num_leaves; ++i) {
@@ -216,6 +239,9 @@ class TPtree {
         leafs[i].size=0;
 
       assign_leaf_points<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves);
+//      assign_leaf_points_in_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
+      cudaDeviceSynchronize();
+//      assign_leaf_points_out_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
     }
 
     /************************************************************************************
@@ -233,7 +259,7 @@ class TPtree {
 };
 
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE,Dim>* points, int N, int MAX_LEVELS) {
+__host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE,Dim>* points, int N, int MAX_LEVELS, int min_id, int max_id) {
 
   for(int j=0; j<Dim; ++j) {
     d_tree->weight_list[0][j] = ((rand()%2)*2)-1;
@@ -244,7 +270,7 @@ __host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE
     }
   }
   
-  d_tree->construct_tree(points);
+  d_tree->construct_tree(points, min_id, max_id);
 }
 
 
@@ -253,10 +279,10 @@ __host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE
  * Helper function to calculated the porjected value of point onto the partitioning hyperplane
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ float weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
-  float val=0.0;
+__device__ KEY_T weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
+  KEY_T val=0.0;
   for(int i=0; i<PART_DIMS; ++i) {
-    val += (weights[i] * point.coords[i]);
+    val += (weights[i] * (KEY_T)point.coords[i]);
   }
   return val;
 }

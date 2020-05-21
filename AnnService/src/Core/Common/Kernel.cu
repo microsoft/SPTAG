@@ -56,3 +56,30 @@ __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_
     }
 }
 
+
+__global__ void assign_leaf_points_in_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id) {
+    int leaf_id;
+    int idx;
+    for (int i = min_id + blockIdx.x*blockDim.x + threadIdx.x; i < max_id; i += blockDim.x*gridDim.x) {
+        leaf_id = node_ids[i] - internal_nodes;
+        idx = atomicAdd(&leafs[leaf_id].size, 1);
+        leaf_points[idx + leafs[leaf_id].offset] = i;
+    }
+}
+
+__global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id) {
+    int leaf_id;
+    int idx;
+    for (int i = blockIdx.x*blockDim.x + threadIdx.x; i < min_id; i += blockDim.x*gridDim.x) {
+        leaf_id = node_ids[i] - internal_nodes;
+        idx = atomicAdd(&leafs[leaf_id].size, 1);
+        leaf_points[idx + leafs[leaf_id].offset] = i;
+    }
+
+    for (int i = max_id + blockIdx.x*blockDim.x + threadIdx.x; i < N; i += blockDim.x*gridDim.x) {
+        leaf_id = node_ids[i] - internal_nodes;
+        idx = atomicAdd(&leafs[leaf_id].size, 1);
+        leaf_points[idx + leafs[leaf_id].offset] = i;
+    }
+}
+
