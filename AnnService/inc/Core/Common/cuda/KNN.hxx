@@ -289,24 +289,19 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
 
   bool good;
 
-if(threadIdx.x==0 && blockIdx.x==0) printf("Before work, leafIdx:%d, threads_per_leaf:%d, siz:%d\n", leafIdx, threads_per_leaf, tptree->leafs[leafIdx].size);
+if(threadIdx.x==0 && blockIdx.x==0) printf("gridDim:%d, blocks_per_leaf:%d, threads_per_Leaf:%d, leafIdx:%d\n", gridDim.x, blocks_per_leaf, threads_per_leaf, leafIdx);
 
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
-if(threadIdx.x==0 && blockIdx.x==0) printf("i:%d, offset:%d, point:%d\n", i, leaf_offset, tptree->leaf_points[leaf_offset+i]);
-    if(tptree->leaf_points[leaf_offset+i] < min_id || tptree->leaf_points[leaf_offset+i] >= max_id) {
-      i=tptree->leafs[leafIdx].size;
-    }
-    else {
+if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("i:%d, block:%d, leafIdx:%d, leaf size:%d\n", i, blockIdx.x, leafIdx, tptree->leafs[leafIdx].size);
+    if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       query = data[tptree->leaf_points[leaf_offset + i]];
 
-
-if(threadIdx.x==0 && blockIdx.x==0) printf("query id:%d\n", query.id);
 
       // Load results from previous iterations into shared memory heap
       // and re-compute distances since they are not stored in result set
       for(int j=0; j<KVAL; j++) {
-        threadList[j].idx = results[(long long int)(query.id-min_id)*KVAL+j];
+        threadList[j].idx = results[(((long long int)(query.id-min_id))*(long long int)(KVAL))+j];
         if(threadList[j].idx != -1) {
           if(metric == 0) {
             threadList[j].dist = query.l2(&data[threadList[j].idx]);
@@ -320,8 +315,6 @@ if(threadIdx.x==0 && blockIdx.x==0) printf("query id:%d\n", query.id);
         }
       }
       max_dist = threadList[KVAL-1].dist;
-
-if(threadIdx.x==0 && blockIdx.x==0) printf("existing results loaded\n");
 
       // Compare source query with all points in the leaf
       for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
@@ -378,12 +371,12 @@ if(threadIdx.x==0 && blockIdx.x==0) printf("existing results loaded\n");
           }
         }
       }
-
-if(threadIdx.x==0 && blockIdx.x==0) printf("Writing back to results!\n");
-	    
+if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("block:%d, query:%d, writing...\n", blockIdx.x, query.id);
       for(int j=0; j<KVAL; j++) {
         results[(long long int)(query.id-min_id)*KVAL+j] = threadList[j].idx;
       }
+
+if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("block:%d, done writing.\n", blockIdx.x);
     } // End if within batch
   } // End leaf node loop
 }
@@ -782,6 +775,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
+
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
@@ -794,6 +788,12 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
+
+cout << typeid(points[0].coords[0]).name() << endl;
+for(int i=0; i<2; i++) {
+cout << points[i].id << " - " << unsigned(points[i].coords[0]) << ", " << unsigned(points[i].coords[1]) << ", " << unsigned(points[i].coords[2]) << ", " << unsigned(points[i].coords[3]) << ", " << unsigned(points[i].coords[4]) << endl;
+printf("%hhu, %hhu, %hhu\n", points[i].coords[0], points[i].coords[1], points[i].coords[2]);
+}
 
 
 /* Copy all input data to device, but generate portion of result set each batch */
@@ -821,7 +821,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
 
-printf("Space used - points:%ld - tree:%ld - results:%ld\nTotal:%ld\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>), (long long int)batchSize*KVAL*sizeof(int), dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>));
+printf("Space used (MB) - points:%ld - tree:%ld - results:%ld\nTotal:%ld\n", (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, (13*dataSize)/1000000, ((long long int)batchSize*KVAL*sizeof(int))/1000000, (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
 
   double tree_time=0.0;
   double KNN_time=0.0;
@@ -840,12 +840,10 @@ printf("Space used - points:%ld - tree:%ld - results:%ld\nTotal:%ld\n", dataSize
     // Initialize results to all -1 (special value that is set to distance INFTY)
     cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int));
 
-printf("Batch:%d, min_id:%d, max_id:%d, batchSize:%d\n", batch, min_id,max_id, batchSize);
-
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
       cudaDeviceSynchronize();
+printf("tree:%d\n", tree_id);
 
-printf("creating TPtree %d\n", tree_id);
       LOG("Starting TPT construction timer\n");
       start_t = clock();
      // Create TPT
@@ -856,11 +854,13 @@ printf("creating TPtree %d\n", tree_id);
 // Sort each leaf by ID
 
       end_t = clock();
+printf("TPT created\n");
 
       tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
 
       start_t = clock();
      // Compute the KNN for each leaf node
+
       if(graphtype == 0) {
         findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
       }
@@ -868,11 +868,12 @@ printf("creating TPtree %d\n", tree_id);
         findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
       }
       else if(graphtype==2) {
-printf("calling findRNG_strict\n");
+printf("Calling findRNG, min_id:%d, max_id:%d\n", min_id, max_id);
         findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
       }
-    
+   
       cudaDeviceSynchronize();
+printf("RNG completed\n");
 
       //clock_gettime(CLOCK_MONOTONIC, &end);
       end_t = clock();
@@ -880,7 +881,6 @@ printf("calling findRNG_strict\n");
       KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
     } // end TPT loop
 
-printf("copying batch results to memory at location:%lld\n", (size_t)batch*batchSize*KVAL);
     start_t = clock();
     cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (long long int)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
     end_t = clock();
