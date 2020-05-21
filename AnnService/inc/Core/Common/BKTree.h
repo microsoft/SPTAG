@@ -170,18 +170,8 @@ namespace SPTAG
 
   T* data = (T*)index->GetSample(0);
 
-std::cout << "type: " << typeid(data[0]).name() << ", BKT leaf size: " << m_iBKTLeafSize << std::endl;
-
-for(int i=0; i<3; i++) {
-std::cout << i << ", " << unsigned(data[100*i]) << ", " << unsigned(data[100*i+1]) << ", " << unsigned(data[100*i+2]) << ", " << unsigned(data[100*i+3]) << ", " << unsigned(data[100*i+4]) << std::endl;
-}
-
-long long int test=0;
                     ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
                     while (!ss.empty()) {
-test++;
-if(test%1000 == 0)
-  printf("%lld\n", test);
                         BKTStackItem item = ss.top(); ss.pop();
                         SizeType newBKTid = (SizeType)m_pTreeRoots.size();
                         m_pTreeRoots[item.index].childStart = newBKTid;
@@ -320,7 +310,6 @@ if(test%1000 == 0)
                         if (p_space.m_iNumberOfCheckedLeaves >= p_limits) break;
                     }
                     else {
-//                      printf("internal\n");
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
                         }

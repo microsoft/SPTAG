@@ -289,11 +289,8 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
 
   bool good;
 
-if(threadIdx.x==0 && blockIdx.x==0) printf("gridDim:%d, blocks_per_leaf:%d, threads_per_Leaf:%d, leafIdx:%d\n", gridDim.x, blocks_per_leaf, threads_per_leaf, leafIdx);
-
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
-if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("i:%d, block:%d, leafIdx:%d, leaf size:%d\n", i, blockIdx.x, leafIdx, tptree->leafs[leafIdx].size);
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       query = data[tptree->leaf_points[leaf_offset + i]];
 
@@ -371,12 +368,10 @@ if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("i:%d, block:%d, leafIdx:%d, l
           }
         }
       }
-if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("block:%d, query:%d, writing...\n", blockIdx.x, query.id);
       for(int j=0; j<KVAL; j++) {
         results[(long long int)(query.id-min_id)*KVAL+j] = threadList[j].idx;
       }
 
-if(threadIdx.x==0 && blockIdx.x%1000 == 0) printf("block:%d, done writing.\n", blockIdx.x);
     } // End if within batch
   } // End leaf node loop
 }
@@ -648,6 +643,7 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 
 
 /****************************************************************************************
+ * DEPRICATED - USE BATCHED VERSION INSTEAD
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
@@ -765,8 +761,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
 
 /****************************************************************************************
- * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
- * graphType: KNN=0, RNG=1
+ * Create graph on the GPU in a series of 1 or more batches, graph is saved into @results and is stored on the CPU
+ * graphType: KNN=0, loose RNG=1, strict RNG=2
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
@@ -788,13 +784,6 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
-
-cout << typeid(points[0].coords[0]).name() << endl;
-for(int i=0; i<2; i++) {
-cout << points[i].id << " - " << unsigned(points[i].coords[0]) << ", " << unsigned(points[i].coords[1]) << ", " << unsigned(points[i].coords[2]) << ", " << unsigned(points[i].coords[3]) << ", " << unsigned(points[i].coords[4]) << endl;
-printf("%hhu, %hhu, %hhu\n", points[i].coords[0], points[i].coords[1], points[i].coords[2]);
-}
-
 
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
@@ -821,7 +810,7 @@ printf("%hhu, %hhu, %hhu\n", points[i].coords[0], points[i].coords[1], points[i]
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
 
-printf("Space used (MB) - points:%ld - tree:%ld - results:%ld\nTotal:%ld\n", (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, (13*dataSize)/1000000, ((long long int)batchSize*KVAL*sizeof(int))/1000000, (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
+printf("GPU memory used - input points:%ld MB - tree:%ld MB - neighbor lists :%ld MB - Total:%ld MB \n", (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, (13*dataSize)/1000000, ((long long int)batchSize*KVAL*sizeof(int))/1000000, (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
 
   double tree_time=0.0;
   double KNN_time=0.0;
@@ -842,7 +831,6 @@ printf("Space used (MB) - points:%ld - tree:%ld - results:%ld\nTotal:%ld\n", (da
 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
       cudaDeviceSynchronize();
-printf("tree:%d\n", tree_id);
 
       LOG("Starting TPT construction timer\n");
       start_t = clock();
@@ -854,7 +842,6 @@ printf("tree:%d\n", tree_id);
 // Sort each leaf by ID
 
       end_t = clock();
-printf("TPT created\n");
 
       tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
 
@@ -868,12 +855,10 @@ printf("TPT created\n");
         findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
       }
       else if(graphtype==2) {
-printf("Calling findRNG, min_id:%d, max_id:%d\n", min_id, max_id);
         findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
       }
    
       cudaDeviceSynchronize();
-printf("RNG completed\n");
 
       //clock_gettime(CLOCK_MONOTONIC, &end);
       end_t = clock();
@@ -915,6 +900,10 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     std::cout << "NeighborhoodSize (with scaling factor applied) is " << m_iNeighborhoodSize << " but must be a power of 2 for GPU construction." << std::endl;
     exit(1);
   }
+  if(numBatches > 1 && graph != 2) {
+    std::cout << "Multiple batches only supported for direct RNG construction (GPUGraphType=2)." << std::endl;
+    exit(1);
+  }
 
   // Have to give compiler-time known bounds on dimensions so that we can store points in registers
   // This significantly speeds up distance comparisons.
@@ -925,17 +914,16 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     exit(1);
   }
   else {
-/*
     if(typeid(T) == typeid(float)) {
-      buildGraphGPU<T,float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth, leafSize);
+      buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+    }
+    else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
+        buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
     }
     else {
-      if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth, leafSize);
-      }
+      std::cout << "Selected datatype not currently supported." << std::endl;
+      exit(1);
     }
-*/
-    buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
   }
 }
 
