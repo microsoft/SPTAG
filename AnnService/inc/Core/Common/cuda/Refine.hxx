@@ -12,11 +12,11 @@
 
 #define MAX_CHECK_COUNT 32 // Max number of neighbors checked during each step of refinement.
 
-#define LISTCAP 1024 // Maximum size of buffer for each threadblock during refinemnt
-#define LISTSIZE 512 // Maximum size of nearest neighbors stored during refinement
+#define LISTCAP 2048 // Maximum size of buffer for each threadblock during refinemnt
+#define LISTSIZE 1024 // Maximum size of nearest neighbors stored during refinement
 
 #define REFINE_THREADS 64
-#define REFINE_BLOCKS 256
+#define REFINE_BLOCKS 1024
 
 
 using namespace SPTAG;
@@ -367,10 +367,7 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
       sortListById<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage);
       removeDuplicatesAndCompact<T,SUMTYPE,MAX_DIM,NUM_THREADS>(listMem, &listSize, &temp_storage, borderVals, src);
 
-//      if(listSize > LISTSIZE) listSize = listSize;
-//
-//      __syncthreads();
-
+// Compute distance of all new unique neighbors
     if(metric == 0) {
       for(int i=threadIdx.x; i<listSize; i+=NUM_THREADS) {
         if(listMem[i].dist == INFTY<SUMTYPE>() && listMem[i].id != INFTY<int>()) {

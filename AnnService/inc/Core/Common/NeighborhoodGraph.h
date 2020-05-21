@@ -329,7 +329,6 @@ namespace SPTAG
                     return;
                 }
 
-
                 time_t start = clock();
                 auto t1 = std::chrono::high_resolution_clock::now();
                 BuildInitKNNGraph<T>(index, idmap);

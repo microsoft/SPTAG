@@ -29,7 +29,6 @@
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 
-
 template<typename T, typename SUMTYPE, int Dim>
 __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
   SUMTYPE between;
@@ -652,7 +651,6 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
-
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
   DTYPE* data = (DTYPE*)index->GetSample(0);
@@ -735,7 +733,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
   } // end TPT loop
-
 
   start_t = clock();
 
