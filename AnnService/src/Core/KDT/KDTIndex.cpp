@@ -374,8 +374,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
-			if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
-			return ErrorCode::VectorNotFound;
+            if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
+            return ErrorCode::VectorNotFound;
         }
 
         template <typename T>

@@ -42,9 +42,9 @@ namespace SPTAG
                 {
                     *m_data[key] = 1;
                     m_inserted++;
-					return true;
+                    return true;
                 }
-				return false;
+                return false;
             }
 
             inline bool Save(std::ostream& output)
