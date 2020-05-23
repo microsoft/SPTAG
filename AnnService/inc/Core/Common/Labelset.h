@@ -36,13 +36,15 @@ namespace SPTAG
                 return *m_data[key] == 1;
             }
 
-            inline void Insert(const SizeType& key)
+            inline bool Insert(const SizeType& key)
             {
                 if (*m_data[key] != 1)
                 {
                     *m_data[key] = 1;
                     m_inserted++;
+					return true;
                 }
+				return false;
             }
 
             inline bool Save(std::ostream& output)
