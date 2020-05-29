@@ -337,8 +337,14 @@ namespace SPTAG
                 std::cout << "BuildInitKNNGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
                 std::cout << "BuildInitKNNGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
 
-                if (m_iMaxCheckForRefineGraph > 0) {
-                    RefineGraph<T>(index, idmap);
+                RefineGraph<T>(index, idmap);
+
+                if (idmap != nullptr) {
+                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
+                        if (iter->first < 0)
+                        {
+                            m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
+                        }
                 }
 
                 t2 = std::chrono::high_resolution_clock::now();
@@ -370,14 +376,6 @@ namespace SPTAG
                         if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
-                }
-
-                if (idmap != nullptr) {
-                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
-                        if (iter->first < 0)
-                        {
-                            m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
-                        }
                 }
             }
 
