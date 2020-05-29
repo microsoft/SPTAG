@@ -178,9 +178,6 @@
     <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx">
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="inc\IndexBuilder\Options.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu">

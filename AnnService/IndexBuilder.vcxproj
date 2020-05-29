@@ -137,9 +137,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="inc\IndexBuilder\Options.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="src\IndexBuilder\main.cpp" />
   </ItemGroup>
   <ItemGroup>
