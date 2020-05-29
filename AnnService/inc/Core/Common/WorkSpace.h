@@ -19,12 +19,12 @@ namespace SPTAG
 
             HeapCell(SizeType _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
 
-            inline bool operator < (const HeapCell& rhs)
+            inline bool operator < (const HeapCell& rhs) const
             {
                 return distance < rhs.distance;
             }
 
-            inline bool operator > (const HeapCell& rhs)
+            inline bool operator > (const HeapCell& rhs) const
             {
                 return distance > rhs.distance;
             }

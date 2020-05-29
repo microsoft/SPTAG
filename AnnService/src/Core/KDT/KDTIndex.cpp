@@ -189,32 +189,6 @@ namespace SPTAG
             m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
-
-        template <typename T>
-        ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
-        {
-            auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
-
-            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
-            m_pTrees.InitSearchTrees(this, *p_results, *workSpace);
-            m_pTrees.SearchTrees(this, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
-            BasicResult * res = p_query.GetResults();
-            for (int i = 0; i < p_query.GetResultNum(); i++)
-            {
-                auto& cell = workSpace->m_NGQueue.pop();
-                res[i].VID = cell.node;
-                res[i].Dist = cell.distance;
-            }
-            m_workSpacePool->Return(workSpace);
-            return ErrorCode::Success;
-        }
-
-	template<typename T>
- 	ErrorCode Index<T>::SearchTreeRefine(QueryResult& p_query, const SizeType node) const
-	{
-		return ErrorCode::Success;
-	}
 #pragma endregion
 
         template <typename T>
@@ -400,8 +374,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
-            m_deletedID.Insert(p_id);
-            return ErrorCode::Success;
+            if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
+            return ErrorCode::VectorNotFound;
         }
 
         template <typename T>
@@ -492,6 +466,7 @@ namespace SPTAG
 #undef DefineKDTParameter
 
             m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             return ErrorCode::Success;
         }
 
