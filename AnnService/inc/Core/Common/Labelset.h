@@ -38,13 +38,10 @@ namespace SPTAG
 
             inline bool Insert(const SizeType& key)
             {
-                if (*m_data[key] != 1)
-                {
-                    *m_data[key] = 1;
-                    m_inserted++;
-                    return true;
-                }
-                return false;
+                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
+                if (oldvalue == 1) return false;
+                m_inserted++;
+                return true;
             }
 
             inline bool Save(std::ostream& output)
