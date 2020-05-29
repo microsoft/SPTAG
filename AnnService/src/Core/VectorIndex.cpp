@@ -289,8 +289,8 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 
     std::string meta((char*)p_meta.Data(), p_meta.Length());
     auto iter = m_pMetaToVec->find(meta);
-    if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-    return ErrorCode::Success;
+    if (iter != m_pMetaToVec->end()) return DeleteIndex(iter->second);
+    return ErrorCode::VectorNotFound;
 }
 
 
