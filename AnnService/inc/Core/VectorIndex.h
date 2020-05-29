@@ -32,6 +32,8 @@ public:
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
+    virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
+
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;

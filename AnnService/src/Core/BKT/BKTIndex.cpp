@@ -270,6 +270,26 @@ namespace SPTAG
             m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
+
+        template <typename T>
+        ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
+            m_pTrees.InitSearchTrees(this, *p_results, *workSpace);
+            m_pTrees.SearchTrees(this, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            BasicResult * res = p_query.GetResults();
+            for (int i = 0; i < p_query.GetResultNum(); i++)
+            {
+                auto& cell = workSpace->m_NGQueue.pop();
+                res[i].VID = cell.node;
+                res[i].Dist = cell.distance;
+            }
+            m_workSpacePool->Return(workSpace);
+            return ErrorCode::Success;
+        }
 #pragma endregion
 
         template <typename T>
