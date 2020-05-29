@@ -107,8 +107,8 @@ else()
     message (FATAL_ERROR "Could no find openmp!")
 endif()
 
-SET(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} "/home/bkarsin/ANN/boost_1_67_0/")
-SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} "/home/bkarsin/ANN/boost_1_67_0/libs")
+SET(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} "/home/bkarsin/boost_1_67_0/")
+SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} "/home/bkarsin/boost_1_67_0/libs")
 
 find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex)
 if (Boost_FOUND)

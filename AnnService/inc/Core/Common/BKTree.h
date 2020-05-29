@@ -168,6 +168,8 @@ namespace SPTAG
                     m_pTreeRoots.push_back(BKTNode((SizeType)localindices.size()));
                     std::cout << "Start to build BKTree " << i + 1 << std::endl;
 
+  T* data = (T*)index->GetSample(0);
+
                     ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
                     while (!ss.empty()) {
                         BKTStackItem item = ss.top(); ss.pop();

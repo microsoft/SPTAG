@@ -29,6 +29,18 @@
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 
+template<typename T, typename SUMTYPE, int Dim>
+__device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
+  SUMTYPE between;
+  if(metric == 0) {
+    between = data[closer.idx].l2(&data[farther.idx]);
+  }
+  else {
+    between = data[closer.idx].cosine(&data[farther.idx]);
+  }
+  return between <= farther.dist;
+}
+
 
 /*****************************************************************************************
  * Perform brute-force KNN on each leaf node, where only list of point ids is stored as leafs.
@@ -245,6 +257,123 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
   return access;
 }
 
+
+
+/*****************************************************************************************
+ * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
+ *****************************************************************************************/
+template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
+__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, int min_id, int max_id) {
+
+  extern __shared__ char sharememory[];
+
+  DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[KVAL*threadIdx.x]);
+  SUMTYPE max_dist = INFTY<SUMTYPE>();
+  DistPair<SUMTYPE> temp;
+  int read_id, write_id;
+
+  for(int i=0; i<KVAL; i++) {
+    threadList[i].dist = INFTY<SUMTYPE>();
+  }
+
+  Point<T,SUMTYPE,Dim> query;
+  DistPair<SUMTYPE> target;
+  DistPair<SUMTYPE> candidate;
+
+  int blocks_per_leaf = gridDim.x / tptree->num_leaves;
+  int threads_per_leaf = blocks_per_leaf*blockDim.x;
+  int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
+  int leafIdx= blockIdx.x / blocks_per_leaf;
+  long long int leaf_offset = tptree->leafs[leafIdx].offset;
+
+  bool good;
+
+  // Each point in the leaf is handled by a separate thread
+  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
+    if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
+      query = data[tptree->leaf_points[leaf_offset + i]];
+
+
+      // Load results from previous iterations into shared memory heap
+      // and re-compute distances since they are not stored in result set
+      for(int j=0; j<KVAL; j++) {
+        threadList[j].idx = results[(((long long int)(query.id-min_id))*(long long int)(KVAL))+j];
+        if(threadList[j].idx != -1) {
+          if(metric == 0) {
+            threadList[j].dist = query.l2(&data[threadList[j].idx]);
+	  }
+	  else {
+            threadList[j].dist = query.cosine(&data[threadList[j].idx]);
+	  }
+        }
+        else {
+          threadList[j].dist = INFTY<SUMTYPE>();
+        }
+      }
+      max_dist = threadList[KVAL-1].dist;
+
+      // Compare source query with all points in the leaf
+      for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
+        if(j!=i) {
+          good = true;
+	  candidate.idx = tptree->leaf_points[leaf_offset+j];
+          if(metric == 0) {
+            candidate.dist = query.l2(&data[candidate.idx]);
+          }
+          else if(metric == 1) {
+            candidate.dist = query.cosine(&data[candidate.idx]);
+         }
+
+         if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
+
+  // TODO: handle if two different points have same dist
+	    for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
+              if(violatesRNG<T, SUMTYPE, Dim>(data, candidate, threadList[read_id], metric)) {
+                good = false;
+	      }
+	    }
+	    if(candidate.idx == threadList[read_id].idx)  // Ignore duplicates
+              good = false;
+
+	    if(good) { // candidate should be in RNG list
+              target = threadList[read_id];
+	      threadList[read_id] = candidate;
+	      read_id++;
+              for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
+                if(!violatesRNG<T, SUMTYPE, Dim>(data, threadList[read_id], candidate, metric)) {
+                  if(read_id == write_id) {
+                    temp = threadList[read_id];
+		    threadList[write_id] = target;
+		    target = temp;
+		  }
+		  else {
+                    threadList[write_id] = target;
+		    target = threadList[read_id];
+		  }
+		  write_id++;
+                }
+	      }
+	      if(write_id < KVAL) {
+                threadList[write_id] = target;
+                write_id++;
+              }
+	      for(int k=write_id; k<KVAL && threadList[k].idx != -1; k++) {
+                threadList[k].dist = INFTY<SUMTYPE>();
+	        threadList[k].idx = -1;
+	      }
+              max_dist = threadList[KVAL-1].dist;
+//	    max_dist = min(threadList[KVAL-1].dist, ((SUMTYPE)DIST_FACTOR)*threadList[0].dist);
+	    }
+          }
+        }
+      }
+      for(int j=0; j<KVAL; j++) {
+        results[(long long int)(query.id-min_id)*KVAL+j] = threadList[j].idx;
+      }
+
+    } // End if within batch
+  } // End leaf node loop
+}
 
 /*****************************************************************************************
  * Perform the brute-force graph construction on each leaf node, but tries to maintain 
@@ -513,21 +642,21 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 
 
 /****************************************************************************************
+ * DEPRICATED - USE BATCHED VERSION INSTEAD
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth) {
-
+void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
   // Number of levels set to have approximately 500 points per leaf
-  int levels = (int)std::log2(dataSize/500);
+  int levels = (int)std::log2(dataSize/leafSize);
 
   int KNN_blocks; // number of threadblocks used
 
@@ -548,7 +677,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
   cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>));
   tptree->initialize(dataSize, levels);
-  KNN_blocks= max(tptree->num_leaves, BLOCKS);
+//  KNN_blocks= max(tptree->num_leaves, BLOCKS);
+  KNN_blocks= tptree->num_leaves;
 
   LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
@@ -558,8 +688,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   cudaDeviceSynchronize();
 
-  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-//  srand(1); // random number seed for TP tree random hyperplane partitions
+//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+  srand(1); // random number seed for TP tree random hyperplane partitions
 
 
   double tree_time=0.0;
@@ -576,7 +706,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     start_t = clock();
    // Create TPT
     tptree->reset();
-    create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels);
+    create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, 0, dataSize);
     cudaDeviceSynchronize();
 
     end_t = clock();
@@ -585,13 +715,17 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     start_t = clock();
    // Compute the KNN for each leaf node
+/*
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
-    else {
+    else if(graphtype==1) {
       findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
-    
+    else if(graphtype==2) {
+      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, 0, dataSize);
+    }
+ */   
     cudaDeviceSynchronize();
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
@@ -599,20 +733,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
   } // end TPT loop
-
-// Depricated neighbor's neighbor KNN improvement - removed for now
-//  int imp_steps = 2; 
-//  for(int r=0; r<imp_steps; r++) {
-  // Perform a final step of checking neighbors to improve KNN graph
-//    if(graphtype == 0) {
-//      neighbors_KNN<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, d_results, dataSize, KVAL, (int)metric);
-//    }
-////    else {
-//      neighbors_RNG<DTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, KVAL*THREADS*sizeof(int)*2>>>(d_points, d_results, dataSize, KVAL, (int)metric);
-//    }
-//    cudaDeviceSynchronize();
-//  }
-  
 
   start_t = clock();
 
@@ -627,6 +747,133 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
 
+
+  tptree->destroy();
+  cudaFree(tptree);
+  cudaFree(d_points);
+  cudaFree(tptree);
+  cudaFree(d_results);
+
+}
+
+
+/****************************************************************************************
+ * Create graph on the GPU in a series of 1 or more batches, graph is saved into @results and is stored on the CPU
+ * graphType: KNN=0, loose RNG=1, strict RNG=2
+ * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
+ * at compile time
+ ***************************************************************************************/
+template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches) {
+
+  int dim = index->GetFeatureDim();
+  int metric = (int)index->GetDistCalcMethod();
+
+  DTYPE* data = (DTYPE*)index->GetSample(0);
+
+  // Number of levels set to have approximately 500 points per leaf
+  int levels = (int)std::log2(dataSize/leafSize);
+
+  int KNN_blocks; // number of threadblocks used
+
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
+
+  for(int i=0;  i<dataSize; i++) {
+    points[i].id = i;
+  }
+
+/* Copy all input data to device, but generate portion of result set each batch */
+  Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
+  LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+
+  LOG("Copying to device.\n");
+  cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+
+  LOG("Alloc'ing TPtree memory\n");
+  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
+  cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>));
+  tptree->initialize(dataSize, levels);
+  KNN_blocks= max(tptree->num_leaves, BLOCKS);
+
+
+  int batchSize = (dataSize / numBatches);
+  if(batchSize * numBatches < dataSize) batchSize++;
+
+  LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
+  int* d_results;
+  cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int));
+
+//  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
+  srand(1); // random number seed for TP tree random hyperplane partitions
+
+printf("GPU memory used - input points:%ld MB - tree:%ld MB - neighbor lists :%ld MB - Total:%ld MB \n", (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, (13*dataSize)/1000000, ((long long int)batchSize*KVAL*sizeof(int))/1000000, (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
+
+  double tree_time=0.0;
+  double KNN_time=0.0;
+  double D2H_time = 0.0;
+//  struct timespec start, end;
+  time_t start_t, end_t;
+  time_t tot_start_t, tot_end_t;
+  int min_id, max_id;
+
+  tot_start_t = clock();
+  for(int batch = 0; batch < numBatches; batch++) {
+
+    min_id = batch*batchSize;
+    max_id = min(dataSize, (batch+1)*batchSize);
+
+    // Initialize results to all -1 (special value that is set to distance INFTY)
+    cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int));
+
+    for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
+      cudaDeviceSynchronize();
+
+      LOG("Starting TPT construction timer\n");
+      start_t = clock();
+     // Create TPT
+      tptree->reset();
+      create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
+      cudaDeviceSynchronize();
+
+// Sort each leaf by ID
+
+      end_t = clock();
+
+      tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+
+      start_t = clock();
+     // Compute the KNN for each leaf node
+
+      if(graphtype == 0) {
+        findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+      }
+      else if(graphtype==1) {
+        findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
+      }
+      else if(graphtype==2) {
+        findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
+      }
+   
+      cudaDeviceSynchronize();
+
+      //clock_gettime(CLOCK_MONOTONIC, &end);
+      end_t = clock();
+
+      KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+    } // end TPT loop
+
+    start_t = clock();
+    cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (long long int)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
+    end_t = clock();
+    D2H_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+
+  }
+  tot_end_t = clock();
+
+  LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, %0.3lf\n", tree_time, KNN_time, D2H_time, tree_time+KNN_time+D2H_time, (double)(tot_end_t - tot_start_t));
+
+
   tptree->destroy();
   cudaFree(tptree);
   cudaFree(d_points);
@@ -640,7 +887,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int initSize) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
@@ -648,6 +895,10 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
     std::cout << "NeighborhoodSize (with scaling factor applied) is " << m_iNeighborhoodSize << " but must be a power of 2 for GPU construction." << std::endl;
+    exit(1);
+  }
+  if(numBatches > 1 && graph != 2) {
+    std::cout << "Multiple batches only supported for direct RNG construction (GPUGraphType=2)." << std::endl;
     exit(1);
   }
 
@@ -660,13 +911,15 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     exit(1);
   }
   else {
-    if(m_disttype == 1 || typeid(T) == typeid(float)) {
-      buildGraphGPU<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
+    if(typeid(T) == typeid(float)) {
+      buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+    }
+    else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
+        buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
     }
     else {
-      if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t) || typeid(T) == typeid(int16_t) || typeid(T) == typeid(uint16_t)) {
-        buildGraphGPU<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, refines, graph, initSize, refineDepth);
-      }
+      std::cout << "Selected datatype not currently supported." << std::endl;
+      exit(1);
     }
   }
 }
