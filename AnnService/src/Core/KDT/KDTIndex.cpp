@@ -154,6 +154,8 @@ namespace SPTAG
         ErrorCode
             Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
+            if (m_workSpacePool == nullptr) return ErrorCode::EmptyIndex;
+
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
@@ -194,6 +196,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension)
         {
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+
             omp_set_num_threads(m_iNumberOfThreads);
 
             m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
@@ -381,6 +385,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
         {
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+
             SizeType begin, end;
             ErrorCode ret;
             {
@@ -399,7 +405,7 @@ namespace SPTAG
                     return ErrorCode::Success;
                 }
 
-                if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
+                if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
