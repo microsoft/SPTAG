@@ -9,7 +9,7 @@
 using namespace SPTAG;
 
 ErrorCode
-MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata)
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata) const
 {
     p_newMetadata.reset(new MemMetadataSet());
     for (SizeType& t : indices) {
@@ -19,7 +19,7 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Meta
 }
 
 ErrorCode
-MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut) const
 {
     SizeType R = (SizeType)indices.size();
     p_metaIndexOut.write((char*)&R, sizeof(SizeType));
@@ -36,7 +36,7 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_meta
 
 
 ErrorCode 
-MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile)
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile) const
 {
     std::ofstream metaOut(p_metaFile + "_tmp", std::ios::binary);
     std::ofstream metaIndexOut(p_metaindexFile, std::ios::binary);

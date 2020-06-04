@@ -35,7 +35,7 @@ namespace SPTAG
         public:
             KDTree() : m_iTreeNumber(2), m_numTopDimensionKDTSplit(5), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
 
-            KDTree(KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
+            KDTree(const KDTree& other) : m_iTreeNumber(other.m_iTreeNumber),
                 m_numTopDimensionKDTSplit(other.m_numTopDimensionKDTSplit),
                 m_iSamples(other.m_iSamples), m_lock(new std::shared_timed_mutex) {}
             ~KDTree() {}
