@@ -29,9 +29,7 @@ namespace SPTAG
                                  m_iCEF(1000),
                                  m_iAddCEF(500),
                                  m_iMaxCheckForRefineGraph(10000) 
-            {
-                m_pNeighborhoodGraph.SetName("Graph");
-            }
+            {}
 
             ~NeighborhoodGraph() {}
 
@@ -148,8 +146,11 @@ namespace SPTAG
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
                 std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                NeighborhoodGraph tmp;
-                if (newGraph == nullptr) newGraph = &tmp;
+                std::shared_ptr<NeighborhoodGraph> tmp;
+                if (newGraph == nullptr) {
+                    tmp = NeighborhoodGraph::CreateInstance(Type());
+                    newGraph = tmp.get();
+                }
 
                 SizeType R = (SizeType)indices.size();
                 newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
@@ -408,6 +409,8 @@ namespace SPTAG
             }
 
             inline SizeType R() const { return m_iGraphSize; }
+
+            inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 
