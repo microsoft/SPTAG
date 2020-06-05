@@ -13,6 +13,8 @@ namespace SPTAG
         class RelativeNeighborhoodGraph: public NeighborhoodGraph
         {
         public:
+            RelativeNeighborhoodGraph() { m_pNeighborhoodGraph.SetName("RNG"); }
+
             void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) {
                 DimensionType count = 0;
                 for (int j = 0; j < numResults && count < m_iNeighborhoodSize; j++) {

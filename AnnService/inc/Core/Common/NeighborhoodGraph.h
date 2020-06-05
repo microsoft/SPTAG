@@ -29,9 +29,7 @@ namespace SPTAG
                                  m_iCEF(1000),
                                  m_iAddCEF(500),
                                  m_iMaxCheckForRefineGraph(10000) 
-            {
-                m_pNeighborhoodGraph.SetName("Graph");
-            }
+            {}
 
             ~NeighborhoodGraph() {}
 
@@ -148,41 +146,39 @@ namespace SPTAG
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
                 std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                SizeType R = (SizeType)indices.size();
-
-                if (newGraph != nullptr)
-                {
-                    newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
-                    newGraph->m_iGraphSize = R;
-                    newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
+                std::shared_ptr<NeighborhoodGraph> tmp;
+                if (newGraph == nullptr) {
+                    tmp = NeighborhoodGraph::CreateInstance(Type());
+                    newGraph = tmp.get();
                 }
+
+                SizeType R = (SizeType)indices.size();
+                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
+                newGraph->m_iGraphSize = R;
+                newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
-                    RefineNode<T>(index, indices[i], false, false, m_iCEF);
                     if (i % 1000 == 0) std::cout << "\rRefine " << static_cast<int>(i * 1.0 / R * 100) << "%";
-                    SizeType *nodes, *outnodes; 
-                    nodes = outnodes = m_pNeighborhoodGraph[indices[i]];
-                    if (newGraph != nullptr) outnodes = newGraph->m_pNeighborhoodGraph[i];
+
+                    SizeType *outnodes = newGraph->m_pNeighborhoodGraph[i];
+
+                    COMMON::QueryResultSet<T> query((const T*)index->GetSample(indices[i]), m_iCEF + 1);
+                    index->RefineSearchIndex(query, false);
+                    RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
+
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                     {
-                        if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[nodes[j]];
+                        if (outnodes[j] >= 0 && outnodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[outnodes[j]];
                         if (idmap != nullptr && (iter = idmap->find(outnodes[j])) != idmap->end()) outnodes[j] = iter->second;
                     }
                     if (idmap != nullptr && (iter = idmap->find(-1 - i)) != idmap->end())
                         outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                if (output != nullptr) {
-                    output->write((char*)&R, sizeof(SizeType));
-                    output->write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
-                    for (SizeType i = 0; i < R; i++) {
-                        output->write((char*)m_pNeighborhoodGraph[indices[i]], sizeof(SizeType) * m_iNeighborhoodSize);
-                    }
-                    std::cout << "Save Refine " << m_pNeighborhoodGraph.Name() << " (" << R << ", " << m_iNeighborhoodSize << ") Finish!" << std::endl;
-                }
+                if (output != nullptr) newGraph->SaveGraph(*output);
                 return ErrorCode::Success;
             }
 
@@ -413,6 +409,8 @@ namespace SPTAG
             }
 
             inline SizeType R() const { return m_iGraphSize; }
+
+            inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 

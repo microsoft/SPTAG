@@ -185,6 +185,8 @@ VectorIndex::LoadIndex(const std::string& p_folderPath)
 ErrorCode
 VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
 {
+    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+
     std::ostringstream p_configStream;
     SaveIndexConfig(p_configStream);
     p_config = p_configStream.str();
@@ -219,6 +221,8 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
 ErrorCode
 VectorIndex::SaveIndex(const std::string& p_folderPath)
 {
+	if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+
     std::string folderPath(p_folderPath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
     {
@@ -249,7 +253,7 @@ ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
 {
-    if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
+    if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
     {
         return ErrorCode::Fail;
     }
@@ -274,7 +278,7 @@ VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, bool p_withM
 
 ErrorCode 
 VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex) {
-    if (nullptr == p_vectorSet || p_vectorSet->Count() == 0 || p_vectorSet->Dimension() == 0 || p_vectorSet->GetValueType() != GetVectorValueType())
+    if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
     {
         return ErrorCode::Fail;
     }
