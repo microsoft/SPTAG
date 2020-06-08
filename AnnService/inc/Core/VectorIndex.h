@@ -127,6 +127,7 @@ private:
     ErrorCode SaveIndexConfig(std::ostream& p_configOut);
 
 protected:
+    bool m_bReady;
     std::string m_sIndexName;
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
