@@ -40,6 +40,7 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
+            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -55,6 +56,7 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
+            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -241,7 +243,7 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
-            if (m_workSpacePool == nullptr) return ErrorCode::EmptyIndex;
+            if (!m_bReady) return ErrorCode::EmptyIndex;
 
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
@@ -299,7 +301,7 @@ namespace SPTAG
 
             m_pTrees.BuildTrees<T>(this);
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
-
+            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -350,6 +352,7 @@ namespace SPTAG
             (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
             if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
+            ptr->m_bReady = true;
             return ErrorCode::Success;
         }
 

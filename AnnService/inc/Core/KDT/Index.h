@@ -89,7 +89,8 @@ namespace SPTAG
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
-                
+
+                m_bReady = false;
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
@@ -118,7 +119,7 @@ namespace SPTAG
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
-            inline bool NeedRefine() const { return m_deletedID.Count() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
