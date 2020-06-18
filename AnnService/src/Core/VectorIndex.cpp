@@ -114,8 +114,10 @@ VectorIndex::BuildMetaMapping()
 {
     m_pMetaToVec.reset(new std::unordered_map<std::string, SizeType>);
     for (SizeType i = 0; i < m_pMetadata->Count(); i++) {
-        ByteArray meta = m_pMetadata->GetMetadata(i);
-        m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), i);
+        if (ContainSample(i)) {
+            ByteArray meta = m_pMetadata->GetMetadata(i);
+            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), i);
+        }
     }
 }
 
@@ -126,8 +128,12 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     SPTAG::Helper::IniReader p_reader;
     std::istringstream p_configin(p_config);
     if (SPTAG::ErrorCode::Success != p_reader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
-    LoadIndexConfig(p_reader);
-    
+    ErrorCode ret = LoadIndexConfig(p_reader);
+    if (ErrorCode::Success != ret) return ret;
+
+    ret = LoadIndexDataFromMemory(p_indexBlobs);
+    if (ErrorCode::Success != ret) return ret;
+
     if (p_reader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
     {
         ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
@@ -146,7 +152,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
             BuildMetaMapping();
         }
     }
-    return LoadIndexDataFromMemory(p_indexBlobs);
+    return ErrorCode::Success;
 }
 
 
@@ -154,15 +160,16 @@ ErrorCode
 VectorIndex::LoadIndex(const std::string& p_folderPath)
 {
     std::string folderPath(p_folderPath);
-    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
-    {
-        folderPath += FolderSep;
-    }
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
 
     Helper::IniReader p_configReader;
     if (ErrorCode::Success != p_configReader.LoadIniFile(folderPath + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
-    LoadIndexConfig(p_configReader);
-    
+    ErrorCode ret = LoadIndexConfig(p_configReader);
+    if (ErrorCode::Success != ret) return ret;
+
+    ret = LoadIndexData(folderPath);
+    if (ErrorCode::Success != ret) return ret;
+
     if (p_configReader.DoesSectionExist("MetaData"))
     {
         m_pMetadata.reset(new FileMetadataSet(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile));
@@ -178,7 +185,7 @@ VectorIndex::LoadIndex(const std::string& p_folderPath)
             BuildMetaMapping();
         }
     }
-    return LoadIndexData(folderPath);
+    return ErrorCode::Success;
 }
 
 
@@ -221,7 +228,7 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
 ErrorCode
 VectorIndex::SaveIndex(const std::string& p_folderPath)
 {
-	if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
     std::string folderPath(p_folderPath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
@@ -269,9 +276,13 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
 
 
 ErrorCode
-VectorIndex::SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const {
-    QueryResult res(p_vector, p_neighborCount, p_withMeta, p_results);
-    SearchIndex(res);
+VectorIndex::SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const {
+    size_t vectorSize = GetValueTypeSize(GetVectorValueType()) * GetFeatureDim();
+#pragma omp parallel for schedule(dynamic,10)
+    for (int i = 0; i < p_vectorCount; i++) {
+        QueryResult res((char*)p_vector + i * vectorSize, p_neighborCount, p_withMeta, p_results + i * p_neighborCount);
+        SearchIndex(res);
+    }
     return ErrorCode::Success;
 }
 
@@ -289,7 +300,7 @@ VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<Me
 
 ErrorCode
 VectorIndex::DeleteIndex(ByteArray p_meta) {
-    if (m_pMetaToVec == nullptr) return ErrorCode::Fail;
+    if (m_pMetaToVec == nullptr) return ErrorCode::VectorNotFound;
 
     std::string meta((char*)p_meta.Data(), p_meta.Length());
     auto iter = m_pMetaToVec->find(meta);
@@ -340,6 +351,34 @@ VectorIndex::MergeIndex(const char* p_indexFilePath)
     return ErrorCode::Success;
 }
 
+ErrorCode
+VectorIndex::MergeIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
+{
+    std::shared_ptr<VectorIndex> addIndex;
+    ErrorCode ret = LoadIndex(p_config, p_indexBlobs, addIndex);
+    if (ErrorCode::Success != ret) return ret;
+
+    if (addIndex->m_pMetadata != nullptr) {
+#pragma omp parallel for schedule(dynamic,128)
+        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+            if (addIndex->ContainSample(i))
+            {
+                ByteArray meta = addIndex->GetMetadata(i);
+                std::uint64_t offsets[2] = { 0, meta.Length() };
+                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
+                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
+            }
+    }
+    else {
+#pragma omp parallel for schedule(dynamic,128)
+        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
+            if (addIndex->ContainSample(i))
+            {
+                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), nullptr);
+            }
+    }
+    return ErrorCode::Success;
+}
 
 const void* VectorIndex::GetSample(ByteArray p_meta)
 {

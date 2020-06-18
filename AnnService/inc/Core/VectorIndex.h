@@ -69,11 +69,13 @@ public:
 
     virtual ErrorCode MergeIndex(const char* p_indexFilePath);
 
+    virtual ErrorCode MergeIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
+
     virtual const void* GetSample(ByteArray p_meta);
     
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
-    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
+    virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
