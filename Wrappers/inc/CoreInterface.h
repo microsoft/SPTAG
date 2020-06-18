@@ -32,6 +32,8 @@ public:
 
     std::shared_ptr<QueryResult> SearchWithMetaData(ByteArray p_data, int p_resultNum);
 
+    std::shared_ptr<QueryResult> BatchSearch(ByteArray p_data, int p_vectorNum, int p_resultNum, bool p_withMetaData);
+
     bool ReadyToServe() const;
 
     bool Save(const char* p_saveFile) const;
