@@ -42,7 +42,7 @@ VectorIndex::SetParameter(const std::string& p_param, const std::string& p_value
 
 void 
 VectorIndex::SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath) {
-    m_pMetadata.reset(new FileMetadataSet(p_metadataFilePath, p_metadataIndexPath));
+    m_pMetadata.reset(new MemMetadataSet(p_metadataFilePath, p_metadataIndexPath));
 }
 
 
@@ -172,7 +172,7 @@ VectorIndex::LoadIndex(const std::string& p_folderPath)
 
     if (p_configReader.DoesSectionExist("MetaData"))
     {
-        m_pMetadata.reset(new FileMetadataSet(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile));
+        m_pMetadata.reset(new MemMetadataSet(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile));
 
         if (!m_pMetadata->Available())
         {
@@ -312,29 +312,16 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 ErrorCode
 VectorIndex::MergeIndex(const char* p_indexFilePath)
 {
-    std::string folderPath(p_indexFilePath);
-    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
-    Helper::IniReader iniReader;
-    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath + "indexloader.ini")) return ErrorCode::FailedOpenFile;
+    std::shared_ptr<VectorIndex> addIndex;
+    ErrorCode ret = LoadIndex(p_indexFilePath, addIndex);
+    if (ErrorCode::Success != ret) return ret;
 
-    std::shared_ptr<VectorIndex> addIndex = CreateInstance(iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined),
-        iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined));
-    if (addIndex == nullptr) return ErrorCode::Fail;
-    if (ErrorCode::Success != addIndex->LoadConfig(iniReader)) return ErrorCode::Fail;
-    if (ErrorCode::Success != addIndex->LoadIndexData(folderPath)) return ErrorCode::Fail;
-
-    std::shared_ptr<MetadataSet> pMetadata;
-    if (iniReader.DoesSectionExist("MetaData"))
-    {
-        pMetadata.reset(new MemMetadataSet(folderPath + iniReader.GetParameter("MetaData", "MetaDataFilePath", std::string()),
-            folderPath + iniReader.GetParameter("MetaData", "MetaDataIndexPath", std::string())));
-    }
-    if (pMetadata != nullptr) {
+    if (addIndex->m_pMetadata != nullptr) {
 #pragma omp parallel for schedule(dynamic,128)
         for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
             if (addIndex->ContainSample(i))
             {
-                ByteArray meta = pMetadata->GetMetadata(i);
+                ByteArray meta = addIndex->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
                 AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
