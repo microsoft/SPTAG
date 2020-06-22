@@ -206,7 +206,9 @@ namespace Microsoft
             AnnIndex^ AnnIndex::Merge(String^ p_indexFilePath1, String^ p_indexFilePath2)
             {
                 AnnIndex^ res = Load(p_indexFilePath1);
-                if (*(res->m_Instance) != nullptr && SPTAG::ErrorCode::Success != (*(res->m_Instance))->MergeIndex(string_to_char_array(p_indexFilePath2)))
+                AnnIndex^ add = Load(p_indexFilePath2);
+                if (*(res->m_Instance) == nullptr || *(add->m_Instance) == nullptr || 
+                    SPTAG::ErrorCode::Success != (*(res->m_Instance))->MergeIndex(add->m_Instance->get(), std::atoi((*(res->m_Instance))->GetParameter("NumberOfThreads").c_str())))
                 {
                     return gcnew AnnIndex(nullptr);
                 }

@@ -53,10 +53,6 @@ public:
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
-    virtual ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
-
-    virtual ErrorCode LoadIndex(const std::string& p_folderPath);
-
     virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
@@ -67,11 +63,7 @@ public:
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
-    virtual ErrorCode MergeIndex(const char* p_indexFilePath);
-
-    virtual ErrorCode MergeIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
-
-    virtual const void* GetSample(ByteArray p_meta);
+    virtual ErrorCode MergeIndex(VectorIndex* p_addindex, int p_threadnum);
     
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 

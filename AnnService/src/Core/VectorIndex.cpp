@@ -122,73 +122,6 @@ VectorIndex::BuildMetaMapping()
 }
 
 
-ErrorCode 
-VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
-{
-    SPTAG::Helper::IniReader p_reader;
-    std::istringstream p_configin(p_config);
-    if (SPTAG::ErrorCode::Success != p_reader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
-    ErrorCode ret = LoadIndexConfig(p_reader);
-    if (ErrorCode::Success != ret) return ret;
-
-    ret = LoadIndexDataFromMemory(p_indexBlobs);
-    if (ErrorCode::Success != ret) return ret;
-
-    if (p_reader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
-    {
-        ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
-        m_pMetadata.reset(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
-            ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
-            *((SizeType*)pMetaIndex.Data())));
-
-        if (!m_pMetadata->Available())
-        {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
-            return ErrorCode::Fail;
-        }
-
-        if (p_reader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
-        {
-            BuildMetaMapping();
-        }
-    }
-    return ErrorCode::Success;
-}
-
-
-ErrorCode 
-VectorIndex::LoadIndex(const std::string& p_folderPath)
-{
-    std::string folderPath(p_folderPath);
-    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
-
-    Helper::IniReader p_configReader;
-    if (ErrorCode::Success != p_configReader.LoadIniFile(folderPath + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
-    ErrorCode ret = LoadIndexConfig(p_configReader);
-    if (ErrorCode::Success != ret) return ret;
-
-    ret = LoadIndexData(folderPath);
-    if (ErrorCode::Success != ret) return ret;
-
-    if (p_configReader.DoesSectionExist("MetaData"))
-    {
-        m_pMetadata.reset(new MemMetadataSet(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile));
-
-        if (!m_pMetadata->Available())
-        {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
-            return ErrorCode::Fail;
-        }
-
-        if (p_configReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
-        {
-            BuildMetaMapping();
-        }
-    }
-    return ErrorCode::Success;
-}
-
-
 ErrorCode
 VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
 {
@@ -310,71 +243,28 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 
 
 ErrorCode
-VectorIndex::MergeIndex(const char* p_indexFilePath)
+VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum)
 {
-    std::shared_ptr<VectorIndex> addIndex;
-    ErrorCode ret = LoadIndex(p_indexFilePath, addIndex);
-    if (ErrorCode::Success != ret) return ret;
-
-    if (addIndex->m_pMetadata != nullptr) {
-#pragma omp parallel for schedule(dynamic,128)
-        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
-            if (addIndex->ContainSample(i))
+    if (p_addindex->m_pMetadata != nullptr) {
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+            if (p_addindex->ContainSample(i))
             {
-                ByteArray meta = addIndex->GetMetadata(i);
+                ByteArray meta = p_addindex->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
-                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
+                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
             }
     }
     else {
-#pragma omp parallel for schedule(dynamic,128)
-        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
-            if (addIndex->ContainSample(i))
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+            if (p_addindex->ContainSample(i))
             {
-                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), nullptr);
+                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
             }
     }
     return ErrorCode::Success;
-}
-
-ErrorCode
-VectorIndex::MergeIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
-{
-    std::shared_ptr<VectorIndex> addIndex;
-    ErrorCode ret = LoadIndex(p_config, p_indexBlobs, addIndex);
-    if (ErrorCode::Success != ret) return ret;
-
-    if (addIndex->m_pMetadata != nullptr) {
-#pragma omp parallel for schedule(dynamic,128)
-        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
-            if (addIndex->ContainSample(i))
-            {
-                ByteArray meta = addIndex->GetMetadata(i);
-                std::uint64_t offsets[2] = { 0, meta.Length() };
-                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
-                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), p_metaSet);
-            }
-    }
-    else {
-#pragma omp parallel for schedule(dynamic,128)
-        for (SizeType i = 0; i < addIndex->GetNumSamples(); i++)
-            if (addIndex->ContainSample(i))
-            {
-                AddIndex(addIndex->GetSample(i), 1, addIndex->GetFeatureDim(), nullptr);
-            }
-    }
-    return ErrorCode::Success;
-}
-
-const void* VectorIndex::GetSample(ByteArray p_meta)
-{
-    if (m_pMetaToVec == nullptr) return nullptr;
-
-    std::string meta((char*)p_meta.Data(), p_meta.Length());
-    auto iter = m_pMetaToVec->find(meta);
-    if (iter != m_pMetaToVec->end()) return GetSample(iter->second);
-    return nullptr;
 }
 
 
@@ -433,18 +323,41 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 ErrorCode
 VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
+    std::string folderPath(p_loaderFilePath);
+    if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
+
     Helper::IniReader iniReader;
-    if (ErrorCode::Success != iniReader.LoadIniFile(p_loaderFilePath + "/indexloader.ini")) return ErrorCode::FailedOpenFile;
+    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath + "indexloader.ini")) return ErrorCode::FailedOpenFile;
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-
     p_vectorIndex = CreateInstance(algoType, valueType);
     if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
 
-    return p_vectorIndex->LoadIndex(p_loaderFilePath);
-}
+    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
+    if (ErrorCode::Success != ret) return ret;
 
+    ret = p_vectorIndex->LoadIndexData(folderPath);
+    if (ErrorCode::Success != ret) return ret;
+
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(folderPath + p_vectorIndex->m_sMetadataFile, 
+            folderPath + p_vectorIndex->m_sMetadataIndexFile));
+
+        if (!(p_vectorIndex->m_pMetadata)->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
+
+        if (iniReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+        {
+            p_vectorIndex->BuildMetaMapping();
+        }
+    }
+    return ErrorCode::Success;
+}
 
 
 ErrorCode
@@ -456,11 +369,34 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-
     p_vectorIndex = CreateInstance(algoType, valueType);
     if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
 
-    return p_vectorIndex->LoadIndex(p_config, p_indexBlobs);
+    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
+    if (ErrorCode::Success != ret) return ret;
+
+    ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs);
+    if (ErrorCode::Success != ret) return ret;
+
+    if (iniReader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
+    {
+        ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
+        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
+            ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
+            *((SizeType*)pMetaIndex.Data())));
+
+        if (!(p_vectorIndex->m_pMetadata)->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
+
+        if (iniReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+        {
+            p_vectorIndex->BuildMetaMapping();
+        }
+    }
+    return ErrorCode::Success;
 }
 
 
