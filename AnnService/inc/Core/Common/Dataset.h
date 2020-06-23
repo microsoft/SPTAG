@@ -168,7 +168,7 @@ namespace SPTAG
                 return true;
             }
 
-            bool Load(std::ifstream& p_instream)
+            bool Load(std::istream& p_instream)
             {
                 p_instream.read((char*)&rows, sizeof(SizeType));
                 p_instream.read((char*)&cols, sizeof(DimensionType));

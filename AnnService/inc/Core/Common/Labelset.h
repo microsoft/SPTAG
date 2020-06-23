@@ -61,15 +61,21 @@ namespace SPTAG
                 return true;
             }
 
+            inline bool Load(std::istream& input)
+            {
+                SizeType deleted;
+                input.read((char*)&deleted, sizeof(SizeType));
+                m_inserted = deleted;
+                m_data.Load(input);
+                return true;
+            }
+
             inline bool Load(std::string filename)
             {
                 std::cout << "Load " << m_data.Name() << " From " << filename << std::endl;
                 std::ifstream input(filename, std::ios::binary);
                 if (!input.is_open()) return false;          
-                SizeType deleted;
-                input.read((char*)&deleted, sizeof(SizeType));
-                m_inserted = deleted;
-                m_data.Load(input);
+                Load(input);
                 input.close();
                 return true;
             }

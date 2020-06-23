@@ -88,6 +88,8 @@ public:
 
     MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile);
 
+    MemMetadataSet(std::istream& p_metain, std::istream& p_metaindexin);
+
     ~MemMetadataSet();
 
     ByteArray GetMetadata(SizeType p_vectorID) const;

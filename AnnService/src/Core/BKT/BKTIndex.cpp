@@ -45,6 +45,22 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::istream*>& p_indexStreams)
+        {
+            if (!m_pSamples.Load(*p_indexStreams[0])) return ErrorCode::Fail;
+            if (!m_pTrees.LoadTrees(*p_indexStreams[1])) return ErrorCode::Fail;
+            if (!m_pGraph.LoadGraph(*p_indexStreams[2])) return ErrorCode::Fail;
+            if (!m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
+
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
+            m_bReady = true;
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::string& p_folderPath)
         {
             if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
@@ -381,9 +397,7 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
-
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
-            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
 
             COMMON::BKTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices, &reverseIndices);
@@ -394,6 +408,7 @@ namespace SPTAG
             COMMON::Labelset newDeletedID;
             newDeletedID.Initialize(newR);
             newDeletedID.Save(*p_indexStreams[3]);
+            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 

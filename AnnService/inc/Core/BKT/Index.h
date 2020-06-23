@@ -135,6 +135,7 @@ namespace SPTAG
             ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
+            ErrorCode LoadIndexData(const std::vector<std::istream*>& p_indexStreams);
             ErrorCode LoadIndexData(const std::string& p_folderPath);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 

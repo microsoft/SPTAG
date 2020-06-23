@@ -189,6 +189,45 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     return SaveIndexData(folderPath);
 }
 
+
+ErrorCode
+VectorIndex::SaveIndexToFile(const std::string& p_file)
+{
+    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+
+    std::ofstream out(p_file, std::ios::binary);
+    if (!out.is_open()) return ErrorCode::FailedCreateFile;
+
+    std::ostringstream p_configStream;
+    SaveIndexConfig(p_configStream);
+    std::string& config = p_configStream.str();
+
+    std::uint64_t configSize = config.size();
+    out.write((char*)&configSize, sizeof(std::uint64_t));
+    out.write(config.c_str(), configSize);
+    
+    std::uint64_t blobs = CalculateBufferSize()->size();
+    out.write((char*)&blobs, sizeof(std::uint64_t));
+    std::vector<std::ostream*> p_indexStreams(blobs, &out);
+
+    ErrorCode ret = ErrorCode::Success;
+    if (NeedRefine())
+    {
+        ret = RefineIndex(p_indexStreams);
+    }
+    else
+    {
+        ret = SaveIndexData(p_indexStreams);
+        if (ErrorCode::Success == ret && m_pMetadata != nullptr)
+        {
+            ret = m_pMetadata->SaveMetadata(out, out);
+        }
+    }
+    out.close();
+    return ret;
+}
+
+
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
@@ -361,6 +400,55 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
 
 ErrorCode
+VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex)
+{
+    std::ifstream in(p_file, std::ios::binary);
+    if (!in.is_open()) return ErrorCode::FailedOpenFile;
+
+    std::uint64_t configSize;
+    in.read((char*)&configSize, sizeof(std::uint64_t));
+    std::vector<char> config(configSize + 1, '\0');
+    in.read(config.data(), configSize);
+
+    SPTAG::Helper::IniReader iniReader;
+    std::istringstream p_configin(std::string(config.data(), configSize));
+    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
+
+    IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
+    VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
+    p_vectorIndex = CreateInstance(algoType, valueType);
+    if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
+
+    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
+    if (ErrorCode::Success != ret) return ret;
+
+    std::uint64_t blobs;
+    in.read((char*)&blobs, sizeof(std::uint64_t));
+    std::vector<std::istream*> p_indexStreams(blobs, &in);
+    ret = p_vectorIndex->LoadIndexData(p_indexStreams);
+    if (ErrorCode::Success != ret) return ret;
+
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(in, in));
+
+        if (!(p_vectorIndex->m_pMetadata)->Available())
+        {
+            std::cerr << "Error: Failed to load metadata." << std::endl;
+            return ErrorCode::Fail;
+        }
+
+        if (iniReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+        {
+            p_vectorIndex->BuildMetaMapping();
+        }
+    }
+    in.close();
+    return ErrorCode::Success;
+}
+
+
+ErrorCode
 VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
     SPTAG::Helper::IniReader iniReader;
@@ -400,7 +488,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 }
 
 
-std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize)
+std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
 {
     size_t treeNodeSize;
     if (p_algo == IndexAlgoType::BKT) {
@@ -412,12 +500,12 @@ std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, Dimensio
     else {
         return 0;
     }
-    std::uint64_t unit = GetValueTypeSize(p_valuetype) * p_dimension + sizeof(std::uint64_t) + sizeof(SizeType) * p_neighborhoodSize + 1 + treeNodeSize * p_treeNumber;
+    std::uint64_t unit = GetValueTypeSize(p_valuetype) * p_dimension + p_maxmeta + sizeof(std::uint64_t) + sizeof(SizeType) * p_neighborhoodSize + 1 + treeNodeSize * p_treeNumber;
     return p_memory / unit;
 }
 
 
-std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize)
+std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
 {
     size_t treeNodeSize;
     if (p_algo == IndexAlgoType::BKT) {
@@ -430,6 +518,7 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
         return 0;
     }
     std::uint64_t ret = GetValueTypeSize(p_valuetype) * p_dimension * p_vectorCount; //Vector Size
+    ret += p_maxmeta * p_vectorCount; // MetaData Size
     ret += sizeof(std::uint64_t) * p_vectorCount; // MetaIndex Size
     ret += sizeof(SizeType) * p_neighborhoodSize * p_vectorCount; // Graph Size
     ret += p_vectorCount; // DeletedFlag Size

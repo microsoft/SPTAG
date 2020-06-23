@@ -345,6 +345,15 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
+            bool LoadGraph(std::istream& input)
+            {
+                if (!m_pNeighborhoodGraph.Load(input)) return false;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return true;
+            }
+
             bool LoadGraph(std::string sGraphFilename)
             {
                 if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;

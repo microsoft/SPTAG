@@ -135,12 +135,8 @@ namespace SPTAG
                 return true;
             }
 
-            bool LoadTrees(std::string sTreeFileName)
+            bool LoadTrees(std::istream& input)
             {
-                std::cout << "Load KDT From " << sTreeFileName << std::endl;
-                std::ifstream input(sTreeFileName, std::ios::binary);
-                if (!input.is_open()) return false;
-
                 input.read((char*)&m_iTreeNumber, sizeof(int));
                 m_pTreeStart.resize(m_iTreeNumber);
                 input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
@@ -149,8 +145,17 @@ namespace SPTAG
                 input.read((char*)&treeNodeSize, sizeof(SizeType));
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
-                input.close();
                 std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                return true;
+            }
+
+            bool LoadTrees(std::string sTreeFileName)
+            {
+                std::cout << "Load KDT From " << sTreeFileName << std::endl;
+                std::ifstream input(sTreeFileName, std::ios::binary);
+                if (!input.is_open()) return false;
+                LoadTrees(input);
+                input.close();
                 return true;
             }
 
