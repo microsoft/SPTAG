@@ -75,7 +75,8 @@ public:
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
 
     virtual ByteArray GetMetadata(SizeType p_vectorID) const;
-    virtual void SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath);
+    virtual MetadataSet* GetMetadata() const;
+    virtual void SetMetadata(MetadataSet* p_new);
 
     virtual std::string GetIndexName() const 
     { 

@@ -107,6 +107,8 @@ public:
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
+    void Init(std::istream& p_metain, std::istream& p_metaindexin);
+
     std::vector<std::uint64_t> m_offsets;
 
     SizeType m_count;

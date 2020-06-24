@@ -41,8 +41,14 @@ VectorIndex::SetParameter(const std::string& p_param, const std::string& p_value
 
 
 void 
-VectorIndex::SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath) {
-    m_pMetadata.reset(new MemMetadataSet(p_metadataFilePath, p_metadataIndexPath));
+VectorIndex::SetMetadata(MetadataSet* p_new) {
+    m_pMetadata.reset(p_new);
+}
+
+
+MetadataSet*
+VectorIndex::GetMetadata() const {
+    return m_pMetadata.get();
 }
 
 
@@ -381,10 +387,9 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(folderPath + p_vectorIndex->m_sMetadataFile, 
-            folderPath + p_vectorIndex->m_sMetadataIndexFile));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(folderPath + p_vectorIndex->m_sMetadataFile,  folderPath + p_vectorIndex->m_sMetadataIndexFile));
 
-        if (!(p_vectorIndex->m_pMetadata)->Available())
+    if (!(p_vectorIndex->GetMetadata()->Available()))
         {
             std::cerr << "Error: Failed to load metadata." << std::endl;
             return ErrorCode::Fail;
@@ -430,9 +435,9 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(in, in));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(in, in));
 
-        if (!(p_vectorIndex->m_pMetadata)->Available())
+        if (!(p_vectorIndex->GetMetadata()->Available()))
         {
             std::cerr << "Error: Failed to load metadata." << std::endl;
             return ErrorCode::Fail;
@@ -469,11 +474,11 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     if (iniReader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
     {
         ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
-        p_vectorIndex->m_pMetadata.reset(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
+        p_vectorIndex->SetMetadata(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
             ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
             *((SizeType*)pMetaIndex.Data())));
 
-        if (!(p_vectorIndex->m_pMetadata)->Available())
+        if (!(p_vectorIndex->GetMetadata()->Available()))
         {
             std::cerr << "Error: Failed to load metadata." << std::endl;
             return ErrorCode::Fail;
