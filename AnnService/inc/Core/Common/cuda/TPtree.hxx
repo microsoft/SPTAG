@@ -193,7 +193,6 @@ class TPtree {
      * then compute, for each element, which child node it belongs to (storing in node_ids)
     ************************************************************************************/
     __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points, int min_id, int max_id) {
-//      int min_leaf, max_leaf;
 
       int nodes_on_level=1;
       for(int i=0; i<levels; ++i) {
@@ -206,42 +205,15 @@ class TPtree {
         compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
 
         cudaDeviceSynchronize();
-/*
-for(int i=0; i<10; i++) {
-  printf("%0.3f, ", split_keys[i]);
-}
-printf("\n");
-*/
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N);
         cudaDeviceSynchronize();
-for(int i=0;i<100; i++)
-  printf("%d, ", node_ids[i]);
-printf("\n");
 
         nodes_on_level*=2;
       }
       count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
       cudaDeviceSynchronize();
 
-
-for(int i=0; i<10; i++) {
-  printf("%d, ", leafs[i].size);
-}
-printf("\n");
-
-
-      /*
-      min_leaf=9999;
-      max_leaf=0;
-
-      for(int i=0; i<num_leaves; i++) {
-	      if(leafs[i].size < min_leaf) min_leaf = leafs[i].size;
-	      if(leafs[i].size > max_leaf) max_leaf = leafs[i].size;
-      }
-
-      printf("min_leaf:%d, max_leaf:%d\n", min_leaf,max_leaf);
-      */
 
       leafs[0].offset=0;
       for(int i=1; i<num_leaves; ++i) {
@@ -250,10 +222,10 @@ printf("\n");
       for(int i=0; i<num_leaves; ++i)
         leafs[i].size=0;
 
-      assign_leaf_points<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves);
-//      assign_leaf_points_in_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
+//      assign_leaf_points<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves);
+      assign_leaf_points_in_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
       cudaDeviceSynchronize();
-//      assign_leaf_points_out_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
+      assign_leaf_points_out_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
     }
 
     /************************************************************************************
