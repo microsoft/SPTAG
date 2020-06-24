@@ -6,6 +6,7 @@
 #include "inc/Core/Common/QueryResultSet.h"
 #include "Distance.hxx"
 
+#include <thrust/async/sort.h>
 #include <cub/cub.cuh>
 #include <chrono>
 
