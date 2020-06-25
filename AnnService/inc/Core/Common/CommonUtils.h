@@ -26,6 +26,7 @@
 #include <cstring>
 
 #define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
+#define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
 #define Sleep(a) usleep(a * 1000)
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 #endif
@@ -130,8 +131,8 @@ namespace SPTAG
                     if (currentLine.length() <= 1 || (index = ProcessLine(currentLine, arr, NumDim, base, distCalcMethod)) == std::string::npos) {
                         continue;
                     }
-                    qString.push_back(currentLine.substr(0, index));
-                    if ((SizeType)Query.size() < i + 1) Query.push_back(std::vector<T>(NumDim, 0));
+                    qString.emplace_back(currentLine.substr(0, index));
+                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, 0);
 
                     for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
                     i++;

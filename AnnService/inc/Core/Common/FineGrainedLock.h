@@ -16,7 +16,7 @@ namespace SPTAG
         class FineGrainedLock {
         public:
             FineGrainedLock() {
-                m_locks.reset(new std::mutex[m_poolSize + 1]);
+                m_locks.reset(new std::mutex[PoolSize + 1]);
             }
             ~FineGrainedLock() {}
 
@@ -30,12 +30,12 @@ namespace SPTAG
                 return m_locks[index];
             }
         private:
-            static const int m_poolSize = 16383;
+            static const int PoolSize = 16383;
             std::unique_ptr<std::mutex[]> m_locks;
 
             inline unsigned hash_func(unsigned idx) const
             {
-                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
+                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & PoolSize;
             }
         };
     }

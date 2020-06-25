@@ -29,7 +29,6 @@ DefineKDTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU
 DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
 DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
-
 DefineKDTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
@@ -41,6 +40,5 @@ DefineKDTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineKDTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
-
 
 #endif

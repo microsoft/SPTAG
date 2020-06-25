@@ -650,7 +650,6 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
-
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
@@ -718,7 +717,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     start_t = clock();
    // Compute the KNN for each leaf node
-
+/*
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
@@ -730,6 +729,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     }
 
   CUDA_CHECK(cudaDeviceSynchronize());
+ */   
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
@@ -913,10 +913,12 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   LOG("Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
 
 
+
   tptree->destroy();
-  CUDA_CHECK(cudaFree(d_points));
-  CUDA_CHECK(cudaFree(tptree));
-  CUDA_CHECK(cudaFree(d_results));
+  cudaFree(tptree);
+  cudaFree(d_points);
+  cudaFree(tptree);
+  cudaFree(d_results);
 
 }
 

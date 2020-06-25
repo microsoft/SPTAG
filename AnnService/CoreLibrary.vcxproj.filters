@@ -157,6 +157,9 @@
     <ClInclude Include="inc\Core\Common\Labelset.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">

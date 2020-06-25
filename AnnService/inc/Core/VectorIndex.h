@@ -9,7 +9,6 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
-//#include "../../inc/Helper/SimpleIniReader.h"
 
 #include <unordered_map>
 
@@ -33,12 +32,11 @@ public:
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
+    virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
+
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;
 
-    virtual ErrorCode SearchTree(QueryResult& p_results) const = 0;
-
-    virtual ErrorCode SearchTreeRefine(QueryResult& p_results, const SizeType node) const = 0;
-
+    virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
@@ -46,6 +44,7 @@ public:
    
     virtual DimensionType GetFeatureDim() const = 0;
     virtual SizeType GetNumSamples() const = 0;
+    virtual SizeType GetNumDeleted() const = 0;
 
     virtual DistCalcMethod GetDistCalcMethod() const = 0;
     virtual IndexAlgoType GetIndexAlgoType() const = 0;
@@ -73,6 +72,8 @@ public:
     virtual ErrorCode MergeIndex(const char* p_indexFilePath);
 
     virtual const void* GetSample(ByteArray p_meta);
+    
+    virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
@@ -94,6 +95,10 @@ public:
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
+    static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize);
+
+    static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize);
 
 protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;

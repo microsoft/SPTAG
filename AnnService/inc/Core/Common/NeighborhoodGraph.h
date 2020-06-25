@@ -46,8 +46,8 @@ namespace SPTAG
                                  m_iGPUGraphType(2),
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
-				 m_iGPULeafSize(500),
-				 m_iGPUBatches(1)
+                                 m_iGPULeafSize(500),
+                                 m_iGPUBatches(1)
             {
                 m_pNeighborhoodGraph.SetName("Graph");
             }
@@ -127,7 +127,7 @@ namespace SPTAG
             {
                 if (last - first <= m_iTPTLeafSize)
                 {
-                    leaves.push_back(std::make_pair(first, last));
+                    leaves.emplace_back(first, last);
                 }
                 else
                 {
@@ -153,7 +153,7 @@ namespace SPTAG
                     Variance.reserve(index->GetFeatureDim());
                     for (DimensionType j = 0; j < index->GetFeatureDim(); j++)
                     {
-                        Variance.push_back(BasicResult(j, 0));
+                        Variance.emplace_back(j, 0.0f);
                     }
                     // calculate the variance of each dimension
                     for (SizeType j = first; j <= end; j++)
@@ -337,32 +337,20 @@ namespace SPTAG
                 std::cout << "BuildInitKNNGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
                 std::cout << "BuildInitKNNGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
 
-                if (m_iMaxCheckForRefineGraph > 0) {
-                    RefineGraph<T>(index, idmap);
+                RefineGraph<T>(index, idmap);
+
+                if (idmap != nullptr) {
+                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
+                        if (iter->first < 0)
+                        {
+                            m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
+                        }
                 }
 
                 t2 = std::chrono::high_resolution_clock::now();
                 std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
                 std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
             }
-
-			template <typename T>
-			void RefineNodeSimple(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
-			{
-				COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
-				index->SearchTreeRefine(query, node);
-/*
-		if(node == 93) {
-			printf("CEF+1:%d\n", CEF+1);
-			for(int i=0; i<CEF+1; i++) {
-				printf("%d\n", query.GetResults()[i].VID);
-			}
-		}
-*/
-
-
-				RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
-			}
 
             template <typename T>
             void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
@@ -372,7 +360,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNodeSimple<T>(index, i, false, false, m_iCEF * m_iCEFScale);
+                        RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
                         if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
@@ -384,18 +372,10 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNodeSimple<T>(index, i, false, false, m_iCEF);
+                        RefineNode<T>(index, i, false, false, m_iCEF);
                         if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
                     std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
-                }
-
-                if (idmap != nullptr) {
-                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
-                        if (iter->first < 0)
-                        {
-                            m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
-                        }
                 }
             }
 

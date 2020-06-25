@@ -158,7 +158,6 @@
     <ClInclude Include="inc\Helper\ThreadPool.h" />
     <ClInclude Include="inc\Helper\VectorSetReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
-    <ClInclude Include="inc\IndexBuilder\Options.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

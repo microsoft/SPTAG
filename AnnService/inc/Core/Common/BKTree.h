@@ -165,7 +165,7 @@ namespace SPTAG
                     std::random_shuffle(localindices.begin(), localindices.end());
 
                     m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
-                    m_pTreeRoots.push_back(BKTNode((SizeType)localindices.size()));
+                    m_pTreeRoots.emplace_back((SizeType)localindices.size());
                     std::cout << "Start to build BKTree " << i + 1 << std::endl;
 
   T* data = (T*)index->GetSample(0);
@@ -178,7 +178,7 @@ namespace SPTAG
                         if (item.last - item.first <= m_iBKTLeafSize) {
                             for (SizeType j = item.first; j < item.last; j++) {
                                 SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
-                                m_pTreeRoots.push_back(BKTNode(cid));
+                                m_pTreeRoots.emplace_back(cid);
                             }
                         }
                         else { // clustering the data into BKTKmeansK clusters
@@ -190,7 +190,7 @@ namespace SPTAG
                                 m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
                                 for (SizeType j = item.first + 1; j < end; j++) {
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                    m_pTreeRoots.push_back(BKTNode(cid));
+                                    m_pTreeRoots.emplace_back(cid);
                                     m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
                                 }
                                 m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
@@ -199,7 +199,7 @@ namespace SPTAG
                                 for (int k = 0; k < m_iBKTKmeansK; k++) {
                                     if (args.counts[k] == 0) continue;
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
-                                    m_pTreeRoots.push_back(BKTNode(cid));
+                                    m_pTreeRoots.emplace_back(cid);
                                     if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
                                     item.first += args.counts[k];
                                 }
@@ -207,7 +207,7 @@ namespace SPTAG
                         }
                         m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
-                    m_pTreeRoots.push_back(BKTNode(-1));
+                    m_pTreeRoots.emplace_back(-1);
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
             }
@@ -252,7 +252,7 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -272,7 +272,7 @@ namespace SPTAG
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
                 input.close();
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.push_back(BKTNode(-1));
+                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -310,7 +310,6 @@ namespace SPTAG
                         if (p_space.m_iNumberOfCheckedLeaves >= p_limits) break;
                     }
                     else {
-//                      printf("internal\n");
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
                         }

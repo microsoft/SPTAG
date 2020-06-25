@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/IndexBuilder/Options.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common.h"
@@ -12,9 +11,31 @@
 
 using namespace SPTAG;
 
+class BuilderOptions : public Helper::ReaderOptions
+{
+public:
+    BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, "|", 32)
+    {
+        AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
+        AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
+        AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
+        AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+    }
+
+    ~BuilderOptions() {}
+
+    std::string m_inputFiles;
+
+    std::string m_outputFolder;
+
+    SPTAG::IndexAlgoType m_indexAlgoType;
+
+    std::string m_builderConfigFile;
+};
+
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<IndexBuilder::BuilderOptions> options(new IndexBuilder::BuilderOptions);
+    std::shared_ptr<BuilderOptions> options(new BuilderOptions);
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
