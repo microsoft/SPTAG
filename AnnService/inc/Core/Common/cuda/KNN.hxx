@@ -368,7 +368,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
         }
       }
       for(int j=0; j<KVAL; j++) {
-        results[(long long int)(query.id-min_id)*KVAL+j] = threadList[j].idx;
+        results[(size_t)(query.id-min_id)*KVAL+j] = threadList[j].idx;
       }
 
     } // End if within batch
@@ -642,12 +642,15 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 
 
 /****************************************************************************************
- * DEPRICATED - USE BATCHED VERSION INSTEAD
+ * Non-batched version of graph construction on GPU, only supports creating KNN or "loosely"
+ * enforced RNG.
+ *
  * Create either graph on the GPU, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, RNG=1
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
+
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
@@ -668,25 +671,25 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
   LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
-  cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
   LOG("Copying to device.\n");
-  cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
   LOG("Alloc'ing TPtree memory\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
-  cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>));
+  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
   tptree->initialize(dataSize, levels);
 //  KNN_blocks= max(tptree->num_leaves, BLOCKS);
   KNN_blocks= tptree->num_leaves;
 
   LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
-  cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int));
+  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
   // Initialize results to all -1 (special value that is set to distance INFTY)
-  cudaMemset(d_results, -1, (long long int)dataSize*KVAL*sizeof(int));
+  CUDA_CHECK(cudaMemset(d_results, -1, (long long int)dataSize*KVAL*sizeof(int)));
 
-  cudaDeviceSynchronize();
+  CUDA_CHECK(cudaDeviceSynchronize());
 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
@@ -700,14 +703,14 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
 
   for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
-    cudaDeviceSynchronize();
+  CUDA_CHECK(cudaDeviceSynchronize());
 
-    LOG("Starting TPT construction timer\n");
+    LOG("TPT iteartion %d - ", tree_id);
     start_t = clock();
    // Create TPT
     tptree->reset();
     create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, 0, dataSize);
-    cudaDeviceSynchronize();
+  CUDA_CHECK(cudaDeviceSynchronize());
 
     end_t = clock();
 
@@ -715,7 +718,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     start_t = clock();
    // Compute the KNN for each leaf node
-/*
+
     if(graphtype == 0) {
       findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
     }
@@ -725,13 +728,16 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
     else if(graphtype==2) {
       findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, 0, dataSize);
     }
- */   
-    cudaDeviceSynchronize();
+
+  CUDA_CHECK(cudaDeviceSynchronize());
 
     //clock_gettime(CLOCK_MONOTONIC, &end);
     end_t = clock();
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+
+    LOG("tree:%lfms, graph build:%lfms\n", tree_time, KNN_time);
+
   } // end TPT loop
 
   start_t = clock();
@@ -745,14 +751,13 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
 
   LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
-  cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
+  CUDA_CHECK(cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
 
 
   tptree->destroy();
-  cudaFree(tptree);
-  cudaFree(d_points);
-  cudaFree(tptree);
-  cudaFree(d_results);
+  CUDA_CHECK(cudaFree(d_points));
+  CUDA_CHECK(cudaFree(tptree));
+  CUDA_CHECK(cudaFree(d_results));
 
 }
 
@@ -782,37 +787,57 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     points[i].id = i;
   }
 
+  int batchSize = (dataSize / numBatches);
+  if(batchSize * numBatches < dataSize) batchSize++;
+
+  LOG("Creating RNG graph using %d batches, each of %d elements, TPT iters:%d, tree depth:%d, KVAL:%d\n", numBatches, batchSize, trees, levels, KVAL);
+
+// Get properties of the GPU being used
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
+
+// If debug/verbose mode, output GPU memory details
+#ifdef DEBUG
+  std::cout << "GPU: " << prop.name << std::endl;
+  std::cout << "Total available GPU memory: " << totalGPUMem << " MB" << std::endl;
+
+  // Print out memory requirements on the GPU
+  std::cout << "GPU memory used - input points: " << (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000 << " MB - tree: " <<  (13*dataSize)/1000000 << " MB - neighbor lists: " << ((long long int)batchSize*KVAL*sizeof(int))/1000000 << " MB - Total: " << (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000 << " MB " << std::endl;
+#endif
+
+  if(totalGPUMem < (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000)
+  {
+    printf("Insufficient GPU memory to create graph.  Use more batches or a GPU more with memory.\n");
+    exit(1);
+  }
+
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
   LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
-  cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
-  LOG("Copying to device.\n");
-  cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
-  LOG("Alloc'ing TPtree memory\n");
+  LOG("Alloc'ing TPtree memory and initializing tree\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
-  cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>));
+  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
   tptree->initialize(dataSize, levels);
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
 
-  int batchSize = (dataSize / numBatches);
-  if(batchSize * numBatches < dataSize) batchSize++;
-
   LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
   int* d_results;
-  cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int));
+  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
 
-printf("GPU memory used - input points:%ld MB - tree:%ld MB - neighbor lists :%ld MB - Total:%ld MB \n", (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, (13*dataSize)/1000000, ((long long int)batchSize*KVAL*sizeof(int))/1000000, (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
-
   double tree_time=0.0;
   double KNN_time=0.0;
   double D2H_time = 0.0;
-//  struct timespec start, end;
+  double temp_time=0.0;
+
   time_t start_t, end_t;
   time_t tot_start_t, tot_end_t;
   int min_id, max_id;
@@ -823,62 +848,75 @@ printf("GPU memory used - input points:%ld MB - tree:%ld MB - neighbor lists :%l
     min_id = batch*batchSize;
     max_id = min(dataSize, (batch+1)*batchSize);
 
+    LOG("Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
+
     // Initialize results to all -1 (special value that is set to distance INFTY)
-    cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int));
+    CUDA_CHECK(cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int)));
 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
-      cudaDeviceSynchronize();
+      CUDA_CHECK(cudaDeviceSynchronize());
 
-      LOG("Starting TPT construction timer\n");
+      LOG("TPT iteration %d - ", tree_id);
       start_t = clock();
      // Create TPT
       tptree->reset();
       create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
-      cudaDeviceSynchronize();
+      CUDA_CHECK(cudaDeviceSynchronize());
 
 // Sort each leaf by ID
 
       end_t = clock();
 
-      tree_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      LOG("tree: %0.3lf, ", temp_time);
+      tree_time += temp_time;
 
       start_t = clock();
-     // Compute the KNN for each leaf node
 
-      if(graphtype == 0) {
-        findKNN_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
-      }
-      else if(graphtype==1) {
-        findRNG_leaf_nodes<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL-1) * THREADS >>>(d_points, tptree, KVAL, d_results, metric);
-      }
-      else if(graphtype==2) {
-        findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
-      }
+
+     // Compute the STRICT RNG for each leaf node
+      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
    
-      cudaDeviceSynchronize();
+      CUDA_CHECK(cudaDeviceSynchronize());
 
-      //clock_gettime(CLOCK_MONOTONIC, &end);
       end_t = clock();
 
-      KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      temp_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      LOG("graph build: %0.3lf\n", temp_time);
+      KNN_time += temp_time;
+ 
     } // end TPT loop
 
     start_t = clock();
-    cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (long long int)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (size_t)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
     end_t = clock();
-    D2H_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+    temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC; 
+    D2H_time += temp_time;
 
+    LOG("Batch complete, time to copy results:%0.3lf\n", temp_time);
+#ifdef DEBUG
+  LOG("Neighbors of first vertex of batch (%d):\n", min_id);
+  for(int i=0; i<KVAL; i++) {
+    LOG("%d, ", results[min_id*KVAL+i]);
   }
+  LOG("\n");
+  LOG("Neighbors of last vertex of batch (%d):\n", max_id-1);
+  for(int i=0; i<KVAL; i++) {
+    LOG("%d, ", results[(max_id-1)*KVAL+i]);
+  }
+  LOG("\n");
+#endif
+
+  } // end batch loop
   tot_end_t = clock();
 
-  LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, %0.3lf\n", tree_time, KNN_time, D2H_time, tree_time+KNN_time+D2H_time, (double)(tot_end_t - tot_start_t));
+  LOG("Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
 
 
   tptree->destroy();
-  cudaFree(tptree);
-  cudaFree(d_points);
-  cudaFree(tptree);
-  cudaFree(d_results);
+  CUDA_CHECK(cudaFree(d_points));
+  CUDA_CHECK(cudaFree(tptree));
+  CUDA_CHECK(cudaFree(d_results));
 
 }
 
@@ -910,17 +948,18 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     std::cout << ">100 dimensions not currently supported for GPU construction." << std::endl;
     exit(1);
   }
+
+// TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
+  
+  if(typeid(T) == typeid(float)) {
+    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+  }
+  else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
+      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+  }
   else {
-    if(typeid(T) == typeid(float)) {
-      buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
-    }
-    else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-        buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
-    }
-    else {
-      std::cout << "Selected datatype not currently supported." << std::endl;
-      exit(1);
-    }
+    std::cout << "Selected datatype not currently supported." << std::endl;
+    exit(1);
   }
 }
 
