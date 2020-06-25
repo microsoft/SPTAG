@@ -130,14 +130,12 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        T* newBlock = (T*)aligned_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
                         incBlocks.push_back(newBlock);
                     }
-                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
-                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
-                    std::memset(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, -1, ((size_t)toWrite) * cols * sizeof(T));
-                    written += toWrite;
+                    written += min(rowsInBlock - ((incRows + written) % rowsInBlock), num - written);
                 }
                 incRows += written;
                 return ErrorCode::Success;

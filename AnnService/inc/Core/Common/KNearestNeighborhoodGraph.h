@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_COMMON_RNG_H_
-#define _SPTAG_COMMON_RNG_H_
+#ifndef _SPTAG_COMMON_KNG_H_
+#define _SPTAG_COMMON_KNG_H_
 
 #include "NeighborhoodGraph.h"
 
@@ -10,7 +10,7 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        class RelativeNeighborhoodGraph: public NeighborhoodGraph
+        class KNearestNeighborhoodGraph : public NeighborhoodGraph
         {
         public:
             void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) {
@@ -19,15 +19,7 @@ namespace SPTAG
                     const BasicResult& item = queryResults[j];
                     if (item.VID < 0) break;
                     if (item.VID == node) continue;
-
-                    bool good = true;
-                    for (DimensionType k = 0; k < count; k++) {
-                        if (index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) <= item.Dist) {
-                            good = false;
-                            break;
-                        }
-                    }
-                    if (good) nodes[count++] = item.VID;
+                    nodes[count++] = item.VID;
                 }
                 for (DimensionType j = count; j < m_iNeighborhoodSize; j++)  nodes[j] = -1;
             }
@@ -47,21 +39,10 @@ namespace SPTAG
                     if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist
                         || (insertDist == tmpDist && insertNode < tmpNode))
                     {
-                        bool good = true;
-                        for (DimensionType t = 0; t < k; t++) {
-                            if (index->ComputeDistance(index->GetSample(insertNode), index->GetSample(nodes[t])) < insertDist) {
-                                good = false;
-                                break;
-                            }
-                        }
-                        if (good) {
-                            nodes[k] = insertNode;
-                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1 &&
-                                index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) >=
-                                index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode)))
-                            {
-                                std::swap(tmpNode, nodes[k]);
-                            }
+                        nodes[k] = insertNode;
+                        while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1)
+                        {
+                            std::swap(tmpNode, nodes[k]);
                         }
                         break;
                     }

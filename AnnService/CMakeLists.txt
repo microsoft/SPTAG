@@ -26,9 +26,8 @@ file(GLOB AGG_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/Aggregator
 add_executable (aggregator ${AGG_FILES} ${AGG_HDR_FILES})
 target_link_libraries(aggregator ${Boost_LIBRARIES})
 
-file(GLOB BUILDER_HDR_FILES ${HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/inc/IndexBuilder/*.h)
 file(GLOB BUILDER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexBuilder/*.cpp)
-add_executable (indexbuilder ${BUILDER_FILES} ${BUILDER_HDR_FILES})
+add_executable (indexbuilder ${BUILDER_FILES} ${HDR_FILES})
 target_link_libraries(indexbuilder ${Boost_LIBRARIES})
 
 file(GLOB SEARCHER_FILES ${SRC_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexSearcher/*.cpp)

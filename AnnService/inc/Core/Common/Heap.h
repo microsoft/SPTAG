@@ -22,7 +22,7 @@ namespace SPTAG
                 length = size;
                 heap.reset(new T[length + 1]);  // heap uses 1-based indexing
                 count = 0;
-                lastlevel = int(pow(2.0, floor(log2(size))));
+                lastlevel = int(pow(2.0, floor(log2((float)size))));
             }
             ~Heap() {}
             inline int size() { return count; }
@@ -31,7 +31,7 @@ namespace SPTAG
             inline T& Top() { if (count == 0) return heap[0]; else return heap[1]; }
 
             // Insert a new element in the heap.
-            void insert(T value)
+            void insert(const T& value)
             {
                 /* If heap is full, then return without adding this element. */
                 int loc;

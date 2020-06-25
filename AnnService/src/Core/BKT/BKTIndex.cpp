@@ -37,7 +37,7 @@ namespace SPTAG
             if (p_indexBlobs.size() > 3 && !m_deletedID.Load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -52,7 +52,7 @@ namespace SPTAG
             if (!m_deletedID.Load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_iMaxCheck, GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -100,40 +100,45 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
-
-#define Search(CheckDeleted1, CheckDeleted2) \
+#define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(this, p_query, p_space); \
         m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
-            const SizeType *node = m_pGraph[gnode.node]; \
+            SizeType tmpNode = gnode.node; \
+            const SizeType *node = m_pGraph[tmpNode]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
-            CheckDeleted1 \
-            { \
-                if (p_query.AddPoint(gnode.node, gnode.distance)) { \
-                    p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
-                    SizeType checkNode = node[checkPos]; \
-                    if (checkNode < -1) { \
-                        const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
-                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++) { \
-                            CheckDeleted2 \
-                            { \
-                                if (!p_query.AddPoint(m_pTrees[i].centerid, gnode.distance)) break; \
-                            } \
-                        } \
-                    } \
-                } \
-                else { \
-                    p_space.m_iNumOfContinuousNoBetterPropagation++; \
-                    if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
-                        p_query.SortResult(); return; \
-                    } \
-                } \
-            } \
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
+            if (gnode.distance <= p_query.worstDist()) { \
+                SizeType checkNode = node[checkPos]; \
+                if (checkNode < -1) { \
+                    const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                    SizeType i = -tnode.childStart; \
+                    do { \
+                        CheckDeleted \
+                        { \
+                            p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
+                            CheckDuplicated \
+                            break; \
+                        } \
+                        tmpNode = m_pTrees[i].centerid; \
+                    } while (i++ < tnode.childEnd); \
+                } else { \
+                    CheckDeleted \
+                    { \
+                        p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
+                        p_query.AddPoint(tmpNode, gnode.distance); \
+                    } \
+                } \
+            } else { \
+                p_space.m_iNumOfContinuousNoBetterPropagation++; \
+                if (p_space.m_iNumOfContinuousNoBetterPropagation > p_space.m_iContinuousLimit || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
+                    p_query.SortResult(); return; \
+                } \
             } \
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \
@@ -148,30 +153,98 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
+/*
+#define Search(CheckDeleted, CheckDuplicated) \
+        std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
+        m_pTrees.InitSearchTrees(this, p_query, p_space); \
+        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
+        while (!p_space.m_NGQueue.empty()) { \
+            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            SizeType tmpNode = gnode.node; \
+            const SizeType *node = m_pGraph[tmpNode]; \
+            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
+            if (gnode.distance <= p_query.worstDist()) { \
+                SizeType checkNode = node[checkPos]; \
+                if (checkNode < -1) { \
+                    const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                    SizeType i = -tnode.childStart; \
+                    do { \
+                        CheckDeleted \
+                        { \
+                            CheckDuplicated \
+                            break; \
+                        } \
+                        tmpNode = m_pTrees[i].centerid; \
+                    } while (i++ < tnode.childEnd); \
+               } else { \
+                   CheckDeleted \
+                   { \
+                       p_query.AddPoint(tmpNode, gnode.distance); \
+                   } \
+               } \
+            } else { \
+                CheckDeleted \
+                { \
+                    if (gnode.distance > p_space.m_Results.worst()) { \
+                        p_query.SortResult(); return; \
+                    } \
+                } \
+            } \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                SizeType nn_index = node[i]; \
+                if (nn_index < 0) break; \
+                if (p_space.CheckAndSet(nn_index)) continue; \
+                float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                p_space.m_iNumberOfCheckedLeaves++; \
+                if (p_space.m_Results.insert(distance2leaf)) { \
+                    p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+                } \
+            } \
+            if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
+                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+            } \
+        } \
+        p_query.SortResult(); \
+*/
 
         template <typename T>
-        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
         {
-            Search(if (!m_deletedID.Contains(gnode.node)), if (!m_deletedID.Contains(m_pTrees[i].centerid)))
-        }
-
-        template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
-        {
-            Search(; , ;)
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+            {
+                if (p_searchDuplicated)
+                {
+                    Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                }
+                else
+                {
+                    Search(;, p_query.AddPoint(tmpNode, gnode.distance);)
+                }
+            }
+            else
+            {
+                if (p_searchDuplicated)
+                {
+                    Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                }
+                else
+                {
+                    Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);)
+                }
+            }
         }
 
         template<typename T>
-        ErrorCode
-            Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
-            else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
 
             m_workSpacePool->Return(workSpace);
 
@@ -183,6 +256,38 @@ namespace SPTAG
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
                 }
             }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
+
+            m_workSpacePool->Return(workSpace);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
+            m_pTrees.InitSearchTrees(this, *p_results, *workSpace);
+            m_pTrees.SearchTrees(this, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            BasicResult * res = p_query.GetResults();
+            for (int i = 0; i < p_query.GetResultNum(); i++)
+            {
+                auto& cell = workSpace->m_NGQueue.pop();
+                res[i].VID = cell.node;
+                res[i].Dist = cell.distance;
+            }
+            m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
 #pragma endregion
@@ -204,7 +309,7 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
@@ -249,7 +354,7 @@ namespace SPTAG
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(ptr->m_pGraph.m_iMaxCheckForRefineGraph, newR));
+            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
             ptr->m_threadPool.init();
 
@@ -363,8 +468,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
-            m_deletedID.Insert(p_id);
-            return ErrorCode::Success;
+            if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
+            return ErrorCode::VectorNotFound;
         }
 
         template <typename T>
@@ -428,7 +533,7 @@ namespace SPTAG
 
             for (SizeType node = begin; node < end; node++)
             {
-                m_pGraph.RefineNode<T>(this, node, true, true);
+                m_pGraph.RefineNode<T>(this, node, true, true, m_pGraph.m_iAddCEF);
             }
             //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
@@ -455,6 +560,7 @@ namespace SPTAG
 #undef DefineBKTParameter
 
             m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             return ErrorCode::Success;
         }
 

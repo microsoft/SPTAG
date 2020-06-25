@@ -132,6 +132,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
+    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />

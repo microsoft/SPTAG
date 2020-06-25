@@ -26,6 +26,7 @@
 #include <cstring>
 
 #define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
+#define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
 #define Sleep(a) usleep(a * 1000)
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 #endif
@@ -108,11 +109,10 @@ namespace SPTAG
 
             static size_t ProcessLine(std::string& currentLine, std::vector<float>& arr, DimensionType& D, int base, DistCalcMethod distCalcMethod) {
                 size_t index;
-                double vecLen;
-                if (currentLine.length() == 0 || (index = currentLine.find_last_of("\t")) == std::string::npos || (vecLen = GetVector(const_cast<char*>(currentLine.c_str() + index + 1), "|", arr, D)) < -1) {
+                if (currentLine.length() == 0 || (index = currentLine.find_last_of("\t")) == std::string::npos || GetVector(const_cast<char*>(currentLine.c_str() + index + 1), "|", arr, D) < -1) {
                     std::cout << "Parse vector error: " + currentLine << std::endl;
                     //throw MyException("Error in parsing data " + currentLine);
-                    return -1;
+                    return std::string::npos;
                 }
                 if (distCalcMethod == DistCalcMethod::Cosine) {
                     Normalize(arr.data(), D, base);
@@ -128,11 +128,11 @@ namespace SPTAG
                 size_t index;
                 while ((NumQuery < 0 || i < NumQuery) && !inStream.eof()) {
                     std::getline(inStream, currentLine);
-                    if (currentLine.length() <= 1 || (index = ProcessLine(currentLine, arr, NumDim, base, distCalcMethod)) < 0) {
+                    if (currentLine.length() <= 1 || (index = ProcessLine(currentLine, arr, NumDim, base, distCalcMethod)) == std::string::npos) {
                         continue;
                     }
-                    qString.push_back(currentLine.substr(0, index));
-                    if ((SizeType)Query.size() < i + 1) Query.push_back(std::vector<T>(NumDim, 0));
+                    qString.emplace_back(currentLine.substr(0, index));
+                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, 0);
 
                     for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
                     i++;

@@ -30,6 +30,7 @@ DefineErrorCode(ParamNotFound, 0x0010)
 DefineErrorCode(FailedParseValue, 0x0011)
 DefineErrorCode(MemoryOverFlow, 0x0012)
 DefineErrorCode(LackOfInputs, 0x0013)
+DefineErrorCode(VectorNotFound, 0x0014)
 
 // 0x1000 ~ 0x1FFF  Index Build Status
 

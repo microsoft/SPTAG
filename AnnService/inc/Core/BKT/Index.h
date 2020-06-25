@@ -75,7 +75,8 @@ namespace SPTAG
 
             DistCalcMethod m_iDistCalcMethod;
             float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
-        
+            int m_iBaseSquare;
+
             int m_iMaxCheck;        
             int m_iThresholdOfNumberOfContinuousNoBetterPropagation;
             int m_iNumberOfInitialDynamicPivots;
@@ -91,11 +92,13 @@ namespace SPTAG
 
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
             ~Index() {}
 
             inline SizeType GetNumSamples() const { return m_pSamples.R(); }
+            inline SizeType GetNumDeleted() const { return (SizeType)m_deletedID.Count(); }
             inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
         
             inline int GetCurrMaxCheck() const { return m_iMaxCheck; }
@@ -104,6 +107,14 @@ namespace SPTAG
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::BKT; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
             
+            inline float AccurateDistance(const void* pX, const void* pY) const { 
+                if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+
+                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_pSamples.C());
+                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_pSamples.C());
+                return 1.0f - xy / (sqrt(xx) * sqrt(yy));
+            }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
@@ -128,6 +139,8 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
@@ -140,8 +153,7 @@ namespace SPTAG
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
-            void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
+            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const;
         };
     } // namespace BKT
 } // namespace SPTAG

@@ -1,14 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32">
-      <Configuration>Debug</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32">
-      <Configuration>Release</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
@@ -19,49 +11,27 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>15.0</VCProjectVersion>
-    <ProjectGuid>{F492F794-E78B-4B1F-A556-5E045B9163D5}</ProjectGuid>
-    <RootNamespace>IndexBuilder</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <ProjectGuid>{84A84DBE-D46B-4EC9-8948-FF150DE5D386}</ProjectGuid>
+    <RootNamespace>GPUIndexBuilder</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
-    <CharacterSet>MultiByte</CharacterSet>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
-    <CharacterSet>MultiByte</CharacterSet>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
-  <ImportGroup Label="Shared">
-  </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 10.1.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -75,13 +45,31 @@
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
+  <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
-  <ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>DEBUG;GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <OpenMPSupport>true</OpenMPSupport>
+      <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
     <Link>
-      <AdditionalDependencies>CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>CoreLibrary.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CudaCompile>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <CodeGeneration>compute_35,sm_35</CodeGeneration>
+      <Defines>WIN32;%(Defines)</Defines>
+      <Runtime>MTd</Runtime>
+    </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -89,60 +77,92 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
+      <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>CoreLibrary.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-    </ClCompile>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-      <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <ControlFlowGuard>Guard</ControlFlowGuard>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <OpenMPSupport>true</OpenMPSupport>
-    </ClCompile>
-    <Link>
-      <AdditionalOptions>/guard:cf %(AdditionalOptions)</AdditionalOptions>
-    </Link>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
-      <FunctionLevelLinking>true</FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
-      <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
-    </ClCompile>
-    <Link>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
-    </Link>
+    <CudaCompile>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <AdditionalOptions>-Xcompiler "/openmp" %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\IndexBuilder\main.cpp" />
+    <CudaCompile Include="src\Core\Common\Kernel.cu" />
+    <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
+    <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
+    <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
+    <CudaCompile Include="src\Core\Common\WorkSpacePool.cpp" />
+    <CudaCompile Include="src\Core\MetadataSet.cpp" />
+    <CudaCompile Include="src\Core\VectorIndex.cpp" />
+    <CudaCompile Include="src\Core\VectorSet.cpp" />
+    <CudaCompile Include="src\Helper\ArgumentsParser.cpp" />
+    <CudaCompile Include="src\Helper\Base64Encode.cpp" />
+    <CudaCompile Include="src\Helper\CommonHelper.cpp" />
+    <CudaCompile Include="src\Helper\Concurrent.cpp" />
+    <CudaCompile Include="src\Helper\SimpleIniReader.cpp" />
+    <CudaCompile Include="src\Helper\VectorSetReader.cpp" />
+    <CudaCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
+    <CudaCompile Include="src\IndexBuilder\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="inc\Core\Common\cuda\KNN.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\params.h" />
+    <ClInclude Include="inc\Core\Common\cuda\Distance.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
+    <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
+    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
+    <ClInclude Include="inc\Core\Common\Labelset.h" />
+    <ClInclude Include="inc\Core\Common\WorkSpace.h" />
+    <ClInclude Include="inc\Core\Common\CommonUtils.h" />
+    <ClInclude Include="inc\Core\Common\Dataset.h" />
+    <ClInclude Include="inc\Core\Common\DataUtils.h" />
+    <ClInclude Include="inc\Core\Common\DistanceUtils.h" />
+    <ClInclude Include="inc\Core\Common\Heap.h" />
+    <ClInclude Include="inc\Core\Common\QueryResultSet.h" />
+    <ClInclude Include="inc\Core\Common\WorkSpacePool.h" />
+    <ClInclude Include="inc\Core\BKT\Index.h" />
+    <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\Core\KDT\Index.h" />
+    <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\Core\Common.h" />
+    <ClInclude Include="inc\Core\CommonDataStructure.h" />
+    <ClInclude Include="inc\Core\DefinitionList.h" />
+    <ClInclude Include="inc\Core\MetadataSet.h" />
+    <ClInclude Include="inc\Core\SearchQuery.h" />
+    <ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\VectorIndex.h" />
+    <ClInclude Include="inc\Core\VectorSet.h" />
+    <ClInclude Include="inc\Helper\ArgumentsParser.h" />
+    <ClInclude Include="inc\Helper\Base64Encode.h" />
+    <ClInclude Include="inc\Helper\BufferStream.h" />
+    <ClInclude Include="inc\Helper\CommonHelper.h" />
+    <ClInclude Include="inc\Helper\Concurrent.h" />
+    <ClInclude Include="inc\Helper\ConcurrentSet.h" />
+    <ClInclude Include="inc\Helper\SimpleIniReader.h" />
+    <ClInclude Include="inc\Helper\StringConvert.h" />
+    <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />
+    <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
+    <ClInclude Include="inc\Core\Common\BKTree.h" />
+    <ClInclude Include="inc\Core\Common\KDTree.h" />
+    <ClInclude Include="inc\Helper\ThreadPool.h" />
+    <ClInclude Include="inc\Helper\VectorSetReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 10.1.targets" />
+  </ImportGroup>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\boost.1.67.0.0\build\boost.targets" Condition="Exists('..\packages\boost.1.67.0.0\build\boost.targets')" />
     <Import Project="..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets" Condition="Exists('..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets')" />
