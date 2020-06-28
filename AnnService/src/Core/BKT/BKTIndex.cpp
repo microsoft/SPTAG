@@ -47,10 +47,12 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::istream*>& p_indexStreams)
         {
+            if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
+
             if (!m_pSamples.Load(*p_indexStreams[0])) return ErrorCode::Fail;
             if (!m_pTrees.LoadTrees(*p_indexStreams[1])) return ErrorCode::Fail;
             if (!m_pGraph.LoadGraph(*p_indexStreams[2])) return ErrorCode::Fail;
-            if (!m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
+            if (p_indexStreams.size() > 3 && !m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
