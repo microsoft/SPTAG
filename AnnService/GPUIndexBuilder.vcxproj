@@ -13,6 +13,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{84A84DBE-D46B-4EC9-8948-FF150DE5D386}</ProjectGuid>
     <RootNamespace>GPUIndexBuilder</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
@@ -27,7 +28,7 @@
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -41,7 +42,7 @@
   </ImportGroup>
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(ProjectDir);$(IncludePath)</IncludePath>
+    <IncludePath>C:\Users\AzureUser\source\repos\SPTAG\packages\cub-1.8.0;$(ProjectDir);$(IncludePath)</IncludePath>
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
@@ -91,6 +92,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <AdditionalOptions>-Xcompiler "/openmp" %(AdditionalOptions)</AdditionalOptions>
+      <CodeGeneration>compute_75,sm_75</CodeGeneration>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -164,24 +166,24 @@
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 10.1.targets" />
   </ImportGroup>
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\boost.1.67.0.0\build\boost.targets" Condition="Exists('..\packages\boost.1.67.0.0\build\boost.targets')" />
-    <Import Project="..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets" Condition="Exists('..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets')" />
-    <Import Project="..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets" Condition="Exists('..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets')" />
-    <Import Project="..\packages\boost_serialization-vc140.1.67.0.0\build\boost_serialization-vc140.targets" Condition="Exists('..\packages\boost_serialization-vc140.1.67.0.0\build\boost_serialization-vc140.targets')" />
-    <Import Project="..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets" Condition="Exists('..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets')" />
-    <Import Project="..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets" Condition="Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" />
-    <Import Project="..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets" Condition="Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" />
+    <Import Project="..\packages\boost.1.72.0.0\build\boost.targets" Condition="Exists('..\packages\boost.1.72.0.0\build\boost.targets')" />
+    <Import Project="..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets" Condition="Exists('..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets')" />
+    <Import Project="..\packages\boost_regex-vc142.1.72.0.0\build\boost_regex-vc142.targets" Condition="Exists('..\packages\boost_regex-vc142.1.72.0.0\build\boost_regex-vc142.targets')" />
+    <Import Project="..\packages\boost_serialization-vc142.1.72.0.0\build\boost_serialization-vc142.targets" Condition="Exists('..\packages\boost_serialization-vc142.1.72.0.0\build\boost_serialization-vc142.targets')" />
+    <Import Project="..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets" Condition="Exists('..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets')" />
+    <Import Project="..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets" Condition="Exists('..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets')" />
+    <Import Project="..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets" Condition="Exists('..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\boost.1.67.0.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.67.0.0\build\boost.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_date_time-vc140.1.67.0.0\build\boost_date_time-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_regex-vc140.1.67.0.0\build\boost_regex-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_serialization-vc140.1.67.0.0\build\boost_serialization-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc140.1.67.0.0\build\boost_serialization-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc140.1.67.0.0\build\boost_system-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc140.1.67.0.0\build\boost_thread-vc140.targets'))" />
-    <Error Condition="!Exists('..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc140.1.67.0.0\build\boost_wserialization-vc140.targets'))" />
+    <Error Condition="!Exists('..\packages\boost.1.72.0.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.72.0.0\build\boost.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_regex-vc142.1.72.0.0\build\boost_regex-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_regex-vc142.1.72.0.0\build\boost_regex-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_serialization-vc142.1.72.0.0\build\boost_serialization-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc142.1.72.0.0\build\boost_serialization-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets'))" />
   </Target>
 </Project>

@@ -60,3 +60,4 @@ dkms.conf
 /build
 /ipch
 /packages
+/out/build/x64-Debug
