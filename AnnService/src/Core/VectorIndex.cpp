@@ -206,7 +206,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file)
 
     std::ostringstream p_configStream;
     SaveIndexConfig(p_configStream);
-    std::string& config = p_configStream.str();
+    std::string config = p_configStream.str();
 
     std::uint64_t configSize = config.size();
     out.write((char*)&configSize, sizeof(std::uint64_t));
