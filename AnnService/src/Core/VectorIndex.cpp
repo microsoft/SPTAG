@@ -116,13 +116,13 @@ VectorIndex::SaveIndexConfig(std::ostream& p_configOut)
 
 
 void
-VectorIndex::BuildMetaMapping()
+VectorIndex::BuildMetaMapping(bool p_checkDeleted)
 {
-    m_pMetaToVec.reset(new std::unordered_map<std::string, SizeType>);
+    m_pMetaToVec.reset(new MetadataMap);
     for (SizeType i = 0; i < m_pMetadata->Count(); i++) {
-        if (ContainSample(i)) {
+        if (!p_checkDeleted || ContainSample(i)) {
             ByteArray meta = m_pMetadata->GetMetadata(i);
-            m_pMetaToVec->emplace(std::string((char*)meta.Data(), meta.Length()), i);
+            (*m_pMetaToVec)[std::string((char*)meta.Data(), meta.Length())] = i;
         }
     }
 }
@@ -242,13 +242,12 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     {
         return ErrorCode::Fail;
     }
-
-    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
     m_pMetadata = std::move(p_metadataSet);
-    if (p_withMetaIndex && m_pMetadata != nullptr) 
+    if (p_withMetaIndex && m_pMetadata != nullptr)
     {
-        BuildMetaMapping();
+        BuildMetaMapping(false);
     }
+    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
     return ErrorCode::Success;
 }
 
@@ -400,6 +399,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
             p_vectorIndex->BuildMetaMapping();
         }
     }
+    p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
 
@@ -449,6 +449,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
         }
     }
     in.close();
+    p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
 
@@ -489,6 +490,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
             p_vectorIndex->BuildMetaMapping();
         }
     }
+    p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
 

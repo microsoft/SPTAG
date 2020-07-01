@@ -40,7 +40,6 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -58,7 +57,6 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -74,7 +72,6 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -288,7 +285,7 @@ namespace SPTAG
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
-            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
+            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping(false);
             ptr->m_bReady = true;
             return ErrorCode::Success;
         }
@@ -416,12 +413,12 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     m_pMetadata = std::move(p_metadataSet);
                     if (p_withMetaIndex && m_pMetadata != nullptr)
                     {
-                        BuildMetaMapping();
+                        BuildMetaMapping(false);
                     }
+                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
                 }
 

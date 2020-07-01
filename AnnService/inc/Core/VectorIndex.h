@@ -10,11 +10,16 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 
-#include <unordered_map>
+#ifndef _MSC_VER
+#include "inc/Helper/ConcurrentSet.h"
+typedef SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
+#else
+#include <concurrent_unordered_map.h>
+typedef Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeType> MetadataMap;
+#endif
 
 namespace SPTAG
 {
-
 class VectorIndex
 {
 public:
@@ -50,6 +55,8 @@ public:
 
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
+
+    virtual bool IsReady() const { return m_bReady; }
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
@@ -120,7 +127,7 @@ protected:
 
     virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
 
-    void BuildMetaMapping();
+    void BuildMetaMapping(bool p_checkDeleted = true);
 
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
@@ -128,12 +135,12 @@ private:
     ErrorCode SaveIndexConfig(std::ostream& p_configOut);
 
 protected:
-    bool m_bReady;
-    std::string m_sIndexName;
+    bool m_bReady = false;
+    std::string m_sIndexName = "NULL";
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
-    std::unique_ptr<std::unordered_map<std::string, SizeType>> m_pMetaToVec;
+    std::unique_ptr<MetadataMap> m_pMetaToVec;
 };
 
 

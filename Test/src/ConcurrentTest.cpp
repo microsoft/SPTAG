@@ -27,12 +27,25 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
             SPTAG::ByteArray metaarr = meta->GetMetadata(i);
             std::uint64_t offset[2] = { 0, metaarr.Length() };
             std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
-            SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset);
+            SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
             if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
             i = (i + 1) % vec->Count();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         std::cout << "Stop AddThread..." << std::endl;
+    };
+
+    auto DeleteThread = [&stop, &vecIndex, &vec, &meta]() {
+        int i = 0;
+        while (!stop)
+        {
+            SPTAG::ByteArray metaarr = meta->GetMetadata(i);
+            SPTAG::ErrorCode ret = vecIndex->DeleteIndex(metaarr);
+            if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error DeleteIndex(" << (int)(ret) << ") for vector " << i << std::endl;
+            i = (i + 1) % vec->Count();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        std::cout << "Stop DeleteThread..." << std::endl;
     };
 
     auto SearchThread = [&stop, &vecIndex, &vec]() {
@@ -55,6 +68,7 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
 
     std::vector<std::thread> threads;
     threads.emplace_back(std::thread(AddThread));
+    threads.emplace_back(std::thread(DeleteThread));
     threads.emplace_back(std::thread(SearchThread));
     threads.emplace_back(std::thread(SaveThread));
 

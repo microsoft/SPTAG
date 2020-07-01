@@ -250,7 +250,7 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -266,7 +266,7 @@ namespace SPTAG
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
 
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }

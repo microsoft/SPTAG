@@ -90,7 +90,6 @@ namespace SPTAG
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
 
-                m_bReady = false;
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
