@@ -188,7 +188,7 @@ namespace SPTAG
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
                     SizeType result = p_query.GetResult(i)->VID;
-                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result).Clone());
                 }
             }
             return ErrorCode::Success;
