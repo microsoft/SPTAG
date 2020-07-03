@@ -5,6 +5,7 @@
 #define _SPTAG_COMMONDATASTRUCTURE_H_
 
 #include "inc/Core/Common.h"
+#include <string.h>
 
 namespace SPTAG
 {
