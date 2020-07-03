@@ -42,7 +42,7 @@
   </ImportGroup>
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>C:\Users\AzureUser\source\repos\SPTAG\packages\cub-1.8.0;$(ProjectDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)\packages\cub-1.8.0;$(ProjectDir);$(IncludePath)</IncludePath>
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
