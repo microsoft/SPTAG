@@ -139,7 +139,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="inc\Options.h" />
+  </ItemGroup>
+  <ItemGroup>
     <ClCompile Include="src\IndexBuilder\main.cpp" />
+    <ClCompile Include="src\IndexBuilder\Options.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
