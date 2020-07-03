@@ -354,6 +354,7 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
 
             ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
@@ -396,6 +397,8 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
+
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
 
             COMMON::BKTree newTrees(m_pTrees);
