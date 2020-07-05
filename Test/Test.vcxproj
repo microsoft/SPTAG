@@ -147,6 +147,7 @@
     <ClCompile Include="src\AlgoTest.cpp" />
     <ClCompile Include="src\Base64HelperTest.cpp" />
     <ClCompile Include="src\CommonHelperTest.cpp" />
+    <ClCompile Include="src\ConcurrentTest.cpp" />
     <ClCompile Include="src\DistanceTest.cpp" />
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
