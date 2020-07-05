@@ -200,7 +200,7 @@ namespace SPTAG
                 C = *((DimensionType*)pDataPointsMemFile);
                 pDataPointsMemFile += sizeof(DimensionType);
 
-                Initialize(R, C, (T*)pDataPointsMemFile);
+                Initialize(R, C, (T*)pDataPointsMemFile, false);
                 std::cout << "Load " << name << " (" << R << ", " << C << ") Finish!" << std::endl;
                 return true;
             }
