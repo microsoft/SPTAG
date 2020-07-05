@@ -12,6 +12,13 @@
 #include "inc/Core/KDT/Index.h"
 #include <fstream>
 
+#ifndef _MSC_VER
+#include "inc/Helper/ConcurrentSet.h"
+typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
+#else
+#include <concurrent_unordered_map.h>
+typedef typename Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeType> MetadataMap;
+#endif
 
 using namespace SPTAG;
 
@@ -115,16 +122,37 @@ VectorIndex::SaveIndexConfig(std::ostream& p_configOut)
 }
 
 
+SizeType
+VectorIndex::GetMetaMapping(std::string& meta) const
+{
+    MetadataMap* ptr = static_cast<MetadataMap*>(m_pMetaToVec.get());
+    auto iter = ptr->find(meta);
+    if (iter != ptr->end()) return iter->second;
+    return -1;
+}
+
+
+void
+VectorIndex::UpdateMetaMapping(std::string& meta, SizeType i)
+{
+    MetadataMap* ptr = static_cast<MetadataMap*>(m_pMetaToVec.get());
+    auto iter = ptr->find(meta);
+    if (iter != ptr->end()) DeleteIndex(iter->second);;
+    (*ptr)[meta] = i;
+}
+
+
 void
 VectorIndex::BuildMetaMapping(bool p_checkDeleted)
 {
-    m_pMetaToVec.reset(new MetadataMap);
+    MetadataMap* ptr = new MetadataMap;
     for (SizeType i = 0; i < m_pMetadata->Count(); i++) {
         if (!p_checkDeleted || ContainSample(i)) {
             ByteArray meta = m_pMetadata->GetMetadata(i);
-            (*m_pMetaToVec)[std::string((char*)meta.Data(), meta.Length())] = i;
+            (*ptr)[std::string((char*)meta.Data(), meta.Length())] = i;
         }
     }
+    m_pMetaToVec.reset(ptr, std::default_delete<MetadataMap>());
 }
 
 
@@ -280,8 +308,8 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
     if (m_pMetaToVec == nullptr) return ErrorCode::VectorNotFound;
 
     std::string meta((char*)p_meta.Data(), p_meta.Length());
-    auto iter = m_pMetaToVec->find(meta);
-    if (iter != m_pMetaToVec->end()) return DeleteIndex(iter->second);
+    SizeType vid = GetMetaMapping(meta);
+    if (vid >= 0) return DeleteIndex(vid);
     return ErrorCode::VectorNotFound;
 }
 
@@ -317,10 +345,10 @@ const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
     if (m_pMetaToVec == nullptr) return nullptr;
 
     std::string meta((char*)p_meta.Data(), p_meta.Length());
-    auto iter = m_pMetaToVec->find(meta);
-    if (iter != m_pMetaToVec->end()) {
-        deleteFlag = !ContainSample(iter->second);
-        return GetSample(iter->second);
+    SizeType vid = GetMetaMapping(meta);
+    if (vid >= 0) {
+        deleteFlag = !ContainSample(vid);
+        return GetSample(vid);
     }
     return nullptr;
 }

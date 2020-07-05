@@ -367,7 +367,7 @@ namespace SPTAG
             COMMON::BKTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
-            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping(false);
+            if (HasMetaMapping()) ptr->BuildMetaMapping(false);
             ptr->m_bReady = true;
             return ErrorCode::Success;
         }
@@ -521,13 +521,11 @@ namespace SPTAG
                 if (m_pMetadata != nullptr) {
                     m_pMetadata->AddBatch(*p_metadataSet);
 
-                    if (m_pMetaToVec != nullptr) {
+                    if (HasMetaMapping()) {
                         for (SizeType i = begin; i < end; i++) {
                             ByteArray meta = m_pMetadata->GetMetadata(i);
                             std::string metastr((char*)meta.Data(), meta.Length());
-                            auto iter = m_pMetaToVec->find(metastr);
-                            if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-                            (*m_pMetaToVec)[metastr] = i;
+                            UpdateMetaMapping(metastr, i);
                         }
                     }
                 }

@@ -10,14 +10,6 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 
-#ifndef _MSC_VER
-#include "inc/Helper/ConcurrentSet.h"
-typedef SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
-#else
-#include <concurrent_unordered_map.h>
-typedef Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeType> MetadataMap;
-#endif
-
 namespace SPTAG
 {
 class VectorIndex
@@ -127,6 +119,12 @@ protected:
 
     virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
 
+    inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
+
+    inline SizeType GetMetaMapping(std::string& meta) const;
+
+    void UpdateMetaMapping(std::string& meta, SizeType i);
+
     void BuildMetaMapping(bool p_checkDeleted = true);
 
 private:
@@ -140,7 +138,7 @@ protected:
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
-    std::unique_ptr<MetadataMap> m_pMetaToVec;
+    std::shared_ptr<void> m_pMetaToVec;
 };
 
 

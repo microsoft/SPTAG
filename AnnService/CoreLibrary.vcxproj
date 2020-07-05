@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>15.0</VCProjectVersion>
+    <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}</ProjectGuid>
     <RootNamespace>CoreLibrary</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -172,13 +172,13 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
-    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
-    <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
-    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
-    <ClCompile Include="src\Core\MetadataSet.cpp" />
-    <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
+    <ClCompile Include="src\Core\MetadataSet.cpp" />
+    <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
+    <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
+    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
+    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
+    <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Helper\ArgumentsParser.cpp" />
     <ClCompile Include="src\Helper\Base64Encode.cpp" />
     <ClCompile Include="src\Helper\CommonHelper.cpp" />
