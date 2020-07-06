@@ -90,7 +90,6 @@ namespace SPTAG
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
 
-                m_bReady = false;
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
@@ -135,6 +134,7 @@ namespace SPTAG
             ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
+            ErrorCode LoadIndexData(const std::vector<std::istream*>& p_indexStreams);
             ErrorCode LoadIndexData(const std::string& p_folderPath);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 

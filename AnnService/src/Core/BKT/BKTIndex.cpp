@@ -40,7 +40,23 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            m_bReady = true;
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::istream*>& p_indexStreams)
+        {
+            if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
+
+            if (!m_pSamples.Load(*p_indexStreams[0])) return ErrorCode::Fail;
+            if (!m_pTrees.LoadTrees(*p_indexStreams[1])) return ErrorCode::Fail;
+            if (!m_pGraph.LoadGraph(*p_indexStreams[2])) return ErrorCode::Fail;
+            if (p_indexStreams.size() > 3 && !m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
+
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
             return ErrorCode::Success;
         }
 
@@ -56,7 +72,6 @@ namespace SPTAG
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -257,7 +272,7 @@ namespace SPTAG
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
                     SizeType result = p_query.GetResult(i)->VID;
-                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result).Clone());
                 }
             }
             return ErrorCode::Success;
@@ -339,6 +354,7 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
 
             ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
@@ -351,7 +367,7 @@ namespace SPTAG
             COMMON::BKTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
-            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
+            if (HasMetaMapping()) ptr->BuildMetaMapping(false);
             ptr->m_bReady = true;
             return ErrorCode::Success;
         }
@@ -381,9 +397,9 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
 
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
-            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
 
             COMMON::BKTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices, &reverseIndices);
@@ -394,6 +410,7 @@ namespace SPTAG
             COMMON::Labelset newDeletedID;
             newDeletedID.Initialize(newR);
             newDeletedID.Save(*p_indexStreams[3]);
+            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -473,12 +490,12 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     m_pMetadata = std::move(p_metadataSet);
                     if (p_withMetaIndex && m_pMetadata != nullptr)
                     {
-                        BuildMetaMapping();
+                        BuildMetaMapping(false);
                     }
+                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
                 }
 
@@ -504,13 +521,11 @@ namespace SPTAG
                 if (m_pMetadata != nullptr) {
                     m_pMetadata->AddBatch(*p_metadataSet);
 
-                    if (m_pMetaToVec != nullptr) {
+                    if (HasMetaMapping()) {
                         for (SizeType i = begin; i < end; i++) {
                             ByteArray meta = m_pMetadata->GetMetadata(i);
                             std::string metastr((char*)meta.Data(), meta.Length());
-                            auto iter = m_pMetaToVec->find(metastr);
-                            if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-                            (*m_pMetaToVec)[metastr] = i;
+                            UpdateMetaMapping(metastr, i);
                         }
                     }
                 }

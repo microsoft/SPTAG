@@ -27,10 +27,15 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_meta
     for (SizeType i = 0; i < R; i++) {
         p_metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
         ByteArray meta = GetMetadata(indices[i]);
-        p_metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
         offset += meta.Length();
     }
     p_metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
+
+    for (SizeType i = 0; i < R; i++) {
+        ByteArray meta = GetMetadata(indices[i]);
+        p_metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
+    }
+    std::cout << "Save MetaIndex(" << R << ") Meta(" << offset << ")" << std::endl;
     return ErrorCode::Success;
 }
 
@@ -88,6 +93,7 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     m_pOffsets.resize(m_count + 1);
     fpidx.read((char *)m_pOffsets.data(), sizeof(std::uint64_t) * (m_count + 1));
     fpidx.close();
+    std::cout << "Load MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
 }
 
 
@@ -152,6 +158,10 @@ FileMetadataSet::Add(const ByteArray& data)
 ErrorCode
 FileMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
 {
+    SizeType count = Count();
+    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
+    p_metaIndexOut.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
+
     m_fp->seekg(0, std::ios_base::beg);
 
     int bufsize = 1000000;
@@ -165,10 +175,7 @@ FileMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndex
     if (m_newdata.size() > 0) {
         p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
     }
-
-    SizeType count = Count();
-    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
-    p_metaIndexOut.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
+    std::cout << "Save MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
     return ErrorCode::Success;
 }
 
@@ -200,6 +207,24 @@ MemMetadataSet::MemMetadataSet(): m_count(0), m_metadataHolder(ByteArray::c_empt
 }
 
 
+void
+MemMetadataSet::Init(std::istream& p_metain, std::istream& p_metaindexin)
+{
+    p_metaindexin.read((char *)&m_count, sizeof(m_count));
+    m_offsets.resize(m_count + 1);
+    p_metaindexin.read((char *)m_offsets.data(), sizeof(std::uint64_t) * (m_count + 1));
+
+    m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
+    p_metain.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    std::cout << "Load MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
+}
+
+
+MemMetadataSet::MemMetadataSet(std::istream& p_metain, std::istream& p_metaindexin)
+{
+    Init(p_metain, p_metaindexin);
+}
+
 MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile)
 {
     std::ifstream meta(p_metafile, std::ifstream::binary);
@@ -209,15 +234,9 @@ MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string&
         std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
         return;
     }
-
-    metaidx.read((char *)&m_count, sizeof(m_count));
-    m_offsets.resize(m_count + 1);
-    metaidx.read((char *)m_offsets.data(), sizeof(std::uint64_t) * (m_count + 1));
-    metaidx.close();
-
-    m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
-    meta.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    Init(meta, metaidx);
     meta.close();
+    metaidx.close();
 }
 
 
@@ -287,14 +306,15 @@ MemMetadataSet::Add(const ByteArray& data)
 ErrorCode
 MemMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
 {
+    SizeType count = Count();
+    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
+    p_metaIndexOut.write((char*)m_offsets.data(), sizeof(std::uint64_t) * m_offsets.size());
+
     p_metaOut.write(reinterpret_cast<const char*>(m_metadataHolder.Data()), m_metadataHolder.Length());
     if (m_newdata.size() > 0) {
         p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
     }
-
-    SizeType count = Count();
-    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
-    p_metaIndexOut.write((char*)m_offsets.data(), sizeof(std::uint64_t) * m_offsets.size());
+    std::cout << "Save MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
     return ErrorCode::Success;
 }
 
