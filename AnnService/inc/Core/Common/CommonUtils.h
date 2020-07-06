@@ -132,7 +132,7 @@ namespace SPTAG
                         continue;
                     }
                     qString.emplace_back(currentLine.substr(0, index));
-                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, 0);
+                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, (T)0);
 
                     for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
                     i++;

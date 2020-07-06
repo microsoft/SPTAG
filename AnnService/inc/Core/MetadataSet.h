@@ -35,11 +35,11 @@ public:
  
     virtual void AddBatch(MetadataSet& data);
     
-    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata);
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata) const;
 
-    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut);
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut) const;
 
-    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile);
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile) const;
 };
 
 
@@ -88,6 +88,8 @@ public:
 
     MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile);
 
+    MemMetadataSet(std::istream& p_metain, std::istream& p_metaindexin);
+
     ~MemMetadataSet();
 
     ByteArray GetMetadata(SizeType p_vectorID) const;
@@ -105,6 +107,8 @@ public:
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
+    void Init(std::istream& p_metain, std::istream& p_metaindexin);
+
     std::vector<std::uint64_t> m_offsets;
 
     SizeType m_count;

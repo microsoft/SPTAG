@@ -48,9 +48,7 @@ namespace SPTAG
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
                                  m_iGPUBatches(1)
-            {
-                m_pNeighborhoodGraph.SetName("Graph");
-            }
+            {}
 
             ~NeighborhoodGraph() {}
 
@@ -448,6 +446,15 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
+            bool LoadGraph(std::istream& input)
+            {
+                if (!m_pNeighborhoodGraph.Load(input)) return false;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return true;
+            }
+
             bool LoadGraph(std::string sGraphFilename)
             {
                 if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;
@@ -512,6 +519,8 @@ namespace SPTAG
             }
 
             inline SizeType R() const { return m_iGraphSize; }
+
+            inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 

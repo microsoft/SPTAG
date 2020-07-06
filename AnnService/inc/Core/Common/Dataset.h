@@ -168,7 +168,7 @@ namespace SPTAG
                 return true;
             }
 
-            bool Load(std::ifstream& p_instream)
+            bool Load(std::istream& p_instream)
             {
                 p_instream.read((char*)&rows, sizeof(SizeType));
                 p_instream.read((char*)&cols, sizeof(DimensionType));
@@ -205,7 +205,7 @@ namespace SPTAG
                 return true;
             }
 
-            bool Refine(const std::vector<SizeType>& indices, Dataset<T>& data)
+            bool Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
             {
                 SizeType R = (SizeType)(indices.size());
                 data.Initialize(R, cols);
@@ -215,7 +215,7 @@ namespace SPTAG
                 return true;
             }
 
-            bool Refine(const std::vector<SizeType>& indices, std::ostream& output)
+            bool Refine(const std::vector<SizeType>& indices, std::ostream& output) const
             {
                 SizeType R = (SizeType)(indices.size());
                 output.write((char*)&R, sizeof(SizeType));
@@ -228,7 +228,7 @@ namespace SPTAG
                 return true;
             }
 
-            bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName)
+            bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
             {
                 std::cout << "Save Refine " << name << " To " << sDataPointsFileName << std::endl;
                 std::ofstream output(sDataPointsFileName, std::ios::binary);

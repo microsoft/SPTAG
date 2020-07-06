@@ -44,6 +44,23 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::istream*>& p_indexStreams)
+        {
+            if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
+
+            if (!m_pSamples.Load(*p_indexStreams[0])) return ErrorCode::Fail;
+            if (!m_pTrees.LoadTrees(*p_indexStreams[1])) return ErrorCode::Fail;
+            if (!m_pGraph.LoadGraph(*p_indexStreams[2])) return ErrorCode::Fail;
+            if (p_indexStreams.size() > 3 && !m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
+
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_threadPool.init();
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::string& p_folderPath)
         {
             if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
@@ -154,6 +171,8 @@ namespace SPTAG
         ErrorCode
             Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck);
 
@@ -169,7 +188,7 @@ namespace SPTAG
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
                     SizeType result = p_query.GetResult(i)->VID;
-                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result));
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result).Clone());
                 }
             }
             return ErrorCode::Success;
@@ -214,6 +233,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension)
         {
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+
             omp_set_num_threads(m_iNumberOfThreads);
 
             m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
@@ -234,7 +255,7 @@ namespace SPTAG
 
             m_pTrees.BuildTrees<T>(this);
             m_pGraph.BuildGraph<T>(this);
-            
+            m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -272,6 +293,7 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
 
             ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
@@ -284,7 +306,8 @@ namespace SPTAG
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr);
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
-            if (m_pMetaToVec != nullptr) ptr->BuildMetaMapping();
+            if (HasMetaMapping()) ptr->BuildMetaMapping(false);
+            ptr->m_bReady = true;
             return ErrorCode::Success;
         }
 
@@ -313,9 +336,9 @@ namespace SPTAG
             }
 
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            if (newR == 0) return ErrorCode::EmptyIndex;
 
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
-            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
 
             COMMON::KDTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices);
@@ -333,6 +356,7 @@ namespace SPTAG
             COMMON::Labelset newDeletedID;
             newDeletedID.Initialize(newR);
             newDeletedID.Save(*p_indexStreams[3]);
+            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
             return ErrorCode::Success;
         }
 
@@ -401,6 +425,8 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
         {
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+
             SizeType begin, end;
             ErrorCode ret;
             {
@@ -410,16 +436,16 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     m_pMetadata = std::move(p_metadataSet);
                     if (p_withMetaIndex && m_pMetadata != nullptr)
                     {
-                        BuildMetaMapping();
+                        BuildMetaMapping(false);
                     }
+                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
                 }
 
-                if (p_dimension != GetFeatureDim()) return ErrorCode::FailedParseValue;
+                if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
@@ -441,13 +467,11 @@ namespace SPTAG
                 if (m_pMetadata != nullptr) {
                     m_pMetadata->AddBatch(*p_metadataSet);
 
-                    if (m_pMetaToVec != nullptr) {
+                    if (HasMetaMapping()) {
                         for (SizeType i = begin; i < end; i++) {
                             ByteArray meta = m_pMetadata->GetMetadata(i);
                             std::string metastr((char*)meta.Data(), meta.Length());
-                            auto iter = m_pMetaToVec->find(metastr);
-                            if (iter != m_pMetaToVec->end()) DeleteIndex(iter->second);
-                            (*m_pMetaToVec)[metastr] = i;
+                            UpdateMetaMapping(metastr, i);
                         }
                     }
                 }

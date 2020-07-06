@@ -89,7 +89,7 @@ namespace SPTAG
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
-                
+
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
@@ -118,7 +118,7 @@ namespace SPTAG
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
-            inline bool NeedRefine() const { return m_deletedID.Count() >= (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
@@ -134,6 +134,7 @@ namespace SPTAG
             ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
+            ErrorCode LoadIndexData(const std::vector<std::istream*>& p_indexStreams);
             ErrorCode LoadIndexData(const std::string& p_folderPath);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 

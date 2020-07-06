@@ -10,11 +10,8 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 
-#include <unordered_map>
-
 namespace SPTAG
 {
-
 class VectorIndex
 {
 public:
@@ -53,15 +50,15 @@ public:
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
 
+    virtual bool IsReady() const { return m_bReady; }
+
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
-
-    virtual ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
-
-    virtual ErrorCode LoadIndex(const std::string& p_folderPath);
 
     virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
+
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
@@ -69,19 +66,18 @@ public:
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
-    virtual ErrorCode MergeIndex(const char* p_indexFilePath);
-
-    virtual const void* GetSample(ByteArray p_meta);
+    virtual ErrorCode MergeIndex(VectorIndex* p_addindex, int p_threadnum);
     
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
-    virtual ErrorCode SearchIndex(const void* p_vector, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
+    virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
 
     virtual ByteArray GetMetadata(SizeType p_vectorID) const;
-    virtual void SetMetadata(const std::string& p_metadataFilePath, const std::string& p_metadataIndexPath);
+    virtual MetadataSet* GetMetadata() const;
+    virtual void SetMetadata(MetadataSet* p_new);
 
     virtual std::string GetIndexName() const 
     { 
@@ -94,11 +90,13 @@ public:
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
+    static ErrorCode LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
-    static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize);
+    static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
-    static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, IndexAlgoType p_algo, VectorValueType p_valuetype, int p_treeNumber, int p_neighborhoodSize);
+    static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
 protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
@@ -113,6 +111,8 @@ protected:
 
     virtual ErrorCode LoadIndexData(const std::string& p_folderPath) = 0;
 
+    virtual ErrorCode LoadIndexData(const std::vector<std::istream*>& p_indexStreams) = 0;
+
     virtual ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) = 0;
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
@@ -121,7 +121,13 @@ protected:
 
     virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
 
-    void BuildMetaMapping();
+    inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
+
+    inline SizeType GetMetaMapping(std::string& meta) const;
+
+    void UpdateMetaMapping(std::string& meta, SizeType i);
+
+    void BuildMetaMapping(bool p_checkDeleted = true);
 
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
@@ -129,11 +135,12 @@ private:
     ErrorCode SaveIndexConfig(std::ostream& p_configOut);
 
 protected:
-    std::string m_sIndexName;
+    bool m_bReady = false;
+    std::string m_sIndexName = "";
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
-    std::unique_ptr<std::unordered_map<std::string, SizeType>> m_pMetaToVec;
+    std::shared_ptr<void> m_pMetaToVec;
 };
 
 

@@ -109,7 +109,7 @@ namespace SPTAG
         public:
             BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
             
-            BKTree(BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
+            BKTree(const BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
                                    m_iBKTKmeansK(other.m_iBKTKmeansK), 
                                    m_iBKTLeafSize(other.m_iBKTLeafSize),
                                    m_iSamples(other.m_iSamples),
@@ -250,7 +250,23 @@ namespace SPTAG
                 pBKTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
+                std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                return true;
+            }
+
+            bool LoadTrees(std::istream& input)
+            {
+                input.read((char*)&m_iTreeNumber, sizeof(int));
+                m_pTreeStart.resize(m_iTreeNumber);
+                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+
+                SizeType treeNodeSize;
+                input.read((char*)&treeNodeSize, sizeof(SizeType));
+                m_pTreeRoots.resize(treeNodeSize);
+                input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+
+                if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
@@ -260,18 +276,8 @@ namespace SPTAG
                 std::cout << "Load BKT From " << sTreeFileName << std::endl;
                 std::ifstream input(sTreeFileName, std::ios::binary);
                 if (!input.is_open()) return false;
-
-                input.read((char*)&m_iTreeNumber, sizeof(int));
-                m_pTreeStart.resize(m_iTreeNumber);
-                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
-
-                SizeType treeNodeSize;
-                input.read((char*)&treeNodeSize, sizeof(SizeType));
-                m_pTreeRoots.resize(treeNodeSize);
-                input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                LoadTrees(input);
                 input.close();
-                if (m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
-                std::cout << "Load BKT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
                 return true;
             }
 
