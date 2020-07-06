@@ -7,6 +7,7 @@
 #include "inc/Helper/Base64Encode.h"
 #include "inc/Helper/StringConvert.h"
 
+#include <iostream>
 #include <boost/asio.hpp>
 
 
@@ -107,7 +108,11 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
     using namespace SPTAG;
 
     SPTAG::Socket::RemoteSearchResult ret;
-    if (Socket::c_invalidConnectionID != m_connectionID)
+
+    SPTAG::VectorValueType valueType = SPTAG::VectorValueType::Undefined;
+    SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, valueType);
+
+    if (Socket::c_invalidConnectionID != m_connectionID && SPTAG::VectorValueType::Undefined != valueType)
     {
 
         auto signal = std::make_shared<Helper::Concurrent::WaitSignal>(1);
@@ -153,8 +158,6 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
             std::move(timeoutCallback));
 
         Socket::RemoteQuery query;
-        SPTAG::VectorValueType valueType;
-        SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, valueType);
         query.m_queryString = CreateSearchQuery(p_data, p_resultNum, p_withMetaData, valueType);
 
         packet.Header().m_bodyLength = static_cast<std::uint32_t>(query.EstimateBufferSize());
@@ -165,6 +168,9 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
         m_socketClient->SendPacket(m_connectionID, std::move(packet), connectCallback);
 
         signal->Wait();
+    }
+    else {
+        std::cout << "Error connection or data type!" << std::endl;
     }
     return std::make_shared<RemoteSearchResult>(ret);
 }
