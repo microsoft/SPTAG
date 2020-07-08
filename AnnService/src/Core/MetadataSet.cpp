@@ -5,6 +5,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <shared_mutex>
 
 using namespace SPTAG;
 
@@ -204,6 +205,7 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
 MemMetadataSet::MemMetadataSet(): m_count(0), m_metadataHolder(ByteArray::c_empty)
 {
     m_offsets.push_back(0);
+    m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
 }
 
 
@@ -216,6 +218,7 @@ MemMetadataSet::Init(std::istream& p_metain, std::istream& p_metaindexin)
 
     m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
     p_metain.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
     std::cout << "Load MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
 }
 
@@ -245,7 +248,8 @@ MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeTy
       m_count(p_count)
 {
     const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(p_offsets.Data());
-    m_offsets.insert(m_offsets.end(), newdata, newdata + p_count + 1);
+    m_offsets.assign(newdata, newdata + p_count + 1);
+    m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
 }
 
 
@@ -257,6 +261,7 @@ MemMetadataSet::~MemMetadataSet()
 ByteArray
 MemMetadataSet::GetMetadata(SizeType p_vectorID) const
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     if (p_vectorID < m_count)
     {
         return ByteArray(m_metadataHolder.Data() + m_offsets[p_vectorID],
@@ -276,6 +281,7 @@ MemMetadataSet::GetMetadata(SizeType p_vectorID) const
 SizeType
 MemMetadataSet::Count() const
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     return static_cast<SizeType>(m_offsets.size() - 1);
 }
 
@@ -283,14 +289,16 @@ MemMetadataSet::Count() const
 bool
 MemMetadataSet::Available() const
 {
-    return m_metadataHolder.Length() > 0 && m_offsets.size() > 0;
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return m_offsets.size() > 1;
 }
 
 
 std::pair<std::uint64_t, std::uint64_t>
 MemMetadataSet::BufferSize() const
 {
-    return std::make_pair(m_offsets[m_offsets.size() - 1],
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return std::make_pair(m_offsets.back(),
         sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
@@ -298,6 +306,7 @@ MemMetadataSet::BufferSize() const
 void
 MemMetadataSet::Add(const ByteArray& data)
 {
+    std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
     m_offsets.push_back(m_offsets.back() + data.Length());
 }
@@ -306,6 +315,7 @@ MemMetadataSet::Add(const ByteArray& data)
 ErrorCode
 MemMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     SizeType count = Count();
     p_metaIndexOut.write((char*)&count, sizeof(SizeType));
     p_metaIndexOut.write((char*)m_offsets.data(), sizeof(std::uint64_t) * m_offsets.size());

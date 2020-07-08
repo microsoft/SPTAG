@@ -116,6 +116,8 @@ private:
     ByteArray m_metadataHolder;
 
     std::vector<std::uint8_t> m_newdata;
+
+    std::shared_ptr<void> m_lock;
 };
 
 
