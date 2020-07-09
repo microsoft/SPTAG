@@ -2,6 +2,12 @@
 # Licensed under the MIT License.
 
 find_package(Python2 COMPONENTS Development)
+
+find_package(CUDA)
+if (CUDA_FOUND)
+    set (Python2_FOUND false)
+endif()
+
 if (Python2_FOUND)    
     include_directories (${Python2_INCLUDE_DIRS})
     link_directories (${Python2_LIBRARY_DIRS})
@@ -39,8 +45,13 @@ if (Python_FOUND)
     file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/CoreInterface.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_pwrap.cpp)
     add_library (_SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
     set_target_properties(_SPTAG PROPERTIES PREFIX "" SUFFIX ${PY_SUFFIX})
-    target_link_libraries(_SPTAG SPTAGLib ${Python_LIBRARIES})
+    if (CUDA_FOUND)
+        target_link_libraries(_SPTAG GPUSPTAGLib ${Python_LIBRARIES})
+    else()
+        target_link_libraries(_SPTAG SPTAGLib ${Python_LIBRARIES})
+    endif()
     add_custom_command(TARGET _SPTAG POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/Wrappers/inc/SPTAG.py ${EXECUTABLE_OUTPUT_PATH})
+
 
     file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
     file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_pwrap.cpp)
