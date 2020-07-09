@@ -769,7 +769,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches) {
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches, int gpuNum) {
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
@@ -794,7 +794,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
 // Get properties of the GPU being used
   cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
+  cudaGetDeviceProperties(&prop, gpuNum);
   size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
 
 // If debug/verbose mode, output GPU memory details
@@ -927,10 +927,12 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches, int gpuNum) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
+
+  cudaSetDevice(gpuNum);
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
@@ -954,10 +956,10 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 // TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
   
   if(typeid(T) == typeid(float)) {
-    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches);
+      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else {
     std::cout << "Selected datatype not currently supported." << std::endl;

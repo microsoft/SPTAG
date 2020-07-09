@@ -7,9 +7,19 @@ if (CUDA_FOUND)
     message (STATUS "Include Path:" ${CUDA_INCLUDE_DIRS})
     message (STATUS "Library Path:" ${CUDA_LIBRARIES})
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math -gencode=arch=compute_61,code=sm_61 " )
+        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math 
+        -gencode arch=compute_70,code=sm_70 
+        -gencode arch=compute_61,code=sm_61
+        -gencode arch=compute_60,code=sm_60
+        -gencode arch=compute_52,code=sm_52
+        -gencode arch=compute_50,code=sm_50" )
     elseif(WIN32)
-        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus --use_fast_math -gencode=arch=compute_61,code=sm_61 " )
+        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus --use_fast_math
+        -gencode arch=compute_70,code=sm_70 
+        -gencode arch=compute_61,code=sm_61
+        -gencode arch=compute_60,code=sm_60
+        -gencode arch=compute_52,code=sm_52
+        -gencode arch=compute_50,code=sm_50" )
     endif()
    
     message (STATUS "CUDA_NVCC_FLAGS:" ${CUDA_NVCC_FLAGS})
