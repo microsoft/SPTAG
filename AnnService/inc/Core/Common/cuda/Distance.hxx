@@ -190,8 +190,10 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return totals[0]+totals[1]+totals[2]+totals[3];
   }
 
-  // Cosine distance measure for uint8_t datatype is more complex because it cannot be normalized.
-  // So, we have to perform the formal computation, not just dot-product
+#if __CUDA_ARCH__ > 610  // Use intrinsics if available for GPU being compiled for
+
+  // With int8 datatype, values are packed into integers so they need to be
+  // unpacked while computing distance
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     uint32_t prod=0;
     uint32_t src=0;
@@ -206,6 +208,25 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)65536) - prod;
   }
 
+#else
+  __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
+    SUMTYPE prod[4];
+    SUMTYPE a[4];
+    SUMTYPE b[4];
+    prod[0]=0; a[0]=0; b[0]=0;
+
+    for(int i=0; i<Dim/4; ++i) {
+      prod[0] += (coords[i] & 0x000000FF)*(other->coords[i] & 0x000000FF);
+      prod[1] = ((coords[i] & 0x0000FF00) >> 8)*((other->coords[i] & 0x0000FF00) >> 8);
+      prod[2] = ((coords[i] & 0x00FF0000) >> 16)*((other->coords[i] & 0x00FF0000) >> 16);
+      prod[3] = ((coords[i]) >> 24)*((other->coords[i]) >> 24);
+
+      prod[0] += prod[1]+prod[2]+prod[3];
+    }
+
+    return ((SUMTYPE)65536) - prod[0];
+  }
+#endif
 
 };
 

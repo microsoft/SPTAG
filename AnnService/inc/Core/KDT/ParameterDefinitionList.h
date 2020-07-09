@@ -30,6 +30,7 @@ DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Step
 DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 DefineKDTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
+DefineKDTParameter(m_pGraph.m_iGPUNum, int, 0, "GPUNum")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
