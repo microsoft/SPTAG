@@ -253,7 +253,7 @@ namespace SPTAG
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
-            m_pTrees.BuildTrees<T>(this);
+            m_pTrees.BuildTrees<T>(this, nullptr, m_iNumberOfThreads);
             m_pGraph.BuildGraph<T>(this);
             m_bReady = true;
             return ErrorCode::Success;
