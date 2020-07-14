@@ -174,7 +174,7 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     ErrorCode ret = ErrorCode::Success;
     if (NeedRefine()) 
     {
-        ret = RefineIndex(p_indexStreams);
+        ret = RefineIndex(p_indexStreams, nullptr);
     }
     else 
     {
@@ -213,51 +213,80 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     SaveIndexConfig(configFile);
     configFile.close();
     
-    if (NeedRefine()) return RefineIndex(p_folderPath);
+    std::vector<std::ostream*> streams;
+    for (std::string& f : *GetIndexFiles())
+        streams.push_back(new std::ofstream(folderPath + f, std::ios::binary));
 
-    if (m_pMetadata != nullptr)
+    if (nullptr != m_pMetadata)
     {
-        ErrorCode ret = m_pMetadata->SaveMetadata(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile);
-        if (ErrorCode::Success != ret) return ret;
+        streams.push_back(new std::ofstream(folderPath + m_sMetadataFile, std::ios::binary));
+        streams.push_back(new std::ofstream(folderPath + m_sMetadataIndexFile, std::ios::binary));
     }
-    return SaveIndexData(folderPath);
+
+    for (size_t i = 0; i < streams.size(); i++)
+        if (!(((std::ofstream*)streams[i])->is_open())) return ErrorCode::FailedCreateFile;
+
+    ErrorCode ret = ErrorCode::Success;
+    if (NeedRefine()) 
+    {
+        ret = RefineIndex(streams, nullptr);
+    }
+    else 
+    {
+        if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(*streams[streams.size() - 2], *streams[streams.size() - 1]);
+        if (ErrorCode::Success == ret) ret = SaveIndexData(streams);
+    }
+
+    for (size_t i = 0; i < streams.size(); i++)
+    {
+        static_cast<std::ofstream*>(streams[i])->close();
+        delete streams[i];
+    }
+    return ret;
 }
 
 
 ErrorCode
-VectorIndex::SaveIndexToFile(const std::string& p_file)
+VectorIndex::SaveIndexToFile(const std::string& p_file, bool* abort)
 {
     if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
     std::ofstream out(p_file, std::ios::binary);
     if (!out.is_open()) return ErrorCode::FailedCreateFile;
 
+    ErrorCode ret = ErrorCode::Success;
+
     std::ostringstream p_configStream;
     SaveIndexConfig(p_configStream);
     std::string config = p_configStream.str();
-
+    
     std::uint64_t configSize = config.size();
     out.write((char*)&configSize, sizeof(std::uint64_t));
     out.write(config.c_str(), configSize);
-    
-    std::uint64_t blobs = CalculateBufferSize()->size();
-    out.write((char*)&blobs, sizeof(std::uint64_t));
-    std::vector<std::ostream*> p_indexStreams(blobs, &out);
+    if (abort != nullptr && *abort) ret = ErrorCode::ExternalAbort;
+    else {
+        std::uint64_t blobs = CalculateBufferSize()->size();
+        out.write((char*)&blobs, sizeof(std::uint64_t));
+        std::vector<std::ostream*> p_indexStreams(blobs, &out);
 
-    ErrorCode ret = ErrorCode::Success;
-    if (NeedRefine())
-    {
-        ret = RefineIndex(p_indexStreams);
-    }
-    else
-    {
-        ret = SaveIndexData(p_indexStreams);
-        if (ErrorCode::Success == ret && m_pMetadata != nullptr)
+        if (NeedRefine())
         {
-            ret = m_pMetadata->SaveMetadata(out, out);
+            ret = RefineIndex(p_indexStreams, abort);
+        }
+        else
+        {
+            ret = SaveIndexData(p_indexStreams);
+
+            if (abort != nullptr && *abort) ret = ErrorCode::ExternalAbort;
+
+            if (ErrorCode::Success == ret && m_pMetadata != nullptr)
+            {
+                ret = m_pMetadata->SaveMetadata(out, out);
+            }
         }
     }
     out.close();
+    if (ret == ErrorCode::ExternalAbort) std::remove(p_file.c_str());
     return ret;
 }
 
@@ -315,11 +344,18 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 
 
 ErrorCode
-VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum)
+VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, bool* abort)
 {
+    ErrorCode ret = ErrorCode::Success;
     if (p_addindex->m_pMetadata != nullptr) {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+        {
+            if (abort != nullptr && *abort) 
+            {
+                ret = ErrorCode::ExternalAbort;
+                break;
+            }
             if (p_addindex->ContainSample(i))
             {
                 ByteArray meta = p_addindex->GetMetadata(i);
@@ -327,16 +363,24 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum)
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
             }
+        }
     }
     else {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
-        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
+        {
+            if (abort != nullptr && *abort) 
+            {
+                ret = ErrorCode::ExternalAbort;
+                break;
+            }
             if (p_addindex->ContainSample(i))
             {
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
             }
+        }
     }
-    return ErrorCode::Success;
+    return ret;
 }
 
 

@@ -129,8 +129,17 @@ namespace SPTAG
                 return std::move(buffersize);
             }
 
+            std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
+            {
+                std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
+                files->push_back(m_sDataPointsFilename);
+                files->push_back(m_sBKTFilename);
+                files->push_back(m_sGraphFilename);
+                files->push_back(m_sDeleteDataPointsFilename);
+                return std::move(files);
+            }
+
             ErrorCode SaveConfig(std::ostream& p_configout) const;
-            ErrorCode SaveIndexData(const std::string& p_folderPath);
             ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
@@ -148,8 +157,7 @@ namespace SPTAG
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;
 
-            ErrorCode RefineIndex(const std::string& p_folderPath);
-            ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams);
+            ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams, bool* abort);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:
