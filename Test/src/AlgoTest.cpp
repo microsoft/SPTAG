@@ -17,6 +17,7 @@ void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_pt
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "16");
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
@@ -30,6 +31,7 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "16");
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
@@ -81,6 +83,7 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "16");
 
     clock_t start = clock();
     for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {

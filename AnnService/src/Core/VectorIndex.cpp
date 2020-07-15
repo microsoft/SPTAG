@@ -213,8 +213,9 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     SaveIndexConfig(configFile);
     configFile.close();
     
+    std::shared_ptr<std::vector<std::string>> indexfiles = GetIndexFiles();
     std::vector<std::ostream*> streams;
-    for (std::string& f : *GetIndexFiles())
+    for (std::string& f : *indexfiles)
         streams.push_back(new std::ofstream(folderPath + f, std::ios::binary));
 
     if (nullptr != m_pMetadata)
