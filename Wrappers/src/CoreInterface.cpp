@@ -241,7 +241,7 @@ AnnIndex::Merge(const char* p_indexFilePath1, const char* p_indexFilePath2)
     std::shared_ptr<SPTAG::VectorIndex> vecIndex, addIndex;
     if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::LoadIndex(p_indexFilePath1, vecIndex) ||
         SPTAG::ErrorCode::Success != SPTAG::VectorIndex::LoadIndex(p_indexFilePath2, addIndex) ||
-        SPTAG::ErrorCode::Success != vecIndex->MergeIndex(addIndex.get(), std::atoi(vecIndex->GetParameter("NumberOfThreads").c_str())))
+        SPTAG::ErrorCode::Success != vecIndex->MergeIndex(addIndex.get(), std::atoi(vecIndex->GetParameter("NumberOfThreads").c_str()), nullptr))
         return AnnIndex(0);
 
     return AnnIndex(vecIndex);
