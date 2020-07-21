@@ -248,7 +248,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
 
 
 ErrorCode
-VectorIndex::SaveIndexToFile(const std::string& p_file, bool* abort)
+VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort)
 {
     if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
@@ -264,7 +264,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, bool* abort)
     std::uint64_t configSize = config.size();
     out.write((char*)&configSize, sizeof(std::uint64_t));
     out.write(config.c_str(), configSize);
-    if (abort != nullptr && *abort) ret = ErrorCode::ExternalAbort;
+    if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
         std::uint64_t blobs = CalculateBufferSize()->size();
         out.write((char*)&blobs, sizeof(std::uint64_t));
@@ -272,13 +272,13 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, bool* abort)
 
         if (NeedRefine())
         {
-            ret = RefineIndex(p_indexStreams, abort);
+            ret = RefineIndex(p_indexStreams, p_abort);
         }
         else
         {
             ret = SaveIndexData(p_indexStreams);
 
-            if (abort != nullptr && *abort) ret = ErrorCode::ExternalAbort;
+            if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
 
             if (ErrorCode::Success == ret && m_pMetadata != nullptr)
             {
@@ -345,14 +345,14 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 
 
 ErrorCode
-VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, bool* abort)
+VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperation* p_abort)
 {
     ErrorCode ret = ErrorCode::Success;
     if (p_addindex->m_pMetadata != nullptr) {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
         {
-            if (abort != nullptr && *abort) 
+            if (p_abort != nullptr && p_abort->ShouldAbort()) 
             {
                 ret = ErrorCode::ExternalAbort;
                 break;
@@ -370,7 +370,7 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, bool* abort)
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
         {
-            if (abort != nullptr && *abort) 
+            if (p_abort != nullptr && p_abort->ShouldAbort()) 
             {
                 ret = ErrorCode::ExternalAbort;
                 break;

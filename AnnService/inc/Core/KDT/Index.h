@@ -157,7 +157,7 @@ namespace SPTAG
             ErrorCode SetParameter(const char* p_param, const char* p_value);
             std::string GetParameter(const char* p_param) const;
 
-            ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams, bool* abort);
+            ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams, IAbortOperation* p_abort);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:

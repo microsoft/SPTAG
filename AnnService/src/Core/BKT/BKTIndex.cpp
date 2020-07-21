@@ -359,7 +359,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams, bool* abort)
+        ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams, IAbortOperation* p_abort)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
@@ -387,13 +387,13 @@ namespace SPTAG
 
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
 
-            if (abort != nullptr && *abort) return ErrorCode::ExternalAbort;
+            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             COMMON::BKTree newTrees(m_pTrees);
             newTrees.BuildTrees<T>(this, &indices, &reverseIndices);
             newTrees.SaveTrees(*p_indexStreams[1]);
 
-            if (abort != nullptr && *abort) return ErrorCode::ExternalAbort;
+            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr, &(newTrees.GetSampleMap()));
 
