@@ -34,6 +34,7 @@ DefineErrorCode(VectorNotFound, 0x0014)
 DefineErrorCode(EmptyIndex, 0x0015)
 DefineErrorCode(EmptyData, 0x0016)
 DefineErrorCode(DimensionSizeMismatch, 0x0017)
+DefineErrorCode(ExternalAbort, 0x0018)
 
 // 0x1000 ~ 0x1FFF  Index Build Status
 

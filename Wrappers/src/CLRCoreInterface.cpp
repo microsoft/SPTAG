@@ -208,7 +208,7 @@ namespace Microsoft
                 AnnIndex^ res = Load(p_indexFilePath1);
                 AnnIndex^ add = Load(p_indexFilePath2);
                 if (*(res->m_Instance) == nullptr || *(add->m_Instance) == nullptr || 
-                    SPTAG::ErrorCode::Success != (*(res->m_Instance))->MergeIndex(add->m_Instance->get(), std::atoi((*(res->m_Instance))->GetParameter("NumberOfThreads").c_str())))
+                    SPTAG::ErrorCode::Success != (*(res->m_Instance))->MergeIndex(add->m_Instance->get(), std::atoi((*(res->m_Instance))->GetParameter("NumberOfThreads").c_str()), nullptr))
                 {
                     return gcnew AnnIndex(nullptr);
                 }

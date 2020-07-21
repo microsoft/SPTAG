@@ -12,6 +12,12 @@
 
 namespace SPTAG
 {
+class IAbortOperation
+{
+public:
+    virtual bool ShouldAbort() = 0;
+};
+
 class VectorIndex
 {
 public:
@@ -56,7 +62,7 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
-    virtual ErrorCode SaveIndexToFile(const std::string& p_file);
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
@@ -64,7 +70,7 @@ public:
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
-    virtual ErrorCode MergeIndex(VectorIndex* p_addindex, int p_threadnum);
+    virtual ErrorCode MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperation* p_abort);
     
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
@@ -99,9 +105,9 @@ public:
 protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
-    virtual ErrorCode SaveConfig(std::ostream& p_configout) const = 0;
+    virtual std::shared_ptr<std::vector<std::string>> GetIndexFiles() const = 0;
 
-    virtual ErrorCode SaveIndexData(const std::string& p_folderPath) = 0;
+    virtual ErrorCode SaveConfig(std::ostream& p_configout) const = 0;
 
     virtual ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams) = 0;
 
@@ -115,9 +121,7 @@ protected:
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
-    virtual ErrorCode RefineIndex(const std::string& p_folderPath) = 0;
-
-    virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams) = 0;
+    virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams, IAbortOperation* p_abort) = 0;
 
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 
@@ -134,7 +138,7 @@ private:
 
 protected:
     bool m_bReady = false;
-    std::string m_sIndexName = "NULL";
+    std::string m_sIndexName = "";
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
