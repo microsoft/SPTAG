@@ -3,6 +3,7 @@
 
 #include "inc/Core/MetadataSet.h"
 
+#include <string.h>
 #include <fstream>
 #include <iostream>
 #include <shared_mutex>

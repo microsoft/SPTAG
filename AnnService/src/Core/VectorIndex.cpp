@@ -355,7 +355,7 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
             if (p_abort != nullptr && p_abort->ShouldAbort()) 
             {
                 ret = ErrorCode::ExternalAbort;
-                break;
+                continue;
             }
             if (p_addindex->ContainSample(i))
             {
@@ -373,7 +373,7 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
             if (p_abort != nullptr && p_abort->ShouldAbort()) 
             {
                 ret = ErrorCode::ExternalAbort;
-                break;
+                continue;
             }
             if (p_addindex->ContainSample(i))
             {
