@@ -120,6 +120,25 @@ enum class IndexAlgoType : std::uint8_t
 };
 static_assert(static_cast<std::uint8_t>(IndexAlgoType::Undefined) != 0, "Empty IndexAlgoType!");
 
+enum class VectorFileType : std::uint8_t
+{
+#define DefineVectorFileType(Name) Name,
+#include "DefinitionList.h"
+#undef DefineVectorFileType
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(VectorFileType::Undefined) != 0, "Empty VectorFileType!");
+
+enum class TruthFileType : std::uint8_t
+{
+#define DefineTruthFileType(Name) Name,
+#include "DefinitionList.h"
+#undef DefineTruthFileType
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(TruthFileType::Undefined) != 0, "Empty TruthFileType!");
 
 template<typename T>
 constexpr VectorValueType GetEnumValueType()

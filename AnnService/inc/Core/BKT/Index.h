@@ -38,14 +38,16 @@ namespace SPTAG
         {
             class RebuildJob : public Helper::ThreadPool::Job {
             public:
-                RebuildJob(VectorIndex* p_index, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_index(p_index), m_tree(p_tree), m_graph(p_graph) {}
+                RebuildJob(COMMON::Dataset<T>* p_data, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph, 
+                    DistCalcMethod p_distMethod) : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod) {}
                 void exec() {
-                    m_tree->Rebuild<T>(m_index);
+                    m_tree->Rebuild<T>(*m_data, m_distMethod);
                 }
             private:
-                VectorIndex* m_index;
+                COMMON::Dataset<T>* m_data;
                 COMMON::BKTree* m_tree;
                 COMMON::RelativeNeighborhoodGraph* m_graph;
+                DistCalcMethod m_distMethod;
             };
 
         private:

@@ -23,6 +23,8 @@ public:
 
     virtual ~DefaultReader();
 
+	virtual ErrorCode LoadBinaryFile(const std::string& p_filePaths);
+
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 
     virtual std::shared_ptr<VectorSet> GetVectorSet() const;
@@ -96,6 +98,8 @@ private:
     std::string m_metadataConentOutput;
 
     std::string m_metadataIndexOutput;
+
+	bool m_clean;
 
     Helper::Concurrent::WaitSignal m_waitSignal;
 };

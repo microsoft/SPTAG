@@ -29,6 +29,8 @@ public:
     virtual bool Available() const = 0;
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const = 0;
+
+    virtual SizeType PerVectorDataSize() const = 0;
 };
 
 
@@ -39,6 +41,9 @@ public:
                    VectorValueType p_valueType,
                    DimensionType p_dimension,
                    SizeType p_vectorCount);
+
+    BasicVectorSet(std::string p_filePath, VectorValueType p_valueType,
+        DimensionType p_dimension, SizeType p_vectorCount, VectorFileType p_fileType, std::string p_delimiter, DistCalcMethod p_distCalcMethod);
 
     virtual ~BasicVectorSet();
 
@@ -56,6 +61,8 @@ public:
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const;
 
+    virtual SizeType PerVectorDataSize() const;
+
 private:
     ByteArray m_data;
 
@@ -65,7 +72,15 @@ private:
 
     SizeType m_vectorCount;
 
-    SizeType m_perVectorDataSize;
+    size_t m_perVectorDataSize;
+
+    void readXvec(std::string p_filePath, VectorValueType p_valueType,
+        DimensionType p_dimension, SizeType p_vectorCount);
+
+    void readDefault(std::string p_filePath, VectorValueType p_valueType);
+
+    void readTxt(std::string p_filePath, VectorValueType p_valueType,
+        DimensionType p_dimension, std::string p_delimiter);
 };
 
 } // namespace SPTAG

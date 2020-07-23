@@ -105,8 +105,8 @@ namespace SPTAG
 #pragma region K-NN search
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
-        m_pTrees.InitSearchTrees(this, p_query, p_space); \
-        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
+        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
@@ -152,15 +152,15 @@ namespace SPTAG
                 p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
-                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
 /*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
-        m_pTrees.InitSearchTrees(this, p_query, p_space); \
-        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
+        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
@@ -208,7 +208,7 @@ namespace SPTAG
                 } \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
-                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
@@ -300,7 +300,7 @@ namespace SPTAG
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
-            m_pTrees.BuildTrees<T>(this);
+            m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, omp_get_num_threads());
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
             m_bReady = true;
             return ErrorCode::Success;
@@ -351,7 +351,7 @@ namespace SPTAG
 
             ptr->m_deletedID.Initialize(newR);
             COMMON::BKTree* newtree = &(ptr->m_pTrees);
-            (*newtree).BuildTrees<T>(ptr);
+            (*newtree).BuildTrees<T>(ptr->m_pSamples, ptr->m_iDistCalcMethod, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
             if (HasMetaMapping()) ptr->BuildMetaMapping(false);
             ptr->m_bReady = true;
@@ -390,7 +390,7 @@ namespace SPTAG
             if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             COMMON::BKTree newTrees(m_pTrees);
-            newTrees.BuildTrees<T>(this, &indices, &reverseIndices);
+            newTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, omp_get_num_threads(), &indices, &reverseIndices);
             newTrees.SaveTrees(*p_indexStreams[1]);
 
             if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
@@ -484,7 +484,7 @@ namespace SPTAG
             }
 
             if (end - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0) {
-                m_threadPool.add(new RebuildJob(this, &m_pTrees, &m_pGraph));
+                m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph, m_iDistCalcMethod));
             }
 
             for (SizeType node = begin; node < end; node++)

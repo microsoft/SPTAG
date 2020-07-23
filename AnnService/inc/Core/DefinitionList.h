@@ -62,3 +62,35 @@ DefineIndexAlgo(BKT)
 DefineIndexAlgo(KDT)
 
 #endif // DefineIndexAlgo
+
+// target vectors and queries
+#ifdef DefineVectorFileType
+
+// number of vectors(int32_t), dimension(int32_t)
+// 1st vector
+// 2nd vector
+// ..
+DefineVectorFileType(DEFAULT)
+// dimension of 1st vector(int32_t), 1st vector
+// dimension of 2nd vector(int32_t), 2nd vector
+// ...
+DefineVectorFileType(XVEC)
+// vectors that have names and are viewable
+DefineVectorFileType(TXT)
+
+#endif // DefineVectorFileType
+
+#ifdef DefineTruthFileType
+
+// 1st nn id(int32_t), SPACE, 2nd nn id, SPACE, 3rd nn id,... 
+// 1st nn id, SPACE, 2nd nn id, SPACE, 3rd nn id,... 
+// ...
+DefineTruthFileType(TXT)
+// K of 1st vector(int32_t), 1st nn id(int32_t), SPACE, 2nd nn id, SPACE, 3rd nn id,... 
+// K of 2nd vector(int32_t), 1st nn id, SPACE, 2nd nn id, SPACE, 3rd nn id,... 
+// ...
+DefineTruthFileType(XVEC)
+// row(int32_t), column(int32_t), data...
+DefineTruthFileType(DEFAULT)
+
+#endif // DefineTruthFileType

@@ -158,11 +158,14 @@ DefaultReader::DefaultReader(std::shared_ptr<ReaderOptions> p_options)
     m_vectorOutput = tempFolder + "vectorset.bin";
     m_metadataConentOutput = tempFolder + "metadata.bin";
     m_metadataIndexOutput = tempFolder + "metadataindex.bin";
+    m_clean = true;
 }
 
 
 DefaultReader::~DefaultReader()
 {
+    if (!m_clean) return;
+
     if (fileexists(m_vectorOutput.c_str()))
     {
         remove(m_vectorOutput.c_str());
@@ -177,6 +180,21 @@ DefaultReader::~DefaultReader()
     {
         remove(m_metadataConentOutput.c_str());
     }
+}
+
+
+ErrorCode
+DefaultReader::LoadBinaryFile(const std::string& p_filePaths)
+{
+	std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(p_filePaths, ",");
+
+	m_vectorOutput = files[0];
+    if (files.size() >= 3) {
+        m_metadataConentOutput = files[1];
+        m_metadataIndexOutput = files[2];
+	}
+    m_clean = false;
+	return ErrorCode::Success;
 }
 
 
@@ -245,26 +263,35 @@ DefaultReader::LoadFile(const std::string& p_filePaths)
 std::shared_ptr<VectorSet>
 DefaultReader::GetVectorSet() const
 {
-    ByteArray vectorSet = ByteArray::Alloc(m_totalRecordVectorBytes);
-    char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+    std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
+	if (!inputStream.is_open()) {
+		fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
+		exit(1);
+	}
 
-    std::ifstream inputStream;
-    inputStream.open(m_vectorOutput, std::ifstream::binary);
-    inputStream.seekg(sizeof(SizeType) + sizeof(DimensionType), std::ifstream::beg);
-    inputStream.read(vecBuf, m_totalRecordVectorBytes);
+    SizeType row;
+    DimensionType col;
+	inputStream.read((char*)&row, sizeof(SizeType));
+	inputStream.read((char*)&col, sizeof(DimensionType));
+	std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
+	ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
+	char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+    inputStream.read(vecBuf, totalRecordVectorBytes);
     inputStream.close();
 
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
                                                          m_options->m_inputValueType,
-                                                         m_options->m_dimension,
-                                                         m_totalRecordCount));
+                                                         col,
+                                                         row));
 }
 
 
 std::shared_ptr<MetadataSet>
 DefaultReader::GetMetadataSet() const
 {
-    return std::shared_ptr<MetadataSet>(new FileMetadataSet(m_metadataConentOutput, m_metadataIndexOutput));
+	if (fileexists(m_metadataIndexOutput.c_str()) && fileexists(m_metadataConentOutput.c_str()))
+        return std::shared_ptr<MetadataSet>(new FileMetadataSet(m_metadataConentOutput, m_metadataIndexOutput));
+	return nullptr;
 }
 
 

@@ -39,6 +39,8 @@ public:
 
     virtual ~VectorSetReader();
 
+    virtual ErrorCode LoadBinaryFile(const std::string& p_filePath) = 0;
+
     virtual ErrorCode LoadFile(const std::string& p_filePath) = 0;
 
     virtual std::shared_ptr<VectorSet> GetVectorSet() const = 0;

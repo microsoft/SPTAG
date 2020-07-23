@@ -161,6 +161,7 @@
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />
+    <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />
     <ClInclude Include="inc\Helper\StringConvert.h" />
     <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />
@@ -185,6 +186,7 @@
     <ClCompile Include="src\Helper\Concurrent.cpp" />
     <ClCompile Include="src\Helper\SimpleIniReader.cpp" />
     <ClCompile Include="src\Helper\VectorSetReader.cpp" />
+    <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
   </ItemGroup>
   <ItemGroup>
