@@ -85,7 +85,6 @@ void CTest(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 {
     SPTAG::SizeType n = 2000, q = 3;
     SPTAG::DimensionType m = 10;
-    int k = 3;
     std::vector<T> vec;
     for (SPTAG::SizeType i = 0; i < n; i++) {
         for (SPTAG::DimensionType j = 0; j < m; j++) {

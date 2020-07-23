@@ -3,6 +3,7 @@
 
 #include "inc/Core/MetadataSet.h"
 
+#include <string.h>
 #include <fstream>
 #include <iostream>
 #include <shared_mutex>
@@ -137,7 +138,7 @@ FileMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
         m_fp->read((char*)b.Data(), bytes);
     }
     else {
-        std::memcpy(b.Data(), m_newdata.data() + (startoff - m_pOffsets[m_count]), bytes);
+        memcpy(b.Data(), m_newdata.data() + (startoff - m_pOffsets[m_count]), bytes);
     }
     return b;
 }
@@ -303,10 +304,10 @@ MemMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
     std::uint64_t bytes = m_offsets[p_vectorID + 1] - startoff;
     ByteArray b = ByteArray::Alloc(bytes);
     if (p_vectorID < m_count) {
-        std::memcpy(b.Data(), m_metadataHolder.Data() + startoff, bytes);
+        memcpy(b.Data(), m_metadataHolder.Data() + startoff, bytes);
     }
     else {
-        std::memcpy(b.Data(), m_newdata.data() + (startoff - m_offsets[m_count]), bytes);
+        memcpy(b.Data(), m_newdata.data() + (startoff - m_offsets[m_count]), bytes);
     }
     return b;
 }
