@@ -352,12 +352,8 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
         {
-            if (p_abort != nullptr && p_abort->ShouldAbort()) 
-            {
-                ret = ErrorCode::ExternalAbort;
-                i = p_addindex->GetNumSamples();
-                continue;
-            }
+            if (ret == ErrorCode::ExternalAbort) continue;
+
             if (p_addindex->ContainSample(i))
             {
                 ByteArray meta = p_addindex->GetMetadata(i);
@@ -365,21 +361,27 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
             }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort()) 
+            {
+                ret = ErrorCode::ExternalAbort;
+            }
         }
     }
     else {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
         {
-            if (p_abort != nullptr && p_abort->ShouldAbort()) 
-            {
-                ret = ErrorCode::ExternalAbort;
-                i = p_addindex->GetNumSamples();
-                continue;
-            }
+            if (ret == ErrorCode::ExternalAbort) continue;
+
             if (p_addindex->ContainSample(i))
             {
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
+            }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort())
+            {
+                ret = ErrorCode::ExternalAbort;
             }
         }
     }
