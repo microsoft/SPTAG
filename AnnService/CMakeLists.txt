@@ -1,8 +1,26 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 
-file(GLOB HDR_FILES ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/VectorSetReaders/*.h)
-file(GLOB SRC_FILES ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/VectorSetReaders/*.cpp)
+file(GLOB HDR_FILES
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/*.h
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h
+        ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/VectorSetReaders/*.h
+        ${PROJECT_SOURCE_DIR}/simde/simde/*.h
+        ${PROJECT_SOURCE_DIR}/simde/simde/x86/*.h
+        ${PROJECT_SOURCE_DIR}/simde/simde/arm/*.h
+        ${PROJECT_SOURCE_DIR}/simde/simde/arm/neon/*.h
+        )
+file(GLOB SRC_FILES
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/*.cpp
+        ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/VectorSetReaders/*.cpp
+        )
 
 include_directories(${PROJECT_SOURCE_DIR}/AnnService)
 

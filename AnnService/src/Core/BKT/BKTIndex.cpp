@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/BKT/Index.h"
+#include "../../../../simde/simde/x86/sse4.2.h"
+
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -112,9 +114,9 @@ namespace SPTAG
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
             const SizeType *node = m_pGraph[tmpNode]; \
-            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            __builtin_prefetch((const char *)node); \
             for (DimensionType i = 0; i <= checkPos; i++) { \
-                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+                __builtin_prefetch((const char *)(m_pSamples)[node[i]]); \
             } \
             if (gnode.distance <= p_query.worstDist()) { \
                 SizeType checkNode = node[checkPos]; \
@@ -166,9 +168,9 @@ namespace SPTAG
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
             const SizeType *node = m_pGraph[tmpNode]; \
-            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            __builtin_prefetch((const char *)node); \
             for (DimensionType i = 0; i <= checkPos; i++) { \
-                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+                __builtin_prefetch((const char *)(m_pSamples)[node[i]]); \
             } \
             if (gnode.distance <= p_query.worstDist()) { \
                 SizeType checkNode = node[checkPos]; \
