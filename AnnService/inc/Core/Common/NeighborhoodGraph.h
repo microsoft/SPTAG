@@ -11,6 +11,8 @@
 #include "FineGrainedLock.h"
 #include "QueryResultSet.h"
 
+#include <chrono>
+
 namespace SPTAG
 {
     namespace COMMON
@@ -63,6 +65,7 @@ namespace SPTAG
                         for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                             (NeighborhoodDists)[i][j] = MaxDist;
 
+                    auto t1 = std::chrono::high_resolution_clock::now();
                     std::cout << "Parallel TpTree Partition begin " << std::endl;
 #pragma omp parallel for schedule(dynamic)
                     for (int i = 0; i < m_iTPTNumber; i++)
@@ -74,6 +77,8 @@ namespace SPTAG
                         std::cout << "Finish Getting Leaves for Tree " << i << std::endl;
                     }
                     std::cout << "Parallel TpTree Partition done" << std::endl;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    std::cout << "Build TPTree time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count() << std::endl << std::flush;
 
                     for (int i = 0; i < m_iTPTNumber; i++)
                     {
@@ -105,6 +110,9 @@ namespace SPTAG
                     }
                     TptreeDataIndices.clear();
                     TptreeLeafNodes.clear();
+                    
+                    auto t3 = std::chrono::high_resolution_clock::now();
+                    std::cout << "Process TPTree time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count() << std::endl << std::flush;
                 }
                 RefineGraph<T>(index, idmap);
             }
@@ -114,24 +122,28 @@ namespace SPTAG
             {
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
+                    auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
                         if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                     }
-                    std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    std::cout << "Refine RNG time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count() <<  " graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl << std::flush;
                 }
 
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
+                auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
                     RefineNode<T>(index, i, false, false, m_iCEF);
                     if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
                 }
-                std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+                auto t2 = std::chrono::high_resolution_clock::now();
+                std::cout << "Refine RNG time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count() << " graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl << std::flush;
 
                 if (idmap != nullptr) {
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++)

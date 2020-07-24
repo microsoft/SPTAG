@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/BKT/Index.h"
+#include <chrono>
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -300,8 +301,15 @@ namespace SPTAG
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
+            auto t1 = std::chrono::high_resolution_clock::now();
             m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, omp_get_num_threads());
+            auto t2 = std::chrono::high_resolution_clock::now();
+            std::cout << "Build Tree time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count() << std::endl << std::flush;
+            
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
+            auto t3 = std::chrono::high_resolution_clock::now();
+            std::cout << "Build Graph time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count() << std::endl << std::flush;
+
             m_bReady = true;
             return ErrorCode::Success;
         }
