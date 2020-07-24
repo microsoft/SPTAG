@@ -2,11 +2,6 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/VectorSet.h"
-#include "inttypes.h"
-#include <fstream>
-#include <memory>
-#include "inc/Helper/VectorSetReader.h"
-#include "inc/Core/Common/CommonUtils.h"
 
 using namespace SPTAG;
 
@@ -32,31 +27,6 @@ BasicVectorSet::BasicVectorSet(const ByteArray& p_bytesArray,
       m_vectorCount(p_vectorCount),
       m_perVectorDataSize(static_cast<SizeType>(p_dimension * GetValueTypeSize(p_valueType)))
 {
-}
-
-
-void
-BasicVectorSet::Normalize(DistCalcMethod p_distCalcMethod)
-{
-    if (p_distCalcMethod == DistCalcMethod::Cosine) {
-#pragma omp parallel for
-        for (int64_t i = 0; i < m_vectorCount; i++)
-        {
-            int64_t offset = i * m_perVectorDataSize;
-            switch (m_valueType)
-            {
-#define DefineVectorValueType(Name, Type) \
-case SPTAG::VectorValueType::Name: \
-SPTAG::COMMON::Utils::Normalize<Type>(reinterpret_cast<Type *>(m_data.Data() + offset), m_dimension, SPTAG::COMMON::Utils::GetBase<Type>()); \
-break; \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-            default:
-                break;
-            }
-        }
-    }
 }
 
 BasicVectorSet::~BasicVectorSet()

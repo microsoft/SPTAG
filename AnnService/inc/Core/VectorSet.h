@@ -16,8 +16,6 @@ public:
 
     virtual ~VectorSet();
 
-    virtual void Normalize(DistCalcMethod p_distCalcMethod) = 0;
-
     virtual VectorValueType GetValueType() const = 0;
 
     virtual void* GetVector(SizeType p_vectorID) const = 0;
@@ -45,8 +43,6 @@ public:
                    SizeType p_vectorCount);
 
     virtual ~BasicVectorSet();
-
-    virtual void Normalize(DistCalcMethod p_distCalcMethod);
 
     virtual VectorValueType GetValueType() const;
 

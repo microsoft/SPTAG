@@ -62,6 +62,14 @@ namespace SPTAG
                 }
             }
 
+            template<typename T>
+            static inline int GetBase() {
+                if (GetEnumValueType<T>() != VectorValueType::Float) {
+                    return (int)(std::numeric_limits<T>::max)();
+                }
+                return 1;
+            }
+
             static double GetVector(char* cstr, const char* sep, std::vector<float>& arr, DimensionType& NumDim) {
                 char* current;
                 char* context = NULL;
@@ -107,6 +115,15 @@ namespace SPTAG
                 }
             }
 
+            template <typename T>
+            static void BatchNormalize(T* data, SizeType row, DimensionType col, int base, int threads) {
+#pragma omp parallel for num_threads(threads)
+                for (SizeType i = 0; i < row; i++)
+                {
+                    SPTAG::COMMON::Utils::Normalize(data + i * (size_t)col, col, base);
+                }
+            }
+
             static size_t ProcessLine(std::string& currentLine, std::vector<float>& arr, DimensionType& D, int base, DistCalcMethod distCalcMethod) {
                 size_t index;
                 double vecLen;
@@ -140,14 +157,6 @@ namespace SPTAG
                 }
                 NumQuery = i;
                 std::cout << "Load data: (" << NumQuery << ", " << NumDim << ")" << std::endl;
-            }
-
-            template<typename T>
-            static inline int GetBase() {
-                if (GetEnumValueType<T>() != VectorValueType::Float) {
-                    return (int)(std::numeric_limits<T>::max)();
-                }
-                return 1;
             }
 
             static inline void AddNeighbor(SizeType idx, float dist, SizeType *neighbors, float *dists, DimensionType size)
