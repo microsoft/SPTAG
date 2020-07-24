@@ -47,7 +47,7 @@ BasicVectorSet::Normalize(DistCalcMethod p_distCalcMethod)
             {
 #define DefineVectorValueType(Name, Type) \
 case SPTAG::VectorValueType::Name: \
-SPTAG::COMMON::Utils::Normalize<Type>(reinterpret_cast<Type *>(m_data.Data() + offset), p_dimension, SPTAG::COMMON::Utils::GetBase<Type>()); \
+SPTAG::COMMON::Utils::Normalize<Type>(reinterpret_cast<Type *>(m_data.Data() + offset), m_dimension, SPTAG::COMMON::Utils::GetBase<Type>()); \
 break; \
 
 #include "inc/Core/DefinitionList.h"

@@ -37,9 +37,9 @@ AggregatorContext::AggregatorContext(const std::string& p_filePath)
 	m_settings->m_distMethod = iniReader.GetParameter("Service", "DistCalcMethod", DistCalcMethod::L2);
     const std::string emptyStr;
 
-    std::uint32_t serverNum = iniReader.GetParameter("Servers", "Number", static_cast<std::uint32_t>(0));
+    SizeType serverNum = iniReader.GetParameter("Servers", "Number", static_cast<SizeType>(0));
 
-    for (std::uint32_t i = 0; i < serverNum; ++i)
+    for (SizeType i = 0; i < serverNum; ++i)
     {
         std::string sectionName("Server_");
         sectionName += std::to_string(i);

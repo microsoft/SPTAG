@@ -231,7 +231,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 			} else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0) { \
                 vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length())); \
                 Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(), vectorSize); \
-                vectorDimension = vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType); \
+                vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType)); \
             } \
             for (int i = 0; i < context->GetCenters()->Count(); i++) { \
                 servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance((Type*)vector.Data(), \

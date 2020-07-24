@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/IndexBuilder/Options.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common.h"
@@ -12,9 +11,31 @@
 
 using namespace SPTAG;
 
+class BuilderOptions : public Helper::ReaderOptions
+{
+public:
+    BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
+    {
+        AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
+        AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
+        AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
+        AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+    }
+
+    ~BuilderOptions() {}
+
+    std::string m_inputFiles;
+
+    std::string m_outputFolder;
+
+    SPTAG::IndexAlgoType m_indexAlgoType;
+
+    std::string m_builderConfigFile;
+};
+
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<IndexBuilder::BuilderOptions> options(new IndexBuilder::BuilderOptions);
+    std::shared_ptr<BuilderOptions> options(new BuilderOptions);
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
@@ -54,42 +75,14 @@ int main(int argc, char* argv[])
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
     }
 
-    ErrorCode code;
-    if (options->m_inputFiles.find("BIN:") == 0) {
-        std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles.substr(4), ",");
-        std::ifstream inputStream(files[0], std::ifstream::binary);
-        if (!inputStream.is_open()) {
-            fprintf(stderr, "Failed to read input file.\n");
-            exit(1);
-        }
-        SizeType row;
-        DimensionType col;
-        inputStream.read((char*)&row, sizeof(SizeType));
-        inputStream.read((char*)&col, sizeof(DimensionType));
-        std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(options->m_inputValueType)) * row * col;
-        ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
-        char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-        inputStream.read(vecBuf, totalRecordVectorBytes);
-        inputStream.close();
-        std::shared_ptr<VectorSet> p_vectorSet(new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
-        
-        std::shared_ptr<MetadataSet> p_metaSet = nullptr;
-        if (files.size() >= 3) {
-            p_metaSet.reset(new FileMetadataSet(files[1], files[2]));
-        }
-        code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
-        indexBuilder->SaveIndex(options->m_outputFolder);
+    auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+    if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
+    {
+        fprintf(stderr, "Failed to read input file.\n");
+        exit(1);
     }
-    else {
-        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
-        {
-            fprintf(stderr, "Failed to read input file.\n");
-            exit(1);
-        }
-        code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
-        indexBuilder->SaveIndex(options->m_outputFolder);
-    }
+    ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
+    indexBuilder->SaveIndex(options->m_outputFolder);
 
     if (ErrorCode::Success != code)
     {

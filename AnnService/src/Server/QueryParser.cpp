@@ -71,7 +71,7 @@ QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
             }
             else if (State::VectorBase64 == currState)
             {
-                m_vectorBase64Length = iter - m_vectorBase64;
+                m_vectorBase64Length = (SizeType)(iter - m_vectorBase64);
             }
 
             currState = State::None;
@@ -143,7 +143,7 @@ QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
     }
     else if (State::VectorBase64 == currState)
     {
-        m_vectorBase64Length = iter - m_vectorBase64;
+        m_vectorBase64Length = (SizeType)(iter - m_vectorBase64);
     }
 
     if (vectorStrBegin == nullptr || 0 == estDimension)

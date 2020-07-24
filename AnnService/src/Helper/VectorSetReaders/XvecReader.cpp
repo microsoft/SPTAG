@@ -72,6 +72,7 @@ XvecReader::LoadFile(const std::string& p_filePaths)
     outputStream.seekp(0, std::ios_base::beg);
     outputStream.write(reinterpret_cast<char*>(&vectorCount), sizeof(vectorCount));
     outputStream.close();
+    return ErrorCode::Success;
 }
 
 
