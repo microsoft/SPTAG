@@ -171,6 +171,8 @@
     <ClInclude Include="inc\Helper\ThreadPool.h" />
     <ClInclude Include="inc\Helper\VectorSetReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorSet.cpp" />
@@ -188,6 +190,8 @@
     <ClCompile Include="src\Helper\VectorSetReader.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />
+    <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

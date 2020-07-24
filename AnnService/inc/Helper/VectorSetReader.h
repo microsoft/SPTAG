@@ -19,17 +19,19 @@ namespace Helper
 class ReaderOptions : public ArgumentsParser
 {
 public:
-    ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
+    ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
 
     ~ReaderOptions();
 
-    std::uint32_t m_threadNum;
-
-    DimensionType m_dimension;
-
-    std::string m_vectorDelimiter;
-
     SPTAG::VectorValueType m_inputValueType;
+    
+    DimensionType m_dimension;   
+  
+    SPTAG::VectorFileType m_inputFileType;
+
+    std::string m_vectorDelimiter;    
+    
+    std::uint32_t m_threadNum;
 };
 
 class VectorSetReader
@@ -38,8 +40,6 @@ public:
     VectorSetReader(std::shared_ptr<ReaderOptions> p_options);
 
     virtual ~VectorSetReader();
-
-    virtual ErrorCode LoadBinaryFile(const std::string& p_filePath) = 0;
 
     virtual ErrorCode LoadFile(const std::string& p_filePath) = 0;
 

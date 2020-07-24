@@ -160,6 +160,12 @@
     <ClInclude Include="inc\Helper\DynamicNeighbors.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -206,6 +212,12 @@
     </ClCompile>
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -16,6 +16,8 @@ public:
 
     virtual ~VectorSet();
 
+    virtual void Normalize(DistCalcMethod p_distCalcMethod) = 0;
+
     virtual VectorValueType GetValueType() const = 0;
 
     virtual void* GetVector(SizeType p_vectorID) const = 0;
@@ -42,10 +44,9 @@ public:
                    DimensionType p_dimension,
                    SizeType p_vectorCount);
 
-    BasicVectorSet(std::string p_filePath, VectorValueType p_valueType,
-        DimensionType p_dimension, SizeType p_vectorCount, VectorFileType p_fileType, std::string p_delimiter, DistCalcMethod p_distCalcMethod);
-
     virtual ~BasicVectorSet();
+
+    virtual void Normalize(DistCalcMethod p_distCalcMethod);
 
     virtual VectorValueType GetValueType() const;
 
@@ -73,14 +74,6 @@ private:
     SizeType m_vectorCount;
 
     size_t m_perVectorDataSize;
-
-    void readXvec(std::string p_filePath, VectorValueType p_valueType,
-        DimensionType p_dimension, SizeType p_vectorCount);
-
-    void readDefault(std::string p_filePath, VectorValueType p_valueType);
-
-    void readTxt(std::string p_filePath, VectorValueType p_valueType,
-        DimensionType p_dimension, std::string p_delimiter);
 };
 
 } // namespace SPTAG
