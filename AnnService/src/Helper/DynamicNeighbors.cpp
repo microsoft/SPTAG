@@ -53,7 +53,7 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
 
     size_t graphSize = static_cast<size_t>(m_neighborOffset[m_vectorCount]);
 
-    fprintf(stderr, "Vector count: %d, Graph size: %llu\n", m_vectorCount, graphSize);
+    fprintf(stderr, "Vector count: %d, Graph size: %zu\n", m_vectorCount, graphSize);
 
     m_data.reset(new int[graphSize]);
     graph.read(reinterpret_cast<char*>(m_data.get()), graphSize * sizeof(int));
@@ -61,7 +61,7 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
     if (graph.gcount() != graphSize * sizeof(int))
     {
         fprintf(stderr,
-            "Failed read graph: size not match, expected %llu, actually %llu\n",
+            "Failed read graph: size not match, expected %zu, actually %zu\n",
             static_cast<size_t>(graphSize * sizeof(int)),
             static_cast<size_t>(graph.gcount()));
 
