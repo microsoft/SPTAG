@@ -80,18 +80,18 @@ std::shared_ptr<VectorSet>
 XvecReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
-	if (!inputStream.is_open()) {
-		fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
-		exit(1);
-	}
+    if (!inputStream.is_open()) {
+        fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
+        exit(1);
+    }
 
     SizeType row;
     DimensionType col;
-	inputStream.read((char*)&row, sizeof(SizeType));
-	inputStream.read((char*)&col, sizeof(DimensionType));
-	std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
-	ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
-	char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+    inputStream.read((char*)&row, sizeof(SizeType));
+    inputStream.read((char*)&col, sizeof(DimensionType));
+    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
+    ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
+    char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
     inputStream.read(vecBuf, totalRecordVectorBytes);
     inputStream.close();
 

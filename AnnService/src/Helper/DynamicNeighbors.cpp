@@ -62,8 +62,8 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
     {
         fprintf(stderr,
             "Failed read graph: size not match, expected %llu, actually %llu\n",
-            static_cast<uint64_t>(graphSize * sizeof(int)),
-            static_cast<uint64_t>(graph.gcount()));
+            static_cast<size_t>(graphSize * sizeof(int)),
+            static_cast<size_t>(graph.gcount()));
 
         exit(1);
     }

@@ -29,6 +29,7 @@ BasicVectorSet::BasicVectorSet(const ByteArray& p_bytesArray,
 {
 }
 
+
 BasicVectorSet::~BasicVectorSet()
 {
 }
