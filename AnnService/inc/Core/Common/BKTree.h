@@ -168,6 +168,8 @@ namespace SPTAG
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());
                     std::cout << "Start to build BKTree " << i + 1 << std::endl;
 
+time_t start_t = clock();
+
                     ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
                     while (!ss.empty()) {
                         BKTStackItem item = ss.top(); ss.pop();
@@ -205,6 +207,8 @@ namespace SPTAG
                         }
                         m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
+time_t end_t = clock();
+printf("Time to build BKT:%lf\n", (double)(end_t-start_t)/CLOCKS_PER_SEC);
                     m_pTreeRoots.emplace_back(-1);
                     std::cout << i + 1 << " BKTree built, " << m_pTreeRoots.size() - m_pTreeStart[i] << " " << localindices.size() << std::endl;
                 }
