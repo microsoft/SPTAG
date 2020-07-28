@@ -230,6 +230,126 @@ class Point<uint8_t, SUMTYPE, Dim> {
 
 };
 
+// Specialized version of Point structure for SIGNED 1-byte datatype (int8)
+// Packs coordinates into Dim/4 total integer values, and functions un-pack as needed
+template<typename SUMTYPE, int Dim>
+class Point<int8_t, SUMTYPE, Dim> {
+  public:
+    int id;
+    uint32_t coords[Dim/4];
+
+  __host__ void load(vector<int8_t> data) {
+
+    uint8_t* test = reinterpret_cast<uint8_t*>(data.data());
+    for(int i=0; i<Dim/4; i++) {
+      coords[i] = 0;
+      for(int j=0; j<4; j++) {
+        coords[i] += ((test[i*4 + j]) << (j*8));
+      }
+    }
+  }
+
+  __host__ void loadChunk(int8_t* data, int exact_dims) {
+
+    uint8_t* test = reinterpret_cast<uint8_t*>(data);
+    for(int i=0; i<exact_dims/4; i++) {
+      coords[i] = 0;
+      for(int j=0; j<4; j++) {
+        coords[i] += (test[i*4 + j] << (j*8));
+      }
+    }
+    for(int i=exact_dims/4; i<Dim/4; i++) {
+      coords[i]=0;
+    }
+  }
+
+  __host__ int8_t getVal(int idx) {
+    if(idx % 4 == 0) {
+      return (int8_t)(coords[idx/4] & 0x000000FF);
+    }
+    else if(idx % 4 == 1) {
+      return (int8_t)((coords[idx/4] & 0x0000FF00)>>8);
+    }
+    else if(idx % 4 == 2) {
+      return (int8_t)((coords[idx/4] & 0x00FF0000)>>16);
+    }
+    else if(idx % 4 == 3) {
+      return (int8_t)((coords[idx/4])>>24);
+    }
+    return 0;
+  }
+
+  __host__ __device__ Point& operator=( const Point& other ) {
+    for(int i=0; i<Dim/4; i++) {
+      coords[i] = other.coords[i];
+    }
+    id = other.id;
+    return *this;
+  }
+  __device__ __host__ SUMTYPE l2_block(Point<int8_t,SUMTYPE,Dim>* other) {return 0;}
+  __device__ __host__ SUMTYPE l2(Point<int8_t,SUMTYPE,Dim>* other) {
+
+    SUMTYPE totals[4] = {0,0,0,0};
+    SUMTYPE temp[4];
+    SUMTYPE temp_other[4];
+
+    for(int i=0; i<Dim/4; ++i) {
+      temp[0] = (coords[i] & 0x000000FF);
+      temp_other[0] = (other->coords[i] & 0x000000FF);
+
+      temp[1] = (coords[i] & 0x0000FF00) >> 8;
+      temp_other[1] = (other->coords[i] & 0x0000FF00) >> 8;
+
+      temp[2] = (coords[i] & 0x00FF0000) >> 16;
+      temp_other[2] = (other->coords[i] & 0x00FF0000) >> 16;
+
+      temp[3] = (coords[i]) >> 24;
+      temp_other[3] = (other->coords[i])>> 24;
+
+      totals[0] += (temp[0]-temp_other[0])*(temp[0]-temp_other[0]);
+      totals[1] += (temp[1]-temp_other[1])*(temp[1]-temp_other[1]);
+      totals[2] += (temp[2]-temp_other[2])*(temp[2]-temp_other[2]);
+      totals[3] += (temp[3]-temp_other[3])*(temp[3]-temp_other[3]);
+    }
+    return totals[0]+totals[1]+totals[2]+totals[3];
+  }
+
+
+#if __CUDA_ARCH__ > 610  // Use intrinsics if available for GPU being compiled for
+  // With int8 datatype, values are packed into integers so they need to be
+  // unpacked while computing distance
+  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other) {
+    int32_t prod=0;
+    int32_t src=0;
+    int32_t target=0;
+
+    for(int i=0; i<Dim/4; ++i) {
+      src = coords[i];
+      target = other->coords[i];
+      prod = __dp4a(src, target, prod);
+    }
+
+    return ((SUMTYPE)16384) - (SUMTYPE)prod;
+  }
+
+#else
+  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other) {
+    SUMTYPE prod[4];
+    prod[0]=0;
+
+    for(int i=0; i<Dim/4; ++i) {
+      prod[0] += ((int8_t)(coords[i] & 0x000000FF))*((int8_t)(other->coords[i] & 0x000000FF));
+      prod[1] = ((int8_t)((coords[i] & 0x0000FF00) >> 8))*((int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+      prod[2] = ((int8_t)((coords[i] & 0x00FF0000) >> 16))*((int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+      prod[3] = ((int8_t)((coords[i]) >> 24))*((int8_t)((other->coords[i]) >> 24));
+      prod[0] += prod[1]+prod[2]+prod[3];
+    }
+
+    return ((SUMTYPE)1) - prod[0];
+  }
+#endif
+};
+
 /*********************************************************************
  * Create an array of Point structures out of an input array
  ********************************************************************/
