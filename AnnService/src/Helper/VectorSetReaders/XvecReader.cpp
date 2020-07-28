@@ -5,11 +5,12 @@
 #include "inc/Helper/CommonHelper.h"
 
 #include <fstream>
+#include <time.h>
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
-XvecReader::XvecReader(std::shared_ptr<ReaderOptions> p_options)
+XvecVectorReader::XvecVectorReader(std::shared_ptr<ReaderOptions> p_options)
     : VectorSetReader(std::move(p_options))
 {
     std::string tempFolder("tempfolder");
@@ -17,11 +18,12 @@ XvecReader::XvecReader(std::shared_ptr<ReaderOptions> p_options)
     {
         mkdir(tempFolder.c_str());
     }
-    m_vectorOutput = tempFolder + FolderSep + "vectorset.bin";
+    std::srand(clock());
+    m_vectorOutput = tempFolder + FolderSep + "vectorset.bin." + std::to_string(std::rand());
 }
 
 
-XvecReader::~XvecReader()
+XvecVectorReader::~XvecVectorReader()
 {
     if (fileexists(m_vectorOutput.c_str()))
     {
@@ -31,7 +33,7 @@ XvecReader::~XvecReader()
 
 
 ErrorCode
-XvecReader::LoadFile(const std::string& p_filePaths)
+XvecVectorReader::LoadFile(const std::string& p_filePaths)
 {
     const auto& files = Helper::StrUtils::SplitString(p_filePaths, ",");
     std::ofstream outputStream(m_vectorOutput, std::ofstream::binary);
@@ -77,7 +79,7 @@ XvecReader::LoadFile(const std::string& p_filePaths)
 
 
 std::shared_ptr<VectorSet>
-XvecReader::GetVectorSet() const
+XvecVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
@@ -103,7 +105,7 @@ XvecReader::GetVectorSet() const
 
 
 std::shared_ptr<MetadataSet>
-XvecReader::GetMetadataSet() const
+XvecVectorReader::GetMetadataSet() const
 {
     return nullptr;
 }

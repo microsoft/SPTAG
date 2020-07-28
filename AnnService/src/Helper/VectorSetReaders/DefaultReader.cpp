@@ -9,7 +9,7 @@
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
-DefaultReader::DefaultReader(std::shared_ptr<ReaderOptions> p_options)
+DefaultVectorReader::DefaultVectorReader(std::shared_ptr<ReaderOptions> p_options)
     : VectorSetReader(std::move(p_options))
 {
     m_vectorOutput = "";
@@ -18,13 +18,13 @@ DefaultReader::DefaultReader(std::shared_ptr<ReaderOptions> p_options)
 }
 
 
-DefaultReader::~DefaultReader()
+DefaultVectorReader::~DefaultVectorReader()
 {
 }
 
 
 ErrorCode
-DefaultReader::LoadFile(const std::string& p_filePaths)
+DefaultVectorReader::LoadFile(const std::string& p_filePaths)
 {
     const auto& files = SPTAG::Helper::StrUtils::SplitString(p_filePaths, ",");
     m_vectorOutput = files[0];
@@ -37,7 +37,7 @@ DefaultReader::LoadFile(const std::string& p_filePaths)
 
 
 std::shared_ptr<VectorSet>
-DefaultReader::GetVectorSet() const
+DefaultVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
@@ -63,7 +63,7 @@ DefaultReader::GetVectorSet() const
 
 
 std::shared_ptr<MetadataSet>
-DefaultReader::GetMetadataSet() const
+DefaultVectorReader::GetMetadataSet() const
 {
     if (fileexists(m_metadataIndexOutput.c_str()) && fileexists(m_metadataConentOutput.c_str()))
         return std::shared_ptr<MetadataSet>(new FileMetadataSet(m_metadataConentOutput, m_metadataIndexOutput));

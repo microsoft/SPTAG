@@ -16,12 +16,12 @@ namespace SPTAG
 namespace Helper
 {
 
-class TxtReader : public VectorSetReader
+class TxtVectorReader : public VectorSetReader
 {
 public:
-    TxtReader(std::shared_ptr<ReaderOptions> p_options);
+    TxtVectorReader(std::shared_ptr<ReaderOptions> p_options);
 
-    virtual ~TxtReader();
+    virtual ~TxtVectorReader();
 
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 

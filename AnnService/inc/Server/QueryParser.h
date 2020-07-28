@@ -19,21 +19,18 @@ template<typename ValueType>
 ErrorCode
 	ConvertVectorFromString(const std::vector<const char*>& p_source, ByteArray& p_dest, SizeType& p_dimension)
 {
-	p_dimension = 0;
-	p_dest = ByteArray::Alloc(p_source.size() * sizeof(ValueType));
+	p_dimension = p_source.size();
+	p_dest = ByteArray::Alloc(p_dimension * sizeof(ValueType));
 	ValueType* arr = reinterpret_cast<ValueType*>(p_dest.Data());
 	for (std::size_t i = 0; i < p_source.size(); ++i)
 	{
 		if (!Helper::Convert::ConvertStringTo<ValueType>(p_source[i], arr[i]))
 		{
 			p_dest.Clear();
-			p_dimension = 0;
+            p_dimension = 0;
 			return ErrorCode::Fail;
 		}
-
-		++p_dimension;
 	}
-
 	return ErrorCode::Success;
 }
 

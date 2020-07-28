@@ -142,7 +142,7 @@ private:
 } // namespace
 
 
-TxtReader::TxtReader(std::shared_ptr<ReaderOptions> p_options)
+TxtVectorReader::TxtVectorReader(std::shared_ptr<ReaderOptions> p_options)
     : VectorSetReader(std::move(p_options)),
     m_subTaskBlocksize(0)
 {
@@ -155,13 +155,15 @@ TxtReader::TxtReader(std::shared_ptr<ReaderOptions> p_options)
     }
 
     tempFolder += FolderSep;
-    m_vectorOutput = tempFolder + "vectorset.bin";
-    m_metadataConentOutput = tempFolder + "metadata.bin";
-    m_metadataIndexOutput = tempFolder + "metadataindex.bin";
+    std::srand(clock());
+    std::string randstr = std::to_string(std::rand());
+    m_vectorOutput = tempFolder + "vectorset.bin." + randstr;
+    m_metadataConentOutput = tempFolder + "metadata.bin." + randstr;
+    m_metadataIndexOutput = tempFolder + "metadataindex.bin." + randstr;
 }
 
 
-TxtReader::~TxtReader()
+TxtVectorReader::~TxtVectorReader()
 {
     if (fileexists(m_vectorOutput.c_str()))
     {
@@ -181,7 +183,7 @@ TxtReader::~TxtReader()
 
 
 ErrorCode
-TxtReader::LoadFile(const std::string& p_filePaths)
+TxtVectorReader::LoadFile(const std::string& p_filePaths)
 {
     const auto& files = GetFileSizes(p_filePaths);
     std::vector<std::function<void()>> subWorks;
@@ -212,7 +214,7 @@ TxtReader::LoadFile(const std::string& p_filePaths)
 
         for (std::uint32_t i = 0; i < fileTaskCount; ++i)
         {
-            subWorks.emplace_back(std::bind(&TxtReader::LoadFileInternal,
+            subWorks.emplace_back(std::bind(&TxtVectorReader::LoadFileInternal,
                                             this,
                                             fileInfo.first,
                                             m_subTaskCount++,
@@ -243,7 +245,7 @@ TxtReader::LoadFile(const std::string& p_filePaths)
 
 
 std::shared_ptr<VectorSet>
-TxtReader::GetVectorSet() const
+TxtVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
@@ -269,7 +271,7 @@ TxtReader::GetVectorSet() const
 
 
 std::shared_ptr<MetadataSet>
-TxtReader::GetMetadataSet() const
+TxtVectorReader::GetMetadataSet() const
 {
     if (fileexists(m_metadataIndexOutput.c_str()) && fileexists(m_metadataConentOutput.c_str()))
         return std::shared_ptr<MetadataSet>(new FileMetadataSet(m_metadataConentOutput, m_metadataIndexOutput));
@@ -278,7 +280,7 @@ TxtReader::GetMetadataSet() const
 
 
 void
-TxtReader::LoadFileInternal(const std::string& p_filePath,
+TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
                                 std::uint32_t p_subTaskID,
                                 std::uint32_t p_fileBlockID,
                                 std::size_t p_fileBlockSize)
@@ -405,7 +407,7 @@ TxtReader::LoadFileInternal(const std::string& p_filePath,
 
 
 void
-TxtReader::MergeData()
+TxtVectorReader::MergeData()
 {
     const std::size_t bufferSize = 1 << 30;
     const std::size_t bufferSizeTrim64 = (bufferSize / sizeof(std::uint64_t)) * sizeof(std::uint64_t);
@@ -494,11 +496,11 @@ TxtReader::MergeData()
 }
 
 
-std::vector<TxtReader::FileInfoPair>
-TxtReader::GetFileSizes(const std::string& p_filePaths)
+std::vector<TxtVectorReader::FileInfoPair>
+TxtVectorReader::GetFileSizes(const std::string& p_filePaths)
 {
     const auto& files = Helper::StrUtils::SplitString(p_filePaths, ",");
-    std::vector<TxtReader::FileInfoPair> res;
+    std::vector<TxtVectorReader::FileInfoPair> res;
     res.reserve(files.size());
 
     for (const auto& filePath : files)

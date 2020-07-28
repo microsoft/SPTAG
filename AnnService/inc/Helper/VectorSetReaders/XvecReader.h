@@ -11,12 +11,12 @@ namespace SPTAG
 namespace Helper
 {
 
-class XvecReader : public VectorSetReader
+class XvecVectorReader : public VectorSetReader
 {
 public:
-    XvecReader(std::shared_ptr<ReaderOptions> p_options);
+    XvecVectorReader(std::shared_ptr<ReaderOptions> p_options);
 
-    virtual ~XvecReader();
+    virtual ~XvecVectorReader();
 
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 
