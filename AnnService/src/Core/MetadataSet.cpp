@@ -37,7 +37,7 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_meta
         ByteArray meta = GetMetadata(indices[i]);
         p_metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
     }
-    std::cout << "Save MetaIndex(" << R << ") Meta(" << offset << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%d) Meta(%llu)\n", R, offset);
     return ErrorCode::Success;
 }
 
@@ -87,7 +87,7 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     std::ifstream fpidx(p_metaindexfile, std::ifstream::binary);
     if (!m_fp->is_open() || !fpidx.is_open())
     {
-        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(), p_metaindexfile.c_str());
         return;
     }
 
@@ -95,7 +95,7 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     m_pOffsets.resize(m_count + 1);
     fpidx.read((char *)m_pOffsets.data(), sizeof(std::uint64_t) * (m_count + 1));
     fpidx.close();
-    std::cout << "Load MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%zu) Meta(%llu)\n", m_pOffsets.size() - 1, m_pOffsets.back());
 }
 
 
@@ -194,7 +194,7 @@ FileMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndex
     if (m_newdata.size() > 0) {
         p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
     }
-    std::cout << "Save MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%zu) Meta(%llu)\n", m_pOffsets.size() - 1, m_pOffsets.back());
     return ErrorCode::Success;
 }
 
@@ -237,7 +237,7 @@ MemMetadataSet::Init(std::istream& p_metain, std::istream& p_metaindexin)
     m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
     p_metain.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
     m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
-    std::cout << "Load MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%zu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
 }
 
 
@@ -252,7 +252,7 @@ MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string&
     std::ifstream metaidx(p_metaindexfile, std::ifstream::binary);
     if (!meta.is_open() || !metaidx.is_open())
     {
-        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(),  p_metaindexfile.c_str());
         return;
     }
     Init(meta, metaidx);
@@ -359,7 +359,7 @@ MemMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexO
     if (m_newdata.size() > 0) {
         p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
     }
-    std::cout << "Save MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%zu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 

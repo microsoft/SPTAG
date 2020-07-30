@@ -41,7 +41,7 @@ DefaultVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
-        fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
+        LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 

@@ -84,7 +84,7 @@ namespace SPTAG
                         arr.push_back(val);
                     }
                     catch (std::exception e) {
-                        std::cout << "Exception:" << e.what() << std::endl;
+                        LOG(Helper::LogLevel::LL_Error, "Exception:%s\n", e.what());
                         return -2;
                     }
 
@@ -128,7 +128,7 @@ namespace SPTAG
                 size_t index;
                 double vecLen;
                 if (currentLine.length() == 0 || (index = currentLine.find_last_of("\t")) == std::string::npos || (vecLen = GetVector(const_cast<char*>(currentLine.c_str() + index + 1), "|", arr, D)) < -1) {
-                    std::cout << "Parse vector error: " + currentLine << std::endl;
+                    LOG(Helper::LogLevel::LL_Error, "Parse vector error: %s\n", currentLine.c_str());
                     //throw MyException("Error in parsing data " + currentLine);
                     return -1;
                 }
@@ -156,7 +156,7 @@ namespace SPTAG
                     i++;
                 }
                 NumQuery = i;
-                std::cout << "Load data: (" << NumQuery << ", " << NumDim << ")" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load data: (%d,%d)\n", NumQuery, NumDim);
             }
 
             static inline void AddNeighbor(SizeType idx, float dist, SizeType *neighbors, float *dists, DimensionType size)

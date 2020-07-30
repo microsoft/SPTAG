@@ -154,13 +154,13 @@ namespace SPTAG
 
                 SizeType remain = incRows % rowsInBlock;
                 if (remain > 0) p_outstream.write((char*)incBlocks[blocks], sizeof(T) * cols * remain);
-                std::cout << "Save " << name << " (" << CR << ", " << cols << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
                 return true;
             }
 
             bool Save(std::string sDataPointsFileName) const
             {
-                std::cout << "Save " << name << " To " << sDataPointsFileName << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName);
                 std::ofstream output(sDataPointsFileName, std::ios::binary);
                 if (!output.is_open()) return false;
                 Save(output);
@@ -175,13 +175,13 @@ namespace SPTAG
 
                 Initialize(rows, cols);
                 p_instream.read((char*)data, sizeof(T) * cols * rows);
-                std::cout << "Load " << name << " (" << rows << ", " << cols << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
                 return true;
             }
 
             bool Load(std::string sDataPointsFileName)
             {
-                std::cout << "Load " << name << " From " << sDataPointsFileName << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
                 std::ifstream input(sDataPointsFileName, std::ios::binary);
                 if (!input.is_open()) return false;
                 Load(input);
@@ -201,7 +201,7 @@ namespace SPTAG
                 pDataPointsMemFile += sizeof(DimensionType);
 
                 Initialize(R, C, (T*)pDataPointsMemFile);
-                std::cout << "Load " << name << " (" << R << ", " << C << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
                 return true;
             }
 
@@ -224,13 +224,13 @@ namespace SPTAG
                 for (SizeType i = 0; i < R; i++) {
                     output.write((char*)At(indices[i]), sizeof(T) * cols);
                 }
-                std::cout << "Save Refine " << name << " (" << R << ", " << cols << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), R, cols);
                 return true;
             }
 
             bool Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
             {
-                std::cout << "Save Refine " << name << " To " << sDataPointsFileName << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
                 std::ofstream output(sDataPointsFileName, std::ios::binary);
                 if (!output.is_open()) return false;
                 Refine(indices, output);

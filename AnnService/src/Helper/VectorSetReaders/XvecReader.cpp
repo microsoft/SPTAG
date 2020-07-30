@@ -38,7 +38,7 @@ XvecVectorReader::LoadFile(const std::string& p_filePaths)
     const auto& files = Helper::StrUtils::SplitString(p_filePaths, ",");
     std::ofstream outputStream(m_vectorOutput, std::ofstream::binary);
     if (!outputStream.is_open()) {
-        fprintf(stderr, "Failed to write file: %s \n", m_vectorOutput.c_str());
+        LOG(Helper::LogLevel::LL_Error, "Failed to write file: %s \n", m_vectorOutput.c_str());
         exit(1);
     }
     SizeType vectorCount = 0;
@@ -51,7 +51,7 @@ XvecVectorReader::LoadFile(const std::string& p_filePaths)
     {
         std::ifstream fin(file, std::ifstream::binary);
         if (!fin.is_open()) {
-            fprintf(stderr, "Failed to read file: %s \n", file.c_str());
+            LOG(Helper::LogLevel::LL_Error, "Failed to read file: %s \n", file.c_str());
             exit(-1);
         }
         while (true)
@@ -61,7 +61,7 @@ XvecVectorReader::LoadFile(const std::string& p_filePaths)
             if (fin.eof()) break;
 
             if (dim != m_options->m_dimension) {
-                fprintf(stderr, "Xvec file %s has No.%d vector whose dims are not as many as expected. Expected: %d, Fact: %d\n", file.c_str(), vectorCount, m_options->m_dimension, dim);
+                LOG(Helper::LogLevel::LL_Error, "Xvec file %s has No.%d vector whose dims are not as many as expected. Expected: %d, Fact: %d\n", file.c_str(), vectorCount, m_options->m_dimension, dim);
                 exit(-1);
             }
             fin.read(buffer.get(), vectorDataSize);
@@ -83,7 +83,7 @@ XvecVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
-        fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
+        LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 

@@ -98,6 +98,7 @@
       <ControlFlowGuard>Guard</ControlFlowGuard>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -126,6 +127,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -138,7 +140,6 @@
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />
-    <ClInclude Include="inc\Core\Common\DataUtils.h" />
     <ClInclude Include="inc\Core\Common\DistanceUtils.h" />
     <ClInclude Include="inc\Core\Common\Heap.h" />
     <ClInclude Include="inc\Core\Common\QueryResultSet.h" />
@@ -161,7 +162,9 @@
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />
+    <ClInclude Include="inc\Helper\DiskIO.h" />
     <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
+    <ClInclude Include="inc\Helper\Logging.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />
     <ClInclude Include="inc\Helper\StringConvert.h" />
     <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />

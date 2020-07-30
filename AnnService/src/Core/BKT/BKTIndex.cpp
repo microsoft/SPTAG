@@ -302,13 +302,13 @@ namespace SPTAG
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
-            m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, omp_get_num_threads());
+            m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads);
             auto t2 = std::chrono::high_resolution_clock::now();
-            std::cout << "Build Tree time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count() << std::endl << std::flush;
+            LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
             
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
             auto t3 = std::chrono::high_resolution_clock::now();
-            std::cout << "Build Graph time (s):" << std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count() << std::endl << std::flush;
+            LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
 
             m_bReady = true;
             return ErrorCode::Success;
@@ -347,7 +347,7 @@ namespace SPTAG
                 }
             }
 
-            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
             ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
@@ -390,7 +390,7 @@ namespace SPTAG
                 }
             }
 
-            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
             if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
@@ -464,7 +464,7 @@ namespace SPTAG
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || 
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success || 
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                    std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
+                    LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
                     m_deletedID.SetR(begin);
@@ -499,7 +499,6 @@ namespace SPTAG
             {
                 m_pGraph.RefineNode<T>(this, node, true, true, m_pGraph.m_iAddCEF);
             }
-            //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
         }
 
@@ -512,7 +511,7 @@ namespace SPTAG
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        fprintf(stderr, "Setting %s with value %s\n", RepresentStr, p_value); \
+        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (SPTAG::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \

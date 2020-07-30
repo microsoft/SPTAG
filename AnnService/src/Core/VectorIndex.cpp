@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/VectorIndex.h"
-#include "inc/Core/Common/DataUtils.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
@@ -22,6 +21,7 @@ typedef typename Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeT
 
 using namespace SPTAG;
 
+std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 
 VectorIndex::VectorIndex()
 {
@@ -94,7 +94,7 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
 
     if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
     {
-        std::cerr << "Error: Failed to load parameter DistCalcMethod." << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "Error: Failed to load parameter DistCalcMethod.\n");
         return ErrorCode::Fail;
     }
     return LoadConfig(p_reader);
@@ -467,7 +467,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
     if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -516,7 +516,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -558,7 +558,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 

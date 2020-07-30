@@ -53,7 +53,7 @@ namespace SPTAG
 
             inline bool Save(std::string filename)
             {
-                std::cout << "Save " << m_data.Name() << " To " << filename << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
                 std::ofstream output(filename, std::ios::binary);
                 if (!output.is_open()) return false;
                 Save(output);
@@ -72,7 +72,7 @@ namespace SPTAG
 
             inline bool Load(std::string filename)
             {
-                std::cout << "Load " << m_data.Name() << " From " << filename << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
                 std::ifstream input(filename, std::ios::binary);
                 if (!input.is_open()) return false;          
                 Load(input);

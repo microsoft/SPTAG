@@ -196,7 +196,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
         {
             std::stringstream msg;
             msg << "File " << fileInfo.first << " not exists or can't access.";
-            std::cerr << msg.str() << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
             exit(1);
         }
 
@@ -249,7 +249,7 @@ TxtVectorReader::GetVectorSet() const
 {
     std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
     if (!inputStream.is_open()) {
-        fprintf(stderr, "Failed to read file %s.\n", m_vectorOutput.c_str());
+        LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 
@@ -304,7 +304,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         std::stringstream msg;
         msg << "Unable to open file: " << p_filePath << std::endl;
         const auto& msgStr = msg.str();
-        std::cerr << msgStr;
+        LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
         throw MyException(msgStr);
         exit(1);
     }
@@ -312,7 +312,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
     {
         std::stringstream msg;
         msg << "Begin Subtask: " << p_subTaskID << ", start offset position:" << startpos << std::endl;
-        std::cout << msg.str();
+        LOG(Helper::LogLevel::LL_Info, "%s\n", msg.str().c_str());
     }
 
     std::string subFileSuffix("_");
@@ -355,7 +355,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         {
             std::stringstream msg;
             msg << "Subtask: " << p_subTaskID << " cannot parsing line:" << currentLine.get() << std::endl;
-            std::cout << msg.str();
+            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
             exit(1);
         }
 
@@ -379,7 +379,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         {
             std::stringstream msg;
             msg << "Subtask: " << p_subTaskID << " cannot parsing vector:" << (currentLine.get() + tabIndex + 1) << std::endl;
-            std::cout << msg.str();
+            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
             exit(1);
         }
 

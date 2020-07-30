@@ -11,6 +11,7 @@
 #include <limits>
 #include <vector>
 #include <cmath>
+#include "inc/Helper/Logging.h"
 
 #ifndef _MSC_VER
 #include <sys/stat.h>
@@ -63,6 +64,9 @@ const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
 const float MaxDist = (std::numeric_limits<float>::max)();
 const float Epsilon = 0.000000001f;
+extern std::unique_ptr<Helper::Logger> g_pLogger;
+
+#define LOG(l, ...) g_pLogger->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
 class MyException : public std::exception 
 {

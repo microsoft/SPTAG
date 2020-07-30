@@ -1,5 +1,5 @@
 #include "inc/Helper/DynamicNeighbors.h"
-
+#include "inc/Core/Common.h"
 #include <fstream>
 
 using namespace SPTAG::Helper;
@@ -41,7 +41,7 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
 
     if (!graph.is_open())
     {
-        fprintf(stderr, "Failed open graph file: %s\n", p_filePath);
+        LOG(Helper::LogLevel::LL_Error, "Failed open graph file: %s\n", p_filePath);
         exit(1);
     }
 
@@ -53,14 +53,14 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
 
     size_t graphSize = static_cast<size_t>(m_neighborOffset[m_vectorCount]);
 
-    fprintf(stderr, "Vector count: %d, Graph size: %zu\n", m_vectorCount, graphSize);
+    LOG(Helper::LogLevel::LL_Error, "Vector count: %d, Graph size: %zu\n", m_vectorCount, graphSize);
 
     m_data.reset(new int[graphSize]);
     graph.read(reinterpret_cast<char*>(m_data.get()), graphSize * sizeof(int));
 
     if (graph.gcount() != graphSize * sizeof(int))
     {
-        fprintf(stderr,
+        LOG(Helper::LogLevel::LL_Error,
             "Failed read graph: size not match, expected %zu, actually %zu\n",
             static_cast<size_t>(graphSize * sizeof(int)),
             static_cast<size_t>(graph.gcount()));

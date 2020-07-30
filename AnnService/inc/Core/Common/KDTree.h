@@ -84,10 +84,10 @@ namespace SPTAG
                     std::random_shuffle(pindices.begin(), pindices.end());
 
                     m_pTreeStart[i] = i * (SizeType)pindices.size();
-                    std::cout << "Start to build KDTree " << i + 1 << std::endl;
+                    LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
                     SizeType iTreeSize = m_pTreeStart[i];
                     DivideTree<T>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize);
-                    std::cout << i + 1 << " KDTree built, " << iTreeSize - m_pTreeStart[i] << " " << pindices.size() << std::endl;
+                    LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
                 }
             }
 
@@ -105,13 +105,13 @@ namespace SPTAG
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
                 p_outstream.write((char*)&treeNodeSize, sizeof(SizeType));
                 p_outstream.write((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
-                std::cout << "Save KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return true;
             }
 
             bool SaveTrees(std::string sTreeFileName) const
             {
-                std::cout << "Save KDT to " << sTreeFileName << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Save KDT to %s\n", sTreeFileName.c_str());
                 std::ofstream output(sTreeFileName, std::ios::binary);
                 if (!output.is_open()) return false;
                 SaveTrees(output);
@@ -131,7 +131,7 @@ namespace SPTAG
                 pKDTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pKDTMemFile, sizeof(KDTNode) * treeNodeSize);
-                std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return true;
             }
 
@@ -145,13 +145,13 @@ namespace SPTAG
                 input.read((char*)&treeNodeSize, sizeof(SizeType));
                 m_pTreeRoots.resize(treeNodeSize);
                 input.read((char*)m_pTreeRoots.data(), sizeof(KDTNode) * treeNodeSize);
-                std::cout << "Load KDT (" << m_iTreeNumber << "," << treeNodeSize << ") Finish!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return true;
             }
 
             bool LoadTrees(std::string sTreeFileName)
             {
-                std::cout << "Load KDT From " << sTreeFileName << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Load KDT From %s\n", sTreeFileName.c_str());
                 std::ifstream input(sTreeFileName, std::ios::binary);
                 if (!input.is_open()) return false;
                 LoadTrees(input);
