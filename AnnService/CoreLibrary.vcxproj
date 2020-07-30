@@ -134,6 +134,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
+    <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
@@ -172,6 +173,8 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
+    <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
