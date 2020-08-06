@@ -2,43 +2,11 @@
 // Licensed under the MIT License.
 
 #include "inc/Server/SearchExecutionContext.h"
-#include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/Base64Encode.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Service;
-
-namespace
-{
-namespace Local
-{
-
-template<typename ValueType>
-ErrorCode
-ConvertVectorFromString(const std::vector<const char*>& p_source, ByteArray& p_dest, SizeType& p_dimension)
-{
-    p_dimension = 0;
-    p_dest = ByteArray::Alloc(p_source.size() * sizeof(ValueType));
-    ValueType* arr = reinterpret_cast<ValueType*>(p_dest.Data());
-    for (std::size_t i = 0; i < p_source.size(); ++i)
-    {
-        if (!Helper::Convert::ConvertStringTo<ValueType>(p_source[i], arr[i]))
-        {
-            p_dest.Clear();
-            p_dimension = 0;
-            return ErrorCode::Fail;
-        }
-
-        ++p_dimension;
-    }
-
-    return ErrorCode::Success;
-}
-
-}
-}
-
 
 SearchExecutionContext::SearchExecutionContext(const std::shared_ptr<const ServiceSettings>& p_serviceSettings)
     : c_serviceSettings(p_serviceSettings),
@@ -118,8 +86,7 @@ SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
         {
 #define DefineVectorValueType(Name, Type) \
         case VectorValueType::Name: \
-            return Local::ConvertVectorFromString<Type>( \
-                        m_queryParser.GetVectorElements(), m_vector, m_vectorDimension); \
+            return ConvertVectorFromString<Type>(m_queryParser.GetVectorElements(), m_vector, m_vectorDimension); \
             break; \
 
 #include "inc/Core/DefinitionList.h"

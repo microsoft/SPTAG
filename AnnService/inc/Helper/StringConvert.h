@@ -246,6 +246,48 @@ inline bool ConvertStringTo<IndexAlgoType>(const char* p_str, IndexAlgoType& p_v
     return false;
 }
 
+template <>
+inline bool ConvertStringTo<VectorFileType>(const char* p_str, VectorFileType& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineVectorFileType(Name) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = VectorFileType::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorFileType
+
+    return false;
+}
+
+template <>
+inline bool ConvertStringTo<TruthFileType>(const char* p_str, TruthFileType& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineTruthFileType(Name) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = TruthFileType::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineTruthFileType
+
+    return false;
+}
+
 
 template <>
 inline bool ConvertStringTo<DistCalcMethod>(const char* p_str, DistCalcMethod& p_value)
@@ -366,6 +408,43 @@ inline std::string ConvertToString<VectorValueType>(const VectorValueType& p_val
     return "Undefined";
 }
 
+template <>
+inline std::string ConvertToString<VectorFileType>(const VectorFileType& p_value)
+{
+    switch (p_value)
+    {
+#define DefineVectorFileType(Name) \
+    case VectorFileType::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorFileType
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
+
+template <>
+inline std::string ConvertToString<TruthFileType>(const TruthFileType& p_value)
+{
+    switch (p_value)
+    {
+#define DefineTruthFileType(Name) \
+    case TruthFileType::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineTruthFileType
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
 
 } // namespace Convert
 } // namespace Helper

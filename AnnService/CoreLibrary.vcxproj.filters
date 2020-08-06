@@ -103,9 +103,6 @@
     <ClInclude Include="inc\Core\Common\Dataset.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\DataUtils.h">
-      <Filter>Header Files\Core\Common</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Core\Common\DistanceUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
@@ -142,9 +139,6 @@
     <ClInclude Include="inc\Helper\ConcurrentSet.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Helper\BufferStream.h">
-      <Filter>Header Files\Helper</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h">
       <Filter>Header Files\Helper\VectorSetReaders</Filter>
     </ClInclude>
@@ -156,6 +150,21 @@
     </ClInclude>
     <ClInclude Include="inc\Core\Common\Labelset.h">
       <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\DynamicNeighbors.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h">
+      <Filter>Header Files\Helper\VectorSetReaders</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\Logging.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\DiskIO.h">
+      <Filter>Header Files\Helper</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -200,6 +209,15 @@
     </ClCompile>
     <ClCompile Include="src\Helper\VectorSetReader.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\DynamicNeighbors.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp">
+      <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
