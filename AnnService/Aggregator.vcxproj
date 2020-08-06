@@ -149,6 +149,7 @@
     <ClCompile Include="src\Aggregator\AggregatorService.cpp" />
     <ClCompile Include="src\Aggregator\AggregatorSettings.cpp" />
     <ClCompile Include="src\Aggregator\main.cpp" />
+    <ClCompile Include="src\Server\QueryParser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

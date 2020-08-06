@@ -17,6 +17,7 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "16");
 
     bool stop = false;
 

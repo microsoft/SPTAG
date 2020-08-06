@@ -26,6 +26,14 @@ struct AggregatorSettings
     SizeType m_threadNum;
 
     SizeType m_socketThreadNum;
+
+	std::string m_centers;
+
+	VectorValueType m_valueType;
+
+	SizeType m_topK;
+
+	DistCalcMethod m_distMethod;
 };
 
 

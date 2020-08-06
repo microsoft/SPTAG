@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/BKT/Index.h"
+#include <chrono>
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -31,10 +32,10 @@ namespace SPTAG
         {
             if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
 
-            if (!m_pSamples.Load((char*)p_indexBlobs[0].Data())) return ErrorCode::FailedParseValue;
-            if (!m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data())) return ErrorCode::FailedParseValue;
-            if (!m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data())) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() > 3 && !m_deletedID.Load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
+            if (m_pSamples.Load((char*)p_indexBlobs[0].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
@@ -44,83 +45,57 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::LoadIndexData(const std::vector<std::istream*>& p_indexStreams)
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
         {
             if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
 
-            if (!m_pSamples.Load(*p_indexStreams[0])) return ErrorCode::Fail;
-            if (!m_pTrees.LoadTrees(*p_indexStreams[1])) return ErrorCode::Fail;
-            if (!m_pGraph.LoadGraph(*p_indexStreams[2])) return ErrorCode::Fail;
-            if (p_indexStreams.size() > 3 && !m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
+            ErrorCode ret = ErrorCode::Success;
+            if ((ret = m_pSamples.Load(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if ((ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if ((ret = m_pGraph.LoadGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
+            if (p_indexStreams.size() > 3 && (ret = m_deletedID.Load(p_indexStreams[3])) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
-            return ErrorCode::Success;
+            return ret;
         }
 
         template <typename T>
-        ErrorCode Index<T>::LoadIndexData(const std::string& p_folderPath)
-        {
-            if (!m_pSamples.Load(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!m_pTrees.LoadTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
-            if (!m_pGraph.LoadGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            if (!m_deletedID.Load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
-
-            omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
-            m_workSpacePool->Init(m_iNumberOfThreads);
-            m_threadPool.init();
-            return ErrorCode::Success;
-        }
-
-        template <typename T>
-        ErrorCode Index<T>::SaveConfig(std::ostream& p_configOut) const
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut) const
         {
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
-    p_configOut << RepresentStr << "=" << GetParameter(RepresentStr) << std::endl;
+    IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
 
 #include "inc/Core/BKT/ParameterDefinitionList.h"
 #undef DefineBKTParameter
-            p_configOut << std::endl;
+
+            IOSTRING(p_configOut, WriteString, "\n");
             return ErrorCode::Success;
         }
 
         template<typename T>
-        ErrorCode
-            Index<T>::SaveIndexData(const std::string& p_folderPath)
-        {
-            std::lock_guard<std::mutex> lock(m_dataAddLock);
-            std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
-
-            if (!m_pSamples.Save(p_folderPath + m_sDataPointsFilename)) return ErrorCode::Fail;
-            if (!m_pTrees.SaveTrees(p_folderPath + m_sBKTFilename)) return ErrorCode::Fail;
-            if (!m_pGraph.SaveGraph(p_folderPath + m_sGraphFilename)) return ErrorCode::Fail;
-            if (!m_deletedID.Save(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
-            return ErrorCode::Success;
-        }
-
-        template<typename T>
-        ErrorCode Index<T>::SaveIndexData(const std::vector<std::ostream*>& p_indexStreams)
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
         {
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
             
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
-            if (!m_pSamples.Save(*p_indexStreams[0])) return ErrorCode::Fail;
-            if (!m_pTrees.SaveTrees(*p_indexStreams[1])) return ErrorCode::Fail;
-            if (!m_pGraph.SaveGraph(*p_indexStreams[2])) return ErrorCode::Fail;
-            if (!m_deletedID.Save(*p_indexStreams[3])) return ErrorCode::Fail;
-            return ErrorCode::Success;
+            ErrorCode ret = ErrorCode::Success;
+            if ((ret = m_pSamples.Save(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if ((ret = m_pTrees.SaveTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if ((ret = m_pGraph.SaveGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
+            if ((ret = m_deletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
+            return ret;
         }
 
 #pragma region K-NN search
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
-        m_pTrees.InitSearchTrees(this, p_query, p_space); \
-        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
+        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
@@ -166,15 +141,15 @@ namespace SPTAG
                 p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
-                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
 /*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
-        m_pTrees.InitSearchTrees(this, p_query, p_space); \
-        m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
+        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
             COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
@@ -222,7 +197,7 @@ namespace SPTAG
                 } \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
-                m_pTrees.SearchTrees(this, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
@@ -272,7 +247,7 @@ namespace SPTAG
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
                     SizeType result = p_query.GetResult(i)->VID;
-                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadata(result).Clone());
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
             return ErrorCode::Success;
@@ -334,8 +309,15 @@ namespace SPTAG
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
-            m_pTrees.BuildTrees<T>(this, nullptr, nullptr, m_iNumberOfThreads);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            m_pTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+            
             m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
+            auto t3 = std::chrono::high_resolution_clock::now();
+            LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
+
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -373,27 +355,28 @@ namespace SPTAG
                 }
             }
 
-            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
             ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
             ptr->m_threadPool.init();
 
-            if (false == m_pSamples.Refine(indices, ptr->m_pSamples)) return ErrorCode::Fail;
-            if (nullptr != m_pMetadata && ErrorCode::Success != m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) return ErrorCode::Fail;
+            ErrorCode ret = ErrorCode::Success;
+            if ((ret = m_pSamples.Refine(indices, ptr->m_pSamples)) != ErrorCode::Success) return ret;
+            if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) != ErrorCode::Success) return ret;
 
             ptr->m_deletedID.Initialize(newR);
             COMMON::BKTree* newtree = &(ptr->m_pTrees);
-            (*newtree).BuildTrees<T>(ptr);
+            (*newtree).BuildTrees<T>(ptr->m_pSamples, ptr->m_iDistCalcMethod, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
             if (HasMetaMapping()) ptr->BuildMetaMapping(false);
             ptr->m_bReady = true;
-            return ErrorCode::Success;
+            return ret;
         }
 
         template <typename T>
-        ErrorCode Index<T>::RefineIndex(const std::vector<std::ostream*>& p_indexStreams)
+        ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, IAbortOperation* p_abort)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
@@ -416,58 +399,28 @@ namespace SPTAG
                 }
             }
 
-            std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
+            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            if (false == m_pSamples.Refine(indices, *p_indexStreams[0])) return ErrorCode::Fail;
+            ErrorCode ret = ErrorCode::Success;
+            if ((ret = m_pSamples.Refine(indices, p_indexStreams[0])) != ErrorCode::Success) return ret;
+
+            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             COMMON::BKTree newTrees(m_pTrees);
-            newTrees.BuildTrees<T>(this, &indices, &reverseIndices);
-            newTrees.SaveTrees(*p_indexStreams[1]);
+            newTrees.BuildTrees<T>(m_pSamples, m_iDistCalcMethod, omp_get_num_threads(), &indices, &reverseIndices);
+            if ((ret = newTrees.SaveTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
 
-            m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr, &(newTrees.GetSampleMap()));
+            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
+
+            if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr, &(newTrees.GetSampleMap()))) != ErrorCode::Success) return ret;
 
             COMMON::Labelset newDeletedID;
             newDeletedID.Initialize(newR);
-            newDeletedID.Save(*p_indexStreams[3]);
-            if (nullptr != m_pMetadata && (p_indexStreams.size() < 6 || ErrorCode::Success != m_pMetadata->RefineMetadata(indices, *p_indexStreams[4], *p_indexStreams[5]))) return ErrorCode::Fail;
-            return ErrorCode::Success;
-        }
-
-        template <typename T>
-        ErrorCode Index<T>::RefineIndex(const std::string& p_folderPath)
-        {
-            std::string folderPath(p_folderPath);
-            if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
-            {
-                folderPath += FolderSep;
-            }
-
-            if (!direxists(folderPath.c_str()))
-            {
-                mkdir(folderPath.c_str());
-            }
-
-            std::vector<std::ostream*> streams;
-            streams.push_back(new std::ofstream(folderPath + m_sDataPointsFilename, std::ios::binary));
-            streams.push_back(new std::ofstream(folderPath + m_sBKTFilename, std::ios::binary));
-            streams.push_back(new std::ofstream(folderPath + m_sGraphFilename, std::ios::binary));
-            streams.push_back(new std::ofstream(folderPath + m_sDeleteDataPointsFilename, std::ios::binary));
-            if (nullptr != m_pMetadata)
-            {
-                streams.push_back(new std::ofstream(folderPath + m_sMetadataFile, std::ios::binary));
-                streams.push_back(new std::ofstream(folderPath + m_sMetadataIndexFile, std::ios::binary));
-            }
-
-            for (size_t i = 0; i < streams.size(); i++)
-                if (!(((std::ofstream*)streams[i])->is_open())) return ErrorCode::FailedCreateFile;
-
-            ErrorCode ret = RefineIndex(streams);
-
-            for (size_t i = 0; i < streams.size(); i++)
-            {
-                ((std::ofstream*)streams[i])->close();
-                delete streams[i];
+            if ((ret = newDeletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
+            if (nullptr != m_pMetadata) {
+                if (p_indexStreams.size() < 6) return ErrorCode::LackOfInputs;
+                if ((ret = m_pMetadata->RefineMetadata(indices, p_indexStreams[4], p_indexStreams[5])) != ErrorCode::Success) return ret;
             }
             return ret;
         }
@@ -524,7 +477,7 @@ namespace SPTAG
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || 
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success || 
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                    std::cout << "Memory Error: Cannot alloc space for vectors" << std::endl;
+                    LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
                     m_deletedID.SetR(begin);
@@ -552,14 +505,13 @@ namespace SPTAG
             }
 
             if (end - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0) {
-                m_threadPool.add(new RebuildJob(this, &m_pTrees, &m_pGraph));
+                m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph, m_iDistCalcMethod));
             }
 
             for (SizeType node = begin; node < end; node++)
             {
                 m_pGraph.RefineNode<T>(this, node, true, true, m_pGraph.m_iAddCEF);
             }
-            //std::cout << "Add " << p_vectorNum << " vectors" << std::endl;
             return ErrorCode::Success;
         }
 
@@ -572,7 +524,7 @@ namespace SPTAG
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        fprintf(stderr, "Setting %s with value %s\n", RepresentStr, p_value); \
+        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (SPTAG::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \

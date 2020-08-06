@@ -267,7 +267,8 @@ namespace SPTAG
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                         (NeighborhoodDists)[i][j] = MaxDist;
 
-                std::cout << "Parallel TpTree Partition begin " << std::endl;
+                auto t1 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
 #pragma omp parallel for schedule(dynamic)
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
@@ -275,9 +276,11 @@ namespace SPTAG
                     for (SizeType j = 0; j < m_iGraphSize; j++) TptreeDataIndices[i][j] = j;
                     std::random_shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end());
                     PartitionByTptree<T>(index, TptreeDataIndices[i], 0, m_iGraphSize - 1, TptreeLeafNodes[i]);
-                    std::cout << "Finish Getting Leaves for Tree " << i << std::endl;
+                    LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
                 }
-                std::cout << "Parallel TpTree Partition done" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
+                auto t2 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
@@ -286,7 +289,7 @@ namespace SPTAG
                     {
                         SizeType start_index = TptreeLeafNodes[i][j].first;
                         SizeType end_index = TptreeLeafNodes[i][j].second;
-                        if (omp_get_thread_num() == 0) std::cout << "\rProcessing Tree " << i << ' ' << j * 100 / TptreeLeafNodes[i].size() << '%';
+                        if ((j * 5) % TptreeLeafNodes[i].size() == 0) LOG(Helper::LogLevel::LL_Info, "Processing Tree %d %d%%\n", i, static_cast<int>(j * 1.0 / TptreeLeafNodes[i].size() * 100));
                         for (SizeType x = start_index; x < end_index; x++)
                         {
                             for (SizeType y = x + 1; y <= end_index; y++)
@@ -305,35 +308,34 @@ namespace SPTAG
                     }
                     TptreeDataIndices[i].clear();
                     TptreeLeafNodes[i].clear();
-                    std::cout << std::endl;
                 }
                 TptreeDataIndices.clear();
                 TptreeLeafNodes.clear();
+
+                auto t3 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Process TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
             }
 #endif
 
             template <typename T>
             void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                std::cout << "build RNG graph!" << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = m_iNeighborhoodSize * m_iNeighborhoodScale;
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
-                
+
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
-                    std::cout << "Build RNG Graph end!" << std::endl;
+                    LOG(Helper::LogLevel::LL_Info, "Build RNG Graph end!\n");
                     return;
                 }
 
-                time_t start = clock();
                 auto t1 = std::chrono::high_resolution_clock::now();
                 BuildInitKNNGraph<T>(index, idmap);
                 auto t2 = std::chrono::high_resolution_clock::now();
-
-                std::cout << "BuildInitKNNGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
-                std::cout << "BuildInitKNNGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+                LOG(Helper::LogLevel::LL_Info, "BuildInitKNNGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
                 RefineGraph<T>(index, idmap);
 
@@ -345,9 +347,8 @@ namespace SPTAG
                         }
                 }
 
-                t2 = std::chrono::high_resolution_clock::now();
-                std::cout << "BuildGraph clock time (s): " << ((double)(clock() - start) / CLOCKS_PER_SEC) << std::endl;
-                std::cout << "BuildGraph time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+                auto t3 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
             }
 
             template <typename T>
@@ -355,25 +356,29 @@ namespace SPTAG
             {
                 for (int iter = 0; iter < m_iRefineIter - 1; iter++)
                 {
+                    auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
-                        if (i % 1000 == 0) std::cout << "\rRefine " << iter << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
+                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
-                    std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
 
                 m_iNeighborhoodSize /= m_iNeighborhoodScale;
 
                 if (m_iRefineIter > 0) {
+                    auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false, m_iCEF);
-                        if (i % 1000 == 0) std::cout << "\rRefine " << (m_iRefineIter - 1) << " " << static_cast<int>(i * 1.0 / m_iGraphSize * 100) << "%";
+                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", m_iRefineIter - 1, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
-                    std::cout << "Refine RNG, graph acc:" << GraphAccuracyEstimation(index, 100, idmap) << std::endl;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
             }
 
@@ -381,41 +386,39 @@ namespace SPTAG
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
                 std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                SizeType R = (SizeType)indices.size();
-
-                if (newGraph != nullptr)
-                {
-                    newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
-                    newGraph->m_iGraphSize = R;
-                    newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
+                std::shared_ptr<NeighborhoodGraph> tmp;
+                if (newGraph == nullptr) {
+                    tmp = NeighborhoodGraph::CreateInstance(Type());
+                    newGraph = tmp.get();
                 }
+
+                SizeType R = (SizeType)indices.size();
+                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
+                newGraph->m_iGraphSize = R;
+                newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
-                    RefineNode<T>(index, indices[i], false, false, m_iCEF);
-                    if (i % 1000 == 0) std::cout << "\rRefine " << static_cast<int>(i * 1.0 / R * 100) << "%";
-                    SizeType *nodes, *outnodes; 
-                    nodes = outnodes = m_pNeighborhoodGraph[indices[i]];
-                    if (newGraph != nullptr) outnodes = newGraph->m_pNeighborhoodGraph[i];
+                    if ((i * 5) % R == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n", static_cast<int>(i * 1.0 / R * 100));
+
+                    SizeType* outnodes = newGraph->m_pNeighborhoodGraph[i];
+
+                    COMMON::QueryResultSet<T> query((const T*)index->GetSample(indices[i]), m_iCEF + 1);
+                    index->RefineSearchIndex(query, false);
+                    RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
+
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
                     {
-                        if (nodes[j] >= 0 && nodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[nodes[j]];
+                        if (outnodes[j] >= 0 && outnodes[j] < reverseIndices.size()) outnodes[j] = reverseIndices[outnodes[j]];
                         if (idmap != nullptr && (iter = idmap->find(outnodes[j])) != idmap->end()) outnodes[j] = iter->second;
                     }
                     if (idmap != nullptr && (iter = idmap->find(-1 - i)) != idmap->end())
                         outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                if (output != nullptr) {
-                    output->write((char*)&R, sizeof(SizeType));
-                    output->write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
-                    for (SizeType i = 0; i < R; i++) {
-                        output->write((char*)m_pNeighborhoodGraph[indices[i]], sizeof(SizeType) * m_iNeighborhoodSize);
-                    }
-                    std::cout << "Save Refine " << m_pNeighborhoodGraph.Name() << " (" << R << ", " << m_iNeighborhoodSize << ") Finish!" << std::endl;
-                }
+                if (output != nullptr) newGraph->SaveGraph(output);
                 return ErrorCode::Success;
             }
 
@@ -423,9 +426,7 @@ namespace SPTAG
             void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
-
                 index->RefineSearchIndex(query, searchDeleted);
-
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
 
                 if (updateNeighbors) {
@@ -446,53 +447,44 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            bool LoadGraph(std::istream& input)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input)
             {
-                if (!m_pNeighborhoodGraph.Load(input)) return false;
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(input)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ret;
             }
 
-            bool LoadGraph(std::string sGraphFilename)
+            ErrorCode LoadGraph(std::string sGraphFilename)
             {
-                if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ret;
             }
             
-            bool LoadGraph(char* pGraphMemFile)
+            ErrorCode LoadGraph(char* pGraphMemFile)
             {
-                m_pNeighborhoodGraph.Load(pGraphMemFile);
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ErrorCode::Success;
             }
             
-            bool SaveGraph(std::string sGraphFilename) const
+            ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                std::cout << "Save " << m_pNeighborhoodGraph.Name() << " To " << sGraphFilename << std::endl;
-                std::ofstream output(sGraphFilename, std::ios::binary);
-                if (!output.is_open()) return false;
-                SaveGraph(output);
-                output.close();
-                return true;
+                return m_pNeighborhoodGraph.Save(sGraphFilename);
             }
 
-            bool SaveGraph(std::ostream& output) const
+            ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
             {
-                output.write((char*)&m_iGraphSize, sizeof(SizeType));
-                output.write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
-
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                    output.write((char*)m_pNeighborhoodGraph[i], sizeof(SizeType) * m_iNeighborhoodSize);
-
-                std::cout << "Save " << m_pNeighborhoodGraph.Name() << " (" << m_iGraphSize << ", " << m_iNeighborhoodSize << ") Finish!" << std::endl;
-                return true;
+                return m_pNeighborhoodGraph.Save(output);
             }
 
             inline ErrorCode AddBatch(SizeType num)

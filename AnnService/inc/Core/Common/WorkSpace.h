@@ -73,7 +73,7 @@ namespace SPTAG
                     size >>= 1;
                 }
                 m_secondHash = true;
-                m_poolSize = (1 << (ex + 12)) - 1;
+                m_poolSize = (1 << (ex + 10)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
             }
@@ -129,7 +129,7 @@ namespace SPTAG
                 }
 
                 // Do not include this item.
-                std::cout << "Hash table is full!" << std::endl;
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full!\n");
                 return -1;
             }
         };

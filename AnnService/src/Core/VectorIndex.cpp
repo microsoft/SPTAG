@@ -2,15 +2,12 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/VectorIndex.h"
-#include "inc/Core/Common/DataUtils.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
-#include "inc/Helper/BufferStream.h"
 
 #include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
-#include <fstream>
 
 #ifndef _MSC_VER
 #include "inc/Helper/ConcurrentSet.h"
@@ -22,6 +19,8 @@ typedef typename Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeT
 
 using namespace SPTAG;
 
+std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
+std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
 VectorIndex::VectorIndex()
 {
@@ -94,7 +93,7 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
 
     if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
     {
-        std::cerr << "Error: Failed to load parameter DistCalcMethod." << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "Error: Failed to load parameter DistCalcMethod.\n");
         return ErrorCode::Fail;
     }
     return LoadConfig(p_reader);
@@ -102,21 +101,21 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
 
 
 ErrorCode
-VectorIndex::SaveIndexConfig(std::ostream& p_configOut)
+VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
 {
     if (nullptr != m_pMetadata)
     {
-        p_configOut << "[MetaData]" << std::endl;
-        p_configOut << "MetaDataFilePath=" << m_sMetadataFile << std::endl;
-        p_configOut << "MetaDataIndexPath=" << m_sMetadataIndexFile << std::endl;
-        if (nullptr != m_pMetaToVec) p_configOut << "MetaDataToVectorIndex=true" << std::endl;
-        p_configOut << std::endl;
+        IOSTRING(p_configOut, WriteString, "[MetaData]\n");
+        IOSTRING(p_configOut, WriteString, ("MetaDataFilePath=" + m_sMetadataFile + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, ("MetaDataIndexPath=" + m_sMetadataIndexFile + "\n").c_str());
+        if (nullptr != m_pMetaToVec) IOSTRING(p_configOut, WriteString, "MetaDataToVectorIndex=true\n");
+        IOSTRING(p_configOut, WriteString, "\n");
     }
 
-    p_configOut << "[Index]" << std::endl;
-    p_configOut << "IndexAlgoType=" << Helper::Convert::ConvertToString(GetIndexAlgoType()) << std::endl;
-    p_configOut << "ValueType=" << Helper::Convert::ConvertToString(GetVectorValueType()) << std::endl;
-    p_configOut << std::endl;
+    IOSTRING(p_configOut, WriteString, "[Index]\n");
+    IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, "\n");
 
     return SaveConfig(p_configOut);
 }
@@ -161,32 +160,34 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
 {
     if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
-    std::ostringstream p_configStream;
-    SaveIndexConfig(p_configStream);
-    p_config = p_configStream.str();
-    
-    std::vector<std::ostream*> p_indexStreams;
-    for (size_t i = 0; i < p_indexBlobs.size(); i++)
+    ErrorCode ret = ErrorCode::Success;
     {
-        p_indexStreams.push_back(new Helper::obufferstream(new Helper::streambuf((char*)p_indexBlobs[i].Data(), p_indexBlobs[i].Length()), true));
+        std::shared_ptr<Helper::DiskPriorityIO> p_configStream(new Helper::SimpleBufferIO());
+        if (p_configStream == nullptr || !p_configStream->Initialize(nullptr, std::ios::out)) return ErrorCode::EmptyDiskIO;
+        if ((ret = SaveIndexConfig(p_configStream)) != ErrorCode::Success) return ret;
+        p_config.resize(p_configStream->TellP());
+        IOBINARY(p_configStream, ReadBinary, p_config.size(), (char*)p_config.c_str(), 0);
     }
 
-    ErrorCode ret = ErrorCode::Success;
-    if (NeedRefine()) 
+    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams;
+    for (size_t i = 0; i < p_indexBlobs.size(); i++)
     {
-        ret = RefineIndex(p_indexStreams);
+        std::shared_ptr<Helper::DiskPriorityIO> ptr(new Helper::SimpleBufferIO());
+        if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[i].Data(), std::ios::binary | std::ios::out, p_indexBlobs[i].Length())) return ErrorCode::EmptyDiskIO;
+        p_indexStreams.push_back(std::move(ptr));
+    }
+
+    if (NeedRefine())
+    {
+        ret = RefineIndex(p_indexStreams, nullptr);
     }
     else 
     {
         if (m_pMetadata != nullptr && p_indexStreams.size() > 5)
         {
-            ret = m_pMetadata->SaveMetadata(*p_indexStreams[p_indexStreams.size() - 2], *p_indexStreams[p_indexStreams.size() - 1]);
+            ret = m_pMetadata->SaveMetadata(p_indexStreams[p_indexStreams.size() - 2], p_indexStreams[p_indexStreams.size() - 1]);
         }
         if (ErrorCode::Success == ret) ret = SaveIndexData(p_indexStreams);
-    }
-    for (size_t i = 0; i < p_indexStreams.size(); i++)
-    {
-        delete p_indexStreams[i];
     }
     return ret;
 }
@@ -208,56 +209,76 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         mkdir(folderPath.c_str());
     }
 
-    std::ofstream configFile(folderPath + "indexloader.ini");
-    if (!configFile.is_open()) return ErrorCode::FailedCreateFile;
-    SaveIndexConfig(configFile);
-    configFile.close();
-    
-    if (NeedRefine()) return RefineIndex(p_folderPath);
-
-    if (m_pMetadata != nullptr)
+    ErrorCode ret = ErrorCode::Success;
     {
-        ErrorCode ret = m_pMetadata->SaveMetadata(folderPath + m_sMetadataFile, folderPath + m_sMetadataIndexFile);
-        if (ErrorCode::Success != ret) return ret;
+        auto configFile = SPTAG::f_createIO();
+        if (configFile == nullptr || !configFile->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
+        if ((ret = SaveIndexConfig(configFile)) != ErrorCode::Success) return ret;
     }
-    return SaveIndexData(folderPath);
+
+    std::shared_ptr<std::vector<std::string>> indexfiles = GetIndexFiles();
+    if (nullptr != m_pMetadata) {
+        indexfiles->push_back(m_sMetadataFile);
+        indexfiles->push_back(m_sMetadataIndexFile);
+    }
+    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
+    for (std::string& f : *indexfiles) {
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+        handles.push_back(std::move(ptr));
+    }
+
+    if (NeedRefine()) 
+    {
+        ret = RefineIndex(handles, nullptr);
+    }
+    else 
+    {
+        if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(handles[handles.size() - 2], handles[handles.size() - 1]);
+        if (ErrorCode::Success == ret) ret = SaveIndexData(handles);
+    }
+    return ret;
 }
 
 
 ErrorCode
-VectorIndex::SaveIndexToFile(const std::string& p_file)
+VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort)
 {
     if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
-    std::ofstream out(p_file, std::ios::binary);
-    if (!out.is_open()) return ErrorCode::FailedCreateFile;
-
-    std::ostringstream p_configStream;
-    SaveIndexConfig(p_configStream);
-    std::string config = p_configStream.str();
-
-    std::uint64_t configSize = config.size();
-    out.write((char*)&configSize, sizeof(std::uint64_t));
-    out.write(config.c_str(), configSize);
-    
-    std::uint64_t blobs = CalculateBufferSize()->size();
-    out.write((char*)&blobs, sizeof(std::uint64_t));
-    std::vector<std::ostream*> p_indexStreams(blobs, &out);
+    auto fp = SPTAG::f_createIO();
+    if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
     ErrorCode ret = ErrorCode::Success;
-    if (NeedRefine())
-    {
-        ret = RefineIndex(p_indexStreams);
-    }
-    else
-    {
-        ret = SaveIndexData(p_indexStreams);
-        if (ErrorCode::Success == ret && m_pMetadata != nullptr)
+    
+    std::uint64_t configSize = 0;
+    IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize);
+    if ((ret = SaveIndexConfig(fp)) != ErrorCode::Success) return ret;
+    configSize = fp->TellP() - sizeof(configSize);
+
+    if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
+    else {
+        std::uint64_t blobs = CalculateBufferSize()->size();
+        IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)blobs);
+        std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
+
+        if (NeedRefine())
         {
-            ret = m_pMetadata->SaveMetadata(out, out);
+            ret = RefineIndex(p_indexStreams, p_abort);
+        }
+        else
+        {
+            ret = SaveIndexData(p_indexStreams);
+
+            if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
+
+            if (ErrorCode::Success == ret && m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(fp, fp);
         }
     }
-    out.close();
+    IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
+    fp->ShutDown();
+
+    if (ret == ErrorCode::ExternalAbort) std::remove(p_file.c_str());
     return ret;
 }
 
@@ -315,11 +336,15 @@ VectorIndex::DeleteIndex(ByteArray p_meta) {
 
 
 ErrorCode
-VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum)
+VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperation* p_abort)
 {
+    ErrorCode ret = ErrorCode::Success;
     if (p_addindex->m_pMetadata != nullptr) {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+        {
+            if (ret == ErrorCode::ExternalAbort) continue;
+
             if (p_addindex->ContainSample(i))
             {
                 ByteArray meta = p_addindex->GetMetadata(i);
@@ -327,16 +352,31 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum)
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
             }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort()) 
+            {
+                ret = ErrorCode::ExternalAbort;
+            }
+        }
     }
     else {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
-        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
+        {
+            if (ret == ErrorCode::ExternalAbort) continue;
+
             if (p_addindex->ContainSample(i))
             {
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
             }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort())
+            {
+                ret = ErrorCode::ExternalAbort;
+            }
+        }
     }
-    return ErrorCode::Success;
+    return ret;
 }
 
 
@@ -399,26 +439,40 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
 
     Helper::IniReader iniReader;
-    if (ErrorCode::Success != iniReader.LoadIniFile(folderPath + "indexloader.ini")) return ErrorCode::FailedOpenFile;
+    {
+        auto fp = SPTAG::f_createIO();
+        if (fp == nullptr || !fp->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
+        if (ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
+    }
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    p_vectorIndex = CreateInstance(algoType, valueType);
-    if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
-    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
-    if (ErrorCode::Success != ret) return ret;
+    ErrorCode ret = ErrorCode::Success;
+    if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
-    ret = p_vectorIndex->LoadIndexData(folderPath);
-    if (ErrorCode::Success != ret) return ret;
+    std::shared_ptr<std::vector<std::string>> indexfiles = p_vectorIndex->GetIndexFiles();
+    if (iniReader.DoesSectionExist("MetaData")) {
+        indexfiles->push_back(p_vectorIndex->m_sMetadataFile);
+        indexfiles->push_back(p_vectorIndex->m_sMetadataIndexFile);
+    }
+    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
+    for (std::string& f : *indexfiles) {
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+        handles.push_back(std::move(ptr));
+    }
+
+    if ((ret = p_vectorIndex->LoadIndexData(handles)) != ErrorCode::Success) return ret;
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->SetMetadata(new MemMetadataSet(folderPath + p_vectorIndex->m_sMetadataFile,  folderPath + p_vectorIndex->m_sMetadataIndexFile));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(handles[handles.size() - 2], handles[handles.size() - 1]));
 
-    if (!(p_vectorIndex->GetMetadata()->Available()))
+        if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -435,39 +489,41 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 ErrorCode
 VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
-    std::ifstream in(p_file, std::ios::binary);
-    if (!in.is_open()) return ErrorCode::FailedOpenFile;
-
-    std::uint64_t configSize;
-    in.read((char*)&configSize, sizeof(std::uint64_t));
-    std::vector<char> config(configSize + 1, '\0');
-    in.read(config.data(), configSize);
+    auto fp = SPTAG::f_createIO();
+    if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
 
     SPTAG::Helper::IniReader iniReader;
-    std::istringstream p_configin(std::string(config.data(), configSize));
-    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
+    {
+        std::uint64_t configSize;
+        IOBINARY(fp, ReadBinary, sizeof(configSize), (char*)&configSize);
+        std::vector<char> config(configSize + 1, '\0');
+        IOBINARY(fp, ReadBinary, configSize, config.data());
+
+        std::shared_ptr<Helper::DiskPriorityIO> bufferhandle(new Helper::SimpleBufferIO());
+        if (bufferhandle == nullptr || !bufferhandle->Initialize(config.data(), std::ios::in, configSize)) return ErrorCode::EmptyDiskIO;
+        if (SPTAG::ErrorCode::Success != iniReader.LoadIni(bufferhandle)) return ErrorCode::FailedParseValue;
+    }
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    p_vectorIndex = CreateInstance(algoType, valueType);
-    if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
-    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
-    if (ErrorCode::Success != ret) return ret;
+    ErrorCode ret = ErrorCode::Success;
+    if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     std::uint64_t blobs;
-    in.read((char*)&blobs, sizeof(std::uint64_t));
-    std::vector<std::istream*> p_indexStreams(blobs, &in);
-    ret = p_vectorIndex->LoadIndexData(p_indexStreams);
-    if (ErrorCode::Success != ret) return ret;
+    IOBINARY(fp, ReadBinary, sizeof(blobs), (char*)&blobs);
+   
+    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
+    if ((ret = p_vectorIndex->LoadIndexData(p_indexStreams)) != ErrorCode::Success) return ret;
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->SetMetadata(new MemMetadataSet(in, in));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(fp, fp));
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -476,7 +532,6 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
             p_vectorIndex->BuildMetaMapping();
         }
     }
-    in.close();
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -486,19 +541,18 @@ ErrorCode
 VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
     SPTAG::Helper::IniReader iniReader;
-    std::istringstream p_configin(p_config);
-    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(p_configin)) return ErrorCode::FailedParseValue;
+    std::shared_ptr<Helper::DiskPriorityIO> fp(new Helper::SimpleBufferIO());
+    if (fp == nullptr || !fp->Initialize(p_config.c_str(), std::ios::in, p_config.size())) return ErrorCode::EmptyDiskIO;
+    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    p_vectorIndex = CreateInstance(algoType, valueType);
-    if (p_vectorIndex == nullptr) return ErrorCode::FailedParseValue;
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
-    ErrorCode ret = p_vectorIndex->LoadIndexConfig(iniReader);
-    if (ErrorCode::Success != ret) return ret;
+    ErrorCode ret = ErrorCode::Success;
+    if ((p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
-    ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs);
-    if (ErrorCode::Success != ret) return ret;
+    if ((ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs)) != ErrorCode::Success) return ret;
 
     if (iniReader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
     {
@@ -509,7 +563,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            std::cerr << "Error: Failed to load metadata." << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 

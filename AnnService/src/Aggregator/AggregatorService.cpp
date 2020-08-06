@@ -2,6 +2,9 @@
 // Licensed under the MIT License.
 
 #include "inc/Aggregator/AggregatorService.h"
+#include "inc/Server/QueryParser.h"
+#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Helper/Base64Encode.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Aggregator;
@@ -209,16 +212,60 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
     std::vector<Socket::ConnectionID> remoteServers;
     remoteServers.reserve(context->GetRemoteServers().size());
 
-    for (const auto& server : context->GetRemoteServers())
-    {
-        if (RemoteMachineStatus::Connected != server->m_status)
-        {
-            continue;
-        }
+	if (context->GetSettings()->m_topK > 0 && context->GetRemoteServers().size() == context->GetCenters()->Count()) {
+		Socket::RemoteQuery remoteQuery;
+		remoteQuery.Read(p_packet.Body());
 
-        remoteServers.push_back(server->m_connectionID);
-    }
+		Service::QueryParser queryParser;
+		queryParser.Parse(remoteQuery.m_queryString, "|");
+		ByteArray vector;
+		size_t vectorSize;
+		SizeType vectorDimension;
+		std::vector<BasicResult> servers;
+		switch (context->GetSettings()->m_valueType)
+		{
+#define DefineVectorValueType(Name, Type) \
+        case VectorValueType::Name: \
+            if (!queryParser.GetVectorElements().empty()) { \
+			    Service::ConvertVectorFromString<Type>(queryParser.GetVectorElements(), vector, vectorDimension); \
+			} else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0) { \
+                vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length())); \
+                Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(), vectorSize); \
+                vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType)); \
+            } \
+            for (int i = 0; i < context->GetCenters()->Count(); i++) { \
+                servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance((Type*)vector.Data(), \
+                    (Type*)context->GetCenters()->GetVector(i), vectorDimension, context->GetSettings()->m_distMethod))); \
+			} \
+            break; \
 
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+		default:
+			break;
+		}
+		std::sort(servers.begin(), servers.end(), [](const BasicResult& a, const BasicResult& b) { return a.Dist < b.Dist; });
+		for (int i = 0; i < context->GetSettings()->m_topK; i++) {
+			auto& server = context->GetRemoteServers().at(servers[i].VID);
+			if (RemoteMachineStatus::Connected != server->m_status)
+			{
+				continue;
+			}
+			remoteServers.push_back(server->m_connectionID);
+		}
+	}
+	else {
+		for (const auto& server : context->GetRemoteServers())
+		{
+			if (RemoteMachineStatus::Connected != server->m_status)
+			{
+				continue;
+			}
+
+			remoteServers.push_back(server->m_connectionID);
+		}
+	}
     Socket::PacketHeader requestHeader = p_packet.Header();
     if (Socket::c_invalidConnectionID == requestHeader.m_connectionID)
     {
