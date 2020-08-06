@@ -37,7 +37,7 @@ namespace SPTAG
             if (p_indexBlobs.size() > 3 && !m_deletedID.Load((char*)p_indexBlobs[3].Data())) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -54,7 +54,7 @@ namespace SPTAG
             if (p_indexStreams.size() > 3 && !m_deletedID.Load(*p_indexStreams[3])) return ErrorCode::Fail;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -69,7 +69,7 @@ namespace SPTAG
             if (!m_deletedID.Load(p_folderPath + m_sDeleteDataPointsFilename)) return ErrorCode::Fail;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -249,7 +249,7 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
@@ -295,7 +295,7 @@ namespace SPTAG
             std::cout << "Refine... from " << GetNumSamples() << "->" << newR << std::endl;
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
+            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR, m_iHashTableExp));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
             ptr->m_threadPool.init();
 

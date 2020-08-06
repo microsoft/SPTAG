@@ -81,6 +81,8 @@ namespace SPTAG
             int m_iThresholdOfNumberOfContinuousNoBetterPropagation;
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
+            int m_iHashTableExp;
+
         public:
             Index()
             {

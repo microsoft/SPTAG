@@ -41,5 +41,6 @@ DefineKDTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineKDTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
+DefineKDTParameter(m_iHashTableExp, int, 6L, "HashTableExponent")
 
 #endif
