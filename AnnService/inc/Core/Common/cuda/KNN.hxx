@@ -669,20 +669,20 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   }
 
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
-  LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
   CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
-  LOG("Copying to device.\n");
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Copying to device.\n");
   CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
-  LOG("Alloc'ing TPtree memory\n");
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing TPtree memory\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
   CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
   tptree->initialize(dataSize, levels);
 //  KNN_blocks= max(tptree->num_leaves, BLOCKS);
   KNN_blocks= tptree->num_leaves;
 
-  LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
   CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
   // Initialize results to all -1 (special value that is set to distance INFTY)
@@ -704,7 +704,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
   CUDA_CHECK(cudaDeviceSynchronize());
 
-    LOG("TPT iteartion %d - ", tree_id);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT iteartion %d - ", tree_id);
     start_t = clock();
    // Create TPT
     tptree->reset();
@@ -736,7 +736,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
     KNN_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
 
-    LOG("tree:%lfms, graph build:%lfms\n", tree_time, KNN_time);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "tree:%lfms, graph build:%lfms\n", tree_time, KNN_time);
 
   } // end TPT loop
 
@@ -750,7 +750,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   refine_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
 
 
-  LOG("%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "%0.3lf, %0.3lf, %0.3lf, %0.3lf, ", tree_time, KNN_time, refine_time, tree_time+KNN_time+refine_time);
   CUDA_CHECK(cudaMemcpy(results, d_results, (long long int)dataSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
 
 
@@ -790,7 +790,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   int batchSize = (dataSize / numBatches);
   if(batchSize * numBatches < dataSize) batchSize++;
 
-  LOG("Creating RNG graph using %d batches, each of %d elements, TPT iters:%d, tree depth:%d, KVAL:%d\n", numBatches, batchSize, trees, levels, KVAL);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %d batches, each of %d elements, TPT iters:%d, tree depth:%d, KVAL:%d\n", numBatches, batchSize, trees, levels, KVAL);
 
 // Get properties of the GPU being used
   cudaDeviceProp prop;
@@ -814,19 +814,19 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
-  LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
   CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
   CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
-  LOG("Alloc'ing TPtree memory and initializing tree\n");
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing TPtree memory and initializing tree\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
   CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
   tptree->initialize(dataSize, levels);
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
 
-  LOG("Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
   int* d_results;
   CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
 
@@ -848,7 +848,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     min_id = batch*batchSize;
     max_id = min(dataSize, (batch+1)*batchSize);
 
-    LOG("Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
 
     // Initialize results to all -1 (special value that is set to distance INFTY)
     CUDA_CHECK(cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int)));
@@ -856,7 +856,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
       CUDA_CHECK(cudaDeviceSynchronize());
 
-      LOG("TPT iteration %d - ", tree_id);
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT iteration %d - ", tree_id);
       start_t = clock();
      // Create TPT
       tptree->reset();
@@ -868,7 +868,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
       end_t = clock();
 
       temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC;
-      LOG("tree: %0.3lf, ", temp_time);
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "tree: %0.3lf, ", temp_time);
       tree_time += temp_time;
 
       start_t = clock();
@@ -882,7 +882,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
       end_t = clock();
 
       temp_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
-      LOG("graph build: %0.3lf\n", temp_time);
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "graph build: %0.3lf\n", temp_time);
       KNN_time += temp_time;
  
     } // end TPT loop
@@ -893,24 +893,24 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC; 
     D2H_time += temp_time;
 
-    LOG("Batch complete, time to copy results:%0.3lf\n", temp_time);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Batch complete, time to copy results:%0.3lf\n", temp_time);
 #ifdef DEBUG
-  LOG("Neighbors of first vertex of batch (%d):\n", min_id);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%d):\n", min_id);
   for(int i=0; i<KVAL; i++) {
-    LOG("%d, ", results[min_id*KVAL+i]);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
   }
-  LOG("\n");
-  LOG("Neighbors of last vertex of batch (%d):\n", max_id-1);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%d):\n", max_id-1);
   for(int i=0; i<KVAL; i++) {
-    LOG("%d, ", results[(max_id-1)*KVAL+i]);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[(max_id-1)*KVAL+i]);
   }
-  LOG("\n");
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
 #endif
 
   } // end batch loop
   tot_end_t = clock();
 
-  LOG("Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
 
 
 

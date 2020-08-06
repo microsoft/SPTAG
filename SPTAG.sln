@@ -1,5 +1,5 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 16
+# Visual Studio Version 16
 VisualStudioVersion = 16.0.29709.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CoreLibrary", "AnnService\CoreLibrary.vcxproj", "{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}"
@@ -82,6 +82,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRCore", "Wrappers\CLRCore
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GPUCoreLibrary", "AnnService\GPUCoreLibrary.vcxproj", "{84A84DBE-D46B-4EC9-8948-FF150DE5D386}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "GPUIndexBuilder", "AnnService\GPUIndexBuilder.vcxproj", "{85106062-3D9F-4B52-AFF3-97D0F9575888}"
+	ProjectSection(ProjectDependencies) = postProject
+		{84A84DBE-D46B-4EC9-8948-FF150DE5D386} = {84A84DBE-D46B-4EC9-8948-FF150DE5D386}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -207,6 +212,12 @@ Global
 		{84A84DBE-D46B-4EC9-8948-FF150DE5D386}.Debug|x86.ActiveCfg = Debug|x64
 		{84A84DBE-D46B-4EC9-8948-FF150DE5D386}.Release|x64.ActiveCfg = Release|x64
 		{84A84DBE-D46B-4EC9-8948-FF150DE5D386}.Release|x86.ActiveCfg = Release|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Debug|x64.ActiveCfg = Debug|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Debug|x64.Build.0 = Debug|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Debug|x86.ActiveCfg = Debug|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Release|x64.ActiveCfg = Release|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Release|x64.Build.0 = Release|x64
+		{85106062-3D9F-4B52-AFF3-97D0F9575888}.Release|x86.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

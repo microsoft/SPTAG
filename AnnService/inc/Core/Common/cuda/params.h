@@ -36,14 +36,6 @@
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
 #define KEYTYPE float // Keys used to divide TPTs at each node
 
-#define DEBUG 1
-
-#if defined(DEBUG)
-#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
-#else
-#define LOG(f_, ...) {}
-#endif
-
 #define CUDA_CHECK(func)                                                       \
   do {                                                                         \
     cudaError_t rt = (func);                                                   \

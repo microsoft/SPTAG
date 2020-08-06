@@ -11,10 +11,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{84A84DBE-D46B-4EC9-8948-FF150DE5D386}</ProjectGuid>
-    <RootNamespace>GPUCoreLibrary</RootNamespace>
+    <ProjectGuid>{85106062-3D9F-4B52-AFF3-97D0F9575888}</ProjectGuid>
+    <RootNamespace>GPUIndexBuilder</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>GPUCoreLibrary</ProjectName>
+    <ProjectName>GPUIndexBuilder</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
@@ -25,7 +25,7 @@
     <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
@@ -85,14 +85,13 @@
       <PreprocessorDefinitions>GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>CoreLibrary.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>GPUCoreLibrary.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
@@ -104,77 +103,10 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="src\Core\Common\Kernel.cu" />
-    <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
-    <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
-    <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
-    <CudaCompile Include="src\Core\Common\WorkSpacePool.cpp" />
-    <CudaCompile Include="src\Core\MetadataSet.cpp" />
-    <CudaCompile Include="src\Core\VectorIndex.cpp" />
-    <CudaCompile Include="src\Core\VectorSet.cpp" />
-    <CudaCompile Include="src\Helper\ArgumentsParser.cpp" />
-    <CudaCompile Include="src\Helper\Base64Encode.cpp" />
-    <CudaCompile Include="src\Helper\CommonHelper.cpp" />
-    <CudaCompile Include="src\Helper\Concurrent.cpp" />
-    <CudaCompile Include="src\Helper\SimpleIniReader.cpp" />
-    <CudaCompile Include="src\Helper\VectorSetReader.cpp" />
-    <CudaCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
+    <CudaCompile Include="src\IndexBuilder\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="inc\Core\Common\cuda\KNN.hxx" />
-    <ClInclude Include="inc\Core\Common\cuda\params.h" />
-    <ClInclude Include="inc\Core\Common\cuda\Distance.hxx" />
-    <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
-    <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
-    <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
-    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
-    <ClInclude Include="inc\Core\Common\Labelset.h" />
-    <ClInclude Include="inc\Core\Common\WorkSpace.h" />
-    <ClInclude Include="inc\Core\Common\CommonUtils.h" />
-    <ClInclude Include="inc\Core\Common\Dataset.h" />
-    <ClInclude Include="inc\Core\Common\DistanceUtils.h" />
-    <ClInclude Include="inc\Core\Common\Heap.h" />
-    <ClInclude Include="inc\Core\Common\QueryResultSet.h" />
-    <ClInclude Include="inc\Core\Common\WorkSpacePool.h" />
-    <ClInclude Include="inc\Core\BKT\Index.h" />
-    <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\Core\KDT\Index.h" />
-    <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\Core\Common.h" />
-    <ClInclude Include="inc\Core\CommonDataStructure.h" />
-    <ClInclude Include="inc\Core\DefinitionList.h" />
-    <ClInclude Include="inc\Core\MetadataSet.h" />
-    <ClInclude Include="inc\Core\SearchQuery.h" />
-    <ClInclude Include="inc\Core\SearchResult.h" />
-    <ClInclude Include="inc\Core\VectorIndex.h" />
-    <ClInclude Include="inc\Core\VectorSet.h" />
-    <ClInclude Include="inc\Helper\ArgumentsParser.h" />
-    <ClInclude Include="inc\Helper\Base64Encode.h" />
-    <ClInclude Include="inc\Helper\CommonHelper.h" />
-    <ClInclude Include="inc\Helper\Concurrent.h" />
-    <ClInclude Include="inc\Helper\ConcurrentSet.h" />
-    <ClInclude Include="inc\Helper\DiskIO.h" />
-    <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
-    <ClInclude Include="inc\Helper\Logging.h" />
-    <ClInclude Include="inc\Helper\SimpleIniReader.h" />
-    <ClInclude Include="inc\Helper\StringConvert.h" />
-    <ClInclude Include="inc\Core\Common\NeighborhoodGraph.h" />
-    <ClInclude Include="inc\Core\Common\RelativeNeighborhoodGraph.h" />
-    <ClInclude Include="inc\Core\Common\BKTree.h" />
-    <ClInclude Include="inc\Core\Common\KDTree.h" />
-    <ClInclude Include="inc\Helper\ThreadPool.h" />
-    <ClInclude Include="inc\Helper\VectorSetReader.h" />
-    <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
-    <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h" />
-    <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
-    <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />
-    <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

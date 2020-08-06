@@ -272,8 +272,8 @@ namespace SPTAG
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
-            m_pTrees.InitSearchTrees(this, *p_results, *workSpace);
-            m_pTrees.SearchTrees(this, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
             BasicResult * res = p_query.GetResults();
             for (int i = 0; i < p_query.GetResultNum(); i++)
             {

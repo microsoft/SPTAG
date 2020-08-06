@@ -348,7 +348,7 @@ namespace SPTAG
                 }
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
+                LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
             }
 
             template <typename T>
@@ -384,7 +384,7 @@ namespace SPTAG
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::shared_ptr<Helper::DiskPriorityIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 std::shared_ptr<NeighborhoodGraph> tmp;
                 if (newGraph == nullptr) {
