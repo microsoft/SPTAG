@@ -78,7 +78,7 @@ namespace SPTAG
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_handle.reset(new std::fstream(filePath, openMode));
+                m_handle.reset(new std::fstream(filePath, (std::ios::openmode)openMode));
                 return m_handle->is_open();
             }
 
@@ -196,20 +196,20 @@ namespace SPTAG
 
             virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
             {
-                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset);
                 return m_handle->sgetn((char*)buffer, readSize);
             }
 
             virtual std::uint64_t WriteBinary(std::uint64_t writeSize, const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
-                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset);
                 if ((std::uint64_t)m_handle->sputn((const char*)buffer, writeSize) < writeSize) return 0;
                 return writeSize;
             }
 
             virtual std::uint64_t ReadString(std::uint64_t& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', std::uint64_t offset = UINT64_MAX)
             {
-                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset);
                 std::uint64_t readCount = 0;
                 for (int _Meta = m_handle->sgetc();; _Meta = m_handle->snextc()) {
                     if (_Meta == '\r') _Meta = '\n';
