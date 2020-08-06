@@ -225,9 +225,6 @@
     <CudaCompile Include="src\Helper\VectorSetReader.cpp">
       <Filter>Source Files\Helper</Filter>
     </CudaCompile>
-    <CudaCompile Include="src\IndexBuilder\main.cpp">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

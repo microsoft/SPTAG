@@ -129,7 +129,7 @@ namespace SPTAG
                 }
 
                 // Do not include this item.
-                std::cout << "Hash table is full!" << std::endl;
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full!\n");
                 return -1;
             }
         };

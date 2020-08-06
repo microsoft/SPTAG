@@ -1,24 +1,22 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Helper/ArgumentsParser.h"
+#include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
-#include "inc/Core/Common.h"
-#include "inc/Core/MetadataSet.h"
+#include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/VectorIndex.h"
-#include "inc/Core/SearchQuery.h"
-#include "inc/Core/Common/WorkSpace.h"
-#include "inc/Core/Common/DataUtils.h"
+#include <omp.h>
+#include <algorithm>
 #include <iomanip>
 #include <set>
 
 using namespace SPTAG;
 
-class SearcherOptions : public Helper::ArgumentsParser
+class SearcherOptions : public Helper::ReaderOptions
 {
 public:
-    SearcherOptions()
+    SearcherOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
     {
         AddRequiredOption(m_queryFile, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_indexFolder, "-x", "--index", "Index folder.");
@@ -28,13 +26,12 @@ public:
         AddOptionalOption(m_withMeta, "-a", "--withmeta", "Output metadata instead of vector id.");
         AddOptionalOption(m_K, "-k", "--KNN", "K nearest neighbors for search.");
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
-        AddOptionalOption(m_threadNum, "-t", "--thread", "Thread Number.");
     }
 
     ~SearcherOptions() {}
 
     std::string m_queryFile;
-    
+
     std::string m_indexFolder;
 
     std::string m_truthFile = "";
@@ -48,79 +45,10 @@ public:
     int m_K = 32;
 
     int m_batch = 10000;
-
-    std::uint32_t m_threadNum = 0;
 };
 
 template <typename T>
-struct QueryReader
-{
-public:
-    std::vector<std::vector<T>> Query;
-    std::vector<std::string> QStrings;
-    int base = 1;
-
-    QueryReader(std::string inputFile, int batchSize, int featureDim, DistCalcMethod distMethod) {
-        Query.resize(batchSize, std::vector<T>(featureDim, 0));
-        if (distMethod == DistCalcMethod::Cosine) base = COMMON::Utils::GetBase<T>();
-
-        if (inputFile.find("BIN:") == 0) {
-            m_isBinary = true;
-            m_inStream.open(inputFile.substr(4), std::ifstream::binary);
-            if (!m_inStream.is_open())
-            {
-                std::cerr << "ERROR: Cannot Load Query file " << inputFile << "!" << std::endl;
-            }
-            SizeType numQuerys;
-            m_inStream.read((char*)&numQuerys, sizeof(SizeType));
-            m_inStream.read((char*)&m_featureDim, sizeof(SizeType));
-            if (m_featureDim != featureDim) {
-                std::cerr << "ERROR: Feature dimension is not match between query file and index!" << std::endl;
-            }
-        }
-        else {
-            m_isBinary = false;
-            m_inStream.open(inputFile);
-            if (!m_inStream.is_open())
-            {
-                std::cerr << "ERROR: Cannot Load Query file " << inputFile << "!" << std::endl;
-            }
-            m_featureDim = featureDim;
-        }
-        m_distMethod = distMethod;
-    }
-
-    ~QueryReader() {
-        for (int i = 0; i < Query.size(); i++) Query[i].clear();
-        Query.clear();
-        QStrings.clear();
-        m_inStream.close();
-    }
-
-    int ReadBatch() {
-        int readQuerys = (int)Query.size();
-        if (m_isBinary) {
-            QStrings.resize(readQuerys, "");
-            for (int i = 0; i < readQuerys; i++) {
-                m_inStream.read((char*)Query[i].data(), sizeof(T)*m_featureDim);
-                if (m_inStream.eof()) readQuerys = i;
-            }
-        }
-        else {
-            QStrings.clear();
-            COMMON::Utils::PrepareQuerys(m_inStream, QStrings, Query, readQuerys, m_featureDim, m_distMethod, base);
-        }
-        return readQuerys;
-    }
-private:
-    bool m_isBinary;
-    std::ifstream m_inStream;
-    int m_featureDim;
-    DistCalcMethod m_distMethod;
-};
-
-template <typename T>
-float CalcRecall(std::vector<QueryResult> &results, const std::vector<std::set<SizeType>> &truth, SizeType NumQuerys, int K, std::ofstream& log)
+float CalcRecall(std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K, std::ofstream& log)
 {
     float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
     std::vector<float> thisrecall(NumQuerys, 0);
@@ -171,15 +99,29 @@ void LoadTruth(std::ifstream& fp, std::vector<std::set<SizeType>>& truth, SizeTy
 template <typename T>
 int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 {
-    QueryReader<T> reader(options->m_queryFile, options->m_batch, index.GetFeatureDim(), index.GetDistCalcMethod());
-   
+    std::ofstream log("Recall-result.out", std::ios::app);
+    if (!log.is_open())
+    {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open logging file!\n");
+        exit(-1);
+    }
+
+    auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+    if (ErrorCode::Success != vectorReader->LoadFile(options->m_queryFile))
+    {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+        exit(1);
+    }
+    auto queryVectors = vectorReader->GetVectorSet();
+    auto queryMetas = vectorReader->GetMetadataSet();
+
     std::ifstream ftruth;
     if (options->m_truthFile != "")
     {
         ftruth.open(options->m_truthFile);
         if (!ftruth.is_open())
         {
-            std::cerr << "ERROR: Cannot open " << options->m_truthFile << " for read!" << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
         }
     }
 
@@ -189,31 +131,23 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         fp.open(options->m_resultFile);
         if (!fp.is_open())
         {
-            std::cerr << "ERROR: Cannot open " << options->m_resultFile << " for write!" << std::endl;
+            LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_resultFile.c_str());
         }
-    }
-
-//    std::ofstream log(index.GetIndexName() + "_" + std::to_string(options->m_K) + ".txt");
-    std::ofstream log("Recall-result.out", std::ios::app);
-    if (!log.is_open())
-    {
-        std::cerr << "ERROR: Cannot open logging file!" << std::endl;
-        return -1;
     }
 
     std::vector<std::string> maxCheck = Helper::StrUtils::SplitString(options->m_maxCheck, "#");
 
     std::vector<std::set<SizeType>> truth(options->m_batch);
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
-    clock_t * latencies = new clock_t[options->m_batch + 1];
-    
-    std::cout << "[query]\t\t[maxcheck]\t[avg]      \t[99%] \t[95%] \t[recall] \t[mem]" << std::endl;
-    int numQuerys;
-    int totalQuerys = 0;
+    std::vector<clock_t> latencies(options->m_batch + 1, 0);
+    int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
+
+    LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0);
-    while ((numQuerys = reader.ReadBatch()) != 0)
+    for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
-        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(reader.Query[i].data());
+        int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
+        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
         if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, options->m_K);
 
         SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
@@ -251,10 +185,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             timeStd = std::sqrt(timeStd / numQuerys);
             log << timeMean << " " << timeStd << " " << timeMin << " " << timeMax << " ";
 
-            std::sort(latencies, latencies + numQuerys, [](clock_t x, clock_t y)
-            {
-                return x < y;
-            });
+            std::sort(latencies.begin(), latencies.begin() + numQuerys);
             float l99 = float(latencies[SizeType(numQuerys * 0.99)]) / CLOCKS_PER_SEC;
             float l95 = float(latencies[SizeType(numQuerys * 0.95)]) / CLOCKS_PER_SEC;
 
@@ -273,19 +204,26 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
-            std::cout << totalQuerys << "-" << (totalQuerys + numQuerys) << "\t" << maxCheck[mc] << "\t" << std::fixed << std::setprecision(6) << (timeMean / CLOCKS_PER_SEC) << "\t" << std::setprecision(4) << l99 << "\t" << l95 << "\t" << recall << "\t\t" << peakWSS << "GB" << std::endl;
+            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), (timeMean / CLOCKS_PER_SEC), l99, l95, recall, peakWSS);
             totalAvg[mc] += timeMean / CLOCKS_PER_SEC * numQuerys;
             total95[mc] += l95 * numQuerys;
             total99[mc] += l99 * numQuerys;
             totalRecall[mc] += recall * numQuerys;
         }
-        
+
         if (fp.is_open())
         {
             fp << std::setprecision(3) << std::fixed;
             for (SizeType i = 0; i < numQuerys; i++)
             {
-                fp << reader.QStrings[i] << ":";
+                if (queryMetas != nullptr) {
+                    ByteArray qmeta = queryMetas->GetMetadata(startQuery + i);
+                    fp.write((const char*)qmeta.Data(), qmeta.Length());
+                }
+                else {
+                    fp << i;
+                }
+                fp << ":";
                 for (int j = 0; j < options->m_K; j++)
                 {
                     if (results[i].GetResult(j)->VID < 0) {
@@ -294,11 +232,11 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     }
 
                     if (!options->m_withMeta) {
-                        fp << (results[i].GetResult(j)->Dist / (reader.base * reader.base)) << "@" << results[i].GetResult(j)->VID << std::endl;
+                        fp << (results[i].GetResult(j)->Dist / baseSquare) << "@" << results[i].GetResult(j)->VID << std::endl;
                     }
                     else {
                         ByteArray vm = index.GetMetadata(results[i].GetResult(j)->VID);
-                        fp << (results[i].GetResult(j)->Dist / (reader.base * reader.base)) << "@";
+                        fp << (results[i].GetResult(j)->Dist / baseSquare) << "@";
                         fp.write((const char*)vm.Data(), vm.Length());
                     }
                     fp << "|";
@@ -306,21 +244,15 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                 fp << std::endl;
             }
         }
-        totalQuerys += numQuerys;
     }
     for (int mc = 0; mc < maxCheck.size(); mc++)
-        std::cout << 0 << "-" << totalQuerys << "\t" << maxCheck[mc] << "\t" << std::fixed << std::setprecision(6) << (totalAvg[mc]/totalQuerys) << "\t" << std::setprecision(4) << (total99[mc]/totalQuerys) << "\t" << (total95[mc]/totalQuerys) << "\t" << (totalRecall[mc]/totalQuerys) << std::endl;
+        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()));
 
-    std::cout << "Output results finish!" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
     ftruth.close();
     fp.close();
     log.close();
-
-    for (int i = 0; i < truth.size(); i++) truth[i].clear();
-    truth.clear();
-    results.clear();
-    delete[] latencies;
     return 0;
 }
 
@@ -336,7 +268,7 @@ int main(int argc, char** argv)
     auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
     {
-        std::cerr << "Cannot open index configure file!" << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
 
@@ -356,10 +288,10 @@ int main(int argc, char** argv)
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        std::cout << "Set [" << sectionName << "]" << paramName << " = " << paramVal << std::endl;
+        LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
-    if (options->m_threadNum != 0)
+    if (!iniReader.DoesParameterExist("Index", "NumberOfThreads"))
         iniReader.SetParameter("Index", "NumberOfThreads", std::to_string(options->m_threadNum));
 
     for (const auto& iter : iniReader.GetParameters("Index"))

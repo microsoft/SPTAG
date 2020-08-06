@@ -5,7 +5,6 @@
 #define _SPTAG_COMMONDATASTRUCTURE_H_
 
 #include "inc/Core/Common.h"
-#include <string.h>
 
 namespace SPTAG
 {
@@ -33,8 +32,6 @@ public:
     const T& operator[] (std::size_t p_index) const;
 
     ~Array();
-
-    Array<T> Clone() const;
 
     T* Data() const;
 
@@ -153,21 +150,6 @@ Array<T>::operator[] (std::size_t p_index) const
 template<typename T>
 Array<T>::~Array()
 {
-}
-
-
-template<typename T>
-Array<T> Array<T>::Clone() const
-{
-    Array<T> arr;
-    if (0 == m_length) return arr;
-
-    arr.m_data = new T[m_length];
-    arr.m_length = m_length;
-    arr.m_dataHolder.reset(arr.m_data, std::default_delete<T[]>());
-    
-    memcpy(arr.m_data, m_data, sizeof(T) * arr.m_length);
-    return arr;
 }
 
 

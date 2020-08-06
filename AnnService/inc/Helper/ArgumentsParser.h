@@ -38,7 +38,7 @@ protected:
 
         virtual bool ParseValue(int& p_restArgc, char** (&p_args)) = 0;
 
-        virtual void PrintDescription(FILE* p_output) = 0;
+        virtual void PrintDescription() = 0;
 
         virtual bool IsRequiredButNotSet() const = 0;
     };
@@ -113,12 +113,12 @@ protected:
         }
 
 
-        virtual void PrintDescription(FILE* p_output)
+        virtual void PrintDescription()
         {
             std::size_t padding = 30;
             if (!m_representStringShort.empty())
             {
-                fprintf(p_output, "%s", m_representStringShort.c_str());
+                LOG(Helper::LogLevel::LL_Empty, "%s", m_representStringShort.c_str());
                 padding -= m_representStringShort.size();
             }
 
@@ -126,26 +126,26 @@ protected:
             {
                 if (!m_representStringShort.empty())
                 {
-                    fprintf(p_output, ", ");
+                    LOG(Helper::LogLevel::LL_Empty, ", ");
                     padding -= 2;
                 }
 
-                fprintf(p_output, "%s", m_representString.c_str());
+                LOG(Helper::LogLevel::LL_Empty, "%s", m_representString.c_str());
                 padding -= m_representString.size();
             }
 
             if (m_followedValue)
             {
-                fprintf(p_output, " <value>");
+                LOG(Helper::LogLevel::LL_Empty, " <value>");
                 padding -= 8;
             }
 
             while (padding-- > 0)
             {
-                fputc(' ', p_output);
+                LOG(Helper::LogLevel::LL_Empty, " ");
             }
 
-            fprintf(p_output, "%s", m_description.c_str());
+            LOG(Helper::LogLevel::LL_Empty, "%s", m_description.c_str());
         }
 
 

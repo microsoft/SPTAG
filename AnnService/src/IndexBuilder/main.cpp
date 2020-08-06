@@ -7,14 +7,13 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 #include <memory>
-#include <iostream>
 
 using namespace SPTAG;
 
 class BuilderOptions : public Helper::ReaderOptions
 {
 public:
-    BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, "|", 32)
+    BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
@@ -44,9 +43,10 @@ int main(int argc, char* argv[])
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 
     Helper::IniReader iniReader;
-    if (!options->m_builderConfigFile.empty())
+    if (!options->m_builderConfigFile.empty() && iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
     {
-        iniReader.LoadIniFile(options->m_builderConfigFile);
+        LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
+        return -1;
     }
 
     for (int i = 1; i < argc; i++)
@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        std::cout << "Set [" << sectionName << "]" << paramName << " = " << paramVal << std::endl;
+        LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
     if (!iniReader.DoesParameterExist("Index", "NumberOfThreads")) {
@@ -75,46 +75,18 @@ int main(int argc, char* argv[])
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
     }
 
-    ErrorCode code;
-    if (options->m_inputFiles.find("BIN:") == 0) {
-        std::vector<std::string> files = SPTAG::Helper::StrUtils::SplitString(options->m_inputFiles.substr(4), ",");
-        std::ifstream inputStream(files[0], std::ifstream::binary);
-        if (!inputStream.is_open()) {
-            fprintf(stderr, "Failed to read input file.\n");
-            exit(1);
-        }
-        SizeType row;
-        DimensionType col;
-        inputStream.read((char*)&row, sizeof(SizeType));
-        inputStream.read((char*)&col, sizeof(DimensionType));
-        std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(options->m_inputValueType)) * row * col;
-        ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
-        char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-        inputStream.read(vecBuf, totalRecordVectorBytes);
-        inputStream.close();
-        std::shared_ptr<VectorSet> p_vectorSet(new BasicVectorSet(vectorSet, options->m_inputValueType, col, row));
-        
-        std::shared_ptr<MetadataSet> p_metaSet = nullptr;
-        if (files.size() >= 3) {
-            p_metaSet.reset(new FileMetadataSet(files[1], files[2]));
-        }
-        code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
-        indexBuilder->SaveIndex(options->m_outputFolder);
+    auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+    if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
+    {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+        exit(1);
     }
-    else {
-        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
-        {
-            fprintf(stderr, "Failed to read input file.\n");
-            exit(1);
-        }
-        code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
-        indexBuilder->SaveIndex(options->m_outputFolder);
-    }
+    ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
+    indexBuilder->SaveIndex(options->m_outputFolder);
 
     if (ErrorCode::Success != code)
     {
-        fprintf(stderr, "Failed to build index.\n");
+        LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
         exit(1);
     }
     return 0;
