@@ -22,9 +22,9 @@ namespace SPTAG
 
         struct AsyncReadRequest
         {
-            unsigned __int64 m_offset;
-            unsigned __int64 m_readSize;
-            __int8* m_buffer;
+            std::uint64_t m_offset;
+            std::uint64_t m_readSize;
+            char* m_buffer;
             std::function<void(bool)> m_callback;
             
             // Carry items like counter for callback to process.
@@ -43,22 +43,22 @@ namespace SPTAG
 
             virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
-                unsigned __int64 maxIOSize = (1 << 20),
-                unsigned __int32 maxReadRetries = 2,
-                unsigned __int32 maxWriteRetries = 2,
-                unsigned __int16 threadPoolSize = 4) = 0;
+                std::uint64_t maxIOSize = (1 << 20),
+                std::uint32_t maxReadRetries = 2,
+                std::uint32_t maxWriteRetries = 2,
+                std::uint16_t threadPoolSize = 4) = 0;
 
-            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
+            virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
+            virtual std::uint64_t WriteBinary(std::uint64_t writeSize, const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX) = 0;
+            virtual std::uint64_t ReadString(std::uint64_t& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
+            virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) = 0;
 
-            virtual unsigned __int64 TellP() = 0;
+            virtual std::uint64_t TellP() = 0;
 
             virtual void ShutDown() = 0;
 
@@ -73,23 +73,23 @@ namespace SPTAG
 
             virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
-                unsigned __int64 maxIOSize = (1 << 20),
-                unsigned __int32 maxReadRetries = 2,
-                unsigned __int32 maxWriteRetries = 2,
-                unsigned __int16 threadPoolSize = 4)
+                std::uint64_t maxIOSize = (1 << 20),
+                std::uint32_t maxReadRetries = 2,
+                std::uint32_t maxWriteRetries = 2,
+                std::uint16_t threadPoolSize = 4)
             {
                 m_handle.reset(new std::fstream(filePath, openMode));
                 return m_handle->is_open();
             }
 
-            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->seekg(offset, std::ios::beg);
                 m_handle->read((char*)buffer, readSize);
                 return m_handle->gcount();
             }
 
-            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t WriteBinary(std::uint64_t writeSize, const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->seekp(offset, std::ios::beg);
                 m_handle->write((const char*)buffer, writeSize);
@@ -97,10 +97,10 @@ namespace SPTAG
                 return writeSize;
             }
 
-            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t ReadString(std::uint64_t& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->seekg(offset, std::ios::beg);
-                unsigned __int64 readCount = 0;
+                std::uint64_t readCount = 0;
                 for (int _Meta = m_handle->get();; _Meta = m_handle->get()) {
                     if (_Meta == '\r') _Meta = '\n';
 
@@ -130,9 +130,9 @@ namespace SPTAG
                 return readCount;
             }
 
-            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
-                return WriteBinary(strlen(buffer), (const __int8*)buffer, offset);
+                return WriteBinary(strlen(buffer), (const char*)buffer, offset);
             }
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
@@ -140,7 +140,7 @@ namespace SPTAG
                 return false;
             }
 
-            virtual unsigned __int64 TellP()
+            virtual std::uint64_t TellP()
             {
                 return m_handle->tellp();
             }
@@ -166,7 +166,7 @@ namespace SPTAG
                     setp(buffer, buffer + size);
                 }
 
-                unsigned __int64 tellp()
+                std::uint64_t tellp()
                 {
                     if (pptr()) return pptr() - pbase();
                     return 0;
@@ -182,10 +182,10 @@ namespace SPTAG
 
             virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
-                unsigned __int64 maxIOSize = (1 << 20),
-                unsigned __int32 maxReadRetries = 2,
-                unsigned __int32 maxWriteRetries = 2,
-                unsigned __int16 threadPoolSize = 4)
+                std::uint64_t maxIOSize = (1 << 20),
+                std::uint32_t maxReadRetries = 2,
+                std::uint32_t maxWriteRetries = 2,
+                std::uint16_t threadPoolSize = 4)
             {
                 if (filePath != nullptr)
                     m_handle.reset(new streambuf((char*)filePath, maxIOSize));
@@ -194,23 +194,23 @@ namespace SPTAG
                 return true;
             }
 
-            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
                 return m_handle->sgetn((char*)buffer, readSize);
             }
 
-            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t WriteBinary(std::uint64_t writeSize, const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
-                if ((unsigned __int64)m_handle->sputn((const char*)buffer, writeSize) < writeSize) return 0;
+                if ((std::uint64_t)m_handle->sputn((const char*)buffer, writeSize) < writeSize) return 0;
                 return writeSize;
             }
 
-            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t ReadString(std::uint64_t& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', std::uint64_t offset = UINT64_MAX)
             {
                 if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
-                unsigned __int64 readCount = 0;
+                std::uint64_t readCount = 0;
                 for (int _Meta = m_handle->sgetc();; _Meta = m_handle->snextc()) {
                     if (_Meta == '\r') _Meta = '\n';
 
@@ -241,9 +241,9 @@ namespace SPTAG
                 return readCount;
             }
 
-            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX)
+            virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
-                return WriteBinary(strlen(buffer), (const __int8*)buffer, offset);
+                return WriteBinary(strlen(buffer), (const char*)buffer, offset);
             }
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
@@ -251,7 +251,7 @@ namespace SPTAG
                 return false;
             }
 
-            virtual unsigned __int64 TellP()
+            virtual std::uint64_t TellP()
             { 
                 return m_handle->tellp(); 
             }
