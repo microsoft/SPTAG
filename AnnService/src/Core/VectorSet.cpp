@@ -84,14 +84,12 @@ BasicVectorSet::Available() const
 ErrorCode 
 BasicVectorSet::Save(const std::string& p_vectorFile) const
 {
-    FILE * fp = fopen(p_vectorFile.c_str(), "wb");
-    if (fp == NULL) return ErrorCode::FailedOpenFile;
+    auto fp = SPTAG::f_createIO();
+    if (fp == nullptr || !fp->Initialize(p_vectorFile.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedOpenFile;
 
-    fwrite(&m_vectorCount, sizeof(SizeType), 1, fp);
-    fwrite(&m_dimension, sizeof(DimensionType), 1, fp);
-
-    fwrite((const void*)(m_data.Data()), m_data.Length(), 1, fp);
-    fclose(fp);
+    IOBINARY(fp, WriteBinary, sizeof(SizeType), (char*)&m_vectorCount);
+    IOBINARY(fp, WriteBinary, sizeof(DimensionType), (char*)&m_dimension);
+    IOBINARY(fp, WriteBinary, m_data.Length(), (char*)m_data.Data());
     return ErrorCode::Success;
 }
 

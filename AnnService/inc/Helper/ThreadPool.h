@@ -4,7 +4,6 @@
 #ifndef _SPTAG_HELPER_THREADPOOL_H_
 #define _SPTAG_HELPER_THREADPOOL_H_
 
-#include <iostream>
 #include <queue>
 #include <vector>
 #include <thread>

@@ -4,7 +4,6 @@
 #ifndef _SPTAG_COMMON_BKTREE_H_
 #define _SPTAG_COMMON_BKTREE_H_
 
-#include <iostream>
 #include <stack>
 #include <string>
 #include <vector>
@@ -427,29 +426,27 @@ namespace SPTAG
                     sizeof(SizeType) + sizeof(BKTNode) * m_pTreeRoots.size();
             }
 
-            bool SaveTrees(std::ostream& p_outstream) const
+            ErrorCode SaveTrees(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
             {
                 std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                p_outstream.write((char*)&m_iTreeNumber, sizeof(int));
-                p_outstream.write((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
+                IOBINARY(p_out, WriteBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
-                p_outstream.write((char*)&treeNodeSize, sizeof(SizeType));
-                p_outstream.write((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
+                IOBINARY(p_out, WriteBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
                 LOG(Helper::LogLevel::LL_Info, "Save BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
-                return true;
+                return ErrorCode::Success;
             }
 
-            bool SaveTrees(std::string sTreeFileName) const
+            ErrorCode SaveTrees(std::string sTreeFileName) const
             {
                 LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName);
-                std::ofstream output(sTreeFileName, std::ios::binary);
-                if (!output.is_open()) return false;
-                SaveTrees(output);
-                output.close();
-                return true;
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return SaveTrees(ptr);
             }
 
-            bool LoadTrees(char* pBKTMemFile)
+            ErrorCode LoadTrees(char* pBKTMemFile)
             {
                 m_iTreeNumber = *((int*)pBKTMemFile);
                 pBKTMemFile += sizeof(int);
@@ -463,33 +460,31 @@ namespace SPTAG
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
                 if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
-                return true;
+                return ErrorCode::Success;
             }
 
-            bool LoadTrees(std::istream& input)
+            ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
             {
-                input.read((char*)&m_iTreeNumber, sizeof(int));
+                IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 m_pTreeStart.resize(m_iTreeNumber);
-                input.read((char*)m_pTreeStart.data(), sizeof(SizeType) * m_iTreeNumber);
+                IOBINARY(p_input, ReadBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
 
                 SizeType treeNodeSize;
-                input.read((char*)&treeNodeSize, sizeof(SizeType));
+                IOBINARY(p_input, ReadBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
                 m_pTreeRoots.resize(treeNodeSize);
-                input.read((char*)m_pTreeRoots.data(), sizeof(BKTNode) * treeNodeSize);
+                IOBINARY(p_input, ReadBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
 
                 if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
                 LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
-                return true;
+                return ErrorCode::Success;
             }
 
-            bool LoadTrees(std::string sTreeFileName)
+            ErrorCode LoadTrees(std::string sTreeFileName)
             {
                 LOG(Helper::LogLevel::LL_Info, "Load BKT From %s\n", sTreeFileName.c_str());
-                std::ifstream input(sTreeFileName, std::ios::binary);
-                if (!input.is_open()) return false;
-                LoadTrees(input);
-                input.close();
-                return true;
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+                return LoadTrees(ptr);
             }
 
             template <typename T>

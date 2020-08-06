@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <fstream>
+#include <string.h>
 
 namespace SPTAG
 {
@@ -22,7 +23,7 @@ namespace SPTAG
         struct AsyncReadRequest
         {
             unsigned __int64 m_offset;
-            unsigned __int32 m_readSize;
+            unsigned __int64 m_readSize;
             __int8* m_buffer;
             std::function<void(bool)> m_callback;
             
@@ -40,24 +41,24 @@ namespace SPTAG
 
             virtual ~DiskPriorityIO() {}
 
-            virtual bool Initialize(const char* filePath, bool isBinary,
+            virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
-                unsigned __int32 maxIOSize = (1 << 20),
+                unsigned __int64 maxIOSize = (1 << 20),
                 unsigned __int32 maxReadRetries = 2,
                 unsigned __int32 maxWriteRetries = 2,
                 unsigned __int16 threadPoolSize = 4) = 0;
 
-            virtual unsigned __int32 ReadFile(unsigned __int64 offset, unsigned __int32 readSize, __int8* buffer) = 0;
+            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int32 WriteFile(unsigned __int64 offset, unsigned __int32 writeSize, __int8* buffer) = 0;
+            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int32 Read(unsigned __int32 readSize, __int8* buffer) = 0;
+            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX) = 0;
 
-            virtual unsigned __int32 ReadLine(unsigned __int32 readSize, __int8* buffer, char delim = '\n') = 0;
-            
-            virtual unsigned __int32 Write(unsigned __int32 writeSize, __int8* buffer) = 0;
+            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX) = 0;
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) = 0;
+
+            virtual unsigned __int64 TellP() = 0;
 
             virtual void ShutDown() = 0;
 
@@ -66,59 +67,72 @@ namespace SPTAG
         class SimpleFileIO : public DiskPriorityIO
         {
         public:
-            SimpleFileIO(DiskIOScenario scenario) {}
+            SimpleFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
 
-            virtual ~SimpleFileIO()
-            {
-                ShutDown();
-            }
+            virtual ~SimpleFileIO() { ShutDown(); }
 
-            virtual bool Initialize(const char* filePath, bool isBinary,
+            virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
-                unsigned __int32 maxIOSize = (1 << 20),
+                unsigned __int64 maxIOSize = (1 << 20),
                 unsigned __int32 maxReadRetries = 2,
                 unsigned __int32 maxWriteRetries = 2,
                 unsigned __int16 threadPoolSize = 4)
             {
-                m_handle.reset(new std::fstream(filePath, (isBinary ? std::ios::binary : 0) | std::ios::out | std::ios::in));
+                m_handle.reset(new std::fstream(filePath, openMode));
                 return m_handle->is_open();
             }
 
-            virtual unsigned __int32 ReadFile(unsigned __int64 offset, unsigned __int32 readSize, __int8* buffer)
+            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX)
             {
-                m_handle->seekg(offset, std::ios::beg);
+                if (offset != UINT64_MAX) m_handle->seekg(offset, std::ios::beg);
                 m_handle->read((char*)buffer, readSize);
-                if (m_handle->fail() || m_handle->bad() || m_handle->eof()) return 0;
                 return m_handle->gcount();
             }
 
-            virtual unsigned __int32 WriteFile(unsigned __int64 offset, unsigned __int32 writeSize, __int8* buffer)
+            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX)
             {
-                m_handle->seekp(offset, std::ios::beg);
-                m_handle->write((char*)buffer, writeSize);
+                if (offset != UINT64_MAX) m_handle->seekp(offset, std::ios::beg);
+                m_handle->write((const char*)buffer, writeSize);
                 if (m_handle->fail() || m_handle->bad()) return 0;
                 return writeSize;
             }
 
-            virtual unsigned __int32 Read(unsigned __int32 readSize, __int8* buffer)
+            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX)
             {
-                m_handle->read((char*)buffer, readSize);
-                if (m_handle->fail() || m_handle->bad() || m_handle->eof()) return 0;
-                return m_handle->gcount();
+                if (offset != UINT64_MAX) m_handle->seekg(offset, std::ios::beg);
+                unsigned __int64 readCount = 0;
+                for (int _Meta = m_handle->get();; _Meta = m_handle->get()) {
+                    if (_Meta == '\r') _Meta = '\n';
+
+                    if (readCount >= readSize) { // buffer full
+                        readSize *= 2;
+                        std::unique_ptr<char[]> newBuffer(new char[readSize]);
+                        memcpy(newBuffer.get(), buffer.get(), readCount);
+                        buffer.swap(newBuffer);
+                    }
+
+                    if (_Meta == EOF) { // eof
+                        buffer[readCount] = '\0';
+                        break;
+                    }
+                    else if (_Meta == delim) { // got a delimiter, discard it and quit
+                        buffer[readCount++] = '\0';
+                        if (delim == '\n' && m_handle->peek() == '\n') {
+                            readCount++;
+                            m_handle->ignore();
+                        }
+                        break;
+                    }
+                    else { // got a character, add it to string
+                        buffer[readCount++] = std::char_traits<char>::to_char_type(_Meta);
+                    }
+                }
+                return readCount;
             }
 
-            virtual unsigned __int32 ReadLine(unsigned __int32 readSize, __int8* buffer, char delim = '\n')
+            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX)
             {
-                m_handle->getline((char*)buffer, readSize, delim);
-                if (m_handle->fail() || m_handle->bad() || m_handle->eof()) return 0;
-                return m_handle->gcount();
-            }
-
-            virtual unsigned __int32 Write(unsigned __int32 writeSize, __int8* buffer)
-            {
-                m_handle->write((char*)buffer, writeSize);
-                if (m_handle->fail() || m_handle->bad()) return 0;
-                return writeSize;
+                return WriteBinary(strlen(buffer), (const __int8*)buffer, offset);
             }
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
@@ -126,15 +140,127 @@ namespace SPTAG
                 return false;
             }
 
+            virtual unsigned __int64 TellP()
+            {
+                return m_handle->tellp();
+            }
+
             virtual void ShutDown()
             {
-                m_handle->close();
+                if (m_handle != nullptr) m_handle->close();
             }
 
         private:
             std::unique_ptr<std::fstream> m_handle;
         };
 
+        class SimpleBufferIO : public DiskPriorityIO
+        {
+        public:
+            struct streambuf : public std::basic_streambuf<char>
+            {
+                streambuf() {}
+
+                streambuf(char* buffer, size_t size)
+                {
+                    setp(buffer, buffer + size);
+                }
+
+                unsigned __int64 tellp()
+                {
+                    if (pptr()) return pptr() - pbase();
+                    return 0;
+                }
+            };
+
+            SimpleBufferIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
+
+            virtual ~SimpleBufferIO()
+            {
+                ShutDown();
+            }
+
+            virtual bool Initialize(const char* filePath, int openMode,
+                // Max read/write buffer size.
+                unsigned __int64 maxIOSize = (1 << 20),
+                unsigned __int32 maxReadRetries = 2,
+                unsigned __int32 maxWriteRetries = 2,
+                unsigned __int16 threadPoolSize = 4)
+            {
+                if (filePath != nullptr)
+                    m_handle.reset(new streambuf((char*)filePath, maxIOSize));
+                else
+                    m_handle.reset(new streambuf());
+                return true;
+            }
+
+            virtual unsigned __int64 ReadBinary(unsigned __int64 readSize, __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            {
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                return m_handle->sgetn((char*)buffer, readSize);
+            }
+
+            virtual unsigned __int64 WriteBinary(unsigned __int64 writeSize, const __int8* buffer, unsigned __int64 offset = UINT64_MAX)
+            {
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                if ((unsigned __int64)m_handle->sputn((const char*)buffer, writeSize) < writeSize) return 0;
+                return writeSize;
+            }
+
+            virtual unsigned __int64 ReadString(unsigned __int64& readSize, std::unique_ptr<char[]>& buffer, char delim = '\n', unsigned __int64 offset = UINT64_MAX)
+            {
+                if (offset != UINT64_MAX) m_handle->pubseekpos(offset, std::ios::beg);
+                unsigned __int64 readCount = 0;
+                for (int _Meta = m_handle->sgetc();; _Meta = m_handle->snextc()) {
+                    if (_Meta == '\r') _Meta = '\n';
+
+                    if (readCount >= readSize) { // buffer full
+                        readSize *= 2;
+                        std::unique_ptr<char[]> newBuffer(new char[readSize]);
+                        memcpy(newBuffer.get(), buffer.get(), readCount);
+                        buffer.swap(newBuffer);
+                    }
+
+                    if (_Meta == EOF) { // eof
+                        buffer[readCount] = '\0';
+                        break;
+                    }
+                    else if (_Meta == delim) { // got a delimiter, discard it and quit
+                        buffer[readCount++] = '\0';
+                        m_handle->sbumpc();
+                        if (delim == '\n' && m_handle->sgetc() == '\n') {
+                            readCount++;
+                            m_handle->sbumpc();
+                        }
+                        break;
+                    }
+                    else { // got a character, add it to string
+                        buffer[readCount++] = std::char_traits<char>::to_char_type(_Meta);
+                    }
+                }
+                return readCount;
+            }
+
+            virtual unsigned __int64 WriteString(const char* buffer, unsigned __int64 offset = UINT64_MAX)
+            {
+                return WriteBinary(strlen(buffer), (const __int8*)buffer, offset);
+            }
+
+            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
+            {
+                return false;
+            }
+
+            virtual unsigned __int64 TellP()
+            { 
+                return m_handle->tellp(); 
+            }
+
+            virtual void ShutDown() {}
+
+        private:
+            std::unique_ptr<streambuf> m_handle;
+        };
     } // namespace Helper
 } // namespace SPTAG
 

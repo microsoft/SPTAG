@@ -107,21 +107,19 @@ protected:
 
     virtual std::shared_ptr<std::vector<std::string>> GetIndexFiles() const = 0;
 
-    virtual ErrorCode SaveConfig(std::ostream& p_configout) const = 0;
+    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const = 0;
 
-    virtual ErrorCode SaveIndexData(const std::vector<std::ostream*>& p_indexStreams) = 0;
+    virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
 
     virtual ErrorCode LoadConfig(Helper::IniReader& p_reader) = 0;
 
-    virtual ErrorCode LoadIndexData(const std::string& p_folderPath) = 0;
-
-    virtual ErrorCode LoadIndexData(const std::vector<std::istream*>& p_indexStreams) = 0;
+    virtual ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
 
     virtual ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) = 0;
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
-    virtual ErrorCode RefineIndex(const std::vector<std::ostream*>& p_indexStreams, IAbortOperation* p_abort) = 0;
+    virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, IAbortOperation* p_abort) = 0;
 
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 
@@ -134,7 +132,7 @@ protected:
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
-    ErrorCode SaveIndexConfig(std::ostream& p_configOut);
+    ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut);
 
 protected:
     bool m_bReady = false;

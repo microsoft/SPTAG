@@ -7,7 +7,6 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 #include <memory>
-#include <iostream>
 
 using namespace SPTAG;
 
@@ -44,9 +43,10 @@ int main(int argc, char* argv[])
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 
     Helper::IniReader iniReader;
-    if (!options->m_builderConfigFile.empty())
+    if (!options->m_builderConfigFile.empty() && iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
     {
-        iniReader.LoadIniFile(options->m_builderConfigFile);
+        LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
+        return -1;
     }
 
     for (int i = 1; i < argc; i++)
@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        std::cout << "Set [" << sectionName << "]" << paramName << " = " << paramVal << std::endl;
+        LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
     if (!iniReader.DoesParameterExist("Index", "NumberOfThreads")) {
@@ -78,7 +78,7 @@ int main(int argc, char* argv[])
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
     {
-        fprintf(stderr, "Failed to read input file.\n");
+        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
         exit(1);
     }
     ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
@@ -86,7 +86,7 @@ int main(int argc, char* argv[])
 
     if (ErrorCode::Success != code)
     {
-        fprintf(stderr, "Failed to build index.\n");
+        LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
         exit(1);
     }
     return 0;

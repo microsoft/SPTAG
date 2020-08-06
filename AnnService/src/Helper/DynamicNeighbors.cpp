@@ -1,6 +1,5 @@
 #include "inc/Helper/DynamicNeighbors.h"
 #include "inc/Core/Common.h"
-#include <fstream>
 
 using namespace SPTAG::Helper;
 
@@ -37,38 +36,36 @@ DynamicNeighbors::Size() const
 
 DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
 {
-    std::ifstream graph(p_filePath, std::ios::binary);
-
-    if (!graph.is_open())
-    {
+    auto fp = f_createIO();
+    if (fp == nullptr || !fp->Initialize(p_filePath, std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed open graph file: %s\n", p_filePath);
         exit(1);
     }
 
-    graph.read(reinterpret_cast<char*>(&m_vectorCount), sizeof(m_vectorCount));
-
-    m_neighborOffset.reset(new int[m_vectorCount + 1]);
-    m_neighborOffset[0] = 0;
-    graph.read(reinterpret_cast<char*>(m_neighborOffset.get() + 1), m_vectorCount * sizeof(int));
-
-    size_t graphSize = static_cast<size_t>(m_neighborOffset[m_vectorCount]);
-
-    LOG(Helper::LogLevel::LL_Error, "Vector count: %d, Graph size: %zu\n", m_vectorCount, graphSize);
-
-    m_data.reset(new int[graphSize]);
-    graph.read(reinterpret_cast<char*>(m_data.get()), graphSize * sizeof(int));
-
-    if (graph.gcount() != graphSize * sizeof(int))
-    {
-        LOG(Helper::LogLevel::LL_Error,
-            "Failed read graph: size not match, expected %zu, actually %zu\n",
-            static_cast<size_t>(graphSize * sizeof(int)),
-            static_cast<size_t>(graph.gcount()));
-
+    if (fp->ReadBinary(sizeof(m_vectorCount), (char*)&m_vectorCount) != sizeof(m_vectorCount)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read DynamicNeighborsSet!\n");
         exit(1);
     }
 
-    graph.close();
+    m_neighborOffset.reset(new int[m_vectorCount + 1]);
+    m_neighborOffset[0] = 0;
+    if (fp->ReadBinary(m_vectorCount * sizeof(int), (char*)(m_neighborOffset.get() + 1)) != m_vectorCount * sizeof(int)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read DynamicNeighborsSet!\n");
+        exit(1);
+    }
+
+    size_t graphSize = static_cast<size_t>(m_neighborOffset[m_vectorCount]);
+    LOG(Helper::LogLevel::LL_Error, "Vector count: %d, Graph size: %zu\n", m_vectorCount, graphSize);
+
+    m_data.reset(new int[graphSize]);
+    auto readSize = fp->ReadBinary(graphSize * sizeof(int), (char*)(m_data.get()));
+    if (readSize != graphSize * sizeof(int)) {
+        LOG(Helper::LogLevel::LL_Error,
+            "Failed read graph: size not match, expected %zu, actually %zu\n",
+            static_cast<size_t>(graphSize * sizeof(int)),
+            static_cast<size_t>(readSize));
+        exit(1);
+    }
 }
 
 

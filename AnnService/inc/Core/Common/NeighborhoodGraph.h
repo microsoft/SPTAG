@@ -155,7 +155,7 @@ namespace SPTAG
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::ostream* output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::shared_ptr<Helper::DiskPriorityIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 std::shared_ptr<NeighborhoodGraph> tmp;
                 if (newGraph == nullptr) {
@@ -189,7 +189,7 @@ namespace SPTAG
                         outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                if (output != nullptr) newGraph->SaveGraph(*output);
+                if (output != nullptr) newGraph->SaveGraph(output);
                 return ErrorCode::Success;
             }
 
@@ -356,53 +356,44 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            bool LoadGraph(std::istream& input)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input)
             {
-                if (!m_pNeighborhoodGraph.Load(input)) return false;
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(input)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ret;
             }
 
-            bool LoadGraph(std::string sGraphFilename)
+            ErrorCode LoadGraph(std::string sGraphFilename)
             {
-                if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ret;
             }
             
-            bool LoadGraph(char* pGraphMemFile)
+            ErrorCode LoadGraph(char* pGraphMemFile)
             {
-                m_pNeighborhoodGraph.Load(pGraphMemFile);
+                ErrorCode ret = ErrorCode::Success;
+                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
-                return true;
+                return ErrorCode::Success;
             }
             
-            bool SaveGraph(std::string sGraphFilename) const
+            ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
-                std::ofstream output(sGraphFilename, std::ios::binary);
-                if (!output.is_open()) return false;
-                SaveGraph(output);
-                output.close();
-                return true;
+                return m_pNeighborhoodGraph.Save(sGraphFilename);
             }
 
-            bool SaveGraph(std::ostream& output) const
+            ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
             {
-                output.write((char*)&m_iGraphSize, sizeof(SizeType));
-                output.write((char*)&m_iNeighborhoodSize, sizeof(DimensionType));
-
-                for (SizeType i = 0; i < m_iGraphSize; i++)
-                    output.write((char*)m_pNeighborhoodGraph[i], sizeof(SizeType) * m_iNeighborhoodSize);
-
-                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
-                return true;
+                return m_pNeighborhoodGraph.Save(output);
             }
 
             inline ErrorCode AddBatch(SizeType num)

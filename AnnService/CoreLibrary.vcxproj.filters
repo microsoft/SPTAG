@@ -139,9 +139,6 @@
     <ClInclude Include="inc\Helper\ConcurrentSet.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Helper\BufferStream.h">
-      <Filter>Header Files\Helper</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h">
       <Filter>Header Files\Helper\VectorSetReaders</Filter>
     </ClInclude>

@@ -8,8 +8,6 @@
 
 #include <unordered_map>
 
-#include <fstream>
-#include <iostream>
 #include <exception>
 #include <algorithm>
 
@@ -70,34 +68,6 @@ namespace SPTAG
                 return 1;
             }
 
-            static double GetVector(char* cstr, const char* sep, std::vector<float>& arr, DimensionType& NumDim) {
-                char* current;
-                char* context = NULL;
-
-                DimensionType i = 0;
-                double sum = 0;
-                arr.clear();
-                current = strtok_s(cstr, sep, &context);
-                while (current != NULL && (i < NumDim || NumDim < 0)) {
-                    try {
-                        float val = (float)atof(current);
-                        arr.push_back(val);
-                    }
-                    catch (std::exception e) {
-                        LOG(Helper::LogLevel::LL_Error, "Exception:%s\n", e.what());
-                        return -2;
-                    }
-
-                    sum += arr[i] * arr[i];
-                    current = strtok_s(NULL, sep, &context);
-                    i++;
-                }
-
-                if (NumDim < 0) NumDim = i;
-                if (i < NumDim) return -2;
-                return std::sqrt(sum);
-            }
-
             template <typename T>
             static void Normalize(T* arr, DimensionType col, int base) {
                 double vecLen = 0;
@@ -122,41 +92,6 @@ namespace SPTAG
                 {
                     SPTAG::COMMON::Utils::Normalize(data + i * (size_t)col, col, base);
                 }
-            }
-
-            static size_t ProcessLine(std::string& currentLine, std::vector<float>& arr, DimensionType& D, int base, DistCalcMethod distCalcMethod) {
-                size_t index;
-                double vecLen;
-                if (currentLine.length() == 0 || (index = currentLine.find_last_of("\t")) == std::string::npos || (vecLen = GetVector(const_cast<char*>(currentLine.c_str() + index + 1), "|", arr, D)) < -1) {
-                    LOG(Helper::LogLevel::LL_Error, "Parse vector error: %s\n", currentLine.c_str());
-                    //throw MyException("Error in parsing data " + currentLine);
-                    return -1;
-                }
-                if (distCalcMethod == DistCalcMethod::Cosine) {
-                    Normalize(arr.data(), D, base);
-                }
-                return index;
-            }
-
-            template <typename T>
-            static void PrepareQuerys(std::ifstream& inStream, std::vector<std::string>& qString, std::vector<std::vector<T>>& Query, SizeType& NumQuery, DimensionType& NumDim, DistCalcMethod distCalcMethod, int base) {
-                std::string currentLine;
-                std::vector<float> arr;
-                SizeType i = 0;
-                size_t index;
-                while ((NumQuery < 0 || i < NumQuery) && !inStream.eof()) {
-                    std::getline(inStream, currentLine);
-                    if (currentLine.length() <= 1 || (index = ProcessLine(currentLine, arr, NumDim, base, distCalcMethod)) < 0) {
-                        continue;
-                    }
-                    qString.emplace_back(currentLine.substr(0, index));
-                    if ((SizeType)Query.size() < i + 1) Query.emplace_back(NumDim, (T)0);
-
-                    for (DimensionType j = 0; j < NumDim; j++) Query[i][j] = (T)arr[j];
-                    i++;
-                }
-                NumQuery = i;
-                LOG(Helper::LogLevel::LL_Info, "Load data: (%d,%d)\n", NumQuery, NumDim);
             }
 
             static inline void AddNeighbor(SizeType idx, float dist, SizeType *neighbors, float *dists, DimensionType size)

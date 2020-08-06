@@ -5,142 +5,10 @@
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
 
-#include <fstream>
-#include <sstream>
-#include <iostream>
 #include <omp.h>
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;
-
-namespace
-{
-namespace Local
-{
-
-class BinaryLineReader
-{
-public:
-    BinaryLineReader(std::istream& p_inStream)
-        : m_inStream(p_inStream),
-          m_curOffset(0),
-          m_curTotal(0)
-    {
-        m_buffer.reset(new char[c_bufferSize]);
-    }
-
-
-    bool Eof()
-    {
-        return m_inStream.eof() && (m_curOffset == m_curTotal);
-    }
-
-
-    std::size_t GetLine(std::unique_ptr<char[]>& p_buffer, std::size_t& p_bufferSize, std::size_t& p_length)
-    {
-        std::size_t consumedCount = 0;
-        p_length = 0;
-        while (true)
-        {
-            while (m_curOffset < m_curTotal)
-            {
-                if (p_bufferSize > p_length)
-                {
-                    ++consumedCount;
-                    if (!IsDelimiter(m_buffer[m_curOffset]))
-                    {
-                        p_buffer[p_length++] = m_buffer[m_curOffset++];
-                    }
-                    else
-                    {
-                        ++m_curOffset;
-                        p_buffer[p_length] = '\0';
-                        return consumedCount + MoveToNextValid();
-                    }
-                }
-                else
-                {
-                    p_bufferSize *= 2;
-                    std::unique_ptr<char[]> newBuffer(new char[p_bufferSize]);
-                    memcpy(newBuffer.get(), p_buffer.get(), p_length);
-                    p_buffer.swap(newBuffer);
-                }
-            }
-
-            if (m_inStream.eof())
-            {
-                break;
-            }
-
-            m_inStream.read(m_buffer.get(), c_bufferSize);
-            m_curTotal = m_inStream.gcount();
-            m_curOffset = 0;
-        }
-
-        if (p_bufferSize <= p_length)
-        {
-            p_bufferSize *= 2;
-            std::unique_ptr<char[]> newBuffer(new char[p_bufferSize]);
-            memcpy(newBuffer.get(), p_buffer.get(), p_length);
-            p_buffer.swap(newBuffer);
-        }
-
-        p_buffer[p_length] = '\0';
-        return consumedCount;
-    }
-
-
-private:
-    std::size_t MoveToNextValid()
-    {
-        std::size_t skipped = 0;
-        while (true)
-        {
-            while (m_curOffset < m_curTotal)
-            {
-                if (IsDelimiter(m_buffer[m_curOffset]))
-                {
-                    ++skipped;
-                    ++m_curOffset;
-                }
-                else
-                {
-                    return skipped;
-                }
-            }
-
-            if (m_inStream.eof())
-            {
-                break;
-            }
-
-            m_inStream.read(m_buffer.get(), c_bufferSize);
-            m_curTotal = m_inStream.gcount();
-            m_curOffset = 0;
-        }
-
-        return skipped;
-    }
-
-    bool IsDelimiter(char p_ch)
-    {
-        return p_ch == '\r' || p_ch == '\n';
-    }
-
-    static const std::size_t c_bufferSize = 1 << 10;
-
-    std::unique_ptr<char[]> m_buffer;
-
-    std::istream& m_inStream;
-
-    std::size_t m_curOffset;
-
-    std::size_t m_curTotal;
-};
-
-} // namespace Local
-} // namespace
-
 
 TxtVectorReader::TxtVectorReader(std::shared_ptr<ReaderOptions> p_options)
     : VectorSetReader(std::move(p_options)),
@@ -194,9 +62,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
     {
         if (fileInfo.second == (std::numeric_limits<std::size_t>::max)())
         {
-            std::stringstream msg;
-            msg << "File " << fileInfo.first << " not exists or can't access.";
-            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
+            LOG(Helper::LogLevel::LL_Error, "File %s not exists or can't access.\n", fileInfo.first.c_str());
             exit(1);
         }
 
@@ -247,26 +113,36 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
 std::shared_ptr<VectorSet>
 TxtVectorReader::GetVectorSet() const
 {
-    std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
-    if (!inputStream.is_open()) {
+    auto ptr = f_createIO();
+    if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 
     SizeType row;
     DimensionType col;
-    inputStream.read((char*)&row, sizeof(SizeType));
-    inputStream.read((char*)&col, sizeof(DimensionType));
+    if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+    if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+
     std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
     ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
     char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-    inputStream.read(vecBuf, totalRecordVectorBytes);
-    inputStream.close();
+
+    if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf) != totalRecordVectorBytes) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
 
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
-                                                         m_options->m_inputValueType,
-                                                         col,
-                                                         row));
+        m_options->m_inputValueType,
+        col,
+        row));
 }
 
 
@@ -288,62 +164,46 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
     std::size_t lineBufferSize = 1 << 16;
     std::unique_ptr<char[]> currentLine(new char[lineBufferSize]);
 
-    std::ifstream inputStream;
-    std::ofstream outputStream;
-    std::ofstream metaStreamContent;
-    std::ofstream metaStreamIndex;
-
     SizeType recordCount = 0;
     std::uint64_t metaOffset = 0;
     std::size_t totalRead = 0;
     std::streamoff startpos = p_fileBlockID * p_fileBlockSize;
 
-    inputStream.open(p_filePath, std::ios_base::in | std::ios_base::binary);
-    if (inputStream.is_open() == false)
+    std::shared_ptr<Helper::DiskPriorityIO> input = f_createIO(), output = f_createIO(), meta = f_createIO(), metaIndex = f_createIO();
+    if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in))
     {
-        std::stringstream msg;
-        msg << "Unable to open file: " << p_filePath << std::endl;
-        const auto& msgStr = msg.str();
-        LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
-        throw MyException(msgStr);
+        LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n",p_filePath.c_str());
         exit(1);
     }
 
-    {
-        std::stringstream msg;
-        msg << "Begin Subtask: " << p_subTaskID << ", start offset position:" << startpos << std::endl;
-        LOG(Helper::LogLevel::LL_Info, "%s\n", msg.str().c_str());
-    }
+    LOG(Helper::LogLevel::LL_Info, "Begin Subtask: %u, start offset position: %lld\n", p_subTaskID, startpos);
 
     std::string subFileSuffix("_");
     subFileSuffix += std::to_string(p_subTaskID);
     subFileSuffix += ".tmp";
 
-    outputStream.open(m_vectorOutput + subFileSuffix, std::ofstream::binary);
-    metaStreamContent.open(m_metadataConentOutput + subFileSuffix, std::ofstream::binary);
-    metaStreamIndex.open(m_metadataIndexOutput + subFileSuffix, std::ofstream::binary);
+    if (output == nullptr || !output->Initialize((m_vectorOutput + subFileSuffix).c_str(), std::ios::binary | std::ios::out) ||
+        meta == nullptr || !meta->Initialize((m_metadataConentOutput + subFileSuffix).c_str(), std::ios::binary | std::ios::out) ||
+        metaIndex == nullptr || !metaIndex->Initialize((m_metadataIndexOutput + subFileSuffix).c_str(), std::ios::binary | std::ios::out))
+    {
+        LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", (m_vectorOutput + subFileSuffix).c_str(), (m_metadataConentOutput + subFileSuffix).c_str(), (m_metadataIndexOutput + subFileSuffix).c_str());
+        exit(1);
+    }
 
-    inputStream.seekg(startpos, std::ifstream::beg);
-
-    Local::BinaryLineReader lineReader(inputStream);
-
-    std::size_t lineLength;
     if (p_fileBlockID != 0)
     {
-        totalRead += lineReader.GetLine(currentLine, lineBufferSize, lineLength);
+        totalRead += input->ReadString(lineBufferSize, currentLine, '\n', startpos);
     }
 
     std::size_t vectorByteSize = GetValueTypeSize(m_options->m_inputValueType) * m_options->m_dimension;
     std::unique_ptr<std::uint8_t[]> vector;
     vector.reset(new std::uint8_t[vectorByteSize]);
 
-    while (!lineReader.Eof() && totalRead <= p_fileBlockSize)
+    while (totalRead <= p_fileBlockSize)
     {
-        totalRead += lineReader.GetLine(currentLine, lineBufferSize, lineLength);
-        if (0 == lineLength)
-        {
-            continue;
-        }
+        std::uint64_t lineLength = input->ReadString(lineBufferSize, currentLine);
+        if (lineLength == 0) break;
+        totalRead += lineLength;
 
         std::size_t tabIndex = lineLength - 1;
         while (tabIndex > 0 && currentLine[tabIndex] != '\t')
@@ -353,9 +213,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
 
         if (0 == tabIndex && currentLine[tabIndex] != '\t')
         {
-            std::stringstream msg;
-            msg << "Subtask: " << p_subTaskID << " cannot parsing line:" << currentLine.get() << std::endl;
-            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
+            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing line:%s\n", p_subTaskID, currentLine.get());
             exit(1);
         }
 
@@ -377,26 +235,23 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
 
         if (!parseSuccess)
         {
-            std::stringstream msg;
-            msg << "Subtask: " << p_subTaskID << " cannot parsing vector:" << (currentLine.get() + tabIndex + 1) << std::endl;
-            LOG(Helper::LogLevel::LL_Error, "%s\n", msg.str().c_str());
+            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing vector:%s\n", p_subTaskID, currentLine.get());
             exit(1);
         }
 
         ++recordCount;
-        outputStream.write(reinterpret_cast<const char*>(vector.get()), vectorByteSize);
-        metaStreamContent.write(currentLine.get(), tabIndex);
-        metaStreamIndex.write(reinterpret_cast<const char*>(&metaOffset), sizeof(metaOffset));
-
+        if (output->WriteBinary(vectorByteSize, (char*)vector.get()) != vectorByteSize ||
+            meta->WriteBinary(tabIndex, currentLine.get()) != tabIndex ||
+            metaIndex->WriteBinary(sizeof(metaOffset), (const char*)&metaOffset) != sizeof(metaOffset)) {
+            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write line:%s\n", p_subTaskID, currentLine.get());
+            exit(1);
+        }
         metaOffset += tabIndex;
     }
-
-    metaStreamIndex.write(reinterpret_cast<const char*>(&metaOffset), sizeof(metaOffset));
-
-    inputStream.close();
-    outputStream.close();
-    metaStreamContent.close();
-    metaStreamIndex.close();
+    if (metaIndex->WriteBinary(sizeof(metaOffset), (const char*)&metaOffset) != sizeof(metaOffset)) {
+        LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write final offset!\n", p_subTaskID);
+        exit(1);
+    }
 
     m_totalRecordCount += recordCount;
     m_subTaskRecordCount[p_subTaskID] = recordCount;
@@ -411,18 +266,29 @@ TxtVectorReader::MergeData()
 {
     const std::size_t bufferSize = 1 << 30;
     const std::size_t bufferSizeTrim64 = (bufferSize / sizeof(std::uint64_t)) * sizeof(std::uint64_t);
-    std::ifstream inputStream;
-    std::ofstream outputStream;
+
+    std::shared_ptr<Helper::DiskPriorityIO> input = f_createIO(), output = f_createIO(), meta = f_createIO(), metaIndex = f_createIO();
+
+    if (output == nullptr || !output->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::out) ||
+        meta == nullptr || !meta->Initialize(m_metadataConentOutput.c_str(), std::ios::binary | std::ios::out) ||
+        metaIndex == nullptr || !metaIndex->Initialize(m_metadataIndexOutput.c_str(), std::ios::binary | std::ios::out))
+    {
+        LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", m_vectorOutput.c_str(), m_metadataConentOutput.c_str(), m_metadataIndexOutput.c_str());
+        exit(1);
+    }
 
     std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
     char* buf = bufferHolder.get();
 
     SizeType totalRecordCount = m_totalRecordCount;
-
-    outputStream.open(m_vectorOutput, std::ofstream::binary);
-
-    outputStream.write(reinterpret_cast<char*>(&totalRecordCount), sizeof(totalRecordCount));
-    outputStream.write(reinterpret_cast<char*>(&(m_options->m_dimension)), sizeof(m_options->m_dimension));
+    if (output->WriteBinary(sizeof(totalRecordCount), (char*)(&totalRecordCount)) != sizeof(totalRecordCount)) {
+        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+        exit(1);
+    }
+    if (output->WriteBinary(sizeof(m_options->m_dimension), (char*)&(m_options->m_dimension)) != sizeof(m_options->m_dimension)) {
+        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+        exit(1);
+    }
 
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
     {
@@ -431,16 +297,23 @@ TxtVectorReader::MergeData()
         file += std::to_string(i);
         file += ".tmp";
 
-        inputStream.open(file, std::ifstream::binary);
-        outputStream << inputStream.rdbuf();
+        if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            exit(1);
+        }
 
-        inputStream.close();
+        std::uint64_t readSize;
+        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+            if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
+                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+                exit(1);
+            }
+        }
+        input->ShutDown();
         remove(file.c_str());
     }
 
-    outputStream.close();
-
-    outputStream.open(m_metadataConentOutput, std::ofstream::binary);
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
     {
         std::string file = m_metadataConentOutput;
@@ -448,18 +321,27 @@ TxtVectorReader::MergeData()
         file += std::to_string(i);
         file += ".tmp";
 
-        inputStream.open(file, std::ifstream::binary);
-        outputStream << inputStream.rdbuf();
+        if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            exit(1);
+        }
 
-        inputStream.close();
+        std::uint64_t readSize;
+        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+            if (meta->WriteBinary(readSize, bufferHolder.get()) != readSize) {
+                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataConentOutput.c_str());
+                exit(1);
+            }
+        }
+        input->ShutDown();
         remove(file.c_str());
     }
 
-    outputStream.close();
-
-    outputStream.open(m_metadataIndexOutput, std::ofstream::binary);
-
-    outputStream.write(reinterpret_cast<char*>(&totalRecordCount), sizeof(totalRecordCount));
+    if (metaIndex->WriteBinary(sizeof(totalRecordCount), (char*)(&totalRecordCount)) != sizeof(totalRecordCount)) {
+        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+        exit(1);
+    }
 
     std::uint64_t totalOffset = 0;
     for (std::uint32_t i = 0; i < m_subTaskCount; ++i)
@@ -469,30 +351,45 @@ TxtVectorReader::MergeData()
         file += std::to_string(i);
         file += ".tmp";
 
-        inputStream.open(file, std::ifstream::binary);
+        if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            exit(1);
+        }
+
         for (SizeType remains = m_subTaskRecordCount[i]; remains > 0;)
         {
             std::size_t readBytesCount = min(remains * sizeof(std::uint64_t), bufferSizeTrim64);
-            inputStream.read(buf, readBytesCount);
+            if (input->ReadBinary(readBytesCount, buf) != readBytesCount) {
+                LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
+                exit(1);
+            }
             std::uint64_t* offset = reinterpret_cast<std::uint64_t*>(buf);
             for (std::uint64_t i = 0; i < readBytesCount / sizeof(std::uint64_t); ++i)
             {
                 offset[i] += totalOffset;
             }
 
-            outputStream.write(buf, readBytesCount);
+            if (metaIndex->WriteBinary(readBytesCount, buf) != readBytesCount) {
+                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+                exit(1);
+            }
             remains -= static_cast<SizeType>(readBytesCount / sizeof(std::uint64_t));
         }
-
-        inputStream.read(buf, sizeof(std::uint64_t));
+        if (input->ReadBinary(sizeof(std::uint64_t), buf) != sizeof(std::uint64_t)) {
+            LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
+            exit(1);
+        }
         totalOffset += *(reinterpret_cast<std::uint64_t*>(buf));
 
-        inputStream.close();
+        input->ShutDown();
         remove(file.c_str());
     }
 
-    outputStream.write(reinterpret_cast<char*>(&totalOffset), sizeof(totalOffset));
-    outputStream.close();
+    if (metaIndex->WriteBinary(sizeof(totalOffset), (char*)&totalOffset) != sizeof(totalOffset)) {
+        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+        exit(1);
+    }
 }
 
 

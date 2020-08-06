@@ -35,6 +35,8 @@ DefineErrorCode(EmptyIndex, 0x0015)
 DefineErrorCode(EmptyData, 0x0016)
 DefineErrorCode(DimensionSizeMismatch, 0x0017)
 DefineErrorCode(ExternalAbort, 0x0018)
+DefineErrorCode(EmptyDiskIO, 0x0019)
+DefineErrorCode(DiskIOFail, 0x0020)
 
 // 0x1000 ~ 0x1FFF  Index Build Status
 

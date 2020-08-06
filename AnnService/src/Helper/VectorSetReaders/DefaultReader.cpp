@@ -4,8 +4,6 @@
 #include "inc/Helper/VectorSetReaders/DefaultReader.h"
 #include "inc/Helper/CommonHelper.h"
 
-#include <fstream>
-
 using namespace SPTAG;
 using namespace SPTAG::Helper;
 
@@ -39,21 +37,31 @@ DefaultVectorReader::LoadFile(const std::string& p_filePaths)
 std::shared_ptr<VectorSet>
 DefaultVectorReader::GetVectorSet() const
 {
-    std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
-    if (!inputStream.is_open()) {
+    auto ptr = f_createIO();
+    if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 
     SizeType row;
     DimensionType col;
-    inputStream.read((char*)&row, sizeof(SizeType));
-    inputStream.read((char*)&col, sizeof(DimensionType));
+    if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+    if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+    
     std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
     ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
     char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-    inputStream.read(vecBuf, totalRecordVectorBytes);
-    inputStream.close();
+
+    if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf) != totalRecordVectorBytes) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
 
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
                                                          m_options->m_inputValueType,

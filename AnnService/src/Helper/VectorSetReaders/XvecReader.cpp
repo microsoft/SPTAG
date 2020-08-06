@@ -4,7 +4,6 @@
 #include "inc/Helper/VectorSetReaders/XvecReader.h"
 #include "inc/Helper/CommonHelper.h"
 
-#include <fstream>
 #include <time.h>
 
 using namespace SPTAG;
@@ -36,44 +35,39 @@ ErrorCode
 XvecVectorReader::LoadFile(const std::string& p_filePaths)
 {
     const auto& files = Helper::StrUtils::SplitString(p_filePaths, ",");
-    std::ofstream outputStream(m_vectorOutput, std::ofstream::binary);
-    if (!outputStream.is_open()) {
+    auto fp = f_createIO();
+    if (fp == nullptr || !fp->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::out)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to write file: %s \n", m_vectorOutput.c_str());
-        exit(1);
+        return ErrorCode::FailedCreateFile;
     }
     SizeType vectorCount = 0;
-    outputStream.write(reinterpret_cast<char*>(&vectorCount), sizeof(vectorCount));
-    outputStream.write(reinterpret_cast<char*>(&(m_options->m_dimension)), sizeof(m_options->m_dimension));
+    IOBINARY(fp, WriteBinary, sizeof(vectorCount), (char*)&vectorCount);
+    IOBINARY(fp, WriteBinary, sizeof(m_options->m_dimension), (char*)&(m_options->m_dimension));
     
     size_t vectorDataSize = GetValueTypeSize(m_options->m_inputValueType) * m_options->m_dimension;
     std::unique_ptr<char[]> buffer(new char[vectorDataSize]);
     for (std::string file : files)
     {
-        std::ifstream fin(file, std::ifstream::binary);
-        if (!fin.is_open()) {
+        auto ptr = f_createIO();
+        if (ptr == nullptr || !ptr->Initialize(file.c_str(), std::ios::binary | std::ios::in)) {
             LOG(Helper::LogLevel::LL_Error, "Failed to read file: %s \n", file.c_str());
-            exit(-1);
+            return ErrorCode::FailedOpenFile;
         }
         while (true)
         {
             DimensionType dim;
-            fin.read((char*)&dim, sizeof(DimensionType));
-            if (fin.eof()) break;
+            if (ptr->ReadBinary(sizeof(DimensionType), (char*)&dim) == 0) break;
 
             if (dim != m_options->m_dimension) {
                 LOG(Helper::LogLevel::LL_Error, "Xvec file %s has No.%d vector whose dims are not as many as expected. Expected: %d, Fact: %d\n", file.c_str(), vectorCount, m_options->m_dimension, dim);
-                exit(-1);
+                return ErrorCode::DimensionSizeMismatch;
             }
-            fin.read(buffer.get(), vectorDataSize);
-            outputStream.write(buffer.get(), vectorDataSize);
+            IOBINARY(ptr, ReadBinary, vectorDataSize, buffer.get());
+            IOBINARY(fp, WriteBinary, vectorDataSize, buffer.get());
             vectorCount++;
         }
-        fin.close();
     }
-
-    outputStream.seekp(0, std::ios_base::beg);
-    outputStream.write(reinterpret_cast<char*>(&vectorCount), sizeof(vectorCount));
-    outputStream.close();
+    IOBINARY(fp, WriteBinary, sizeof(vectorCount), (char*)&vectorCount, 0);
     return ErrorCode::Success;
 }
 
@@ -81,26 +75,36 @@ XvecVectorReader::LoadFile(const std::string& p_filePaths)
 std::shared_ptr<VectorSet>
 XvecVectorReader::GetVectorSet() const
 {
-    std::ifstream inputStream(m_vectorOutput, std::ifstream::binary);
-    if (!inputStream.is_open()) {
+    auto ptr = f_createIO();
+    if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         exit(1);
     }
 
     SizeType row;
     DimensionType col;
-    inputStream.read((char*)&row, sizeof(SizeType));
-    inputStream.read((char*)&col, sizeof(DimensionType));
+    if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+    if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
+
     std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
     ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
     char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-    inputStream.read(vecBuf, totalRecordVectorBytes);
-    inputStream.close();
+
+    if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf) != totalRecordVectorBytes) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
+    }
 
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
-                                                         m_options->m_inputValueType,
-                                                         col,
-                                                         row));
+        m_options->m_inputValueType,
+        col,
+        row));
 }
 
 
