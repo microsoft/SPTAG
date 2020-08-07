@@ -36,7 +36,7 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
         {
             if (!option->ParseValue(p_argc, p_args))
             {
-                fprintf(stderr, "Failed to parse args around \"%s\"\n", *p_args);
+                LOG(Helper::LogLevel::LL_Empty, "Failed to parse args around \"%s\"\n", *p_args);
                 PrintHelp();
                 return false;
             }
@@ -54,16 +54,16 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
     {
         if (option->IsRequiredButNotSet())
         {
-            fprintf(stderr, "Required option not set:\n  ");
-            option->PrintDescription(stderr);
-            fprintf(stderr, "\n");
+            LOG(Helper::LogLevel::LL_Empty, "Required option not set:\n  ");
+            option->PrintDescription();
+            LOG(Helper::LogLevel::LL_Empty, "\n");
             isValid = false;
         }
     }
 
     if (!isValid)
     {
-        fprintf(stderr, "\n");
+        LOG(Helper::LogLevel::LL_Empty, "\n");
         PrintHelp();
         return false;
     }
@@ -75,12 +75,12 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
 void
 ArgumentsParser::PrintHelp()
 {
-    fprintf(stderr, "Usage: ");
+    LOG(Helper::LogLevel::LL_Empty, "Usage: ");
     for (auto& option : m_arguments)
     {
-        fprintf(stderr, "\n  ");
-        option->PrintDescription(stderr);
+        LOG(Helper::LogLevel::LL_Empty, "\n  ");
+        option->PrintDescription();
     }
 
-    fprintf(stderr, "\n\n");
+    LOG(Helper::LogLevel::LL_Empty, "\n\n");
 }

@@ -4,8 +4,6 @@
 #include "inc/Core/MetadataSet.h"
 
 #include <string.h>
-#include <fstream>
-#include <iostream>
 #include <shared_mutex>
 
 using namespace SPTAG;
@@ -21,23 +19,23 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Meta
 }
 
 ErrorCode
-MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_metaOut, std::ostream& p_metaIndexOut) const
+MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut) const
 {
     SizeType R = (SizeType)indices.size();
-    p_metaIndexOut.write((char*)&R, sizeof(SizeType));
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (char*)&R);
     std::uint64_t offset = 0;
     for (SizeType i = 0; i < R; i++) {
-        p_metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
+        IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t), (char*)&offset);
         ByteArray meta = GetMetadata(indices[i]);
         offset += meta.Length();
     }
-    p_metaIndexOut.write((char*)&offset, sizeof(std::uint64_t));
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t), (char*)&offset);
 
     for (SizeType i = 0; i < R; i++) {
         ByteArray meta = GetMetadata(indices[i]);
-        p_metaOut.write((char*)meta.Data(), sizeof(uint8_t)*meta.Length());
+        IOBINARY(p_metaOut, WriteBinary, sizeof(uint8_t) * meta.Length(), (char*)meta.Data());
     }
-    std::cout << "Save MetaIndex(" << R << ") Meta(" << offset << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%d) Meta(%llu)\n", R, offset);
     return ErrorCode::Success;
 }
 
@@ -45,16 +43,19 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::ostream& p_meta
 ErrorCode 
 MetadataSet::RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile) const
 {
-    std::ofstream metaOut(p_metaFile + "_tmp", std::ios::binary);
-    std::ofstream metaIndexOut(p_metaindexFile, std::ios::binary);
-    if (!metaOut.is_open() || !metaIndexOut.is_open()) return ErrorCode::FailedCreateFile;
+    {
+        std::shared_ptr<Helper::DiskPriorityIO> ptrMeta = f_createIO(), ptrMetaIndex = f_createIO();
+        if (ptrMeta == nullptr || ptrMetaIndex == nullptr || !ptrMeta->Initialize((p_metaFile + "_tmp").c_str(), std::ios::binary | std::ios::out) || !ptrMetaIndex->Initialize((p_metaindexFile + "_tmp").c_str(), std::ios::binary | std::ios::out))
+        return ErrorCode::FailedCreateFile;
 
-    RefineMetadata(indices, metaOut, metaIndexOut);
-    metaOut.close();
-    metaIndexOut.close();
+        ErrorCode ret = RefineMetadata(indices, ptrMeta, ptrMetaIndex);
+        if (ret != ErrorCode::Success) return ret;
+    }
 
     if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
+    if (fileexists(p_metaindexFile.c_str())) std::remove(p_metaindexFile.c_str());
     std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
+    std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
     return ErrorCode::Success;
 }
 
@@ -83,29 +84,29 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     : m_metaFile(p_metafile),
       m_metaindexFile(p_metaindexfile)
 {
-    m_fp = new std::ifstream(p_metafile, std::ifstream::binary);
-    std::ifstream fpidx(p_metaindexfile, std::ifstream::binary);
-    if (!m_fp->is_open() || !fpidx.is_open())
-    {
-        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
-        return;
+    m_fp = f_createIO();
+    auto fpidx = f_createIO();
+    if (m_fp == nullptr || fpidx == nullptr || !m_fp->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !fpidx->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(), p_metaindexfile.c_str());
+        exit(1);
     }
 
-    fpidx.read((char *)&m_count, sizeof(m_count));
+    if (fpidx->ReadBinary(sizeof(m_count), (char*)&m_count) != sizeof(m_count)) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
+        exit(1);
+    }
+
     m_pOffsets.resize(m_count + 1);
-    fpidx.read((char *)m_pOffsets.data(), sizeof(std::uint64_t) * (m_count + 1));
-    fpidx.close();
-    std::cout << "Load MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
+    if (fpidx->ReadBinary(sizeof(std::uint64_t) * (m_count + 1), (char*)m_pOffsets.data()) != sizeof(std::uint64_t) * (m_count + 1)) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
+        exit(1);
+    }
+    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%zu) Meta(%llu)\n", m_pOffsets.size() - 1, m_pOffsets.back());
 }
 
 
 FileMetadataSet::~FileMetadataSet()
 {
-    if (m_fp)
-    {
-        m_fp->close();
-        delete m_fp;
-    }
 }
 
 
@@ -115,9 +116,8 @@ FileMetadataSet::GetMetadata(SizeType p_vectorID) const
     std::uint64_t startoff = m_pOffsets[p_vectorID];
     std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
     if (p_vectorID < m_count) {
-        m_fp->seekg(startoff, std::ios_base::beg);
         ByteArray b = ByteArray::Alloc(bytes);
-        m_fp->read((char*)b.Data(), bytes);
+        m_fp->ReadBinary(bytes, (char*)b.Data(), startoff);
         return b;
     }
     else {
@@ -134,8 +134,7 @@ FileMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
     std::uint64_t bytes = m_pOffsets[p_vectorID + 1] - startoff;
     ByteArray b = ByteArray::Alloc(bytes);
     if (p_vectorID < m_count) {
-        m_fp->seekg(startoff, std::ios_base::beg);   
-        m_fp->read((char*)b.Data(), bytes);
+        m_fp->ReadBinary(bytes, (char*)b.Data(), startoff);
     }
     else {
         memcpy(b.Data(), m_newdata.data() + (startoff - m_pOffsets[m_count]), bytes);
@@ -154,7 +153,7 @@ FileMetadataSet::Count() const
 bool
 FileMetadataSet::Available() const
 {
-    return m_fp && m_fp->is_open() && m_pOffsets.size() > 1;
+    return m_fp != nullptr && m_pOffsets.size() > 1;
 }
 
 
@@ -175,26 +174,25 @@ FileMetadataSet::Add(const ByteArray& data)
 
 
 ErrorCode
-FileMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
+FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut)
 {
     SizeType count = Count();
-    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
-    p_metaIndexOut.write((char*)m_pOffsets.data(), sizeof(std::uint64_t) * m_pOffsets.size());
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (char*)&count);
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t) * m_pOffsets.size(), (char*)m_pOffsets.data());
 
-    m_fp->seekg(0, std::ios_base::beg);
-
-    int bufsize = 1000000;
+    std::uint64_t bufsize = 1000000;
     char* buf = new char[bufsize];
-    while (!m_fp->eof()) {
-        m_fp->read(buf, bufsize);
-        p_metaOut.write(buf, m_fp->gcount());
+    auto readsize = m_fp->ReadBinary(bufsize, buf, 0);
+    while (readsize > 0) {
+        IOBINARY(p_metaOut, WriteBinary, readsize, buf);
+        readsize = m_fp->ReadBinary(bufsize, buf);
     }
     delete[] buf;
     
     if (m_newdata.size() > 0) {
-        p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
+        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (char*)m_newdata.data());
     }
-    std::cout << "Save MetaIndex(" << m_pOffsets.size() - 1 << ") Meta(" << m_pOffsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%zu) Meta(%llu)\n", m_pOffsets.size() - 1, m_pOffsets.back());
     return ErrorCode::Success;
 }
 
@@ -202,18 +200,21 @@ FileMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndex
 ErrorCode
 FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
 {
-    std::ofstream metaOut(p_metaFile + "_tmp", std::ios::binary);
-    std::ofstream metaIndexOut(p_metaindexFile, std::ios::binary);
-    if (!metaOut.is_open() || !metaIndexOut.is_open()) return ErrorCode::FailedCreateFile;
+    {
+        std::shared_ptr<Helper::DiskPriorityIO> metaOut = f_createIO(), metaIndexOut = f_createIO();
+        if (metaOut == nullptr || metaIndexOut == nullptr || !metaOut->Initialize((p_metaFile + "_tmp").c_str(), std::ios::binary | std::ios::out) || !metaIndexOut->Initialize((p_metaindexFile + "_tmp").c_str(), std::ios::binary | std::ios::out))
+            return ErrorCode::FailedCreateFile;
 
-    SaveMetadata(metaOut, metaIndexOut);
-    metaOut.close();
-    metaIndexOut.close();
+        ErrorCode ret = SaveMetadata(metaOut, metaIndexOut);
+        if (ret != ErrorCode::Success) return ret;
+    }
 
-    m_fp->close();
+    m_fp->ShutDown();
     if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
+    if (fileexists(p_metaindexFile.c_str())) std::remove(p_metaindexFile.c_str());
     std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
-    m_fp->open(p_metaFile, std::ifstream::binary);
+    std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
+    if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
     m_count = Count();
     m_newdata.clear();
     return ErrorCode::Success;
@@ -227,37 +228,40 @@ MemMetadataSet::MemMetadataSet(): m_count(0), m_metadataHolder(ByteArray::c_empt
 }
 
 
-void
-MemMetadataSet::Init(std::istream& p_metain, std::istream& p_metaindexin)
+ErrorCode
+MemMetadataSet::Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin)
 {
-    p_metaindexin.read((char *)&m_count, sizeof(m_count));
+    IOBINARY(p_metaindexin, ReadBinary, sizeof(m_count), (char*)&m_count);
     m_offsets.resize(m_count + 1);
-    p_metaindexin.read((char *)m_offsets.data(), sizeof(std::uint64_t) * (m_count + 1));
+    IOBINARY(p_metaindexin, ReadBinary, sizeof(std::uint64_t) * (m_count + 1), (char *)m_offsets.data());
 
     m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
-    p_metain.read((char *)m_metadataHolder.Data(), m_metadataHolder.Length());
+    IOBINARY(p_metain, ReadBinary, m_metadataHolder.Length(), (char *)m_metadataHolder.Data());
     m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
-    std::cout << "Load MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%zu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
+    return ErrorCode::Success;
 }
 
 
-MemMetadataSet::MemMetadataSet(std::istream& p_metain, std::istream& p_metaindexin)
+MemMetadataSet::MemMetadataSet(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin)
 {
-    Init(p_metain, p_metaindexin);
+    if (Init(p_metain, p_metaindexin) != ErrorCode::Success) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
+        exit(1);
+    }
 }
 
 MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile)
 {
-    std::ifstream meta(p_metafile, std::ifstream::binary);
-    std::ifstream metaidx(p_metaindexfile, std::ifstream::binary);
-    if (!meta.is_open() || !metaidx.is_open())
-    {
-        std::cerr << "ERROR: Cannot open meta files " << p_metafile << " and " << p_metaindexfile << "!" << std::endl;
-        return;
+    std::shared_ptr<Helper::DiskPriorityIO> ptrMeta = f_createIO(), ptrMetaIndex = f_createIO();
+    if (ptrMeta == nullptr || ptrMetaIndex == nullptr || !ptrMeta->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !ptrMetaIndex->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(),  p_metaindexfile.c_str());
+        exit(1);
     }
-    Init(meta, metaidx);
-    meta.close();
-    metaidx.close();
+    if (Init(ptrMeta, ptrMetaIndex) != ErrorCode::Success) {
+        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
+        exit(1);
+    }
 }
 
 
@@ -348,18 +352,18 @@ MemMetadataSet::Add(const ByteArray& data)
 
 
 ErrorCode
-MemMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexOut)
+MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut)
 {
     std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     SizeType count = Count();
-    p_metaIndexOut.write((char*)&count, sizeof(SizeType));
-    p_metaIndexOut.write((char*)m_offsets.data(), sizeof(std::uint64_t) * m_offsets.size());
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (char*)&count);
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t) * m_offsets.size(), (char*)m_offsets.data());
 
-    p_metaOut.write(reinterpret_cast<const char*>(m_metadataHolder.Data()), m_metadataHolder.Length());
+    IOBINARY(p_metaOut, WriteBinary, m_metadataHolder.Length(), reinterpret_cast<const char*>(m_metadataHolder.Data()));
     if (m_newdata.size() > 0) {
-        p_metaOut.write((char*)m_newdata.data(), m_newdata.size());
+        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (char*)m_newdata.data());
     }
-    std::cout << "Save MetaIndex(" << m_offsets.size() - 1 << ") Meta(" << m_offsets.back() << ")" << std::endl;
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%zu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 
@@ -368,16 +372,18 @@ MemMetadataSet::SaveMetadata(std::ostream& p_metaOut, std::ostream& p_metaIndexO
 ErrorCode
 MemMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile)
 {
-    std::ofstream metaOut(p_metaFile + "_tmp", std::ios::binary);
-    std::ofstream metaIndexOut(p_metaindexFile, std::ios::binary);
-    if (!metaOut.is_open() || !metaIndexOut.is_open()) return ErrorCode::FailedCreateFile;
+    {
+        std::shared_ptr<Helper::DiskPriorityIO> metaOut = f_createIO(), metaIndexOut = f_createIO();
+        if (metaOut == nullptr || metaIndexOut == nullptr || !metaOut->Initialize((p_metaFile + "_tmp").c_str(), std::ios::binary | std::ios::out) || !metaIndexOut->Initialize((p_metaindexFile + "_tmp").c_str(), std::ios::binary | std::ios::out))
+            return ErrorCode::FailedCreateFile;
 
-    SaveMetadata(metaOut, metaIndexOut);
-    metaOut.close();
-    metaIndexOut.close();
-
+        ErrorCode ret = SaveMetadata(metaOut, metaIndexOut);
+        if (ret != ErrorCode::Success) return ret;
+    }
     if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
+    if (fileexists(p_metaindexFile.c_str())) std::remove(p_metaindexFile.c_str());
     std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
+    std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
     return ErrorCode::Success;
 }
 

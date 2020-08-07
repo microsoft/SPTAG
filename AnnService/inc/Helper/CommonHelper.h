@@ -33,6 +33,8 @@ bool StartsWith(const char* p_str, const char* p_prefix);
 
 bool StrEqualIgnoreCase(const char* p_left, const char* p_right);
 
+std::string ReplaceAll(const std::string& orig, const std::string& from, const std::string& to);
+
 } // namespace StrUtils
 } // namespace Helper
 } // namespace SPTAG
