@@ -19,7 +19,7 @@ template<typename ValueType>
 ErrorCode
 	ConvertVectorFromString(const std::vector<const char*>& p_source, ByteArray& p_dest, SizeType& p_dimension)
 {
-	p_dimension = p_source.size();
+	p_dimension = (SizeType)p_source.size();
 	p_dest = ByteArray::Alloc(p_dimension * sizeof(ValueType));
 	ValueType* arr = reinterpret_cast<ValueType*>(p_dest.Data());
 	for (std::size_t i = 0; i < p_source.size(); ++i)
