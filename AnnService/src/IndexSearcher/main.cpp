@@ -151,7 +151,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         for (SizeType i = 0; i < numQuerys; i++) {
             void* vec = queryVectors->GetVector(startQuery + i);
             if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
-                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector<SPTAG::COMMON::SPTAG_AVX2>(vec);
+                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(vec);
             }
             results[i].SetTarget(vec);
         }

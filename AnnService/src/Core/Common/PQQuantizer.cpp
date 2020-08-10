@@ -7,7 +7,7 @@ namespace SPTAG
 {
 	namespace COMMON
 	{
-		PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, const float*** Codebooks)
+		PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks)
 		{
 			m_NumSubvectors = NumSubvectors;
 			m_KsPerSubvector = KsPerSubvector;
@@ -49,7 +49,6 @@ namespace SPTAG
 			return out;
 		}
 
-		template<EnumInstruction ei>
 		const std::uint8_t* PQQuantizer::QuantizeVector(const float* vec)
 		{
 			std::uint8_t* out = new std::uint8_t[m_NumSubvectors];
@@ -62,7 +61,7 @@ namespace SPTAG
 					subvec[j] = vec[i * m_DimPerSubvector + j];
 				}
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					float dist = DistanceUtils::ComputeL2Distance<ei>(subvec, m_codebooks[i][j], m_DimPerSubvector);
+					float dist = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_ELSE>((const float*)subvec, m_codebooks[i][j], m_DimPerSubvector);
 					if (dist < minDist) {
 						minDist = dist;
 						bestIndex = j;
