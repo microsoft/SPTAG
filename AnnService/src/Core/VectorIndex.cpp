@@ -8,6 +8,7 @@
 
 #include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
+#include "inc/Core/Common/PQQuantizer.h"
 
 #ifndef _MSC_VER
 #include "inc/Helper/ConcurrentSet.h"

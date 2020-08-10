@@ -6,6 +6,9 @@
 #include "inc/Helper/CommonHelper.h"
 
 #include <omp.h>
+#include <iostream>
+#include <fstream>
+#include <inc\Core\Common\PQQuantizer.h>
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;
@@ -53,6 +56,65 @@ TxtVectorReader::~TxtVectorReader()
 ErrorCode
 TxtVectorReader::LoadFile(const std::string& p_filePaths)
 {
+    //First, manage quantization info
+    if (m_options->m_quantized) {
+        const auto& fileNames = Helper::StrUtils::SplitString(p_filePaths, ",");
+        std::string fileName = fileNames[0];
+        std::ifstream infile(fileName);
+        char* tmpname = new char[50];
+        tmpnam_s(tmpname, 50);
+        std::ofstream outfile(tmpname);
+
+        if (infile.good()) {
+            std::string line;
+            std::getline(infile, line);
+            //Parse Quantization
+            DimensionType NumSubvectors;
+            SizeType KsPerSubvector;
+            DimensionType DimPerSubvector;
+            std::stringstream ss(line);
+            std::string tmp;
+            std::getline(ss, tmp, '\t');
+            NumSubvectors = atoi(tmp.c_str());
+            std::getline(ss, tmp, '\t');
+            KsPerSubvector = atoi(tmp.c_str());
+            std::getline(ss, tmp, '\t');
+            DimPerSubvector = atoi(tmp.c_str());
+
+            float*** codebooks = new float**[NumSubvectors];
+            for (int i = 0; i < NumSubvectors; i++) {
+                std::string cs;
+                std::getline(ss, cs, '\t');
+                std::stringstream css(cs);
+                codebooks[i] = new float* [KsPerSubvector];                
+                for (int j = 0; j < KsPerSubvector; j++) {
+                    codebooks[i][j] = new float[DimPerSubvector];
+                    for (int k = 0; k < DimPerSubvector; k++) {
+                        std::string elemstr;
+                        std::getline(css, elemstr, '|');
+                        codebooks[i][j][k] = atof(elemstr.c_str());
+                    }
+                }
+            }
+
+            SPTAG::COMMON::PQQuantizer quantizer = SPTAG::COMMON::PQQuantizer::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, codebooks);
+            SPTAG::COMMON::DistanceUtils::PQQuantizer = &quantizer;
+
+            char c;
+            while (infile.get(c)) {
+                outfile << c;
+            }
+        }
+
+        infile.close();
+        outfile.close();
+
+        std::remove(fileName.c_str());
+        std::rename(tmpname, fileName.c_str());
+        m_options->m_quantized = false;
+    }
+
+
     const auto& files = GetFileSizes(p_filePaths);
     std::vector<std::function<void()>> subWorks;
     subWorks.reserve(files.size() * m_options->m_threadNum);

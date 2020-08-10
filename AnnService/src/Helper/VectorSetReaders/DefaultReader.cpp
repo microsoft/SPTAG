@@ -3,6 +3,7 @@
 
 #include "inc/Helper/VectorSetReaders/DefaultReader.h"
 #include "inc/Helper/CommonHelper.h"
+#include <inc\Core\Common\PQQuantizer.h>
 
 using namespace SPTAG;
 using namespace SPTAG::Helper;
@@ -45,6 +46,10 @@ DefaultVectorReader::GetVectorSet() const
 
     SizeType row;
     DimensionType col;
+    DimensionType NumSubvectors;
+    SizeType KsPerSubvector;
+    DimensionType DimPerSubvector;
+    float*** codebooks;
     if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
         exit(1);
@@ -52,6 +57,38 @@ DefaultVectorReader::GetVectorSet() const
     if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
         exit(1);
+    }
+    if (m_options->m_quantized) {
+        if (ptr->ReadBinary(sizeof(DimensionType), (char*)&NumSubvectors) != sizeof(DimensionType)) {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+            exit(1);
+        }
+
+        if (ptr->ReadBinary(sizeof(SizeType), (char*)&KsPerSubvector) != sizeof(SizeType)) {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+            exit(1);
+        }
+
+        if (ptr->ReadBinary(sizeof(DimensionType), (char*)&DimPerSubvector) != sizeof(DimensionType)) {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+            exit(1);
+        }
+        codebooks = new float** [NumSubvectors];
+        for (int i = 0; i < NumSubvectors; i++) {
+            codebooks[i] = new float* [KsPerSubvector];
+            for (int j = 0; j < KsPerSubvector; j++) {
+                codebooks[i][j] = new float[DimPerSubvector];
+                for (int k = 0; k < DimPerSubvector; k++) {
+                    if (ptr->ReadBinary(sizeof(float), (char*)&(codebooks[i][j][k])) != sizeof(float)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                        exit(1);
+                    }
+                }
+            }
+        }
+        SPTAG::COMMON::PQQuantizer quantizer = SPTAG::COMMON::PQQuantizer::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, codebooks);
+        SPTAG::COMMON::DistanceUtils::PQQuantizer = &quantizer;
+
     }
     
     std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;

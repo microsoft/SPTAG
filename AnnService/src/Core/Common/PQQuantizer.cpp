@@ -12,7 +12,7 @@ namespace SPTAG
 			m_NumSubvectors = NumSubvectors;
 			m_KsPerSubvector = KsPerSubvector;
 			m_DimPerSubvector = DimPerSubvector;
-			m_codebooks = Codebooks;
+			m_codebooks = (const float***) Codebooks;
 
 			m_CosineDistanceTables = new float**[NumSubvectors];
 			m_L2DistanceTables = new float**[NumSubvectors];
