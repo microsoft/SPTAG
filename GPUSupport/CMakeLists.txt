@@ -12,7 +12,7 @@ if (CUDA_FOUND)
         -gencode arch=compute_61,code=sm_61
         -gencode arch=compute_60,code=sm_60" )
     elseif(WIN32)
-        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus --use_fast_math
+        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus -Xcompiler /FS --use_fast_math
         -gencode arch=compute_70,code=sm_70 
         -gencode arch=compute_61,code=sm_61
         -gencode arch=compute_60,code=sm_60" )
@@ -26,31 +26,27 @@ if (CUDA_FOUND)
 
     include_directories(${AnnService})
     set_source_files_properties(${GPUBUILDER_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
-
-    CUDA_ADD_EXECUTABLE(gpuindexbuilder ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES} ${AnnService}/src/IndexBuilder/main.cpp)
-    target_link_libraries(gpuindexbuilder ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        target_compile_definitions(gpuindexbuilder PRIVATE -DGPU -DDEBUG)
+        set(Definition -DGPU -DDEBUG)
     else()
-        target_compile_definitions(gpuindexbuilder PRIVATE -DGPU)
+        set(Definition -DGPU)
     endif()
 
     CUDA_ADD_LIBRARY(GPUSPTAGLib SHARED ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES})
     target_link_libraries(GPUSPTAGLib ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
-    if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        target_compile_definitions(GPUSPTAGLib PRIVATE -DGPU -DDEBUG)
-    else()
-        target_compile_definitions(GPUSPTAGLib PRIVATE -DGPU)
-    endif()
+    target_compile_definitions(GPUSPTAGLib PRIVATE ${Definition})
+
 
     CUDA_ADD_LIBRARY(GPUSPTAGLibStatic STATIC ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES})
     target_link_libraries(GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
-    if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        target_compile_definitions(GPUSPTAGLibStatic PRIVATE -DGPU -DDEBUG)
-    else()
-        target_compile_definitions(GPUSPTAGLibStatic PRIVATE -DGPU)
+    target_compile_definitions(GPUSPTAGLibStatic PRIVATE ${Definition})
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+        target_compile_options(GPUSPTAGLibStatic PRIVATE -fPIC)
     endif()
 
+    CUDA_ADD_EXECUTABLE(gpuindexbuilder ${AnnService}/src/IndexBuilder/main.cpp)
+    target_link_libraries(gpuindexbuilder GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_compile_definitions(gpuindexbuilder PRIVATE ${Definition})
 else()
     message (STATUS "Could not find cuda.")
 endif()

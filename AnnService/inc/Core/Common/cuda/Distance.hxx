@@ -211,9 +211,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
 #else
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
-    SUMTYPE a[4];
-    SUMTYPE b[4];
-    prod[0]=0; a[0]=0; b[0]=0;
+    prod[0]=0;
 
     for(int i=0; i<Dim/4; ++i) {
       prod[0] += (coords[i] & 0x000000FF)*(other->coords[i] & 0x000000FF);
