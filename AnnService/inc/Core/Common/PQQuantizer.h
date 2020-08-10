@@ -22,6 +22,7 @@ namespace SPTAG
 
 			float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
 
+			template<EnumInstruction ei>
 			const std::uint8_t* QuantizeVector(const float* vec);
 
 		private:

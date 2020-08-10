@@ -22,8 +22,8 @@ namespace SPTAG
 					m_CosineDistanceTables[i][j] = new float[KsPerSubvector];
 					m_L2DistanceTables[i][j] = new float[KsPerSubvector];
 					for (int k = 0; k < KsPerSubvector; k++) {
-						m_CosineDistanceTables[i][j][k] = DistanceUtils::ComputeCosineDistance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
-						m_L2DistanceTables[i][j][k] = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_CosineDistanceTables[i][j][k] = DistanceUtils::ComputeCosineDistance<EnumInstruction::SPTAG_ELSE>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_L2DistanceTables[i][j][k] = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_ELSE>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
 				}
 			}
@@ -47,6 +47,7 @@ namespace SPTAG
 			return out;
 		}
 
+		template<EnumInstruction ei>
 		const std::uint8_t* PQQuantizer::QuantizeVector(const float* vec)
 		{
 			std::uint8_t* out = new std::uint8_t[m_NumSubvectors];
@@ -59,7 +60,7 @@ namespace SPTAG
 					subvec[j] = vec[i * m_DimPerSubvector + j];
 				}
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					float dist = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>(subvec, m_codebooks[i][j], m_DimPerSubvector);
+					float dist = DistanceUtils::ComputeL2Distance<ei>(subvec, m_codebooks[i][j], m_DimPerSubvector);
 					if (dist < minDist) {
 						minDist = dist;
 						bestIndex = j;
