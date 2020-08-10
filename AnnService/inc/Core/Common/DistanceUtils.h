@@ -14,6 +14,9 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        class PQQuantizer;
+
+
         template<typename T>
         float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
 
