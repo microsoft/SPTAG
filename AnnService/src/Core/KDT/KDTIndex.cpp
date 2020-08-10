@@ -38,7 +38,7 @@ namespace SPTAG
             if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -56,7 +56,7 @@ namespace SPTAG
             if (p_indexStreams.size() > 3 && (ret = m_deletedID.Load(p_indexStreams[3])) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
             return ret;
@@ -184,6 +184,26 @@ namespace SPTAG
             m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
+
+        template <typename T>
+        ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
+            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            BasicResult * res = p_query.GetResults();
+            for (int i = 0; i < p_query.GetResultNum(); i++)
+            {
+                auto& cell = workSpace->m_NGQueue.pop();
+                res[i].VID = cell.node;
+                res[i].Dist = cell.distance;
+            }
+            m_workSpacePool->Return(workSpace);
+            return ErrorCode::Success;
+        }
 #pragma endregion
 
         template <typename T>
@@ -205,7 +225,7 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples()));
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
             m_workSpacePool->Init(m_iNumberOfThreads);
             m_threadPool.init();
 
@@ -258,7 +278,7 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR));
+            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR, m_iHashTableExp));
             ptr->m_workSpacePool->Init(m_iNumberOfThreads);
             ptr->m_threadPool.init();
 

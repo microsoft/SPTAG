@@ -16,7 +16,7 @@ void cpuid(int info[4], int InfoType);
 #endif
 
 namespace SPTAG {
-	namespace COMMON {
+    namespace COMMON {
 
         class InstructionSet
         {
@@ -43,7 +43,7 @@ namespace SPTAG {
                 bool HW_AVX2;
             };
         };
-	}
+    }
 }
 
 #endif

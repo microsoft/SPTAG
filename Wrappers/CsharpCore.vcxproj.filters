@@ -36,5 +36,6 @@
     <None Include="inc\CsharpCommon.i">
       <Filter>Resources</Filter>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

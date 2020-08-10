@@ -44,6 +44,9 @@
     <Filter Include="Source Files\Helper\VectorSetReaders">
       <UniqueIdentifier>{5c1449e0-38b7-4c82-976e-cbdc488d3fb5}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Core\Common\cuda">
+      <UniqueIdentifier>{83f2b60c-f7c3-45a7-8b66-420d4565fa96}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -151,8 +154,23 @@
     <ClInclude Include="inc\Core\Common\Labelset.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Helper\DynamicNeighbors.h">
-      <Filter>Header Files\Helper</Filter>
+    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\KNN.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\params.h">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\Distance.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
     <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h">
       <Filter>Header Files\Helper\VectorSetReaders</Filter>
@@ -160,79 +178,75 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h">
       <Filter>Header Files\Helper\VectorSetReaders</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Helper\Logging.h">
+    <ClInclude Include="inc\Helper\DynamicNeighbors.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
     <ClInclude Include="inc\Helper\DiskIO.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\InstructionUtils.h">
-      <Filter>Header Files\Core\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
-      <Filter>Header Files\Core\Common</Filter>
+    <ClInclude Include="inc\Helper\Logging.h">
+      <Filter>Header Files\Helper</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\VectorIndex.cpp">
-      <Filter>Source Files\Core</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp">
+    <CudaCompile Include="src\Core\Common\Kernel.cu">
       <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\CommonHelper.cpp">
-      <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\SimpleIniReader.cpp">
-      <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\VectorSet.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\Core\VectorIndex.cpp">
       <Filter>Source Files\Core</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\MetadataSet.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Core\Common\WorkSpacePool.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\CommonHelper.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\SimpleIniReader.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\Core\VectorSet.cpp">
       <Filter>Source Files\Core</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\Base64Encode.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Core\MetadataSet.cpp">
+      <Filter>Source Files\Core</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\Base64Encode.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\Concurrent.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\Concurrent.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\ArgumentsParser.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\ArgumentsParser.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\BKT\BKTIndex.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Core\BKT\BKTIndex.cpp">
       <Filter>Source Files\Core\BKT</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\KDT\KDTIndex.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Core\KDT\KDTIndex.cpp">
       <Filter>Source Files\Core\KDT</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp">
-      <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp">
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\VectorSetReader.cpp">
+    </CudaCompile>
+    <CudaCompile Include="src\Helper\VectorSetReader.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Helper\DynamicNeighbors.cpp">
-      <Filter>Source Files\Helper</Filter>
-    </ClCompile>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp">
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp">
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
-    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
-      <Filter>Source Files\Core\Common</Filter>
+    <ClCompile Include="src\Helper\DynamicNeighbors.cpp">
+      <Filter>Source Files\Helper</Filter>
     </ClCompile>
-    <ClCompile Include="src\Core\Common\InstructionUtils.cpp">
-      <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
   </ItemGroup>
 </Project>

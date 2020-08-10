@@ -36,5 +36,6 @@
     <None Include="inc\JavaCommon.i">
       <Filter>Resources</Filter>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

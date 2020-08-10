@@ -35,7 +35,6 @@ add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
 target_link_libraries (SPTAGLib DistanceUtils)
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
 target_link_libraries (SPTAGLibStatic DistanceUtils)
-# set_target_properties(SPTAGLibStatic PROPERTIES OUTPUT_NAME "SPTAGLib")
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
@@ -55,9 +54,8 @@ file(GLOB AGG_FILES ${AnnService}/src/Aggregator/*.cpp ${AnnService}/src/Socket/
 add_executable (aggregator ${AGG_FILES} ${AGG_HDR_FILES})
 target_link_libraries(aggregator ${Boost_LIBRARIES} SPTAGLibStatic)
 
-file(GLOB BUILDER_HDR_FILES ${AnnService}/inc/IndexBuilder/*.h)
 file(GLOB BUILDER_FILES ${AnnService}/src/IndexBuilder/*.cpp)
-add_executable (indexbuilder ${BUILDER_FILES} ${BUILDER_HDR_FILES})
+add_executable (indexbuilder ${BUILDER_FILES})
 target_link_libraries(indexbuilder ${Boost_LIBRARIES} SPTAGLibStatic)
 
 file(GLOB SEARCHER_FILES ${AnnService}/src/IndexSearcher/*.cpp)

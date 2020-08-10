@@ -27,6 +27,13 @@ DefineBKTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineBKTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
 DefineBKTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
 
+DefineBKTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU construct KNN,loose RNG or RNG
+DefineBKTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
+DefineBKTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
+DefineBKTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
+DefineBKTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
+DefineBKTParameter(m_pGraph.m_iGPUNum, int, 0, "GPUNum")
+
 DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
 
@@ -36,5 +43,6 @@ DefineBKTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineBKTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineBKTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineBKTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
+DefineBKTParameter(m_iHashTableExp, int, 6L, "HashTableExponent")
 
 #endif

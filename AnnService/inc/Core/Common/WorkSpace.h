@@ -65,7 +65,7 @@ namespace SPTAG
             ~OptHashPosVector() {}
 
 
-            void Init(SizeType size)
+            void Init(SizeType size, int exp)
             {
                 int ex = 0;
                 while (size != 0) {
@@ -73,7 +73,7 @@ namespace SPTAG
                     size >>= 1;
                 }
                 m_secondHash = true;
-                m_poolSize = (1 << (ex + 10)) - 1;
+                m_poolSize = (1 << (ex + exp)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
             }
@@ -179,9 +179,9 @@ namespace SPTAG
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, SizeType dataSize)
+            void Initialize(int maxCheck, SizeType dataSize, int hashexp)
             {
-                nodeCheckStatus.Init(maxCheck);
+                nodeCheckStatus.Init(maxCheck, hashexp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
                 //m_Results.Resize(maxCheck / 16);
