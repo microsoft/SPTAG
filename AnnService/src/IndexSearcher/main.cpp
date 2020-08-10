@@ -6,6 +6,7 @@
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/PQQuantizer.h"
 #include "inc/Core/VectorIndex.h"
 #include <omp.h>
 #include <algorithm>
@@ -151,7 +152,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         for (SizeType i = 0; i < numQuerys; i++) {
             void* vec = queryVectors->GetVector(startQuery + i);
             if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
-                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(vec);
+                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector((const float*) vec);
             }
             results[i].SetTarget(vec);
         }
