@@ -20,14 +20,14 @@ if (CUDA_FOUND)
    
     message (STATUS "CUDA_NVCC_FLAGS:" ${CUDA_NVCC_FLAGS})
 
-    file(GLOB GPUBUILDER_HDR_FILES ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/BKT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/KDT/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Helper/VectorSetReaders/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Core/Common/cuda/*)
-    file(GLOB GPUBUILDER_FILES ${PROJECT_SOURCE_DIR}/AnnService/src/Core/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/Common/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/BKT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/KDT/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Helper/VectorSetReaders/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Core/Common/Kernel.cu)
+    set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
+    file(GLOB_RECURSE GPUBUILDER_HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h ${AnnService}/inc/Core/Common/cuda/*)
+    file(GLOB_RECURSE GPUBUILDER_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu)
 
-    include_directories(${PROJECT_SOURCE_DIR}/GPUSupport)
-    include_directories(${PROJECT_SOURCE_DIR}/AnnService)
+    include_directories(${AnnService})
     set_source_files_properties(${GPUBUILDER_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
 
-    CUDA_ADD_EXECUTABLE(gpuindexbuilder ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES} ${PROJECT_SOURCE_DIR}/AnnService/src/IndexBuilder/main.cpp)
+    CUDA_ADD_EXECUTABLE(gpuindexbuilder ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES} ${AnnService}/src/IndexBuilder/main.cpp)
     target_link_libraries(gpuindexbuilder ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
         target_compile_definitions(gpuindexbuilder PRIVATE -DGPU -DDEBUG)
@@ -50,7 +50,6 @@ if (CUDA_FOUND)
     else()
         target_compile_definitions(GPUSPTAGLibStatic PRIVATE -DGPU)
     endif()
-    set_target_properties(GPUSPTAGLibStatic PROPERTIES OUTPUT_NAME GPUSPTAGLib)
 
 else()
     message (STATUS "Could not find cuda.")

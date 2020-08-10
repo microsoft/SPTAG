@@ -166,6 +166,9 @@
     <ClInclude Include="inc\Helper\DiskIO.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\InstructionUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
@@ -221,6 +224,12 @@
     </ClCompile>
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp">
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\InstructionUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
