@@ -7,7 +7,7 @@ if (CUDA_FOUND)
     message (STATUS "Include Path:" ${CUDA_INCLUDE_DIRS})
     message (STATUS "Library Path:" ${CUDA_LIBRARIES})
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math 
+        set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math --disable-warnings 
         -gencode arch=compute_70,code=sm_70 
         -gencode arch=compute_61,code=sm_61
         -gencode arch=compute_60,code=sm_60" )
@@ -36,13 +36,9 @@ if (CUDA_FOUND)
     target_link_libraries(GPUSPTAGLib ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(GPUSPTAGLib PRIVATE ${Definition})
 
-
     CUDA_ADD_LIBRARY(GPUSPTAGLibStatic STATIC ${GPUBUILDER_FILES} ${GPUBUILDER_HDR_FILES})
     target_link_libraries(GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(GPUSPTAGLibStatic PRIVATE ${Definition})
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-        target_compile_options(GPUSPTAGLibStatic PRIVATE -fPIC)
-    endif()
 
     CUDA_ADD_EXECUTABLE(gpuindexbuilder ${AnnService}/src/IndexBuilder/main.cpp)
     target_link_libraries(gpuindexbuilder GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
