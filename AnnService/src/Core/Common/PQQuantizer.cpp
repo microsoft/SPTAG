@@ -1,4 +1,6 @@
 #include <inc/Core/Common/PQQuantizer.h>
+#include <iostream>
+#include <fstream>
 
 
 namespace SPTAG
@@ -69,6 +71,57 @@ namespace SPTAG
 				out[i] = bestIndex;
 			}
 			return out;
+		}
+
+		void PQQuantizer::SaveQuantizer(std::string path)
+		{
+			std::ofstream fl(path, std::ios::out | std::ios::binary);
+			if (!fl) {
+				std::cout << "Could not open quantizer save file" << std::endl;
+				return;
+			}
+
+			fl.write((char*)&m_NumSubvectors, sizeof(DimensionType));
+			fl.write((char*)&m_KsPerSubvector, sizeof(SizeType));
+			fl.write((char*)&m_DimPerSubvector, sizeof(DimensionType));
+
+			for (int i = 0; i < m_NumSubvectors; i++) {
+				for (int j = 0; j < m_KsPerSubvector; j++) {
+					for (int k = 0; k < m_DimPerSubvector; k++) {
+						fl.write((char*)&(m_codebooks[i][j][k]), sizeof(float));
+					}
+				}
+			}
+		}
+
+		void PQQuantizer::LoadQuantizer(std::string path)
+		{
+			std::ifstream fl(path, std::ios::in | std::ios::binary);
+			if (!fl) {
+				std::cout << "Could not open quantizer file" << std::endl;
+				return;
+			}
+			DimensionType m_NumSubvectors;
+			SizeType m_KsPerSubvector;
+			DimensionType m_DimPerSubvector;
+			fl.read((char*)&m_NumSubvectors, sizeof(DimensionType));
+			fl.read((char*)&m_KsPerSubvector, sizeof(SizeType));
+			fl.read((char*)&m_DimPerSubvector, sizeof(DimensionType));
+
+			float*** m_codebooks = new float** [m_NumSubvectors];
+
+			for (int i = 0; i < m_NumSubvectors; i++) {
+				m_codebooks[i] = new float* [m_KsPerSubvector];
+				for (int j = 0; j < m_KsPerSubvector; j++) {
+					m_codebooks[i][j] = new float[m_DimPerSubvector];
+					for (int k = 0; k < m_DimPerSubvector; k++) {
+						fl.read((char*)&(m_codebooks[i][j][k]), sizeof(float));
+					}
+				}
+			}
+
+			PQQuantizer quantizer = PQQuantizer::PQQuantizer(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks);
+			DistanceUtils::PQQuantizer = &quantizer;
 		}
 	}
 }

@@ -96,6 +96,12 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
         m_sMetadataIndexFile = p_reader.GetParameter(metadataSection, "MetaDataIndexPath", std::string());
     }
 
+    std::string quantizerSection("");
+    if (p_reader.DoesSectionExist(quantizerSection)) {
+        m_sQuantizerFile = p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
+        SPTAG::COMMON::PQQuantizer::LoadQuantizer(m_sQuantizerFile);
+    }
+
     if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
     {
         LOG(Helper::LogLevel::LL_Error, "Error: Failed to load parameter DistCalcMethod.\n");
@@ -121,6 +127,12 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
     IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, "\n");
+
+    if (nullptr != SPTAG::COMMON::DistanceUtils::PQQuantizer) {
+        IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
+        IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
+        SPTAG::COMMON::DistanceUtils::PQQuantizer->SaveQuantizer(m_sQuantizerFile);
+    }
 
     return SaveConfig(p_configOut);
 }

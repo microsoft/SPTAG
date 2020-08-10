@@ -142,6 +142,7 @@ protected:
     std::string m_sIndexName = "";
     std::string m_sMetadataFile = "metadata.bin";
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
+    std::string m_sQuantizerFile = "quantizer.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::shared_ptr<void> m_pMetaToVec;
 };

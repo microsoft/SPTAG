@@ -25,6 +25,10 @@ namespace SPTAG
 			template<EnumInstruction ei>
 			const std::uint8_t* QuantizeVector(const float* vec);
 
+			void SaveQuantizer(std::string path);
+
+			static void LoadQuantizer(std::string path);
+
 		private:
 			DimensionType m_NumSubvectors;
 			SizeType m_KsPerSubvector;
