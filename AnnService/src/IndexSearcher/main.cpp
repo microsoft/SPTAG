@@ -5,6 +5,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/VectorIndex.h"
 #include <omp.h>
 #include <algorithm>
@@ -147,7 +148,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
-        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
+        for (SizeType i = 0; i < numQuerys; i++) {
+            void* vec = queryVectors->GetVector(startQuery + i);
+            if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
+                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector<SPTAG::COMMON::SPTAG_AVX2>(vec);
+            }
+            results[i].SetTarget(vec);
+        }
         if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, options->m_K);
 
         SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
