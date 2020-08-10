@@ -122,7 +122,7 @@ namespace SPTAG
             int maxcluster = -1;
             SizeType maxCount = 0;
             for (int k = 0; k < args._DK; k++) {
-                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && DistanceUtils::ComputeL2Distance((T*)data[args.clusterIdx[k]], args.centers + k * args._D, args._D) > 1e-6)
+                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && DistanceUtils::ComputeDistance((T*)data[args.clusterIdx[k]], args.centers + k * args._D, args._D, DistCalcMethod::L2) > 1e-6)
                 {
                     maxcluster = k;
                     maxCount = args.counts[k];
