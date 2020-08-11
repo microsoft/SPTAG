@@ -130,6 +130,7 @@
     <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
+    <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
@@ -172,6 +173,8 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
+    <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp" />
