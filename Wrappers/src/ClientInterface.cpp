@@ -7,7 +7,6 @@
 #include "inc/Helper/Base64Encode.h"
 #include "inc/Helper/StringConvert.h"
 
-#include <iostream>
 #include <boost/asio.hpp>
 
 
@@ -170,7 +169,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
         signal->Wait();
     }
     else {
-        std::cout << "Error connection or data type!" << std::endl;
+        LOG(Helper::LogLevel::LL_Error, "Error connection or data type!");
     }
     return std::make_shared<RemoteSearchResult>(ret);
 }
