@@ -129,7 +129,7 @@ namespace SPTAG
                 }
 
                 // Do not include this item.
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full!\n");
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 4).\n");
                 return -1;
             }
         };
