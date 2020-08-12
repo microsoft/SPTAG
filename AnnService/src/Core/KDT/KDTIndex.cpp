@@ -4,7 +4,6 @@
 #include "inc/Core/KDT/Index.h"
 #include <chrono>
 
-#pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4127)  // conditional expression is constant

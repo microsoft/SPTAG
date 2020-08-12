@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <fstream>
 
+#pragma warning(disable:4996)
+
 namespace SPTAG
 {
     namespace Helper

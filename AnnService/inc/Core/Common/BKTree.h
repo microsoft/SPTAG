@@ -17,8 +17,6 @@
 #include "Dataset.h"
 #include "DistanceUtils.h"
 
-#pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-
 namespace SPTAG
 {
     namespace COMMON
