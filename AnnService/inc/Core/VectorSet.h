@@ -31,6 +31,8 @@ public:
     virtual ErrorCode Save(const std::string& p_vectorFile) const = 0;
 
     virtual SizeType PerVectorDataSize() const = 0;
+
+    virtual void Normalize(int p_threads) = 0;
 };
 
 
@@ -59,6 +61,8 @@ public:
     virtual ErrorCode Save(const std::string& p_vectorFile) const;
 
     virtual SizeType PerVectorDataSize() const;
+
+    virtual void Normalize(int p_threads);
 
 private:
     ByteArray m_data;

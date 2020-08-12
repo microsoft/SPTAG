@@ -187,6 +187,9 @@
     <ClInclude Include="inc\Helper\Logging.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\InstructionUtils.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu">
@@ -247,6 +250,12 @@
     </ClCompile>
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\InstructionUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

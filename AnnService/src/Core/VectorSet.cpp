@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/VectorSet.h"
-
+#include "inc/Core/Common/CommonUtils.h"
 using namespace SPTAG;
 
 #pragma warning(disable:4996)  // 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
@@ -93,6 +93,26 @@ BasicVectorSet::Save(const std::string& p_vectorFile) const
     return ErrorCode::Success;
 }
 
-SizeType BasicVectorSet::PerVectorDataSize() const {
+
+SizeType BasicVectorSet::PerVectorDataSize() const 
+{
     return (SizeType)m_perVectorDataSize;
+}
+
+
+void
+BasicVectorSet::Normalize(int p_threads) 
+{
+    switch (m_valueType)
+    {
+#define DefineVectorValueType(Name, Type) \
+case SPTAG::VectorValueType::Name: \
+SPTAG::COMMON::Utils::BatchNormalize<Type>(reinterpret_cast<Type *>(m_data.Data()), m_vectorCount, m_dimension, SPTAG::COMMON::Utils::GetBase<Type>(), p_threads); \
+break; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+    default:
+        break;
+    }
 }

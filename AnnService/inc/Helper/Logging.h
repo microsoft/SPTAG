@@ -6,6 +6,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <fstream>
 
 namespace SPTAG
 {
@@ -50,6 +51,44 @@ namespace SPTAG
             }
         private:
             LogLevel m_level;
+        };
+
+        class FileLogger : public Logger {
+        public:
+            FileLogger(LogLevel level, const char* file) : m_level(level)
+            {
+                m_handle.reset(new std::fstream(file, std::ios::out));
+            }
+
+            ~FileLogger()
+            {
+                if (m_handle != nullptr) m_handle->close();
+            }
+
+            virtual void Logging(const char* title, LogLevel level, const char* file, int line, const char* func, const char* format, ...)
+            {
+                if (level < m_level || m_handle == nullptr || !m_handle->is_open()) return;
+
+                va_list args;
+                va_start(args, format);
+
+                char buffer[1024];
+                int ret = vsprintf_s(buffer, sizeof(buffer), format, args);
+                if (ret)
+                {
+                    m_handle->write(buffer, strlen(buffer));
+                }
+                else
+                {
+                    std::string msg("Buffer size is not enough!\n");
+                    m_handle->write(msg.c_str(), msg.size());
+                }
+
+                va_end(args);
+            }
+        private:
+            LogLevel m_level;
+            std::unique_ptr<std::fstream> m_handle;
         };
     } // namespace Helper
 } // namespace SPTAG
