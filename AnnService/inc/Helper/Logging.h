@@ -5,8 +5,11 @@
 #define _SPTAG_HELPER_LOGGING_H_
 
 #include <stdarg.h>
+#include <string.h>
 #include <stdio.h>
 #include <fstream>
+
+#pragma warning(disable:4996)
 
 namespace SPTAG
 {
@@ -73,8 +76,8 @@ namespace SPTAG
                 va_start(args, format);
 
                 char buffer[1024];
-                int ret = vsprintf_s(buffer, sizeof(buffer), format, args);
-                if (ret)
+                int ret = vsprintf(buffer, format, args);
+                if (ret > 0)
                 {
                     m_handle->write(buffer, strlen(buffer));
                 }
