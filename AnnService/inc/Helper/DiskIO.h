@@ -163,7 +163,7 @@ namespace SPTAG
 
                 streambuf(char* buffer, size_t size)
                 {
-                    setp(buffer, buffer + size);
+                    setg(buffer, buffer, buffer + size);
                 }
 
                 std::uint64_t tellp()

@@ -259,7 +259,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
         std::uint64_t blobs = CalculateBufferSize()->size();
-        IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)blobs);
+        IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)&blobs);
         std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
 
         if (NeedRefine())
