@@ -1,4 +1,6 @@
 #include "inc/Core/Common/InstructionUtils.h"
+#include "inc/Core/common.h"
+
 #ifndef _MSC_VER
 void cpuid(int info[4], int InfoType) {
     __cpuid_count(InfoType, 0, info[0], info[1], info[2], info[3]);
@@ -36,6 +38,16 @@ namespace SPTAG {
                 cpuid(info, 0x00000007);
                 HW_AVX2 = (info[1] & ((int)1 << 5)) != 0;
             }
+            if (HW_AVX2)
+                LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
+            else if (HW_AVX)
+                LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
+            else if (HW_SSE2)
+                LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
+            else if (HW_SSE)
+                LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
+            else
+                LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
         }
     }
 }

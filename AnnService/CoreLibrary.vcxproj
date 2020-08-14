@@ -177,7 +177,6 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />

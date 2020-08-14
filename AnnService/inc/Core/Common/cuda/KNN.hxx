@@ -798,10 +798,10 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
 
 // If debug/verbose mode, output GPU memory details
-  LOG(SPTAG::Helper::LL_Info, "GPU: %s Total available GPU memory:%zu\n",  prop.name.c_str(), totalGPUMem);
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU: %s Total available GPU memory:%zu\n",  prop.name, totalGPUMem);
 
   // Print out memory requirements on the GPU
-  LOG(SPTAG::Helper::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n", 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
       (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, 
       (13*dataSize)/1000000, 
       ((long long int)batchSize*KVAL*sizeof(int))/1000000,
