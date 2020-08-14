@@ -190,6 +190,9 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\Refine.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu">

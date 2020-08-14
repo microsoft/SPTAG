@@ -109,14 +109,13 @@ namespace SPTAG
                 buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches, m_iGPUNum);
 
 
-              std::unordered_map<SizeType, SizeType>::const_iterator iter;
-              for (SizeType i = 0; i< m_iGraphSize; i++) {
-                for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
-                  if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
-                    m_pNeighborhoodGraph[i][j] = iter->second;
+                std::unordered_map<SizeType, SizeType>::const_iterator iter;
+                for (SizeType i = 0; i< m_iGraphSize; i++) {
+                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
+                        if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
+                            m_pNeighborhoodGraph[i][j] = iter->second;
+                    }
                 }
-              }
-              
             }
 #else
             template <typename T>

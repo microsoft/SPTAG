@@ -410,7 +410,7 @@ void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_point
   cudaMemcpy(d_candidates, candidates, dataSize*candidatesPerVector*sizeof(int), cudaMemcpyHostToDevice);
 
   auto t2 = std::chrono::high_resolution_clock::now();
-  std::cout << "find candidates time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "find candidates time (ms): %lld\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
 
   // Use a number of batches of refinement to overlap CPU and GPU work (TODO)
   int NUM_BATCHES = 1;
@@ -428,13 +428,13 @@ void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_point
       refineBatch_kernel<T,SUMTYPE,MAX_DIM, REFINE_THREADS><<<REFINE_BLOCKS,REFINE_THREADS>>>(d_points, batch_size, i*batch_size, d_graph, d_candidates, listMem, candidatesPerVector, KVAL, refineDepth, metric);
       cudaError_t status = cudaDeviceSynchronize();
       if(status != cudaSuccess) {
-        printf("Refine error code:%d\n", status);
+          LOG(SPTAG::Helper::LogLevel::LL_Error, "Refine error code:%d\n", status);
       }
     }
 
   }
   t2 = std::chrono::high_resolution_clock::now();
-  std::cout << "GPU refine time (ms): " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << std::endl;
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU refine time (ms): %lld\n", std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
 
   cudaFree(listMem);
   cudaFree(d_candidates);
