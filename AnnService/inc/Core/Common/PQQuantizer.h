@@ -28,6 +28,14 @@ namespace SPTAG
 
 			static void LoadQuantizer(std::string path);
 
+			DimensionType GetNumSubvectors();
+
+			SizeType GetKsPerSubvector();
+
+			DimensionType GetDimPerSubvector();
+
+			const float*** GetCodebooks();
+
 		private:
 			DimensionType m_NumSubvectors;
 			SizeType m_KsPerSubvector;

@@ -24,8 +24,8 @@ namespace SPTAG
 					m_CosineDistanceTables[i][j] = new float[KsPerSubvector];
 					m_L2DistanceTables[i][j] = new float[KsPerSubvector];
 					for (int k = 0; k < KsPerSubvector; k++) {
-						m_CosineDistanceTables[i][j][k] = DistanceUtils::ComputeCosineDistance<EnumInstruction::SPTAG_ELSE>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
-						m_L2DistanceTables[i][j][k] = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_ELSE>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_CosineDistanceTables[i][j][k] = DistanceUtils::ComputeCosineDistance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_L2DistanceTables[i][j][k] = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
 				}
 			}
@@ -61,7 +61,7 @@ namespace SPTAG
 					subvec[j] = vec[i * m_DimPerSubvector + j];
 				}
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					float dist = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_ELSE>((const float*)subvec, m_codebooks[i][j], m_DimPerSubvector);
+					float dist = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>((const float*)subvec, m_codebooks[i][j], m_DimPerSubvector);
 					if (dist < minDist) {
 						minDist = dist;
 						bestIndex = j;
@@ -83,6 +83,11 @@ namespace SPTAG
 			fl.write((char*)&m_NumSubvectors, sizeof(DimensionType));
 			fl.write((char*)&m_KsPerSubvector, sizeof(SizeType));
 			fl.write((char*)&m_DimPerSubvector, sizeof(DimensionType));
+
+			std::cout << "Saving quantizer with parameters:" << std::endl;
+			std::cout << "Subvectors: " << m_NumSubvectors << std::endl;
+			std::cout << "KsPerSubvector: " << m_KsPerSubvector << std::endl;
+			std::cout << "DimPerSubvector: " << m_DimPerSubvector << std::endl;
 
 			for (int i = 0; i < m_NumSubvectors; i++) {
 				for (int j = 0; j < m_KsPerSubvector; j++) {
@@ -120,7 +125,24 @@ namespace SPTAG
 			}
 
 			PQQuantizer quantizer = PQQuantizer::PQQuantizer(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks);
-			DistanceUtils::PQQuantizer = &quantizer;
+			DistanceUtils::PQQuantizer = std::make_shared<PQQuantizer>(quantizer);
+		}
+		DimensionType PQQuantizer::GetNumSubvectors()
+		{
+			return m_NumSubvectors;
+		}
+		SizeType PQQuantizer::GetKsPerSubvector()
+		{
+			return m_KsPerSubvector;
+		}
+		DimensionType PQQuantizer::GetDimPerSubvector()
+		{
+			return m_DimPerSubvector;
+		}
+
+		const float*** PQQuantizer::GetCodebooks()
+		{
+			return m_codebooks;
 		}
 	}
 }

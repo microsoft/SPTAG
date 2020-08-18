@@ -87,7 +87,7 @@ DefaultVectorReader::GetVectorSet() const
             }
         }
         SPTAG::COMMON::PQQuantizer quantizer = SPTAG::COMMON::PQQuantizer::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, codebooks);
-        SPTAG::COMMON::DistanceUtils::PQQuantizer = &quantizer;
+        SPTAG::COMMON::DistanceUtils::PQQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(quantizer);
 
     }
     

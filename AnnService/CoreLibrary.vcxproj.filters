@@ -169,6 +169,9 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\PQQuantizer.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
@@ -225,10 +228,13 @@
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp">
       <Filter>Source Files\Helper\VectorSetReaders</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
-    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+    <ClCompile Include="src\Core\Common\PQQuantizer.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>

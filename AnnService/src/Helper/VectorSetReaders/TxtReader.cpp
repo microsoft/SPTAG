@@ -57,8 +57,9 @@ ErrorCode
 TxtVectorReader::LoadFile(const std::string& p_filePaths)
 {
     //First, manage quantization info
-    if (m_options->m_quantized) {
+    if (m_options->m_quantized) {       
         const auto& fileNames = Helper::StrUtils::SplitString(p_filePaths, ",");
+        LOG(Helper::LogLevel::LL_Status, "Loading quantizer from TEXT file\n", fileNames[0]);
         std::string fileName = fileNames[0];
         std::ifstream infile(fileName);
         char* tmpname = new char[50];
@@ -98,7 +99,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
             }
 
             SPTAG::COMMON::PQQuantizer quantizer = SPTAG::COMMON::PQQuantizer::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, codebooks);
-            SPTAG::COMMON::DistanceUtils::PQQuantizer = &quantizer;
+            SPTAG::COMMON::DistanceUtils::PQQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(quantizer);
 
             char c;
             while (infile.get(c)) {
@@ -112,6 +113,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
         std::remove(fileName.c_str());
         std::rename(tmpname, fileName.c_str());
         m_options->m_quantized = false;
+        LOG(Helper::LogLevel::LL_Status, "Quantizer load complete\n");
     }
 
 

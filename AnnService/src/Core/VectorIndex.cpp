@@ -97,10 +97,9 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
         m_sMetadataIndexFile = p_reader.GetParameter(metadataSection, "MetaDataIndexPath", std::string());
     }
 
-    std::string quantizerSection("");
+    std::string quantizerSection("Quantizer");
     if (p_reader.DoesSectionExist(quantizerSection)) {
         m_sQuantizerFile = p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
-        SPTAG::COMMON::PQQuantizer::LoadQuantizer(m_sQuantizerFile);
     }
 
     if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
@@ -124,16 +123,16 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
         IOSTRING(p_configOut, WriteString, "\n");
     }
 
+    if (nullptr != SPTAG::COMMON::DistanceUtils::PQQuantizer) {
+        IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
+        IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, "\n");
+    }
+
     IOSTRING(p_configOut, WriteString, "[Index]\n");
     IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, "\n");
-
-    if (nullptr != SPTAG::COMMON::DistanceUtils::PQQuantizer) {
-        IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
-        IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
-        SPTAG::COMMON::DistanceUtils::PQQuantizer->SaveQuantizer(m_sQuantizerFile);
-    }
 
     return SaveConfig(p_configOut);
 }
@@ -255,6 +254,11 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(handles[handles.size() - 2], handles[handles.size() - 1]);
         if (ErrorCode::Success == ret) ret = SaveIndexData(handles);
     }
+
+    if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
+        SPTAG::COMMON::DistanceUtils::PQQuantizer->SaveQuantizer(folderPath + m_sQuantizerFile);
+    }
+
     return ret;
 }
 
@@ -499,6 +503,11 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
             p_vectorIndex->BuildMetaMapping();
         }
     }
+
+    if (iniReader.DoesSectionExist("Quantizer")) {
+        SPTAG::COMMON::PQQuantizer::LoadQuantizer(folderPath + p_vectorIndex->m_sQuantizerFile);
+    }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -550,6 +559,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
             p_vectorIndex->BuildMetaMapping();
         }
     }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -590,6 +600,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
             p_vectorIndex->BuildMetaMapping();
         }
     }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
