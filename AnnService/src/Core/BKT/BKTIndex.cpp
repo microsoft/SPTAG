@@ -516,6 +516,16 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode
+            Index<T>::UpdateIndex()
+        {
+            omp_set_num_threads(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
+            m_workSpacePool->Init(m_iNumberOfThreads);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode
             Index<T>::SetParameter(const char* p_param, const char* p_value)
         {
             if (nullptr == p_param || nullptr == p_value) return ErrorCode::Fail;
@@ -534,8 +544,10 @@ namespace SPTAG
 #include "inc/Core/BKT/ParameterDefinitionList.h"
 #undef DefineBKTParameter
 
-            m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+            }
             return ErrorCode::Success;
         }
 

@@ -798,23 +798,24 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
 
 // If debug/verbose mode, output GPU memory details
-#ifdef DEBUG
-  std::cout << "GPU: " << prop.name << std::endl;
-  std::cout << "Total available GPU memory: " << totalGPUMem << " MB" << std::endl;
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU: %s Total available GPU memory:%zu\n",  prop.name, totalGPUMem);
 
   // Print out memory requirements on the GPU
-  std::cout << "GPU memory used - input points: " << (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000 << " MB - tree: " <<  (13*dataSize)/1000000 << " MB - neighbor lists: " << ((long long int)batchSize*KVAL*sizeof(int))/1000000 << " MB - Total: " << (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000 << " MB " << std::endl;
-#endif
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
+      (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, 
+      (13*dataSize)/1000000, 
+      ((long long int)batchSize*KVAL*sizeof(int))/1000000,
+      (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
 
   if(totalGPUMem < (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000)
   {
-    printf("Insufficient GPU memory to create graph.  Use more batches or a GPU more with memory.\n");
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to create graph.  Use more batches or a GPU more with memory.\n");
     exit(1);
   }
 
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %zu bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
   CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
   CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
@@ -848,7 +849,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     min_id = batch*batchSize;
     max_id = min(dataSize, (batch+1)*batchSize);
 
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
+    LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
 
     // Initialize results to all -1 (special value that is set to distance INFTY)
     CUDA_CHECK(cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int)));
@@ -894,32 +895,24 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     D2H_time += temp_time;
 
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Batch complete, time to copy results:%0.3lf\n", temp_time);
-#ifdef DEBUG
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%d):\n", min_id);
-  for(int i=0; i<KVAL; i++) {
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
-  }
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%d):\n", max_id-1);
-  for(int i=0; i<KVAL; i++) {
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[(max_id-1)*KVAL+i]);
-  }
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
-#endif
-
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%d):\n", min_id);
+    for(int i=0; i<KVAL; i++) {
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
+    }
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%d):\n", max_id-1);
+    for(int i=0; i<KVAL; i++) {
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[(max_id-1)*KVAL+i]);
+    }
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
   } // end batch loop
   tot_end_t = clock();
 
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
-
-
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
 
   tptree->destroy();
   cudaFree(tptree);
   cudaFree(d_points);
-  cudaFree(tptree);
-  cudaFree(d_results);
-
 }
 
 
@@ -936,11 +929,11 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
-    std::cout << "NeighborhoodSize (with scaling factor applied) is " << m_iNeighborhoodSize << " but must be a power of 2 for GPU construction." << std::endl;
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "NeighborhoodSize (with scaling factor applied) is %d but must be a power of 2 for GPU construction.\n", m_iNeighborhoodSize);
     exit(1);
   }
   if(numBatches > 1 && graph != 2) {
-    std::cout << "Multiple batches only supported for direct RNG construction (GPUGraphType=2)." << std::endl;
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "Multiple batches only supported for direct RNG construction (GPUGraphType=2).\n");
     exit(1);
   }
 
@@ -949,7 +942,7 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   // Create other options here for other commonly-used dimension values.
   // TODO: Create slower, non-register version that can be used for very high-dimensional data
   if(m_iFeatureDim > 100) {
-    std::cout << ">100 dimensions not currently supported for GPU construction." << std::endl;
+    LOG(SPTAG::Helper::LogLevel::LL_Error, ">100 dimensions not currently supported for GPU construction.\n");
     exit(1);
   }
 
@@ -962,7 +955,7 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
       buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else {
-    std::cout << "Selected datatype not currently supported." << std::endl;
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");
     exit(1);
   }
 }

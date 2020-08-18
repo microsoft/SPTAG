@@ -19,7 +19,12 @@ typedef typename Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeT
 
 using namespace SPTAG;
 
+#ifdef DEBUG
+std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
+#else
 std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
+#endif
+
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
 VectorIndex::VectorIndex()
@@ -259,7 +264,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
         std::uint64_t blobs = CalculateBufferSize()->size();
-        IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)blobs);
+        IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)&blobs);
         std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
 
         if (NeedRefine())

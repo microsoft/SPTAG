@@ -55,6 +55,7 @@ public:
 
     virtual std::string GetParameter(const char* p_param) const = 0;
     virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
+    virtual ErrorCode UpdateIndex() = 0;
 
     virtual bool IsReady() const { return m_bReady; }
 
