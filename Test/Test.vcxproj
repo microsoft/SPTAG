@@ -145,7 +145,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="QuantizationTest.cpp" />
     <ClCompile Include="src\AlgoTest.cpp" />
     <ClCompile Include="src\Base64HelperTest.cpp" />
     <ClCompile Include="src\CommonHelperTest.cpp" />
@@ -153,6 +152,7 @@
     <ClCompile Include="src\DistanceTest.cpp" />
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\QuantizationTest.cpp" />
     <ClCompile Include="src\StringConvertTest.cpp" />
   </ItemGroup>
   <ItemGroup>

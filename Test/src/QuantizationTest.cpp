@@ -11,61 +11,60 @@ BOOST_AUTO_TEST_SUITE(QuantizationTest)
 
 BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
 {
-    SPTAG::DimensionType TEST_DIM = 10;
+    SPTAG::DimensionType TEST_DIM = 5;
     // Two files with the same data, in the two formats
     std::string TXT_FILE = "testvectors-quantized.txt";
     std::string DEFAULT_FILE = "testvectors-quantized.bin";
+    // Codebook file
+    std::string CODEBOOK_FILE = "test-quantizer.bin";
     // Distances between vector 0 and vector i, in order L2, Cosine, L2, Cosine, etc.
     std::string TRUTH_FILE = "vector-distances-quantized.txt";
 
-    SPTAG::Helper::ReaderOptions textOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::Float, TEST_DIM, SPTAG::VectorFileType::TXT, "|", 32, true);
-    SPTAG::Helper::ReaderOptions defaultOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::Float, TEST_DIM, SPTAG::VectorFileType::DEFAULT, "|", 32, true);
+    SPTAG::Helper::ReaderOptions textOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::TXT, "|", 1);
+    SPTAG::Helper::ReaderOptions defaultOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::DEFAULT, "|", 1);
+
+    std::cout << "Loading TEXT file" << std::endl;
 
     auto textVectorReader = SPTAG::Helper::VectorSetReader::CreateInstance(std::make_shared<SPTAG::Helper::ReaderOptions>(textOptions));
     textVectorReader->LoadFile(TXT_FILE);
     auto textVectorSet = textVectorReader->GetVectorSet();
-    auto textQuantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
-    BOOST_ASSERT(textQuantizer != nullptr);
+
+
+    std::cout << "Loading DEFAULT file" << std::endl;
 
     auto defaultVectorReader = SPTAG::Helper::VectorSetReader::CreateInstance(std::make_shared<SPTAG::Helper::ReaderOptions>(defaultOptions));
     defaultVectorReader->LoadFile(DEFAULT_FILE);
     auto defaultVectorSet = defaultVectorReader->GetVectorSet();
-    auto defaultQuantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
-    BOOST_ASSERT(defaultQuantizer != nullptr);
 
-    BOOST_ASSERT(textQuantizer != defaultQuantizer);
-    BOOST_ASSERT(textQuantizer->GetDimPerSubvector() == defaultQuantizer->GetDimPerSubvector());
-    BOOST_ASSERT(textQuantizer->GetKsPerSubvector() == defaultQuantizer->GetKsPerSubvector());
-    BOOST_ASSERT(textQuantizer->GetNumSubvectors() == defaultQuantizer->GetNumSubvectors());
+    std::cout << "Loading quantizer" << std::endl;
+    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    std::cout << "Quantizer loaded" << std::endl;
+    auto quantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
+    BOOST_ASSERT(quantizer != nullptr);
+
+    std::cout << "Count (TXT/DEFAULT):" << textVectorSet->Count() << "/" << defaultVectorSet->Count() << std::endl;
     BOOST_ASSERT(textVectorSet->Count() == defaultVectorSet->Count());
+    std::cout << "Dimension (TXT/DEFAULT):" << textVectorSet->Dimension() << "/" << defaultVectorSet->Dimension() << std::endl;
     BOOST_ASSERT(textVectorSet->Dimension() == defaultVectorSet->Dimension());
-    BOOST_ASSERT(textQuantizer->GetNumSubvectors() == textVectorSet->Dimension());
-    BOOST_ASSERT(defaultQuantizer->GetNumSubvectors() == defaultVectorSet->Dimension());
+    BOOST_ASSERT(quantizer->GetNumSubvectors() == textVectorSet->Dimension());
+    BOOST_ASSERT(quantizer->GetNumSubvectors() == defaultVectorSet->Dimension());
 
     int M = textVectorSet->Dimension();
     int cnt = textVectorSet->Count();
-    
+
     // check vectors match
     for (int i = 0; i < cnt; i++) {
         for (int j = 0; j < M; j++) {
+            //std::cout << "Entry (" << i << "," << j << ") - (TEXT/DEFAULT):" << (int) (((std::uint8_t*)textVectorSet->GetVector(i))[j]) << "/" << (int) (((std::uint8_t*)defaultVectorSet->GetVector(i))[j]) << std::endl;
             BOOST_ASSERT(((std::uint8_t*)textVectorSet->GetVector(i))[j] == ((std::uint8_t*)defaultVectorSet->GetVector(i))[j]);
         }
     }
 
-    int Ks = textQuantizer->GetKsPerSubvector();
-    int Ds = textQuantizer->GetDimPerSubvector();
-    auto textCB = textQuantizer->GetCodebooks();
-    auto defaultCB = defaultQuantizer->GetCodebooks();
-
-    // check codebooks match
-    for (int i = 0; i < M; i++) {
-        for (int j = 0; j < Ks; j++) {
-            for (int k = 0; k < Ds; k++) {
-                BOOST_CHECK_CLOSE_FRACTION(textCB[i][j][k], defaultCB[i][j][k], 1e-3);
-            }
-        }
-    }
-
+    int Ks = quantizer->GetKsPerSubvector();
+    int Ds = quantizer->GetDimPerSubvector();
+    auto CB = quantizer->GetCodebooks();
+    std::cout << "First entry of codebook:" << CB[0][0][0] << std::endl;
+    std::cout << "Second entry of codebook:" << CB[0][0][1] << std::endl;
 
     std::ifstream verificationFile(TRUTH_FILE);
     // check distances match
@@ -86,7 +85,8 @@ BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
         BOOST_CHECK_CLOSE_FRACTION(CosineDistTarget, CosineDistReal, 1e-3);
         BOOST_CHECK_CLOSE_FRACTION(L2DistTarget, L2DistReal, 1e-3);
     }
-
+    std::cout << "Quantization Test complete" << std::endl;
+    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
 }
 
 

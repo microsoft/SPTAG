@@ -187,6 +187,16 @@ inline std::size_t GetValueTypeSize(VectorValueType p_valueType)
     return 0;
 }
 
+enum class QuantizerType : std::uint8_t
+{
+#define DefineQuantizerType(Name, Type) Name,
+#include "DefinitionList.h"
+#undef DefineQuantizerType
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(QuantizerType::Undefined) != 0, "Empty QuantizerType!");
+
 } // namespace SPTAG
 
 #endif // _SPTAG_CORE_COMMONDEFS_H_

@@ -5,6 +5,7 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common.h"
 #include "inc/Helper/SimpleIniReader.h"
+#include "inc/Core/Common/PQQuantizer.h"
 
 #include <memory>
 
@@ -19,6 +20,8 @@ public:
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+        AddOptionalOption(m_QuantizerType, "-q", "--quantizerType", "Type of Quantization (if any).");
+        AddOptionalOption(m_QuantizerFile, "-f", "--quantizerFile", "File Quantizer is stored in.");
     }
 
     ~BuilderOptions() {}
@@ -30,6 +33,10 @@ public:
     SPTAG::IndexAlgoType m_indexAlgoType;
 
     std::string m_builderConfigFile;
+
+    SPTAG::QuantizerType m_QuantizerType;
+
+    std::string m_QuantizerFile;
 };
 
 int main(int argc, char* argv[])
@@ -38,6 +45,10 @@ int main(int argc, char* argv[])
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
+    }
+
+    if (options->m_QuantizerType == SPTAG::QuantizerType::PQQuantizer) {
+        SPTAG::COMMON::PQQuantizer::LoadQuantizer(options->m_QuantizerFile);
     }
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);

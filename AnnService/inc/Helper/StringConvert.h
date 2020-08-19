@@ -332,6 +332,27 @@ inline bool ConvertStringTo<VectorValueType>(const char* p_str, VectorValueType&
     return false;
 }
 
+template <>
+inline bool ConvertStringTo<QuantizerType>(const char* p_str, QuantizerType& p_value)
+{
+    if (nullptr == p_str)
+    {
+        return false;
+    }
+
+#define DefineQuantizerType(Name, Type) \
+    else if (StrUtils::StrEqualIgnoreCase(p_str, #Name)) \
+    { \
+        p_value = QuantizerType::Name; \
+        return true; \
+    } \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineQuantizerType
+
+    return false;
+}
+
 
 // Specialization of ConvertToString<>().
 
@@ -360,6 +381,25 @@ inline std::string ConvertToString<IndexAlgoType>(const IndexAlgoType& p_value)
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineIndexAlgo
+
+    default:
+        break;
+    }
+
+    return "Undefined";
+}
+
+template <>
+inline std::string ConvertToString<QuantizerType>(const QuantizerType& p_value)
+{
+    switch (p_value)
+    {
+#define DefineQuantizerType(Name, foo) \
+    case QuantizerType::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineQuantizerType
 
     default:
         break;

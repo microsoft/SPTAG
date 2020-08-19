@@ -30,3 +30,9 @@ install(TARGETS test
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
 
+add_custom_command(
+  TARGET test POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy
+    ${PROJECT_SOURCE_DIR}/Test/res/*
+    $<TARGET_FILE_DIR:${PROJECT_NAME}>)
+

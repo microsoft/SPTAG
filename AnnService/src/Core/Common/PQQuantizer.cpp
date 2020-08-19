@@ -17,30 +17,47 @@ namespace SPTAG
 			m_CosineDistanceTables = new float**[NumSubvectors];
 			m_L2DistanceTables = new float**[NumSubvectors];
 
+			auto cosineDist = DistanceCalcSelector<float>(DistCalcMethod::Cosine);
+			auto L2Dist = DistanceCalcSelector<float>(DistCalcMethod::L2);
+
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				m_CosineDistanceTables[i] = new float* [KsPerSubvector];
-				m_L2DistanceTables[i] = new float* [KsPerSubvector];
-				for (int j = 0; j < KsPerSubvector; j++) {
-					m_CosineDistanceTables[i][j] = new float[KsPerSubvector];
-					m_L2DistanceTables[i][j] = new float[KsPerSubvector];
-					for (int k = 0; k < KsPerSubvector; k++) {
-						m_CosineDistanceTables[i][j][k] = DistanceUtils::ComputeCosineDistance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
-						m_L2DistanceTables[i][j][k] = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+				m_CosineDistanceTables[i] = new float* [m_KsPerSubvector];
+				m_L2DistanceTables[i] = new float* [m_KsPerSubvector];
+				for (int j = 0; j < m_KsPerSubvector; j++) {
+					m_CosineDistanceTables[i][j] = new float[m_KsPerSubvector];
+					m_L2DistanceTables[i][j] = new float[m_KsPerSubvector];
+					for (int k = 0; k < m_KsPerSubvector; k++) {
+						m_CosineDistanceTables[i][j][k] = cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_L2DistanceTables[i][j][k] = L2Dist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
 				}
 			}
 		}
 
-		float PQQuantizer::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) 
-		{
-			float out = 0;
+		PQQuantizer::~PQQuantizer() {
+			
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				out += m_CosineDistanceTables[i][pX[i]][pY[i]];
+				for (int j = 0; j < m_KsPerSubvector; j++) {
+					delete[] m_CosineDistanceTables[i][j];
+					delete[] m_L2DistanceTables[i][j];
+				}
+				delete[] m_CosineDistanceTables[i];
+				delete[] m_L2DistanceTables[i];
 			}
-			return out;
+			
+			delete[] m_CosineDistanceTables;
+			delete[] m_L2DistanceTables;
+			
+			for (int i = 0; i < m_NumSubvectors; i++) {
+				for (int j = 0; j < m_KsPerSubvector; j++) {
+					delete[] m_codebooks[i][j];
+				}
+				delete[] m_codebooks[i];
+			}
+			delete[] m_codebooks;
 		}
 
-		float PQQuantizer::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
+		float PQQuantizer::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) 
 		{
 			float out = 0;
 			for (int i = 0; i < m_NumSubvectors; i++) {
@@ -49,10 +66,20 @@ namespace SPTAG
 			return out;
 		}
 
+		float PQQuantizer::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
+		{
+			float out = 0;
+			for (int i = 0; i < m_NumSubvectors; i++) {
+				out += m_CosineDistanceTables[i][pX[i]][pY[i]];
+			}
+			return out;
+		}
+
 		const std::uint8_t* PQQuantizer::QuantizeVector(const float* vec)
 		{
 			std::uint8_t* out = new std::uint8_t[m_NumSubvectors];
-			
+			auto distCalc = DistanceCalcSelector<float>(DistCalcMethod::L2);
+
 			for (int i = 0; i < m_NumSubvectors; i++) {
 				float minDist = FLT_MIN;
 				SizeType bestIndex = 0;
@@ -61,7 +88,7 @@ namespace SPTAG
 					subvec[j] = vec[i * m_DimPerSubvector + j];
 				}
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					float dist = DistanceUtils::ComputeL2Distance<EnumInstruction::SPTAG_AVX2>((const float*)subvec, m_codebooks[i][j], m_DimPerSubvector);
+					float dist = distCalc((const float*)subvec, m_codebooks[i][j], m_DimPerSubvector);
 					if (dist < minDist) {
 						minDist = dist;
 						bestIndex = j;
@@ -124,8 +151,7 @@ namespace SPTAG
 				}
 			}
 
-			PQQuantizer quantizer = PQQuantizer::PQQuantizer(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks);
-			DistanceUtils::PQQuantizer = std::make_shared<PQQuantizer>(quantizer);
+			DistanceUtils::PQQuantizer = std::make_shared<PQQuantizer>(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks);
 		}
 		DimensionType PQQuantizer::GetNumSubvectors()
 		{

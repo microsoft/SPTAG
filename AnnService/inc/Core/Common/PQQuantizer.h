@@ -16,7 +16,9 @@ namespace SPTAG
 		class PQQuantizer
 		{
 		public:
-			PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks);		
+			PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks);	
+
+			~PQQuantizer();
 
 			float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
 

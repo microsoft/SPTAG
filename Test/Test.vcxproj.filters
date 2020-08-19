@@ -39,7 +39,7 @@
     <ClCompile Include="src\ConcurrentTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="QuantizationTest.cpp">
+    <ClCompile Include="src\QuantizationTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
