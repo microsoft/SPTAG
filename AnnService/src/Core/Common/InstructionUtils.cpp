@@ -1,5 +1,5 @@
 #include "inc/Core/Common/InstructionUtils.h"
-#include "inc/Core/common.h"
+#include "inc/Core/Common.h"
 
 #ifndef _MSC_VER
 void cpuid(int info[4], int InfoType) {
