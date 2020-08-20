@@ -12,13 +12,13 @@
 
 namespace SPTAG
 {
-    namespace COMMON
-    {
-        class PQQuantizer;
+	namespace COMMON
+	{
+		class PQQuantizer;
 
 
-        template<typename T>
-        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
+		template<typename T>
+		float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
 
         class DistanceUtils
         {
@@ -29,7 +29,7 @@ namespace SPTAG
                 const T* pEnd4 = pX + ((length >> 2) << 2);
                 const T* pEnd1 = pX + length;
 
-                float diff = 0;
+			static float ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
 
                 while (pX < pEnd4) {
                     float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
@@ -95,13 +95,13 @@ namespace SPTAG
                 return func(p1, p2, length);
             }
 
-            static inline float ConvertCosineSimilarityToDistance(float cs)
-            {
-                // Cosine similarity is in [-1, 1], the higher the value, the closer are the two vectors. 
-                // However, the tree is built and searched based on "distance" between two vectors, that's >=0. The smaller the value, the closer are the two vectors.
-                // So we do a linear conversion from a cosine similarity to a distance value.
-                return 1 - cs; //[1, 3]
-            }
+			static float ConvertCosineSimilarityToDistance(float cs)
+			{
+				// Cosine similarity is in [-1, 1], the higher the value, the closer are the two vectors. 
+				// However, the tree is built and searched based on "distance" between two vectors, that's >=0. The smaller the value, the closer are the two vectors.
+				// So we do a linear conversion from a cosine similarity to a distance value.
+				return 1 - cs; //[1, 3]
+			}
 
             static inline float ConvertDistanceBackToCosineSimilarity(float d)
             {

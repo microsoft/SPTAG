@@ -181,6 +181,7 @@
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\PQQuantizer.cpp" />
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
