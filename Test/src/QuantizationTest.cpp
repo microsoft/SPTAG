@@ -129,6 +129,8 @@ BOOST_AUTO_TEST_CASE(TestEncoding)
     delete[] pY;
     delete[] qX;
     delete[] qY;
+    std::cout << "Quantization Test complete" << std::endl;
+    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
 }
 
 
