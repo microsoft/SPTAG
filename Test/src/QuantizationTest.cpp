@@ -5,6 +5,7 @@
 #include "inc/Test.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Core/Common/PQQuantizer.h"
+#include <random>
 
 
 BOOST_AUTO_TEST_SUITE(QuantizationTest)
@@ -89,6 +90,40 @@ BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
     SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
 }
 
+BOOST_AUTO_TEST_CASE(TestEncoding) 
+{
+    std::string CODEBOOK_FILE = "test-quantizer.bin";
+    std::cout << "Loading quantizer" << std::endl;
+    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    std::cout << "Quantizer loaded" << std::endl;
+    auto quantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
+    BOOST_ASSERT(quantizer != nullptr);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    auto pX = new float[10];
+    auto pY = new float[10];
+
+    for (int i = 0; i < 10; i++) {
+        pX[i] = dist(gen);
+        pY[i] = dist(gen);
+    }
+
+    auto L2_base = SPTAG::COMMON::DistanceUtils::ComputeL2Distance(pX, pY, 10);
+
+    auto qX = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pX);
+    auto qY = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pY);
+    auto L2_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->L2Distance(qX, qY);
+
+    BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 1e-1);
+
+    delete[] pX;
+    delete[] pY;
+    delete[] qX;
+    delete[] qY;
+}
 
 
 BOOST_AUTO_TEST_SUITE_END()

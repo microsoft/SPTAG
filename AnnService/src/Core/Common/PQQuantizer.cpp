@@ -79,11 +79,11 @@ namespace SPTAG
 		{
 			std::uint8_t* out = new std::uint8_t[m_NumSubvectors];
 			auto distCalc = DistanceCalcSelector<float>(DistCalcMethod::L2);
+			float* subvec = new float[m_DimPerSubvector];
 
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				float minDist = FLT_MIN;
-				SizeType bestIndex = 0;
-				float* subvec = new float[m_DimPerSubvector];
+				float minDist = FLT_MAX;
+				SizeType bestIndex = 0;			
 				for (int j = 0; j < m_DimPerSubvector; j++) {
 					subvec[j] = vec[i * m_DimPerSubvector + j];
 				}
@@ -96,6 +96,7 @@ namespace SPTAG
 				}
 				out[i] = bestIndex;
 			}
+			delete[] subvec;
 			return out;
 		}
 
