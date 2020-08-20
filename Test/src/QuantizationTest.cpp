@@ -8,18 +8,24 @@
 #include <random>
 
 
+#if defined(WIN32) || defined(_WIN32) 
+#define PATH_SEPARATOR (std::string)"\\" 
+#else 
+#define PATH_SEPARATOR (std::string)"/" 
+#endif 
+
 BOOST_AUTO_TEST_SUITE(QuantizationTest)
 
 BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
 {
     SPTAG::DimensionType TEST_DIM = 5;
     // Two files with the same data, in the two formats
-    std::string TXT_FILE = "testvectors-quantized.txt";
-    std::string DEFAULT_FILE = "testvectors-quantized.bin";
+    std::string TXT_FILE = "res" + PATH_SEPARATOR + "testvectors-quantized.txt";
+    std::string DEFAULT_FILE = "res" + PATH_SEPARATOR + "testvectors-quantized.bin";
     // Codebook file
-    std::string CODEBOOK_FILE = "test-quantizer.bin";
+    std::string CODEBOOK_FILE = "res" + PATH_SEPARATOR + "test-quantizer.bin";
     // Distances between vector 0 and vector i, in order L2, Cosine, L2, Cosine, etc.
-    std::string TRUTH_FILE = "vector-distances-quantized.txt";
+    std::string TRUTH_FILE = "res" + PATH_SEPARATOR + "vector-distances-quantized.txt";
 
     SPTAG::Helper::ReaderOptions textOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::TXT, "|", 1);
     SPTAG::Helper::ReaderOptions defaultOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::DEFAULT, "|", 1);
@@ -92,7 +98,7 @@ BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
 
 BOOST_AUTO_TEST_CASE(TestEncoding) 
 {
-    std::string CODEBOOK_FILE = "test-quantizer.bin";
+    std::string CODEBOOK_FILE = "res" + PATH_SEPARATOR + "test-quantizer.bin";
     std::cout << "Loading quantizer" << std::endl;
     SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
     std::cout << "Quantizer loaded" << std::endl;

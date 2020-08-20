@@ -26,6 +26,9 @@ file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
 add_executable (test ${TEST_SRC_FILES} ${TEST_HDR_FILES})
 target_link_libraries(test SPTAGLibStatic ${Boost_LIBRARIES})
 
+add_custom_command(TARGET test POST_BUILD 
+                   COMMAND ${CMAKE_COMMAND} -E copy_directory
+                       ${PROJECT_SOURCE_DIR}/Test/res $<TARGET_FILE_DIR:test>/res)
 
 install(TARGETS test
   RUNTIME DESTINATION bin  
