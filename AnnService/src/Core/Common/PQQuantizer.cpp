@@ -1,6 +1,7 @@
 #include <inc/Core/Common/PQQuantizer.h>
 #include <iostream>
 #include <fstream>
+#include <limits>
 
 
 namespace SPTAG
@@ -82,7 +83,7 @@ namespace SPTAG
 			float* subvec = new float[m_DimPerSubvector];
 
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				float minDist = FLT_MAX;
+				float minDist = std::numeric_limits<float>::infinity();
 				SizeType bestIndex = 0;			
 				for (int j = 0; j < m_DimPerSubvector; j++) {
 					subvec[j] = vec[i * m_DimPerSubvector + j];
