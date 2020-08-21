@@ -8,43 +8,34 @@ namespace SPTAG
 {
 	namespace COMMON
 	{
+
+//#define DIST_IDX(i,j,k) (m_BlockSize * (i) + m_NumSubvectors*(j) + k)
 		PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks)
 		{
 			m_NumSubvectors = NumSubvectors;
 			m_KsPerSubvector = KsPerSubvector;
 			m_DimPerSubvector = DimPerSubvector;
 			m_codebooks = (const float***) Codebooks;
+			m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
 
-			m_CosineDistanceTables = new float**[NumSubvectors];
-			m_L2DistanceTables = new float**[NumSubvectors];
+			m_CosineDistanceTables = new float[m_BlockSize * m_NumSubvectors];
+			m_L2DistanceTables = new float[m_BlockSize * m_NumSubvectors];
+			
 
 			auto cosineDist = DistanceCalcSelector<float>(DistCalcMethod::Cosine);
 			auto L2Dist = DistanceCalcSelector<float>(DistCalcMethod::L2);
 
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				m_CosineDistanceTables[i] = new float* [m_KsPerSubvector];
-				m_L2DistanceTables[i] = new float* [m_KsPerSubvector];
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					m_CosineDistanceTables[i][j] = new float[m_KsPerSubvector];
-					m_L2DistanceTables[i][j] = new float[m_KsPerSubvector];
 					for (int k = 0; k < m_KsPerSubvector; k++) {
-						m_CosineDistanceTables[i][j][k] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector));
-						m_L2DistanceTables[i][j][k] = L2Dist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_CosineDistanceTables[m_DistIndexCalc(i,j,k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector));
+						m_L2DistanceTables[m_DistIndexCalc(i,j,k)] = L2Dist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
 				}
 			}
 		}
 
 		PQQuantizer::~PQQuantizer() {
-			
-			for (int i = 0; i < m_NumSubvectors; i++) {
-				for (int j = 0; j < m_KsPerSubvector; j++) {
-					delete[] m_CosineDistanceTables[i][j];
-					delete[] m_L2DistanceTables[i][j];
-				}
-				delete[] m_CosineDistanceTables[i];
-				delete[] m_L2DistanceTables[i];
-			}
 			
 			delete[] m_CosineDistanceTables;
 			delete[] m_L2DistanceTables;
@@ -62,7 +53,7 @@ namespace SPTAG
 		{
 			float out = 0;
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				out += m_L2DistanceTables[i][pX[i]][pY[i]];
+				out += m_L2DistanceTables[m_DistIndexCalc(i,pX[i],pY[i])];
 			}
 			return out;
 		}
@@ -71,7 +62,7 @@ namespace SPTAG
 		{
 			float out = 0;
 			for (int i = 0; i < m_NumSubvectors; i++) {
-				out += m_CosineDistanceTables[i][pX[i]][pY[i]];
+				out += m_CosineDistanceTables[m_DistIndexCalc(i,pX[i],pY[i])];
 			}
 			return DistanceUtils::ConvertCosineSimilarityToDistance(out);
 		}
@@ -168,9 +159,8 @@ namespace SPTAG
 			return m_DimPerSubvector;
 		}
 
-		const float*** PQQuantizer::GetCodebooks()
-		{
-			return m_codebooks;
+		inline SizeType PQQuantizer::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) {
+			return (m_BlockSize * i) + (m_KsPerSubvector * j) + k;
 		}
 	}
 }

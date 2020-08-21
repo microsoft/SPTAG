@@ -103,7 +103,7 @@ BOOST_AUTO_TEST_CASE(TestEncoding)
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> dist(0.1f, 1.0f);
 
     for (int i = 0; i < 100; i++) {
         auto pX = new float[10];
@@ -122,8 +122,8 @@ BOOST_AUTO_TEST_CASE(TestEncoding)
         auto L2_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->L2Distance(qX, qY);
         auto Cosine_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->CosineDistance(qX, qY);
 
-        BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 3e-1);
-        BOOST_CHECK_CLOSE_FRACTION(Cosine_base, Cosine_quantized, 3e-1);
+        BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 2e-1);
+        BOOST_CHECK_CLOSE_FRACTION(Cosine_base, Cosine_quantized, 2e-1);
 
         delete[] pX;
         delete[] pY;

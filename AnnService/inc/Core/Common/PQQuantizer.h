@@ -36,16 +36,17 @@ namespace SPTAG
 
 			DimensionType GetDimPerSubvector();
 
-			const float*** GetCodebooks();
-
 		private:
 			DimensionType m_NumSubvectors;
 			SizeType m_KsPerSubvector;
 			DimensionType m_DimPerSubvector;
+			SizeType m_BlockSize;
+
+			inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
 			const float*** m_codebooks;
-			float*** m_CosineDistanceTables;
-			float*** m_L2DistanceTables;
+			float* m_CosineDistanceTables;
+			float* m_L2DistanceTables;
 		};
 	}
 }
