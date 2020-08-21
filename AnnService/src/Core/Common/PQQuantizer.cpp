@@ -28,7 +28,7 @@ namespace SPTAG
 					m_CosineDistanceTables[i][j] = new float[m_KsPerSubvector];
 					m_L2DistanceTables[i][j] = new float[m_KsPerSubvector];
 					for (int k = 0; k < m_KsPerSubvector; k++) {
-						m_CosineDistanceTables[i][j][k] = cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
+						m_CosineDistanceTables[i][j][k] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector));
 						m_L2DistanceTables[i][j][k] = L2Dist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
 				}
@@ -73,7 +73,7 @@ namespace SPTAG
 			for (int i = 0; i < m_NumSubvectors; i++) {
 				out += m_CosineDistanceTables[i][pX[i]][pY[i]];
 			}
-			return out;
+			return DistanceUtils::ConvertCosineSimilarityToDistance(out);
 		}
 
 		const std::uint8_t* PQQuantizer::QuantizeVector(const float* vec)

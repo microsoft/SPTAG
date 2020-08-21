@@ -62,16 +62,12 @@ BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
     // check vectors match
     for (int i = 0; i < cnt; i++) {
         for (int j = 0; j < M; j++) {
-            //std::cout << "Entry (" << i << "," << j << ") - (TEXT/DEFAULT):" << (int) (((std::uint8_t*)textVectorSet->GetVector(i))[j]) << "/" << (int) (((std::uint8_t*)defaultVectorSet->GetVector(i))[j]) << std::endl;
             BOOST_ASSERT(((std::uint8_t*)textVectorSet->GetVector(i))[j] == ((std::uint8_t*)defaultVectorSet->GetVector(i))[j]);
         }
     }
 
     int Ks = quantizer->GetKsPerSubvector();
     int Ds = quantizer->GetDimPerSubvector();
-    auto CB = quantizer->GetCodebooks();
-    std::cout << "First entry of codebook:" << CB[0][0][0] << std::endl;
-    std::cout << "Second entry of codebook:" << CB[0][0][1] << std::endl;
 
     std::ifstream verificationFile(TRUTH_FILE);
     // check distances match
@@ -109,26 +105,31 @@ BOOST_AUTO_TEST_CASE(TestEncoding)
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
-    auto pX = new float[10];
-    auto pY = new float[10];
+    for (int i = 0; i < 100; i++) {
+        auto pX = new float[10];
+        auto pY = new float[10];
 
-    for (int i = 0; i < 10; i++) {
-        pX[i] = dist(gen);
-        pY[i] = dist(gen);
+        for (int j = 0; j < 10; j++) {
+            pX[j] = dist(gen);
+            pY[j] = dist(gen);
+        }
+
+        auto L2_base = SPTAG::COMMON::DistanceUtils::ComputeL2Distance(pX, pY, 10);
+        auto Cosine_base = SPTAG::COMMON::DistanceUtils::ComputeCosineDistance(pX, pY, 10);
+
+        auto qX = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pX);
+        auto qY = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pY);
+        auto L2_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->L2Distance(qX, qY);
+        auto Cosine_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->CosineDistance(qX, qY);
+
+        BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 3e-1);
+        BOOST_CHECK_CLOSE_FRACTION(Cosine_base, Cosine_quantized, 3e-1);
+
+        delete[] pX;
+        delete[] pY;
+        delete[] qX;
+        delete[] qY;
     }
-
-    auto L2_base = SPTAG::COMMON::DistanceUtils::ComputeL2Distance(pX, pY, 10);
-
-    auto qX = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pX);
-    auto qY = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pY);
-    auto L2_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->L2Distance(qX, qY);
-
-    BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 1e-1);
-
-    delete[] pX;
-    delete[] pY;
-    delete[] qX;
-    delete[] qY;
     std::cout << "Quantization Test complete" << std::endl;
     SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
 }

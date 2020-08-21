@@ -20,7 +20,7 @@ M = 5
 
 def distance(data, query, D = 'Cosine'):
     if D == 'Cosine':
-        return (1.0 - np.dot(query, data.T))
+        return np.dot(query, data.T)
     else:
         return np.linalg.norm(query-data)**2
 
@@ -91,6 +91,7 @@ def main():
                 qcomp = np.array(xcb[j][vec[j]])
                 l2_dist += distance(bcomp, qcomp, D = 'L2')
                 cosine_dist += distance(bcomp, qcomp, D = 'Cosine')
+            cosine_dist = 1 - cosine_dist
             outfl.write(str(l2_dist) + '\n')
             outfl.write(str(cosine_dist) + '\n')
             print(cosine_dist)
