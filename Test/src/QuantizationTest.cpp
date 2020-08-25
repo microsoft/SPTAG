@@ -6,6 +6,13 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Core/Common/PQQuantizer.h"
 #include <random>
+#include "inc/Helper/SimpleIniReader.h"
+#include "inc/Core/VectorIndex.h"
+#include "inc/Core/Common/CommonUtils.h"
+
+#include <unordered_set>
+#include <ctime>
+#include <inc/Core/Common.h>
 
 
 #if defined(WIN32) || defined(_WIN32) 
@@ -14,125 +21,309 @@
 #define PATH_SEPARATOR (std::string)"/" 
 #endif 
 
-BOOST_AUTO_TEST_SUITE(QuantizationTest)
 
-BOOST_AUTO_TEST_CASE(TestReadTextAndDefault)
+
+template <typename T>
+void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
 {
-    SPTAG::DimensionType TEST_DIM = 5;
-    // Two files with the same data, in the two formats
-    std::string TXT_FILE = "res" + PATH_SEPARATOR + "testvectors-quantized.txt";
-    std::string DEFAULT_FILE = "res" + PATH_SEPARATOR + "testvectors-quantized.bin";
-    // Codebook file
-    std::string CODEBOOK_FILE = "res" + PATH_SEPARATOR + "test-quantizer.bin";
-    // Distances between vector 0 and vector i, in order L2, Cosine, L2, Cosine, etc.
-    std::string TRUTH_FILE = "res" + PATH_SEPARATOR + "vector-distances-quantized.txt";
 
-    SPTAG::Helper::ReaderOptions textOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::TXT, "|", 1);
-    SPTAG::Helper::ReaderOptions defaultOptions = SPTAG::Helper::ReaderOptions(SPTAG::VectorValueType::UInt8, TEST_DIM, SPTAG::VectorFileType::DEFAULT, "|", 1);
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    BOOST_CHECK(nullptr != vecIndex);
 
-    std::cout << "Loading TEXT file" << std::endl;
+    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "8");
 
-    auto textVectorReader = SPTAG::Helper::VectorSetReader::CreateInstance(std::make_shared<SPTAG::Helper::ReaderOptions>(textOptions));
-    textVectorReader->LoadFile(TXT_FILE);
-    auto textVectorSet = textVectorReader->GetVectorSet();
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+}
 
+template <typename T>
+void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
+{
 
-    std::cout << "Loading DEFAULT file" << std::endl;
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    BOOST_CHECK(nullptr != vecIndex);
 
-    auto defaultVectorReader = SPTAG::Helper::VectorSetReader::CreateInstance(std::make_shared<SPTAG::Helper::ReaderOptions>(defaultOptions));
-    defaultVectorReader->LoadFile(DEFAULT_FILE);
-    auto defaultVectorSet = defaultVectorReader->GetVectorSet();
+    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "8");
 
-    std::cout << "Loading quantizer" << std::endl;
-    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
-    std::cout << "Quantizer loaded" << std::endl;
-    auto quantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
-    BOOST_ASSERT(quantizer != nullptr);
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+}
 
-    std::cout << "Count (TXT/DEFAULT):" << textVectorSet->Count() << "/" << defaultVectorSet->Count() << std::endl;
-    BOOST_ASSERT(textVectorSet->Count() == defaultVectorSet->Count());
-    std::cout << "Dimension (TXT/DEFAULT):" << textVectorSet->Dimension() << "/" << defaultVectorSet->Dimension() << std::endl;
-    BOOST_ASSERT(textVectorSet->Dimension() == defaultVectorSet->Dimension());
-    BOOST_ASSERT(quantizer->GetNumSubvectors() == textVectorSet->Dimension());
-    BOOST_ASSERT(quantizer->GetNumSubvectors() == defaultVectorSet->Dimension());
+template <typename T>
+void Search(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
 
-    int M = textVectorSet->Dimension();
-    int cnt = textVectorSet->Count();
+    for (SPTAG::SizeType i = 0; i < n; i++)
+    {
+        SPTAG::QueryResult res(vec, k, true);
+        vecIndex->SearchIndex(res);
+        std::unordered_set<std::string> resmeta;
+        for (int j = 0; j < k; j++)
+        {
+            resmeta.insert(std::string((char*)res.GetMetadata(j).Data(), res.GetMetadata(j).Length()));
+            std::cout << res.GetResult(j)->Dist << "@(" << res.GetResult(j)->VID << "," << std::string((char*)res.GetMetadata(j).Data(), res.GetMetadata(j).Length()) << ") ";
+        }
+        std::cout << std::endl;
+        for (int j = 0; j < k; j++)
+        {
+            BOOST_CHECK(resmeta.count(truthmeta[i * k + j]));
+        }
+        vec += vecIndex->GetFeatureDim();
+    }
+    vecIndex.reset();
+}
 
-    // check vectors match
-    for (int i = 0; i < cnt; i++) {
-        for (int j = 0; j < M; j++) {
-            BOOST_ASSERT(((std::uint8_t*)textVectorSet->GetVector(i))[j] == ((std::uint8_t*)defaultVectorSet->GetVector(i))[j]);
+template <typename T>
+void Add(const std::string folder, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->AddIndex(vec, meta));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    vecIndex.reset();
+}
+
+template <typename T>
+void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    BOOST_CHECK(nullptr != vecIndex);
+
+    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+    vecIndex->SetParameter("NumberOfThreads", "8");
+
+    clock_t start = clock();
+    for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
+        SPTAG::ByteArray metaarr = meta->GetMetadata(i);
+        std::uint64_t offset[2] = { 0, metaarr.Length() };
+        std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+        SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset);
+        if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
+    }
+    std::cout << "AddIndex time: " << ((float)(clock() - start) / CLOCKS_PER_SEC / vec->Count()) << "s" << std::endl;
+
+    Sleep(10000);
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+}
+
+template <typename T>
+void Delete(const std::string folder, T* vec, SPTAG::SizeType n, const std::string out)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->DeleteIndex((const void*)vec, n));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    vecIndex.reset();
+}
+
+template <typename T>
+void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod, SPTAG::SizeType n, SPTAG::DimensionType m)
+{
+    SPTAG::SizeType q = 3;
+    int k = 3;
+    std::vector<T> vec;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        for (SPTAG::DimensionType j = 0; j < m; j++) {
+            vec.push_back((T)i);
         }
     }
 
-    int Ks = quantizer->GetKsPerSubvector();
-    int Ds = quantizer->GetDimPerSubvector();
-
-    std::ifstream verificationFile(TRUTH_FILE);
-    // check distances match
-    auto baseVector = defaultVectorSet->GetVector(0);
-    for (int i = 0; i < cnt; i++) {
-        std::string tmp;
-        std::getline(verificationFile, tmp);
-        float L2DistTarget = atof(tmp.c_str());
-        std::getline(verificationFile, tmp);
-        float CosineDistTarget = atof(tmp.c_str());
-
-        auto CosineFn = SPTAG::COMMON::DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod::Cosine);
-        auto L2Fn = SPTAG::COMMON::DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod::L2);
-
-        float CosineDistReal = CosineFn((std::uint8_t*)baseVector, (std::uint8_t*)defaultVectorSet->GetVector(i), M);
-        float L2DistReal = L2Fn((std::uint8_t*)baseVector, (std::uint8_t*)defaultVectorSet->GetVector(i), M);
-
-        BOOST_CHECK_CLOSE_FRACTION(CosineDistTarget, CosineDistReal, 1e-3);
-        BOOST_CHECK_CLOSE_FRACTION(L2DistTarget, L2DistReal, 1e-3);
+    std::vector<T> query;
+    for (SPTAG::SizeType i = 0; i < q; i++) {
+        for (SPTAG::DimensionType j = 0; j < m; j++) {
+            query.push_back((T)i * 2);
+        }
     }
-    std::cout << "Quantization Test complete" << std::endl;
-    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+
+    std::vector<char> meta;
+    std::vector<std::uint64_t> metaoffset;
+    for (SPTAG::SizeType i = 0; i < n; i++) {
+        metaoffset.push_back((std::uint64_t)meta.size());
+        std::string a = std::to_string(i);
+        for (size_t j = 0; j < a.length(); j++)
+            meta.push_back(a[j]);
+    }
+    metaoffset.push_back((std::uint64_t)meta.size());
+
+    std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
+        SPTAG::ByteArray((std::uint8_t*)vec.data(), sizeof(T) * n * m, false),
+        SPTAG::GetEnumValueType<T>(), m, n));
+
+    std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
+        SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
+        SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
+        n));
+
+    Build<T>(algo, distCalcMethod, vecset, metaset, "testindices-pq");
+    std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta1);
+
+    Add<T>("testindices-pq", vecset, metaset, "testindices-pq");
+    std::string truthmeta2[] = { "0", "0", "1", "2", "2", "1", "4", "4", "3" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta2);
+
+    Delete<T>("testindices-pq", query.data(), q, "testindices-pq");
+    std::string truthmeta3[] = { "1", "1", "3", "1", "3", "1", "3", "5", "3" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta3);
+
+    BuildWithMetaMapping<T>(algo, distCalcMethod, vecset, metaset, "testindices-pq");
+    std::string truthmeta4[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta4);
+
+    Add<T>("testindices-pq", vecset, metaset, "testindices-pq");
+    std::string truthmeta5[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta5);
+
+    AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices-pq");
+    std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+    Search<T>("testindices-pq", query.data(), q, k, truthmeta6);
 }
 
-BOOST_AUTO_TEST_CASE(TestEncoding) 
-{
-    std::string CODEBOOK_FILE = "res" + PATH_SEPARATOR + "test-quantizer.bin";
-    std::cout << "Loading quantizer" << std::endl;
-    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
-    std::cout << "Quantizer loaded" << std::endl;
-    auto quantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
-    BOOST_ASSERT(quantizer != nullptr);
-
+void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim, int M) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dist(0.1f, 1.0f);
+    std::uniform_real_distribution<float> dist(minVecVal, maxVecVal);
+    int Ks = 256;
 
-    for (int i = 0; i < 100; i++) {
-        auto pX = new float[10];
-        auto pY = new float[10];
-
-        for (int j = 0; j < 10; j++) {
-            pX[j] = dist(gen);
-            pY[j] = dist(gen);
+    std::string CODEBOOK_FILE = "test-quantizer.bin";
+    float*** codebooks = new float**[M];
+    for (int i = 0; i < M; i++) {
+        codebooks[i] = new float*[Ks];
+        for (int j = 0; j < Ks; j++) {
+            codebooks[i][j] = new float[(vectorDim / M)];
+            for (int k = 0; k < (vectorDim / M); k++) {
+                codebooks[i][j][k] = dist(gen);
+                
+            }
         }
-
-        auto L2_base = SPTAG::COMMON::DistanceUtils::ComputeL2Distance(pX, pY, 10);
-        auto Cosine_base = SPTAG::COMMON::DistanceUtils::ComputeCosineDistance(pX, pY, 10);
-
-        auto qX = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pX);
-        auto qY = SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector(pY);
-        auto L2_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->L2Distance(qX, qY);
-        auto Cosine_quantized = SPTAG::COMMON::DistanceUtils::PQQuantizer->CosineDistance(qX, qY);
-
-        BOOST_CHECK_CLOSE_FRACTION(L2_base, L2_quantized, 2e-1);
-        BOOST_CHECK_CLOSE_FRACTION(Cosine_base, Cosine_quantized, 2e-1);
-
-        delete[] pX;
-        delete[] pY;
-        delete[] qX;
-        delete[] qY;
     }
-    std::cout << "Quantization Test complete" << std::endl;
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (vectorDim/M), codebooks);
+    std::cout << "Quantizer created" << std::endl;
+    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
+    std::cout << "Quantizer saved" << std::endl;
+    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    auto loadedQuantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
+    BOOST_ASSERT(loadedQuantizer != nullptr);
+
+    float* vecs = new float[numVecs * vectorDim];
+    for (int i = 0; i < numVecs * vectorDim; i++) {
+        vecs[i] = dist(gen);
+    }
+
+    for (int i = 0; i < numVecs; i++) {
+        auto vec = &vecs[i * vectorDim];
+
+        auto baseQ = baseQuantizer->QuantizeVector(vec);
+        auto loadQ = loadedQuantizer->QuantizeVector(vec);
+        for (int j = 0; j < M; j++) {
+            BOOST_ASSERT(baseQ[j] == loadQ[j]);
+        }
+        for (int j = i; j < numVecs; j++) {
+            auto vec2 = &vecs[j * vectorDim];
+            auto baseQ2 = baseQuantizer->QuantizeVector(vec2);
+            auto loadQ2 = loadedQuantizer->QuantizeVector(vec2);
+            std::cout << "(" << i << "," << j << ")" << std::endl;
+            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->CosineDistance(baseQ, baseQ2), loadedQuantizer->CosineDistance(baseQ, baseQ2), 1e-4);
+            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->L2Distance(baseQ, baseQ2), loadedQuantizer->L2Distance(baseQ, baseQ2), 1e-4);
+            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::Cosine), baseQuantizer->CosineDistance(baseQ, baseQ2), 5e-1);
+            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::L2), baseQuantizer->L2Distance(baseQ, baseQ2), 5e-1);
+
+            delete[] baseQ2, delete loadQ2;
+        }
+        delete[] baseQ, delete[] loadQ;
+    }
+    delete[] vecs;
+    baseQuantizer = nullptr;
+    loadedQuantizer = nullptr;
     SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
 }
 
+BOOST_AUTO_TEST_SUITE(QuantizationTest)
+
+BOOST_AUTO_TEST_CASE(PQDistanceTest)
+{
+    TestPQDistance(0.1, 1.0, 5, 10, 5);
+}
+
+
+BOOST_AUTO_TEST_CASE(KDTTest)
+{
+    auto n = 200;
+    auto m = 20;
+    auto M = 10;
+    int Ks = 256;
+
+    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
+    float*** codebooks = new float** [M];
+    for (int i = 0; i < M; i++) {
+        codebooks[i] = new float* [Ks];
+        for (int j = 0; j < Ks; j++) {
+            codebooks[i][j] = new float[(m / M)];
+            for (int k = 0; k < (m / M); k++) {
+                codebooks[i][j][k] = (float) j;
+
+            }
+        }
+    }
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m/M), codebooks);
+    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
+    baseQuantizer = nullptr;
+
+
+    std::cout << "Loading quantizer" << std::endl;
+    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    std::cout << "Quantizer loaded" << std::endl;
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr);
+    //SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+    
+    Test<std::uint8_t>(SPTAG::IndexAlgoType::KDT, "L2", n, m);
+
+    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+}
+
+BOOST_AUTO_TEST_CASE(BKTTest)
+{
+    auto n = 200;
+    auto m = 20;
+    auto M = 10;
+    int Ks = 256;
+
+    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
+    float*** codebooks = new float** [M];
+    for (int i = 0; i < M; i++) {
+        codebooks[i] = new float* [Ks];
+        for (int j = 0; j < Ks; j++) {
+            codebooks[i][j] = new float[(m / M)];
+            for (int k = 0; k < (m / M); k++) {
+                codebooks[i][j][k] = (float)j;
+
+            }
+        }
+    }
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m / M), codebooks);
+    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
+    baseQuantizer = nullptr;
+
+
+    std::cout << "Loading quantizer" << std::endl;
+    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    std::cout << "Quantizer loaded" << std::endl;
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr);
+
+    Test<std::uint8_t>(SPTAG::IndexAlgoType::BKT, "L2", n, m);
+
+    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+
+}
 
 BOOST_AUTO_TEST_SUITE_END()

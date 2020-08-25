@@ -21,7 +21,7 @@ public:
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
         AddOptionalOption(m_QuantizerType, "-q", "--quantizerType", "Type of Quantization (if any).");
-        AddOptionalOption(m_QuantizerFile, "-f", "--quantizerFile", "File Quantizer is stored in.");
+        AddOptionalOption(m_QuantizerFile, "-qF", "--quantizerFile", "File Quantizer is stored in.");
     }
 
     ~BuilderOptions() {}
