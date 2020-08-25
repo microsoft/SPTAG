@@ -16,7 +16,7 @@ namespace SPTAG
 			m_KsPerSubvector = KsPerSubvector;
 			m_DimPerSubvector = DimPerSubvector;
 			m_codebooks = (const float***) Codebooks;
-			m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+			m_BlockSize = (m_KsPerSubvector * (m_KsPerSubvector + 1))/2;
 
 			m_CosineDistanceTables = new float[m_BlockSize * m_NumSubvectors];
 			m_L2DistanceTables = new float[m_BlockSize * m_NumSubvectors];
@@ -27,7 +27,7 @@ namespace SPTAG
 
 			for (int i = 0; i < m_NumSubvectors; i++) {
 				for (int j = 0; j < m_KsPerSubvector; j++) {
-					for (int k = 0; k < m_KsPerSubvector; k++) {
+					for (int k = 0; k <= j; k++) {
 						m_CosineDistanceTables[m_DistIndexCalc(i,j,k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector));
 						m_L2DistanceTables[m_DistIndexCalc(i,j,k)] = L2Dist(m_codebooks[i][j], m_codebooks[i][k], m_DimPerSubvector);
 					}
@@ -160,7 +160,10 @@ namespace SPTAG
 		}
 
 		inline SizeType PQQuantizer::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) {
-			return (m_BlockSize * i) + (m_KsPerSubvector * j) + k;
+			if (k > j) {
+				return (m_BlockSize * i) + ((k * (k + 1)) / 2) + j; // exploit symmetry by swapping
+			}
+			return (m_BlockSize * i) + ((j*(j+1))/2) + k;
 		}
 	}
 }
