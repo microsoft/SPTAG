@@ -257,5 +257,8 @@
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
