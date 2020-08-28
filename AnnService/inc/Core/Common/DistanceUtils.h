@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_DISTANCEUTILS_H_
 #define _SPTAG_COMMON_DISTANCEUTILS_H_
 
-
+#include <immintrin.h>
 #include <functional>
 
 #include "CommonUtils.h"
