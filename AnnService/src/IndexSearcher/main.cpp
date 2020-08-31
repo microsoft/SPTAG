@@ -28,6 +28,7 @@ public:
         AddOptionalOption(m_withMeta, "-a", "--withmeta", "Output metadata instead of vector id.");
         AddOptionalOption(m_K, "-k", "--KNN", "K nearest neighbors for search.");
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
+        AddOptionalOption(m_deNormalizeBy, "-DN", "--denorm", "For quantized vectors, undo query normalization by this factor.");
     }
 
     ~SearcherOptions() {}
@@ -47,6 +48,8 @@ public:
     int m_K = 32;
 
     int m_batch = 10000;
+
+    float m_deNormalizeBy = 1.0;
 };
 
 template <typename T>
@@ -151,7 +154,10 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         for (SizeType i = 0; i < numQuerys; i++) {
             void* vec = queryVectors->GetVector(startQuery + i);
             if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
-                SPTAG::COMMON::Utils::Normalize<float>((float*) vec, options->m_dimension, 1);
+                float* fltvec = (float*) vec;
+                for (int idx = 0; idx < options->m_dimension; idx++) {
+                    fltvec[idx] = fltvec[idx] / options->m_deNormalizeBy;
+                }
                 vec = (void*)SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeVector((const float*) vec);
             }
             results[i].SetTarget(vec);
