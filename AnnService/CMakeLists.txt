@@ -15,6 +15,7 @@ list(REMOVE_ITEM HDR_FILES
     )
 
 list(REMOVE_ITEM SRC_FILES
+    ${AnnService}/src/Core/Common/DistanceUtils.cpp
     ${AnnService}/src/Core/Common/InstructionUtils.cpp
     )
 
@@ -22,6 +23,7 @@ add_library (DistanceUtils STATIC
     inc/Core/Common/DistanceUtils.h 
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
+    src/Core/Common/DistanceUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )
 
