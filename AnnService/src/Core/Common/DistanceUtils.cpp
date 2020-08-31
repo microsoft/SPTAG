@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/PQQuantizer.h"
 #include <immintrin.h>
 
 using namespace SPTAG;
@@ -14,6 +15,8 @@ using namespace SPTAG::COMMON;
 #define DIFF128 diff128.m128_f32
 #define DIFF256 diff256.m256_f32
 #endif
+
+std::shared_ptr<PQQuantizer> DistanceUtils::PQQuantizer = nullptr;
 
 inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
 {
@@ -201,6 +204,23 @@ inline __m256 _mm256_sqdf_ps(__m256 X, __m256 Y)
                 result = acc(result, exec(c1, c2)); \
             } \
 
+float DistanceUtils::ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length) 
+{
+    const std::int8_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::int8_t* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    while (pX < pEnd1) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    return diff;
+}
+
 float DistanceUtils::ComputeL2Distance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
 {
     const std::int8_t* pEnd32 = pX + ((length >> 5) << 5);
@@ -259,7 +279,42 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::int8_t* pX, const std::int
     return diff;
 }
 
+float DistanceUtils::ComputeL2Distance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) 
+{
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    }
+    return DistanceUtils::ComputeL2Distance_NonQuantized(pX, pY, length);
+        
+}
+
+float DistanceUtils::ComputeL2Distance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) 
+{
+    const std::uint8_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::uint8_t* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    while (pX < pEnd1) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    return diff;
+}
+
 float DistanceUtils::ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    }
+    return DistanceUtils::ComputeL2Distance_NonQuantized_SSE(pX, pY, length);
+
+}
+
+float DistanceUtils::ComputeL2Distance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -290,6 +345,15 @@ float DistanceUtils::ComputeL2Distance_SSE(const std::uint8_t* pX, const std::ui
 
 float DistanceUtils::ComputeL2Distance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    }
+    return DistanceUtils::ComputeL2Distance_NonQuantized_AVX(pX, pY, length);
+
+}
+
+float DistanceUtils::ComputeL2Distance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
     const std::uint8_t* pEnd4 = pX + ((length >> 2) << 2);
@@ -305,6 +369,23 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::uint8_t* pX, const std::ui
     }
     float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
 
+    while (pX < pEnd4) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    while (pX < pEnd1) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    return diff;
+}
+
+float DistanceUtils::ComputeL2Distance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
+{
+    const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::int16_t* pEnd1 = pX + length;
+    float diff = 0;
     while (pX < pEnd4) {
         float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
         c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
@@ -377,6 +458,23 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::int16_t* pX, const std::in
     return diff;
 }
 
+float DistanceUtils::ComputeL2Distance(const float* pX, const float* pY, DimensionType length)
+{
+    const float* pEnd4 = pX + ((length >> 2) << 2);
+    const float *pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+        c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    while (pX < pEnd1) {
+        float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+    }
+    return diff;
+}
+
 float DistanceUtils::ComputeL2Distance_SSE(const float* pX, const float* pY, DimensionType length)
 {
     const float* pEnd16 = pX + ((length >> 4) << 4);
@@ -426,6 +524,23 @@ float DistanceUtils::ComputeL2Distance_AVX(const float* pX, const float* pY, Dim
         float c1 = (*pX++) - (*pY++); diff += c1 * c1;
     }
     return diff;
+}
+
+float DistanceUtils::ComputeCosineDistance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
+{
+    const std::int8_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::int8_t* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4)
+    {
+        float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+    }
+    while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
+    int base = Utils::GetBase<std::int8_t>();
+    return base * base - diff;
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
@@ -484,7 +599,38 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::int8_t* pX, const std:
     return 16129 - diff;
 }
 
-float DistanceUtils::ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+float DistanceUtils::ComputeCosineDistance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    }
+    return DistanceUtils::ComputeCosineDistance_NonQuantized(pX, pY, length);
+}
+
+float DistanceUtils::ComputeCosineDistance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
+    const std::uint8_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::uint8_t* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4)
+    {
+        float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+    }
+    while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
+    int base = Utils::GetBase<std::uint8_t>();
+    return base * base - diff;
+}
+
+float DistanceUtils::ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    }
+    return DistanceUtils::ComputeCosineDistance_NonQuantized_SSE(pX, pY, length);
+}
+
+float DistanceUtils::ComputeCosineDistance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -512,7 +658,14 @@ float DistanceUtils::ComputeCosineDistance_SSE(const std::uint8_t* pX, const std
     return 65025 - diff;
 }
 
-float DistanceUtils::ComputeCosineDistance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+float DistanceUtils::ComputeCosineDistance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
+    if (DistanceUtils::PQQuantizer != nullptr) {
+        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    }
+    return DistanceUtils::ComputeCosineDistance_NonQuantized_AVX(pX, pY, length);
+}
+
+float DistanceUtils::ComputeCosineDistance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -538,6 +691,23 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::uint8_t* pX, const std
     }
     while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
     return 65025 - diff;
+}
+
+float DistanceUtils::ComputeCosineDistance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
+{
+    const std::int16_t* pEnd4 = pX + ((length >> 2) << 2);
+    const std::int16_t* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4)
+    {
+        float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+    }
+    while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
+    int base = Utils::GetBase<std::int16_t>();
+    return base * base - diff;
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
@@ -596,6 +766,23 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::int16_t* pX, const std
 
     while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
     return  1073676289 - diff;
+}
+
+float DistanceUtils::ComputeCosineDistance(const float* pX, const float* pY, DimensionType length)
+{
+    const float* pEnd4 = pX + ((length >> 2) << 2);
+    const float* pEnd1 = pX + length;
+    float diff = 0;
+    while (pX < pEnd4)
+    {
+        float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+        c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+    }
+    while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
+    int base = Utils::GetBase<float>();
+    return base * base - diff;
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const float* pX, const float* pY, DimensionType length)

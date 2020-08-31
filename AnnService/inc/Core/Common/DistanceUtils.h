@@ -23,67 +23,37 @@ namespace SPTAG
         class DistanceUtils
         {
         public:
-            template <typename T>
-            static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)
-            {
-                const T* pEnd4 = pX + ((length >> 2) << 2);
-                const T* pEnd1 = pX + length;
+            static std::shared_ptr<PQQuantizer> PQQuantizer;
 
-			static float ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
-
-                while (pX < pEnd4) {
-                    float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
-                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
-                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
-                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
-                }
-                while (pX < pEnd1) {
-                    float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
-                }
-                return diff;
-            }
-
+            static float ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
 
+            static float ComputeL2Distance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
 
+            static float ComputeL2Distance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
 
+            static float ComputeL2Distance(const float* pX, const float* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const float* pX, const float* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const float* pX, const float* pY, DimensionType length);
 
-            template <typename T>
-            static float ComputeCosineDistance(const T* pX, const T* pY, DimensionType length)
-            {
-                const T* pEnd4 = pX + ((length >> 2) << 2);
-                const T* pEnd1 = pX + length;
-
-                float diff = 0;
-
-                while (pX < pEnd4)
-                {
-                    float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
-                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
-                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
-                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
-                }
-                while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
-                int base = Utils::GetBase<T>();
-                return base * base - diff;
-            }
-
+            static float ComputeCosineDistance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
 
+            static float ComputeCosineDistance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
 
+            static float ComputeCosineDistance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
 
+            static float ComputeCosineDistance(const float* pX, const float* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const float* pX, const float* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const float* pX, const float* pY, DimensionType length);
 
@@ -107,6 +77,15 @@ namespace SPTAG
             {
                 return 1 - d;
             }
+
+        private:
+            static float ComputeCosineDistance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static float ComputeCosineDistance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static float ComputeCosineDistance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+
+            static float ComputeL2Distance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static float ComputeL2Distance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static float ComputeL2Distance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
         };
 
         template<typename T>
