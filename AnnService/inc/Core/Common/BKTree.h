@@ -148,7 +148,7 @@ namespace SPTAG
                     float* currCenters = args.newCenters + k * args._D;
                     for (DimensionType j = 0; j < args._D; j++) currCenters[j] /= args.counts[k];
 
-                    if (args._M == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::PQQuantizer == nullptr) {
+                    if (args._M == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr) {
                         COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
                     }
                     for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
@@ -278,7 +278,7 @@ namespace SPTAG
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
                 float baseSquare;
-                if (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
+                if (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
                     baseSquare = 1/ (100.0f * (batchEnd - first));
                 }
                 else {

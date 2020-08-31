@@ -6,6 +6,7 @@
 
 #include "CommonUtils.h"
 #include "DistanceUtils.h"
+#include "Quantizer.h"
 #include <limits>
 
 
@@ -13,7 +14,7 @@ namespace SPTAG
 {
 	namespace COMMON
 	{
-		class PQQuantizer
+		class PQQuantizer : public Quantizer
 		{
 		public:
 			PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks);	
@@ -35,6 +36,10 @@ namespace SPTAG
 			SizeType GetKsPerSubvector();
 
 			DimensionType GetDimPerSubvector();
+
+			QuantizerType GetQuantizerType() {
+				return QuantizerType::PQQuantizer;
+			}
 
 		private:
 			DimensionType m_NumSubvectors;

@@ -142,7 +142,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     std::vector<std::set<SizeType>> truth(options->m_batch);
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
     std::vector<clock_t> latencies(options->m_batch + 1, 0);
-    int baseSquare = (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) ? 1 : SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
+    int baseSquare = (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) ? 1 : SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
     LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0);
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
@@ -150,9 +150,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
         for (SizeType i = 0; i < numQuerys; i++) {
             void* vec = queryVectors->GetVector(startQuery + i);
-            if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
+            if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
                 SPTAG::COMMON::Utils::Normalize<float>((float*) vec, options->m_dimension, 1);
-                vec = (void*)SPTAG::COMMON::DistanceUtils::PQQuantizer->QuantizeVector((const float*) vec);
+                vec = (void*)SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeVector((const float*) vec);
             }
             results[i].SetTarget(vec);
         }

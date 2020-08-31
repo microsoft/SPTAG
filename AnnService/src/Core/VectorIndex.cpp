@@ -123,9 +123,11 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
         IOSTRING(p_configOut, WriteString, "\n");
     }
 
-    if (nullptr != SPTAG::COMMON::DistanceUtils::PQQuantizer) {
+    if (nullptr != SPTAG::COMMON::DistanceUtils::Quantizer) {
         IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
         IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
+        QuantizerType type = SPTAG::COMMON::DistanceUtils::Quantizer->GetQuantizerType();
+        IOSTRING(p_configOut, WriteString, ("QuantizerType=" + Helper::Convert::ConvertToString<QuantizerType>(type) + "\n").c_str());
         IOSTRING(p_configOut, WriteString, "\n");
     }
 
@@ -255,8 +257,9 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         if (ErrorCode::Success == ret) ret = SaveIndexData(handles);
     }
 
-    if (SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr) {
-        SPTAG::COMMON::DistanceUtils::PQQuantizer->SaveQuantizer(folderPath + m_sQuantizerFile);
+    if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
+
+        SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(folderPath + m_sQuantizerFile);
     }
 
     return ret;
@@ -505,7 +508,9 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     }
 
     if (iniReader.DoesSectionExist("Quantizer")) {
-        SPTAG::COMMON::PQQuantizer::LoadQuantizer(folderPath + p_vectorIndex->m_sQuantizerFile);
+        QuantizerType type = QuantizerType::Undefined;
+        SPTAG::Helper::Convert::ConvertStringTo<QuantizerType>(iniReader.GetParameter("Quantizer", "QuantizerType", std::string()).c_str(), type);
+        SPTAG::COMMON::Quantizer::LoadQuantizer(folderPath + p_vectorIndex->m_sQuantizerFile, type);
     }
 
     p_vectorIndex->m_bReady = true;

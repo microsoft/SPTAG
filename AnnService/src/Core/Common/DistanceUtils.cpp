@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/Common/DistanceUtils.h"
-#include "inc/Core/Common/PQQuantizer.h"
 #include <immintrin.h>
 
 using namespace SPTAG;
@@ -16,7 +15,7 @@ using namespace SPTAG::COMMON;
 #define DIFF256 diff256.m256_f32
 #endif
 
-std::shared_ptr<PQQuantizer> DistanceUtils::PQQuantizer = nullptr;
+std::shared_ptr<Quantizer> DistanceUtils::Quantizer = nullptr;
 
 inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
 {
@@ -281,8 +280,8 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::int8_t* pX, const std::int
 
 float DistanceUtils::ComputeL2Distance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) 
 {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->L2Distance(pX, pY);
     }
     return DistanceUtils::ComputeL2Distance_NonQuantized(pX, pY, length);
         
@@ -307,8 +306,8 @@ float DistanceUtils::ComputeL2Distance_NonQuantized(const std::uint8_t* pX, cons
 
 float DistanceUtils::ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->L2Distance(pX, pY);
     }
     return DistanceUtils::ComputeL2Distance_NonQuantized_SSE(pX, pY, length);
 
@@ -345,8 +344,8 @@ float DistanceUtils::ComputeL2Distance_NonQuantized_SSE(const std::uint8_t* pX, 
 
 float DistanceUtils::ComputeL2Distance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->L2Distance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->L2Distance(pX, pY);
     }
     return DistanceUtils::ComputeL2Distance_NonQuantized_AVX(pX, pY, length);
 
@@ -600,8 +599,8 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::int8_t* pX, const std:
 }
 
 float DistanceUtils::ComputeCosineDistance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->CosineDistance(pX, pY);
     }
     return DistanceUtils::ComputeCosineDistance_NonQuantized(pX, pY, length);
 }
@@ -624,8 +623,8 @@ float DistanceUtils::ComputeCosineDistance_NonQuantized(const std::uint8_t* pX, 
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->CosineDistance(pX, pY);
     }
     return DistanceUtils::ComputeCosineDistance_NonQuantized_SSE(pX, pY, length);
 }
@@ -659,8 +658,8 @@ float DistanceUtils::ComputeCosineDistance_NonQuantized_SSE(const std::uint8_t* 
 }
 
 float DistanceUtils::ComputeCosineDistance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {
-    if (DistanceUtils::PQQuantizer != nullptr) {
-        return DistanceUtils::PQQuantizer->CosineDistance(pX, pY);
+    if (DistanceUtils::Quantizer != nullptr) {
+        return DistanceUtils::Quantizer->CosineDistance(pX, pY);
     }
     return DistanceUtils::ComputeCosineDistance_NonQuantized_AVX(pX, pY, length);
 }

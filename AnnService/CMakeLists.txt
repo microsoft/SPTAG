@@ -13,12 +13,14 @@ list(REMOVE_ITEM HDR_FILES
     ${AnnService}/inc/Core/Common/InstructionUtils.h
     ${AnnService}/inc/Core/Common/CommonUtils.h
     ${AnnService}/inc/Core/Common/PQQuantizer.h
+    ${AnnService}/inc/Core/Common/Quantizer.h
     )
 
 list(REMOVE_ITEM SRC_FILES
     ${AnnService}/src/Core/Common/DistanceUtils.cpp
     ${AnnService}/src/Core/Common/InstructionUtils.cpp
     ${AnnService}/src/Core/Common/PQQuantizer.cpp
+    ${AnnService}/src/Core/Common/Quantizer.cpp
     )
 
 add_library (DistanceUtils STATIC 
@@ -26,9 +28,11 @@ add_library (DistanceUtils STATIC
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
     inc/Core/Common/PQQuantizer.h
+    inc/Core/Common/Quantizer.h
     src/Core/Common/DistanceUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     src/Core/Common/PQQuantizer.cpp
+    src/Core/Common/Quantizer.cpp
     )
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")

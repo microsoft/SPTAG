@@ -9,7 +9,6 @@ namespace SPTAG
 	namespace COMMON
 	{
 
-//#define DIST_IDX(i,j,k) (m_BlockSize * (i) + m_NumSubvectors*(j) + k)
 		PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks)
 		{
 			m_NumSubvectors = NumSubvectors;
@@ -144,7 +143,7 @@ namespace SPTAG
 				}
 			}
 
-			DistanceUtils::PQQuantizer = std::make_shared<PQQuantizer>(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks);
+			DistanceUtils::Quantizer = std::static_pointer_cast<Quantizer>(std::make_shared<PQQuantizer>(m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector, m_codebooks));
 		}
 		DimensionType PQQuantizer::GetNumSubvectors()
 		{

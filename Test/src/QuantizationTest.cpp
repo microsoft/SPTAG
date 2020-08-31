@@ -212,7 +212,7 @@ void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim
     baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
     std::cout << "Quantizer saved" << std::endl;
     SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
-    auto loadedQuantizer = SPTAG::COMMON::DistanceUtils::PQQuantizer;
+    auto loadedQuantizer = SPTAG::COMMON::DistanceUtils::Quantizer;
     BOOST_ASSERT(loadedQuantizer != nullptr);
 
     float* vecs = new float[numVecs * vectorDim];
@@ -245,7 +245,7 @@ void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim
     delete[] vecs;
     baseQuantizer = nullptr;
     loadedQuantizer = nullptr;
-    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+    SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
 }
 
 BOOST_AUTO_TEST_SUITE(QuantizationTest)
@@ -283,12 +283,12 @@ BOOST_AUTO_TEST_CASE(KDTTest)
     std::cout << "Loading quantizer" << std::endl;
     SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
     std::cout << "Quantizer loaded" << std::endl;
-    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr);
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
     //SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
     
     Test<std::uint8_t>(SPTAG::IndexAlgoType::KDT, "L2", n, m);
 
-    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+    SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
 }
 
 BOOST_AUTO_TEST_CASE(BKTTest)
@@ -318,11 +318,11 @@ BOOST_AUTO_TEST_CASE(BKTTest)
     std::cout << "Loading quantizer" << std::endl;
     SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
     std::cout << "Quantizer loaded" << std::endl;
-    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::PQQuantizer != nullptr);
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
     Test<std::uint8_t>(SPTAG::IndexAlgoType::BKT, "L2", n, m);
 
-    SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+    SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
 
 }
 

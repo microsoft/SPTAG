@@ -9,13 +9,12 @@
 
 #include "CommonUtils.h"
 #include "InstructionUtils.h"
+#include "Quantizer.h"
 
 namespace SPTAG
 {
 	namespace COMMON
 	{
-		class PQQuantizer;
-
 
 		template<typename T>
 		float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
@@ -23,7 +22,7 @@ namespace SPTAG
         class DistanceUtils
         {
         public:
-            static std::shared_ptr<PQQuantizer> PQQuantizer;
+            static std::shared_ptr<Quantizer> Quantizer;
 
             static float ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);

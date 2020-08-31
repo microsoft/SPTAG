@@ -295,7 +295,7 @@ namespace SPTAG
             m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
             m_deletedID.Initialize(p_vectorNum);
 
-            if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::PQQuantizer == nullptr)
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr)
             {
                 int base = COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
@@ -482,7 +482,7 @@ namespace SPTAG
                     m_deletedID.SetR(begin);
                     return ErrorCode::MemoryOverFlow;
                 }
-                if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::PQQuantizer == nullptr)
+                if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr)
                 {
                     int base = COMMON::Utils::GetBase<T>();
                     for (SizeType i = begin; i < end; i++) {
@@ -546,7 +546,7 @@ namespace SPTAG
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::PQQuantizer == nullptr) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
             return ErrorCode::Success;
         }
