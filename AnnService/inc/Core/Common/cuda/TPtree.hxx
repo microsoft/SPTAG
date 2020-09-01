@@ -71,7 +71,7 @@ __global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, 
  * Set of functions to compute mean to pick dividing hyperplanes
  ************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* node_ids, T* split_keys, int* node_sizes, int N);
+__global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level);
 
 //template<typename KEY_T>
 //__global__ void compute_mean(KEY_T* split_keys, int* node_sizes, int num_nodes);
