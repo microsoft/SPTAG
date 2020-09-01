@@ -15,12 +15,6 @@
 #include <inc/Core/Common.h>
 
 
-#if defined(WIN32) || defined(_WIN32) 
-#define PATH_SEPARATOR (std::string)"\\" 
-#else 
-#define PATH_SEPARATOR (std::string)"/" 
-#endif 
-
 
 
 template <typename T>

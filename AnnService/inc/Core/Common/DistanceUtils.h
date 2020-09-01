@@ -13,46 +13,78 @@
 
 namespace SPTAG
 {
-	namespace COMMON
-	{
+    namespace COMMON
+    {
 
-		template<typename T>
-		float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
+        template<typename T>
+        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
 
         class DistanceUtils
         {
         public:
             static std::shared_ptr<Quantizer> Quantizer;
 
-            static float ComputeL2Distance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
+            template <typename T>
+            static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)
+            {
+                const T* pEnd4 = pX + ((length >> 2) << 2);
+                const T* pEnd1 = pX + length;
+
+                float diff = 0;
+
+                while (pX < pEnd4) {
+                    float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+                    c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+                }
+                while (pX < pEnd1) {
+                    float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
+                }
+                return diff;
+            }
+            
             static float ComputeL2Distance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
-
-            static float ComputeL2Distance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+          
             static float ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-
-            static float ComputeL2Distance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
+         
             static float ComputeL2Distance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
 
-            static float ComputeL2Distance(const float* pX, const float* pY, DimensionType length);
             static float ComputeL2Distance_SSE(const float* pX, const float* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const float* pX, const float* pY, DimensionType length);
 
-            static float ComputeCosineDistance(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
+            template <typename T>
+            static float ComputeCosineDistance(const T* pX, const T* pY, DimensionType length)
+            {
+                const T* pEnd4 = pX + ((length >> 2) << 2);
+                const T* pEnd1 = pX + length;
+
+                float diff = 0;
+
+                while (pX < pEnd4)
+                {
+                    float c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+                    c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
+                }
+                while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
+                int base = Utils::GetBase<T>();
+                return base * base - diff;
+            }
+
             static float ComputeCosineDistance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
 
-            static float ComputeCosineDistance(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
 
-            static float ComputeCosineDistance(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
 
-            static float ComputeCosineDistance(const float* pX, const float* pY, DimensionType length);
             static float ComputeCosineDistance_SSE(const float* pX, const float* pY, DimensionType length);
             static float ComputeCosineDistance_AVX(const float* pX, const float* pY, DimensionType length);
 
@@ -64,31 +96,26 @@ namespace SPTAG
                 return func(p1, p2, length);
             }
 
-			static float ConvertCosineSimilarityToDistance(float cs)
-			{
-				// Cosine similarity is in [-1, 1], the higher the value, the closer are the two vectors. 
-				// However, the tree is built and searched based on "distance" between two vectors, that's >=0. The smaller the value, the closer are the two vectors.
-				// So we do a linear conversion from a cosine similarity to a distance value.
-				return 1 - cs; //[1, 3]
-			}
+            static float ConvertCosineSimilarityToDistance(float cs)
+            {
+                // Cosine similarity is in [-1, 1], the higher the value, the closer are the two vectors. 
+                // However, the tree is built and searched based on "distance" between two vectors, that's >=0. The smaller the value, the closer are the two vectors.
+                // So we do a linear conversion from a cosine similarity to a distance value.
+                return 1 - cs; //[1, 3]
+            }
 
             static inline float ConvertDistanceBackToCosineSimilarity(float d)
             {
                 return 1 - d;
             }
 
-        private:
-            static float ComputeCosineDistance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-            static float ComputeCosineDistance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-            static float ComputeCosineDistance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-
-            static float ComputeL2Distance_NonQuantized(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-            static float ComputeL2Distance_NonQuantized_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-            static float ComputeL2Distance_NonQuantized_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
         };
 
+        template <typename T>
+        using DistanceCalcReturn = float(*)(const T*, const T*, DimensionType);
+        
         template<typename T>
-        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType)
+        inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
         {
             bool isSize4 = (sizeof(T) == 4);
             switch (p_method)
@@ -118,12 +145,57 @@ namespace SPTAG
                 else {
                     return &(DistanceUtils::ComputeL2Distance);
                 }
+
+            default:
+                break;
+            }
+            return nullptr;
+        }
+        
+        
+        template<>
+        inline DistanceCalcReturn<std::uint8_t> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
+        {
+            switch (p_method)
+            {
+            case SPTAG::DistCalcMethod::Cosine:
+                if (DistanceUtils::Quantizer != nullptr) {
+                    return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });
+                } 
+                else if (InstructionSet::AVX2())
+                {
+                    return &(DistanceUtils::ComputeCosineDistance_AVX);
+                }
+                else if (InstructionSet::SSE2())
+                {
+                    return &(DistanceUtils::ComputeCosineDistance_SSE);
+                }
+                else {
+                    return &(DistanceUtils::ComputeCosineDistance<std::uint8_t>);
+                }
+
+            case SPTAG::DistCalcMethod::L2:
+                if (DistanceUtils::Quantizer != nullptr) {
+                    return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->L2Distance(pX, pY); });
+                }
+                else if (InstructionSet::AVX2())
+                {
+                    return &(DistanceUtils::ComputeL2Distance_AVX);
+                }
+                else if (InstructionSet::SSE2())
+                {
+                    return &(DistanceUtils::ComputeL2Distance_SSE);
+                }
+                else {
+                    return &(DistanceUtils::ComputeL2Distance<std::uint8_t>);
+                }
   
             default:
                 break;
             }
             return nullptr;
         }
+        
     }
 }
 

@@ -47,9 +47,7 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    if (options->m_QuantizerType == SPTAG::QuantizerType::PQQuantizer) {
-        SPTAG::COMMON::PQQuantizer::LoadQuantizer(options->m_QuantizerFile);
-    }
+    SPTAG::COMMON::Quantizer::LoadQuantizer(options->m_QuantizerFile, options->m_QuantizerType);
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 
