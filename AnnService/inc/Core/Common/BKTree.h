@@ -438,7 +438,7 @@ namespace SPTAG
 
             ErrorCode SaveTrees(std::string sTreeFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName);
+                LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveTrees(ptr);
