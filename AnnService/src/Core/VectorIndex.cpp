@@ -475,7 +475,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     if (iniReader.DoesSectionExist("Quantizer")) {
         QuantizerType type = QuantizerType::Undefined;
         SPTAG::Helper::Convert::ConvertStringTo<QuantizerType>(iniReader.GetParameter("Quantizer", "QuantizerType", std::string()).c_str(), type);
-        SPTAG::COMMON::Quantizer::LoadQuantizer(folderPath + p_vectorIndex->m_sQuantizerFile, type);
+        SPTAG::COMMON::Quantizer::LoadQuantizer(folderPath + iniReader.GetParameter("Quantizer", "QuantizerFilePath", std::string()), type);
     }
     if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
