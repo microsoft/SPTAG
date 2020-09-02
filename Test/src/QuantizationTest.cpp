@@ -190,22 +190,24 @@ void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim
     int Ks = 256;
 
     std::string CODEBOOK_FILE = "test-quantizer.bin";
-    float*** codebooks = new float**[M];
+    float* codebooks = new float[M * Ks * (vectorDim / M)];
     for (int i = 0; i < M; i++) {
-        codebooks[i] = new float*[Ks];
+        float* base = codebooks + i * Ks * (vectorDim / M);
         for (int j = 0; j < Ks; j++) {
-            codebooks[i][j] = new float[(vectorDim / M)];
             for (int k = 0; k < (vectorDim / M); k++) {
-                codebooks[i][j][k] = dist(gen);
-                
+                *(base + j * (vectorDim / M) + k) = dist(gen);
             }
         }
     }
+
     auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (vectorDim/M), codebooks);
-    std::cout << "Quantizer created" << std::endl;
-    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
-    std::cout << "Quantizer saved" << std::endl;
-    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
+    auto ptr = SPTAG::f_createIO();
+    BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
+    baseQuantizer->SaveQuantizer(ptr);
+    ptr->ShutDown();
+
+    BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
     auto loadedQuantizer = SPTAG::COMMON::DistanceUtils::Quantizer;
     BOOST_ASSERT(loadedQuantizer != nullptr);
 
@@ -214,71 +216,70 @@ void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim
         vecs[i] = dist(gen);
     }
 
+    std::vector<std::uint8_t> baseQ(loadedQuantizer->GetNumSubvectors()), loadQ(loadedQuantizer->GetNumSubvectors()),
+        baseQ2(loadedQuantizer->GetNumSubvectors()), loadQ2(loadedQuantizer->GetNumSubvectors());
     for (int i = 0; i < numVecs; i++) {
         auto vec = &vecs[i * vectorDim];
 
-        auto baseQ = baseQuantizer->QuantizeVector(vec);
-        auto loadQ = loadedQuantizer->QuantizeVector(vec);
+        baseQuantizer->QuantizeVector(vec, baseQ.data());
+        loadedQuantizer->QuantizeVector(vec, loadQ.data());
         for (int j = 0; j < M; j++) {
             BOOST_ASSERT(baseQ[j] == loadQ[j]);
         }
         for (int j = i; j < numVecs; j++) {
             auto vec2 = &vecs[j * vectorDim];
-            auto baseQ2 = baseQuantizer->QuantizeVector(vec2);
-            auto loadQ2 = loadedQuantizer->QuantizeVector(vec2);
-            std::cout << "(" << i << "," << j << ")" << std::endl;
-            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->CosineDistance(baseQ, baseQ2), loadedQuantizer->CosineDistance(baseQ, baseQ2), 1e-4);
-            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->L2Distance(baseQ, baseQ2), loadedQuantizer->L2Distance(baseQ, baseQ2), 1e-4);
-            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::Cosine), baseQuantizer->CosineDistance(baseQ, baseQ2), 5e-1);
-            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::L2), baseQuantizer->L2Distance(baseQ, baseQ2), 5e-1);
-
-            delete[] baseQ2, delete loadQ2;
+            
+            baseQuantizer->QuantizeVector(vec2, baseQ2.data());
+            loadedQuantizer->QuantizeVector(vec2, loadQ2.data());
+            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->CosineDistance(baseQ.data(), baseQ2.data()), loadedQuantizer->CosineDistance(baseQ.data(), baseQ2.data()), 1e-4);
+            BOOST_CHECK_CLOSE_FRACTION(baseQuantizer->L2Distance(baseQ.data(), baseQ2.data()), loadedQuantizer->L2Distance(baseQ.data(), baseQ2.data()), 1e-4);
+            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::Cosine), baseQuantizer->CosineDistance(baseQ.data(), baseQ2.data()), 5e-1);
+            BOOST_CHECK_CLOSE_FRACTION(SPTAG::COMMON::DistanceUtils::ComputeDistance<float>(vec, vec2, vectorDim, SPTAG::DistCalcMethod::L2), baseQuantizer->L2Distance(baseQ.data(), baseQ2.data()), 5e-1);
         }
-        delete[] baseQ, delete[] loadQ;
     }
     delete[] vecs;
-    baseQuantizer = nullptr;
-    loadedQuantizer = nullptr;
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
+}
+
+void GenerateQuantizer(int m) {
+    auto M = 10;
+    int Ks = 256;
+
+    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
+    float* codebooks = new float[M * Ks * (m / M)];
+    for (int i = 0; i < M; i++) {
+        float* base = codebooks + i * Ks * (m / M);
+        for (int j = 0; j < Ks; j++) {
+            for (int k = 0; k < (m / M); k++) {
+                *(base + j * (m / M) + k) = (float)j;
+            }
+        }
+    }
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m / M), codebooks);
+    auto ptr = SPTAG::f_createIO();
+    BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
+    baseQuantizer->SaveQuantizer(ptr);
+    ptr->ShutDown();
+
+    BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 }
 
 BOOST_AUTO_TEST_SUITE(QuantizationTest)
 
 BOOST_AUTO_TEST_CASE(PQDistanceTest)
 {
-    TestPQDistance(0.1, 1.0, 5, 10, 5);
+    TestPQDistance(0.1f, 1.0f, 5, 10, 5);
 }
 
 
 BOOST_AUTO_TEST_CASE(KDTTest)
 {
-    auto n = 200;
-    auto m = 20;
-    auto M = 10;
-    int Ks = 256;
+    int n = 200;
+    int m = 20;
 
-    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
-    float*** codebooks = new float** [M];
-    for (int i = 0; i < M; i++) {
-        codebooks[i] = new float* [Ks];
-        for (int j = 0; j < Ks; j++) {
-            codebooks[i][j] = new float[(m / M)];
-            for (int k = 0; k < (m / M); k++) {
-                codebooks[i][j][k] = (float) j;
-
-            }
-        }
-    }
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m/M), codebooks);
-    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
-    baseQuantizer = nullptr;
-
-
-    std::cout << "Loading quantizer" << std::endl;
-    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
-    std::cout << "Quantizer loaded" << std::endl;
-    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
-    //SPTAG::COMMON::DistanceUtils::PQQuantizer = nullptr;
+    GenerateQuantizer(m);
     
     Test<std::uint8_t>(SPTAG::IndexAlgoType::KDT, "L2", n, m);
 
@@ -287,37 +288,14 @@ BOOST_AUTO_TEST_CASE(KDTTest)
 
 BOOST_AUTO_TEST_CASE(BKTTest)
 {
-    auto n = 200;
-    auto m = 20;
-    auto M = 10;
-    int Ks = 256;
+    int n = 200;
+    int m = 20;
 
-    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
-    float*** codebooks = new float** [M];
-    for (int i = 0; i < M; i++) {
-        codebooks[i] = new float* [Ks];
-        for (int j = 0; j < Ks; j++) {
-            codebooks[i][j] = new float[(m / M)];
-            for (int k = 0; k < (m / M); k++) {
-                codebooks[i][j][k] = (float)j;
-
-            }
-        }
-    }
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m / M), codebooks);
-    baseQuantizer->SaveQuantizer(CODEBOOK_FILE);
-    baseQuantizer = nullptr;
-
-
-    std::cout << "Loading quantizer" << std::endl;
-    SPTAG::COMMON::PQQuantizer::LoadQuantizer(CODEBOOK_FILE);
-    std::cout << "Quantizer loaded" << std::endl;
-    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
+    GenerateQuantizer(m);
 
     Test<std::uint8_t>(SPTAG::IndexAlgoType::BKT, "L2", n, m);
 
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
-
 }
 
 BOOST_AUTO_TEST_SUITE_END()

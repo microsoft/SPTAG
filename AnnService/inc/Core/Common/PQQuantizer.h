@@ -17,25 +17,29 @@ namespace SPTAG
         class PQQuantizer : public Quantizer
         {
         public:
-            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float*** Codebooks);	
+            PQQuantizer();	
+
+            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float* Codebooks);
 
             ~PQQuantizer();
 
-            float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
+            virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
 
-            float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
+            virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
 
-            const std::uint8_t* QuantizeVector(const float* vec);
+            virtual void QuantizeVector(const float* vec, std::uint8_t* vecout);
 
-            void SaveQuantizer(std::string path);
+            virtual std::uint64_t BufferSize() const;
 
-            static void LoadQuantizer(std::string path);
+            virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const;
 
-            DimensionType GetNumSubvectors();
+            virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
 
-            SizeType GetKsPerSubvector();
+            virtual DimensionType GetNumSubvectors() const;
 
-            DimensionType GetDimPerSubvector();
+            SizeType GetKsPerSubvector() const;
+
+            DimensionType GetDimPerSubvector() const;
 
             QuantizerType GetQuantizerType() {
                 return QuantizerType::PQQuantizer;
@@ -49,9 +53,9 @@ namespace SPTAG
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
-            const float*** m_codebooks;
-            float* m_CosineDistanceTables;
-            float* m_L2DistanceTables;
+            std::unique_ptr<float[]> m_codebooks;
+            std::unique_ptr<float[]> m_CosineDistanceTables;
+            std::unique_ptr<float[]> m_L2DistanceTables;
         };
     }
 }

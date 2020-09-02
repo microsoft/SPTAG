@@ -32,11 +32,11 @@ public:
 
     SPTAG::IndexAlgoType m_indexAlgoType;
 
-    std::string m_builderConfigFile;
+    std::string m_builderConfigFile = "";
 
-    SPTAG::QuantizerType m_QuantizerType;
+    SPTAG::QuantizerType m_QuantizerType = SPTAG::QuantizerType::None;
 
-    std::string m_QuantizerFile;
+    std::string m_QuantizerFile = "";
 };
 
 int main(int argc, char* argv[])
@@ -47,7 +47,17 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    SPTAG::COMMON::Quantizer::LoadQuantizer(options->m_QuantizerFile, options->m_QuantizerType);
+    if (!options->m_QuantizerFile.empty()) {
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize(options->m_QuantizerFile.c_str(), std::ios::binary | std::ios::in)) {
+            LOG(Helper::LogLevel::LL_Error, "Cannot open quantizerFile:%s!\n", options->m_QuantizerFile.c_str());
+            exit(1);
+        }
+        if (SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, options->m_QuantizerType) != ErrorCode::Success) {
+            LOG(Helper::LogLevel::LL_Error, "Load quantizerFile error!\n");
+            exit(1);
+        }
+    }
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 

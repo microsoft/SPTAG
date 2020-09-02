@@ -145,7 +145,11 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     std::vector<std::set<SizeType>> truth(options->m_batch);
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
     std::vector<clock_t> latencies(options->m_batch + 1, 0);
-    int baseSquare = (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) ? 1 : SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
+    
+    std::vector<std::uint8_t> quantizedVectors;
+    if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) quantizedVectors.resize(SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() * options->m_batch);
+    int baseSquare = (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) ? 1 : SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
+    
     LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0);
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
@@ -153,12 +157,11 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
         for (SizeType i = 0; i < numQuerys; i++) {
             void* vec = queryVectors->GetVector(startQuery + i);
-            if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
-                float* fltvec = (float*) vec;
-                for (int idx = 0; idx < options->m_dimension; idx++) {
-                    fltvec[idx] = fltvec[idx] / options->m_deNormalizeBy;
-                }
-                vec = (void*)SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeVector((const float*) vec);
+            if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr && options->m_inputValueType == VectorValueType::Float) {
+                float* fltvec = (float*)vec;
+                for (int idx = 0; idx < options->m_dimension; idx++) fltvec[idx] /= options->m_deNormalizeBy;
+                vec = quantizedVectors.data() + SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() * i;
+                SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeVector(fltvec, (std::uint8_t*)vec);
             }
             results[i].SetTarget(vec);
         }

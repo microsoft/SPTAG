@@ -6,7 +6,7 @@ if(NOT WIN32)
   message (STATUS "BOOST_TEST_DYN_LINK")
 endif()
 
-find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex filesystem unit_test_framework)
+find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex unit_test_framework)
 if (Boost_FOUND)
     include_directories (${Boost_INCLUDE_DIR})
     link_directories (${Boost_LIBRARY_DIR})
@@ -20,7 +20,6 @@ endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Test)
 
-
 file(GLOB TEST_HDR_FILES ${PROJECT_SOURCE_DIR}/Test/inc/Test.h)
 file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
 add_executable (test ${TEST_SRC_FILES} ${TEST_HDR_FILES})
@@ -30,5 +29,3 @@ install(TARGETS test
   RUNTIME DESTINATION bin  
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)
-
-

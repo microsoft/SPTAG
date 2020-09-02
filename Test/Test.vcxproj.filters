@@ -50,19 +50,5 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
-    <None Include="res\test-quantizer.bin">
-      <Filter>Resource Files</Filter>
-    </None>
-    <None Include="res\testvectors-quantized.bin">
-      <Filter>Resource Files</Filter>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="res\testvectors-quantized.txt">
-      <Filter>Resource Files</Filter>
-    </Text>
-    <Text Include="res\vector-distances-quantized.txt">
-      <Filter>Resource Files</Filter>
-    </Text>
   </ItemGroup>
 </Project>

@@ -17,13 +17,19 @@ namespace SPTAG
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) = 0;
 
-            virtual const std::uint8_t* QuantizeVector(const float* vec) = 0;
+            virtual void QuantizeVector(const float* vec, std::uint8_t* vecout) = 0;
 
-            virtual void SaveQuantizer(std::string path) = 0;
+            virtual std::uint64_t BufferSize() const = 0;
 
-            static void LoadQuantizer(std::string path, QuantizerType quantizerType);
+            virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const = 0;
+            
+            virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) = 0;
+
+            static ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType);
 
             virtual QuantizerType GetQuantizerType() = 0;
+
+            virtual DimensionType GetNumSubvectors() const = 0;
         };
     }
 }

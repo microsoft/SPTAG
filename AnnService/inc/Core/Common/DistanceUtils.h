@@ -15,9 +15,11 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename T>
+        using DistanceCalcReturn = float(*)(const T*, const T*, DimensionType);
 
         template<typename T>
-        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
+        inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
 
         class DistanceUtils
         {
@@ -43,13 +45,13 @@ namespace SPTAG
                 }
                 return diff;
             }
-            
+
             static float ComputeL2Distance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int8_t* pX, const std::int8_t* pY, DimensionType length);
-          
+
             static float ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
-         
+
             static float ComputeL2Distance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static float ComputeL2Distance_AVX(const std::int16_t* pX, const std::int16_t* pY, DimensionType length);
 
@@ -96,7 +98,7 @@ namespace SPTAG
                 return func(p1, p2, length);
             }
 
-            static float ConvertCosineSimilarityToDistance(float cs)
+            static inline float ConvertCosineSimilarityToDistance(float cs)
             {
                 // Cosine similarity is in [-1, 1], the higher the value, the closer are the two vectors. 
                 // However, the tree is built and searched based on "distance" between two vectors, that's >=0. The smaller the value, the closer are the two vectors.
@@ -108,11 +110,7 @@ namespace SPTAG
             {
                 return 1 - d;
             }
-
         };
-
-        template <typename T>
-        using DistanceCalcReturn = float(*)(const T*, const T*, DimensionType);
         
         template<typename T>
         inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
@@ -195,7 +193,6 @@ namespace SPTAG
             }
             return nullptr;
         }
-        
     }
 }
 
