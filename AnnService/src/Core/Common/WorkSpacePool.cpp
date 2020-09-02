@@ -7,9 +7,10 @@ using namespace SPTAG;
 using namespace SPTAG::COMMON;
 
 
-WorkSpacePool::WorkSpacePool(int p_maxCheck, SizeType p_vectorCount)
+WorkSpacePool::WorkSpacePool(int p_maxCheck, SizeType p_vectorCount, int p_hashExp)
     : m_maxCheck(p_maxCheck),
-      m_vectorCount(p_vectorCount)
+      m_vectorCount(p_vectorCount),
+      m_hashExp(p_hashExp)
 {
 }
 
@@ -37,7 +38,7 @@ WorkSpacePool::Rent()
         else
         {
             workSpace.reset(new WorkSpace);
-            workSpace->Initialize(m_maxCheck, m_vectorCount);
+            workSpace->Initialize(m_maxCheck, m_vectorCount, m_hashExp);
         }
     }
     return workSpace;
@@ -60,7 +61,7 @@ WorkSpacePool::Init(int size)
     for (int i = 0; i < size; i++) 
     {
         std::shared_ptr<WorkSpace> workSpace(new WorkSpace);
-        workSpace->Initialize(m_maxCheck, m_vectorCount);
+        workSpace->Initialize(m_maxCheck, m_vectorCount, m_hashExp);
         m_workSpacePool.push_back(std::move(workSpace));
     }
 }

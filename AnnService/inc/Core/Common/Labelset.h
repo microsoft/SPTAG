@@ -36,46 +36,46 @@ namespace SPTAG
                 return *m_data[key] == 1;
             }
 
-            inline void Insert(const SizeType& key)
+            inline bool Insert(const SizeType& key)
             {
-                if (*m_data[key] != 1)
-                {
-                    *m_data[key] = 1;
-                    m_inserted++;
-                }
+                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
+                if (oldvalue == 1) return false;
+                m_inserted++;
+                return true;
             }
 
-            inline bool Save(std::ostream& output)
+            inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
             {
                 SizeType deleted = m_inserted.load();
-                output.write((char*)&deleted, sizeof(SizeType));
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
                 return m_data.Save(output);
             }
 
-            inline bool Save(std::string filename)
+            inline ErrorCode Save(std::string filename)
             {
-                std::cout << "Save " << m_data.Name() << " To " << filename << std::endl;
-                std::ofstream output(filename, std::ios::binary);
-                if (!output.is_open()) return false;
-                Save(output);
-                output.close();
-                return true;
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return Save(ptr);
             }
 
-            inline bool Load(std::string filename)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input)
             {
-                std::cout << "Load " << m_data.Name() << " From " << filename << std::endl;
-                std::ifstream input(filename, std::ios::binary);
-                if (!input.is_open()) return false;          
                 SizeType deleted;
-                input.read((char*)&deleted, sizeof(SizeType));
+                IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
                 m_inserted = deleted;
-                m_data.Load(input);
-                input.close();
-                return true;
+                return m_data.Load(input);
             }
 
-            inline bool Load(char* pmemoryFile) 
+            inline ErrorCode Load(std::string filename)
+            {
+                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+                return Load(ptr);
+            }
+
+            inline ErrorCode Load(char* pmemoryFile) 
             {
                 m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType));

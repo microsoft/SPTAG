@@ -22,7 +22,15 @@ DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodSca
 DefineKDTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
 DefineKDTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineKDTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
+DefineKDTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
 DefineKDTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
+
+DefineKDTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU construct KNN or RNG
+DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
+DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
+DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
+DefineKDTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
+DefineKDTParameter(m_pGraph.m_iGPUNum, int, 0, "GPUNum")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
@@ -33,5 +41,6 @@ DefineKDTParameter(m_iMaxCheck, int, 8192L, "MaxCheck")
 DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L, "ThresholdOfNumberOfContinuousNoBetterPropagation")
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineKDTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
+DefineKDTParameter(m_iHashTableExp, int, 4L, "HashTableExponent")
 
 #endif
