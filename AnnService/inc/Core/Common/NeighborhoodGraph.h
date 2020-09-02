@@ -47,7 +47,7 @@ namespace SPTAG
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
-                                 m_iGPUBatches(1),
+                                 m_iGPUBatches(1)
             {}
 
             ~NeighborhoodGraph() {}
