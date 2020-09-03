@@ -31,10 +31,14 @@ if (CUDA_FOUND)
         ${AnnService}/inc/Core/Common/DistanceUtils.h
         ${AnnService}/inc/Core/Common/InstructionUtils.h
         ${AnnService}/inc/Core/Common/CommonUtils.h
+        ${AnnService}/inc/Core/Common/PQQuantizer.h
+        ${AnnService}/inc/Core/Common/Quantizer.h
     )
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp
         ${AnnService}/src/Core/Common/InstructionUtils.cpp
+        ${AnnService}/src/Core/Common/PQQuantizer.cpp
+        ${AnnService}/src/Core/Common/Quantizer.cpp
     )
 
     set_source_files_properties(${GPU_SRC_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)

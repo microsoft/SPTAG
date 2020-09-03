@@ -242,7 +242,7 @@ void TestPQDistance(float minVecVal, float maxVecVal, int numVecs, int vectorDim
 }
 
 void GenerateQuantizer(int m) {
-    auto M = 10;
+    int M = 10;
     int Ks = 256;
 
     std::string CODEBOOK_FILE = "test-quantizer-tree.bin";

@@ -277,13 +277,7 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                float baseSquare;
-                if (GetEnumValueType<T>() == VectorValueType::UInt8 && SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) {
-                    baseSquare = 1/ (100.0f * (batchEnd - first));
-                }
-                else {
-                    baseSquare = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (batchEnd - first));
-                }
+                float baseSquare = (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr? 1.0 : COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>()) / (100.0f * (batchEnd - first));
                 currDist = KmeansAssign(data, indices, first, batchEnd, args, true, baseSquare);
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
