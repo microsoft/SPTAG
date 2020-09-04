@@ -798,7 +798,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
 
 // If debug/verbose mode, output GPU memory details
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU: %s Total available GPU memory:%zu\n",  prop.name, totalGPUMem);
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU number:%d, model: %s Total available GPU memory:%zu\n",  gpuNum, prop.name, totalGPUMem);
 
   // Print out memory requirements on the GPU
   LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
@@ -920,12 +920,13 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches, int gpuNum) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
 
-  cudaSetDevice(gpuNum);
+  int gpuNum;
+  cudaGetDevice(&gpuNum);
 
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {

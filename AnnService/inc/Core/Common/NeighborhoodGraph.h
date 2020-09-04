@@ -47,8 +47,7 @@ namespace SPTAG
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
-                                 m_iGPUBatches(1),
-                                 m_iGPUNum(0)
+                                 m_iGPUBatches(1)
             {}
 
             ~NeighborhoodGraph() {}
@@ -106,7 +105,7 @@ namespace SPTAG
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
               // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches, m_iGPUNum);
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -479,12 +478,21 @@ namespace SPTAG
             
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                return m_pNeighborhoodGraph.Save(sGraphFilename);
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sGraphFilename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return SaveGraph(ptr);
             }
 
             ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
             {
-                return m_pNeighborhoodGraph.Save(output);
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
+                IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);
+
+                for (int i = 0; i < m_iGraphSize; i++)
+                    IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
+                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                return ErrorCode::Success;
             }
 
             inline ErrorCode AddBatch(SizeType num)
@@ -524,7 +532,7 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches, m_iGPUNum;
+            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches;
         };
     }
 }
