@@ -478,12 +478,21 @@ namespace SPTAG
             
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                return m_pNeighborhoodGraph.Save(sGraphFilename);
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sGraphFilename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return SaveGraph(ptr);
             }
 
             ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
             {
-                return m_pNeighborhoodGraph.Save(output);
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
+                IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);
+
+                for (int i = 0; i < m_iGraphSize; i++)
+                    IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
+                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                return ErrorCode::Success;
             }
 
             inline ErrorCode AddBatch(SizeType num)
