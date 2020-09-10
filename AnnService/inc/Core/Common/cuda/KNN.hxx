@@ -46,6 +46,7 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
  * Perform brute-force KNN on each leaf node, where only list of point ids is stored as leafs.
  * Returns for each point: the K nearest neighbors within the leaf node containing it.
  *****************************************************************************************/
+#if 0
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 __global__ void findKNN_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric) {
 
@@ -132,6 +133,7 @@ __global__ void findKNN_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
     }
   }
 }
+#endif
 
 /*****************************************************************************************
  * For a given point, @src_id, looks at all neighbors' neighbors to refine KNN if any nearer
@@ -263,7 +265,7 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, int min_id, int max_id) {
+__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, int num_leaves, LeafNode* leafs, int* leaf_points, int KVAL, int* results, int metric, int min_id, int max_id) {
 
   extern __shared__ char sharememory[];
 
@@ -280,18 +282,18 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
   DistPair<SUMTYPE> target;
   DistPair<SUMTYPE> candidate;
 
-  int blocks_per_leaf = gridDim.x / tptree->num_leaves;
+  int blocks_per_leaf = gridDim.x / num_leaves;
   int threads_per_leaf = blocks_per_leaf*blockDim.x;
   int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
   int leafIdx= blockIdx.x / blocks_per_leaf;
-  long long int leaf_offset = tptree->leafs[leafIdx].offset;
+  long long int leaf_offset = leafs[leafIdx].offset;
 
   bool good;
 
   // Each point in the leaf is handled by a separate thread
-  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
-    if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
-      query = data[tptree->leaf_points[leaf_offset + i]];
+  for(int i=thread_id_in_leaf; i<leafs[leafIdx].size; i+=threads_per_leaf) {
+    if(leaf_points[leaf_offset+i] >= min_id && leaf_points[leaf_offset+i] < max_id) {
+      query = data[leaf_points[leaf_offset + i]];
 
 
       // Load results from previous iterations into shared memory heap
@@ -313,10 +315,10 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
       max_dist = threadList[KVAL-1].dist;
 
       // Compare source query with all points in the leaf
-      for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
+      for(long long int j=0; j<leafs[leafIdx].size; ++j) {
         if(j!=i) {
           good = true;
-	  candidate.idx = tptree->leaf_points[leaf_offset+j];
+	  candidate.idx = leaf_points[leaf_offset+j];
           if(metric == 0) {
             candidate.dist = query.l2(&data[candidate.idx]);
           }
@@ -381,6 +383,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
  * inserts new vectors into the neighbor list when the "accessibility score" is 0 (i.e.,
  * it is not already accessible by any neighbors.
  *****************************************************************************************/
+#if 0
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric) {
 
@@ -510,7 +513,7 @@ __global__ void findRNG_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
 
   }
 }
-
+#endif
 /*****************************************************************************************
  * Compare distance of all neighbor's points to see if they are nearer neighbors
  * RNG properties when adding/removing vectors from the neighbor list.  Also only
@@ -677,14 +680,14 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing TPtree memory\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
-  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
+  tptree = new TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>();
   tptree->initialize(dataSize, levels);
 //  KNN_blocks= max(tptree->num_leaves, BLOCKS);
   KNN_blocks= tptree->num_leaves;
 
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
-  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
   // Initialize results to all -1 (special value that is set to distance INFTY)
   CUDA_CHECK(cudaMemset(d_results, -1, (long long int)dataSize*KVAL*sizeof(int)));
 
@@ -756,7 +759,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   tptree->destroy();
   CUDA_CHECK(cudaFree(d_points));
-  CUDA_CHECK(cudaFree(tptree));
+  delete tptree;
   CUDA_CHECK(cudaFree(d_results));
 
 }
@@ -822,14 +825,14 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing TPtree memory and initializing tree\n");
   TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
-  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
+  tptree = new TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>();
   tptree->initialize(dataSize, levels);
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
 
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
   int* d_results;
-  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
@@ -876,7 +879,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
 
      // Compute the STRICT RNG for each leaf node
-      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
+      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree->num_leaves, tptree->leafs, tptree->leaf_points, KVAL, d_results, metric, min_id, max_id);
    
       CUDA_CHECK(cudaDeviceSynchronize());
 
