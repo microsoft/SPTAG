@@ -18,12 +18,12 @@ else()
     message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
 
-include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/PythonWrapper ${PROJECT_SOURCE_DIR}/Test)
+include_directories(${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Test)
 
 file(GLOB TEST_HDR_FILES ${PROJECT_SOURCE_DIR}/Test/inc/Test.h)
 file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
 add_executable (test ${TEST_SRC_FILES} ${TEST_HDR_FILES})
-target_link_libraries(test SPTAGLib ${Boost_LIBRARIES})
+target_link_libraries(test SPTAGLibStatic ${Boost_LIBRARIES})
 
 install(TARGETS test
   RUNTIME DESTINATION bin  

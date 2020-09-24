@@ -13,6 +13,8 @@ namespace SPTAG
         class RelativeNeighborhoodGraph: public NeighborhoodGraph
         {
         public:
+            RelativeNeighborhoodGraph() { m_pNeighborhoodGraph.SetName("RNG"); }
+
             void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) {
                 DimensionType count = 0;
                 for (int j = 0; j < numResults && count < m_iNeighborhoodSize; j++) {
@@ -34,7 +36,7 @@ namespace SPTAG
 
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
             {
-                std::lock_guard<std::mutex> lock(m_dataUpdateLock);
+                std::lock_guard<std::mutex> lock(m_dataUpdateLock[node]);
 
                 SizeType* nodes = m_pNeighborhoodGraph[node];
                 SizeType tmpNode;
@@ -44,7 +46,7 @@ namespace SPTAG
                     tmpNode = nodes[k];
                     if (tmpNode < -1) break;
 
-                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist 
+                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist
                         || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         bool good = true;
@@ -67,48 +69,6 @@ namespace SPTAG
                     }
                 }
             }
-
-            float GraphAccuracyEstimation(VectorIndex* index, const SizeType samples, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
-            {
-                DimensionType* correct = new DimensionType[samples];
-
-#pragma omp parallel for schedule(dynamic)
-                for (SizeType i = 0; i < samples; i++)
-                {
-                    SizeType x = COMMON::Utils::rand(m_iGraphSize);
-                    //int x = i;
-                    COMMON::QueryResultSet<void> query(nullptr, m_iCEF);
-                    for (SizeType y = 0; y < m_iGraphSize; y++)
-                    {
-                        if ((idmap != nullptr && idmap->find(y) != idmap->end())) continue;
-                        float dist = index->ComputeDistance(index->GetSample(x), index->GetSample(y));
-                        query.AddPoint(y, dist);
-                    }
-                    query.SortResult();
-                    SizeType * exact_rng = new SizeType[m_iNeighborhoodSize];
-                    RebuildNeighbors(index, x, exact_rng, query.GetResults(), m_iCEF);
-                  
-                    correct[i] = 0;
-                    for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
-                        if (exact_rng[j] == -1) {
-                            correct[i] += m_iNeighborhoodSize - j;
-                            break;
-                        }
-                        for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
-                            if ((m_pNeighborhoodGraph)[x][k] == exact_rng[j]) {
-                                correct[i]++;
-                                break;
-                            }
-                    }
-                    delete[] exact_rng;
-                }
-                float acc = 0;
-                for (SizeType i = 0; i < samples; i++) acc += float(correct[i]);
-                acc = acc / samples / m_iNeighborhoodSize;
-                delete[] correct;
-                return acc;
-            }
-
         };
     }
 }

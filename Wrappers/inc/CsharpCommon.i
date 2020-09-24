@@ -7,9 +7,9 @@
         size_t _size;
     };
 
-	void deleteArrayOfWrapperArray(void* ptr) {
-		delete[] (WrapperArray*)ptr;
-	}
+    void deleteArrayOfWrapperArray(void* ptr) {
+        delete[] (WrapperArray*)ptr;
+    }
 %}
 
 %pragma(csharp) imclasscode=%{ 
@@ -74,7 +74,7 @@ void deleteArrayOfWrapperArray(void* ptr);
     $result._data = new WrapperArray[$1->GetResultNum()];
     $result._size = $1->GetResultNum();
     for (int i = 0; i < $1->GetResultNum(); i++)
-	    (((WrapperArray*)$result._data) + i)->_data = new BasicResult(*($1->GetResult(i)));
+        (((WrapperArray*)$result._data) + i)->_data = new BasicResult(*($1->GetResult(i)));
 }
 %typemap(csout, excode=SWIGEXCODE) std::shared_ptr<QueryResult> {
     $modulePINVOKE.WrapperArray data = $imcall;
@@ -104,8 +104,8 @@ void deleteArrayOfWrapperArray(void* ptr);
     size_t copyed = 0;
     for (int i = 0; i < nodelen; i++) {
         auto& queryResult = $1->m_allIndexResults[i].m_results;
-		for (int j = 0; j < queryResult.GetResultNum(); j++)
-		    (((WrapperArray*)$result._data) + copyed + j)->_data = new BasicResult(*(queryResult.GetResult(j)));
+        for (int j = 0; j < queryResult.GetResultNum(); j++)
+            (((WrapperArray*)$result._data) + copyed + j)->_data = new BasicResult(*(queryResult.GetResult(j)));
         copyed += queryResult.GetResultNum();
     }
 }

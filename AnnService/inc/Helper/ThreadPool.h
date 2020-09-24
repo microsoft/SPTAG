@@ -4,7 +4,6 @@
 #ifndef _SPTAG_HELPER_THREADPOOL_H_
 #define _SPTAG_HELPER_THREADPOOL_H_
 
-#include <iostream>
 #include <queue>
 #include <vector>
 #include <thread>
@@ -33,24 +32,6 @@ namespace SPTAG
                 m_cond.notify_all();
                 for (auto && t : m_threads) t.join();
                 m_threads.clear();
-
-                /*
-                while (!m_jobs.empty())
-                {
-                    Job* j = m_jobs.front();
-                    m_jobs.pop();
-                    
-                    try
-                    {
-                        j->exec(); 
-                    }
-                    catch (std::exception& e) {
-                        std::cout << "ThreadPool: exception in " << typeid(*j).name() << " " << e.what() << std::endl;
-                    }
-                    
-                    delete j;
-                }
-                */
             }
 
             void init(int numberOfThreads = 1)
@@ -67,7 +48,7 @@ namespace SPTAG
                                 j->exec();
                             }
                             catch (std::exception& e) {
-                                std::cout << "ThreadPool: exception in " << typeid(*j).name() << " " << e.what() << std::endl;
+                                LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
                             }
                             
                             delete j;
