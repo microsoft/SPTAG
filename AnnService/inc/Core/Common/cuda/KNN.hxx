@@ -959,17 +959,6 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");
     exit(1);
   }
-/*
-  for(size_t i=1; i<m_iGraphSize; i++) {
-    if(results[i*m_iNeighborhoodSize] < -1 || results[(i-1)*m_iNeighborhoodSize] < -1) {
-      printf("vector:%d - ", i);
-      for(int j=0; j<m_iNeighborhoodSize; j++) {
-        printf("%d, ", results[(i)*m_iNeighborhoodSize + j]);
-      }
-      printf("\n");
-    }
-  }
-*/
 }
 
 #endif
