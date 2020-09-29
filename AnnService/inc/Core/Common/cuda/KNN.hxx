@@ -769,7 +769,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches, int gpuNum) {
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, size_t numBatches, int gpuNum) {
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
@@ -783,14 +783,14 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
-  for(int i=0;  i<dataSize; i++) {
+  for(size_t i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
 
-  int batchSize = (dataSize / numBatches);
+  size_t batchSize = (dataSize / numBatches);
   if(batchSize * numBatches < dataSize) batchSize++;
 
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %d batches, each of %d elements, TPT iters:%d, tree depth:%d, KVAL:%d\n", numBatches, batchSize, trees, levels, KVAL);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %lld batches, each of %lld elements, TPT iters:%d, tree depth:%d, KVAL:%lld\n", numBatches, batchSize, trees, levels, KVAL);
 
 // Get properties of the GPU being used
   cudaDeviceProp prop;
@@ -804,7 +804,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
       (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, 
       (13*dataSize)/1000000, 
-      ((long long int)batchSize*KVAL*sizeof(int))/1000000,
+      ((size_t)batchSize*KVAL*sizeof(int))/1000000,
       (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
 
   if(totalGPUMem < (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000)
@@ -827,9 +827,9 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
 
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (size_t)batchSize*KVAL*sizeof(int));
   int* d_results;
-  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
+  CUDA_CHECK(cudaMallocManaged(&d_results, (size_t)batchSize*KVAL*sizeof(int)));
 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
   srand(1); // random number seed for TP tree random hyperplane partitions
@@ -841,10 +841,10 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   time_t start_t, end_t;
   time_t tot_start_t, tot_end_t;
-  int min_id, max_id;
+  size_t min_id, max_id;
 
   tot_start_t = clock();
-  for(int batch = 0; batch < numBatches; batch++) {
+  for(size_t batch = 0; batch < numBatches; batch++) {
 
     min_id = batch*batchSize;
     max_id = min(dataSize, (batch+1)*batchSize);
@@ -889,20 +889,20 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
     } // end TPT loop
 
     start_t = clock();
-    CUDA_CHECK(cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (size_t)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&results[batch*batchSize*KVAL], d_results, batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
     end_t = clock();
     temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC; 
     D2H_time += temp_time;
 
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Batch complete, time to copy results:%0.3lf\n", temp_time);
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%d):\n", min_id);
-    for(int i=0; i<KVAL; i++) {
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%lld):\n", min_id);
+    for(size_t i=0; i<KVAL; i++) {
       LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
     }
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%d):\n", max_id-1);
-    for(int i=0; i<KVAL; i++) {
-      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[(max_id-1)*KVAL+i]);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%lld):\n", max_id-1);
+    for(size_t i=0; i<KVAL; i++) {
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[((max_id-1)*KVAL)+i]);
     }
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
   } // end batch loop
@@ -950,15 +950,26 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 // TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
   
   if(typeid(T) == typeid(float)) {
-    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
+    buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
+      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
   }
   else {
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");
     exit(1);
   }
+/*
+  for(size_t i=1; i<m_iGraphSize; i++) {
+    if(results[i*m_iNeighborhoodSize] < -1 || results[(i-1)*m_iNeighborhoodSize] < -1) {
+      printf("vector:%d - ", i);
+      for(int j=0; j<m_iNeighborhoodSize; j++) {
+        printf("%d, ", results[(i)*m_iNeighborhoodSize + j]);
+      }
+      printf("\n");
+    }
+  }
+*/
 }
 
 #endif
