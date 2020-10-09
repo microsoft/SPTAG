@@ -5,6 +5,7 @@ COPY CMakeLists.txt ./
 COPY AnnService ./AnnService/
 COPY Test ./Test/
 COPY Wrappers ./Wrappers/
+COPY GPUSupport ./GPUSupport/
 
 RUN apt-get update && apt-get -y install wget build-essential \
     # remove the following if you don't want to build the wrappers
