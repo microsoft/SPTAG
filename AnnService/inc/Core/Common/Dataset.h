@@ -27,20 +27,20 @@ namespace SPTAG
             std::string name = "Data";
             SizeType rows = 0;
             DimensionType cols = 1;
-            bool ownData = false;
             T* data = nullptr;
+            bool ownData = false;
             SizeType incRows = 0;
             std::vector<T*> incBlocks;
-            static const SizeType rowsInBlock = 1024 * 1024;
+
         public:
-            Dataset()
-            {
-                incBlocks.reserve(MaxSize / rowsInBlock + 1); 
-            }
+            SizeType rowsInBlock = 1024 * 1024;
+
+        public:
+            Dataset() {}
+
             Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, data_, transferOnwership_);
-                incBlocks.reserve(MaxSize / rowsInBlock + 1);
             }
             ~Dataset()
             {
@@ -60,6 +60,7 @@ namespace SPTAG
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
+                incBlocks.reserve(MaxSize / rowsInBlock + 1);
             }
             void SetName(const std::string& name_) { name = name_; }
             const std::string& Name() const { return name; }
