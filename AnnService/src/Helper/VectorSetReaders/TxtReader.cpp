@@ -170,7 +170,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
     std::streamoff startpos = p_fileBlockID * p_fileBlockSize;
 
     std::shared_ptr<Helper::DiskPriorityIO> input = f_createIO(), output = f_createIO(), meta = f_createIO(), metaIndex = f_createIO();
-    if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in))
+    if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in | std::ios::binary))
     {
         LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n",p_filePath.c_str());
         exit(1);
