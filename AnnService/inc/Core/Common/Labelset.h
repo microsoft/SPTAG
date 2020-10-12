@@ -95,6 +95,10 @@ namespace SPTAG
             {
                 m_data.SetR(num);
             }
+
+            inline SizeType RowsInBlock() const { return m_data.rowsInBlock; }
+
+            inline SizeType& RowsInBlock() { return m_data.rowsInBlock; }
         };
     }
 }
