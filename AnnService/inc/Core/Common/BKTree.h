@@ -261,12 +261,12 @@ namespace SPTAG
         }
 
         template <typename T>
-        int KmeansClustering(const Dataset<T>& data,
-            std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
-            KmeansArgs<T>& args, int samples = 1000) {
-            
+        float TryClustering(const Dataset<T>& data,
+            std::vector<SizeType>& indices, const SizeType first, const SizeType last,
+            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false) {
+
             InitCenters(data, indices, first, last, args, samples, 3);
-            
+
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
@@ -277,8 +277,8 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, 
-                    COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / (100.0f * (batchEnd - first)));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true,
+                    COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first));
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
                 if (currDist < minClusterDist) {
@@ -289,6 +289,7 @@ namespace SPTAG
                     noImprovement++;
                 }
                 currDiff = RefineCenters(data, args);
+                //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
                 if (currDiff < 1e-3 || noImprovement >= 5) break;
             }
 
@@ -297,12 +298,60 @@ namespace SPTAG
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
+            SizeType maxCount = 0, minCount = INT_MAX;
+            float CountStd = 0.0, CountAvg = (last - first) * 1.0f / args._DK;
+            for (int i = 0; i < args._DK; i++) {
+                if (args.counts[i] > maxCount) maxCount = args.counts[i];
+                if (args.counts[i] < minCount) minCount = args.counts[i];
+                CountStd += (args.counts[i] - CountAvg) * (args.counts[i] - CountAvg);
+            }
+            CountStd = sqrt(CountStd / args._DK) / CountAvg;
+            if (debug) LOG(Helper::LogLevel::LL_Info, "LambdaFactor:%f Max:%d Min:%d Avg:%f Std/Avg:%f\n", lambdaFactor, maxCount, minCount, CountAvg, CountStd);
+
+            return CountStd;
+        }
+
+        template <typename T>
+        float DynamicFactorSelect(const Dataset<T> & data,
+            std::vector<SizeType> & indices, const SizeType first, const SizeType last,
+            KmeansArgs<T> & args, int samples = 1000) {
+
+            float bestLambdaFactor, bestCountStd = FLT_MAX;
+            for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
+                float CountStd = TryClustering(data, indices, first, last, args, samples, lambdaFactor, true);
+                if (CountStd < bestCountStd) {
+                    bestLambdaFactor = lambdaFactor;
+                    bestCountStd = CountStd;
+                }
+            }
+            std::vector<float> tries(16, 0);
+            for (int i = 0; i < 8; i++) {
+                tries[i] = bestLambdaFactor * (i + 2) / 10;
+                tries[8 + i] = bestLambdaFactor * (i + 2);
+            }
+            for (float lambdaFactor : tries) {
+                float CountStd = TryClustering(data, indices, first, last, args, samples, lambdaFactor, true);
+                if (CountStd < bestCountStd) {
+                    bestLambdaFactor = lambdaFactor;
+                    bestCountStd = CountStd;
+                }
+            }
+            LOG(Helper::LogLevel::LL_Info, "Best Lambda Factor:%f\n", bestLambdaFactor);
+            return bestLambdaFactor;
+        }
+
+        template <typename T>
+        int KmeansClustering(const Dataset<T>& data,
+            std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
+            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false) {
+            
+            TryClustering(data, indices, first, last, args, samples, lambdaFactor, debug);
+
             int numClusters = 0;
             for (int i = 0; i < args._K; i++) if (args.counts[i] > 0) numClusters++;
 
-            if (numClusters <= 1) {
-                return numClusters;
-            }
+            if (numClusters <= 1) return numClusters;
+
             args.Shuffle(indices, first, last);
             return numClusters;
         }
@@ -310,12 +359,13 @@ namespace SPTAG
         class BKTree
         {
         public:
-            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_lock(new std::shared_timed_mutex) {}
+            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_fBalanceFactor(100.0), m_lock(new std::shared_timed_mutex) {}
             
             BKTree(const BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
                                    m_iBKTKmeansK(other.m_iBKTKmeansK), 
                                    m_iBKTLeafSize(other.m_iBKTLeafSize),
                                    m_iSamples(other.m_iSamples),
+                                   m_fBalanceFactor(other.m_fBalanceFactor),
                                    m_lock(new std::shared_timed_mutex) {}
             ~BKTree() {}
 
@@ -362,6 +412,8 @@ namespace SPTAG
                 }
                 KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod);
 
+                if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
+
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
                 {
@@ -388,7 +440,7 @@ namespace SPTAG
                                 args._DK = std::max<int>(args._DK, 2);
                             }
 
-                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples);
+                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, ss.empty());
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
@@ -537,6 +589,7 @@ namespace SPTAG
         public:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples;
+            float m_fBalanceFactor;
         };
     }
 }
