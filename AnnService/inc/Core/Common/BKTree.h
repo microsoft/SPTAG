@@ -298,7 +298,7 @@ namespace SPTAG
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
-            SizeType maxCount = 0, minCount = INT_MAX;
+            SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)();
             float CountStd = 0.0, CountAvg = (last - first) * 1.0f / args._DK;
             for (int i = 0; i < args._DK; i++) {
                 if (args.counts[i] > maxCount) maxCount = args.counts[i];
@@ -316,7 +316,7 @@ namespace SPTAG
             std::vector<SizeType> & indices, const SizeType first, const SizeType last,
             KmeansArgs<T> & args, int samples = 1000) {
 
-            float bestLambdaFactor, bestCountStd = FLT_MAX;
+            float bestLambdaFactor, bestCountStd = (std::numeric_limits<float>::max)();
             for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
                 float CountStd = TryClustering(data, indices, first, last, args, samples, lambdaFactor, true);
                 if (CountStd < bestCountStd) {
