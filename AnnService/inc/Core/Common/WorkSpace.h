@@ -39,6 +39,8 @@ namespace SPTAG
             // Could we use the second hash block.
             bool m_secondHash;
 
+            int m_exp;
+
             // Max pool size.
             int m_poolSize;
 
@@ -73,6 +75,7 @@ namespace SPTAG
                     size >>= 1;
                 }
                 m_secondHash = true;
+                m_exp = exp;
                 m_poolSize = (1 << (ex + exp)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
@@ -110,6 +113,7 @@ namespace SPTAG
                 for (int i = 0; i <= new_poolSize; i++)
                     if (m_hashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, m_hashTable[i]);
 
+                m_exp++;
                 m_poolSize = new_poolSize;
                 m_hashTable.reset(new_hashTable);
             }
@@ -142,50 +146,51 @@ namespace SPTAG
                 }
 
                 DoubleSize();
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewPoolSize=%d\n", m_poolSize);
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
 /*
         class DistPriorityQueue {
-            float* data;
-            int size;
-            int count;
+            std::unique_ptr<float[]> m_data;
+            int m_size;
+            int m_count;
         public:
             DistPriorityQueue() {}
 
             void Resize(int size_) {
-                data = new float[size_ + 1];
-                for (int i = 0; i <= size_; i++) data[i] = MaxDist;
-                size = size_;
-                count = size_;
+                m_data.reset(new float[size_ + 1]);
+                for (int i = 0; i <= size_; i++) m_data[i] = MaxDist;
+                m_size = size_;
+                m_count = size_;
             }
             void clear(int count_) {
-                count = count_;
-                for (int i = 0; i <= count; i++) data[i] = MaxDist;
-            }
-            ~DistPriorityQueue() {
-                delete[] data;
+                if (count_ > m_size) {
+                    m_data.reset(new float[count_ + 1]);
+                    m_size = count_;
+                }
+                for (int i = 0; i <= count_; i++) m_data[i] = MaxDist;
+                m_count = count_;
             }
             bool insert(float dist) {
-                if (dist > data[1]) return false;
+                if (dist > m_data[1]) return false;
 
-                data[1] = dist;
+                m_data[1] = dist;
                 int parent = 1, next = 2;
-                while (next < count) {
-                    if (data[next] < data[next + 1]) next++;
-                    if (data[parent] < data[next]) {
-                        std::swap(data[next], data[parent]);
+                while (next < m_count) {
+                    if (m_data[next] < m_data[next + 1]) next++;
+                    if (m_data[parent] < m_data[next]) {
+                        std::swap(m_data[next], m_data[parent]);
                         parent = next;
                         next <<= 1;
                     }
                     else break;
                 }
-                if (next == count && data[parent] < data[next]) std::swap(data[parent], data[next]);
+                if (next == m_count && m_data[parent] < m_data[next]) std::swap(m_data[parent], m_data[next]);
                 return true;
             }
             float worst() {
-                return data[1];
+                return m_data[1];
             }
         };
 */
