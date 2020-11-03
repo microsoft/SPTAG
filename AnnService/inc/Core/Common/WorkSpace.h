@@ -96,6 +96,7 @@ namespace SPTAG
                 }
             }
 
+            inline int HashTableExponent() const { return m_exp; }
 
             inline bool CheckAndSet(SizeType idx)
             {
@@ -228,6 +229,11 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
+            }
+
+            inline int HashTableExponent() const 
+            { 
+                return nodeCheckStatus.HashTableExponent(); 
             }
 
             OptHashPosVector nodeCheckStatus;

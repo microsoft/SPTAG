@@ -110,7 +110,7 @@ protected:
 
     virtual std::shared_ptr<std::vector<std::string>> GetIndexFiles() const = 0;
 
-    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const = 0;
+    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) = 0;
 
     virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
 

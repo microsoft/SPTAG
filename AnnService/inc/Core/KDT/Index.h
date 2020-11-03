@@ -141,7 +141,7 @@ namespace SPTAG
                 return std::move(files);
             }
 
-            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const;
+            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout);
             ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
