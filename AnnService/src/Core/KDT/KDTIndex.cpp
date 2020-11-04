@@ -62,8 +62,12 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut) const
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
         {
+            auto workSpace = m_workSpacePool->Rent();
+            m_iHashTableExp = workSpace->HashTableExponent();
+            m_workSpacePool->Return(workSpace);
+
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
 
