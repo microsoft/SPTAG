@@ -62,8 +62,12 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut) const
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
         {
+            auto workSpace = m_workSpacePool->Rent();
+            m_iHashTableExp = workSpace->HashTableExponent();
+            m_workSpacePool->Return(workSpace);
+
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
 
@@ -443,6 +447,8 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
             if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
             return ErrorCode::VectorNotFound;

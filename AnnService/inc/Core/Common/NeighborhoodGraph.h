@@ -522,6 +522,10 @@ namespace SPTAG
 
             inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
 
+            inline SizeType RowsInBlock() const { return m_pNeighborhoodGraph.rowsInBlock; }
+
+            inline SizeType& RowsInBlock() { return m_pNeighborhoodGraph.rowsInBlock; }
+
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 
         protected:

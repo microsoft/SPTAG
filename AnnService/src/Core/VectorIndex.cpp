@@ -582,7 +582,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 }
 
 
-std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
+std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
 {
     size_t treeNodeSize;
     if (p_algo == IndexAlgoType::BKT) {
@@ -595,12 +595,13 @@ std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, Dimensio
         return 0;
     }
     std::uint64_t unit = GetValueTypeSize(p_valuetype) * p_dimension + p_maxmeta + sizeof(std::uint64_t) + sizeof(SizeType) * p_neighborhoodSize + 1 + treeNodeSize * p_treeNumber;
-    return p_memory / unit;
+    return ((p_memory / unit) / p_vectorsInBlock) * p_vectorsInBlock;
 }
 
 
-std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
+std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)
 {
+    p_vectorCount = ((p_vectorCount + p_vectorsInBlock - 1) / p_vectorsInBlock) * p_vectorsInBlock;
     size_t treeNodeSize;
     if (p_algo == IndexAlgoType::BKT) {
         treeNodeSize = sizeof(SizeType) * 3;

@@ -39,6 +39,8 @@ namespace SPTAG
             // Could we use the second hash block.
             bool m_secondHash;
 
+            int m_exp;
+
             // Max pool size.
             int m_poolSize;
 
@@ -48,15 +50,15 @@ namespace SPTAG
             std::unique_ptr<SizeType[]> m_hashTable;
 
 
-            inline unsigned hash_func2(unsigned idx, int loop)
+            inline unsigned hash_func2(unsigned idx, int poolSize, int loop)
             {
-                return (idx + loop) & m_poolSize;
+                return (idx + loop) & poolSize;
             }
 
 
-            inline unsigned hash_func(unsigned idx)
+            inline unsigned hash_func(unsigned idx, int poolSize)
             {
-                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
+                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & poolSize;
             }
 
         public:
@@ -73,6 +75,7 @@ namespace SPTAG
                     size >>= 1;
                 }
                 m_secondHash = true;
+                m_exp = exp;
                 m_poolSize = (1 << (ex + exp)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
@@ -93,17 +96,32 @@ namespace SPTAG
                 }
             }
 
+            inline int HashTableExponent() const { return m_exp; }
 
             inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1
-                return _CheckAndSet(m_hashTable.get(), idx + 1) == 0;
+                return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
             }
 
-
-            inline int _CheckAndSet(SizeType* hashTable, SizeType idx)
+            inline void DoubleSize()
             {
-                unsigned index = hash_func((unsigned)idx);
+                int new_poolSize = ((m_poolSize + 1) << 1) - 1; 
+                SizeType* new_hashTable = new SizeType[(new_poolSize + 1) * 2];
+                memset(new_hashTable, 0, sizeof(SizeType) * (new_poolSize + 1) * 2);
+
+                m_secondHash = false;
+                for (int i = 0; i <= new_poolSize; i++)
+                    if (m_hashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, m_hashTable[i]);
+
+                m_exp++;
+                m_poolSize = new_poolSize;
+                m_hashTable.reset(new_hashTable);
+            }
+
+            inline int _CheckAndSet(SizeType* hashTable, int poolSize, bool isFirstTable, SizeType idx)
+            {
+                unsigned index = hash_func((unsigned)idx, poolSize);
                 for (int loop = 0; loop < m_maxLoop; ++loop)
                 {
                     if (!hashTable[index])
@@ -118,61 +136,62 @@ namespace SPTAG
                         return 0;
                     }
                     // Get next hash position.
-                    index = hash_func2(index, loop);
+                    index = hash_func2(index, poolSize, loop);
                 }
 
-                if (hashTable == m_hashTable.get())
+                if (isFirstTable)
                 {
                     // Use second hash block.
                     m_secondHash = true;
-                    return _CheckAndSet(m_hashTable.get() + m_poolSize + 1, idx);
+                    return _CheckAndSet(hashTable + poolSize + 1, poolSize, false, idx);
                 }
 
-                // Do not include this item.
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 4).\n");
-                return -1;
+                DoubleSize();
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
+                return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
 /*
         class DistPriorityQueue {
-            float* data;
-            int size;
-            int count;
+            std::unique_ptr<float[]> m_data;
+            int m_size;
+            int m_count;
         public:
             DistPriorityQueue() {}
 
             void Resize(int size_) {
-                data = new float[size_ + 1];
-                for (int i = 0; i <= size_; i++) data[i] = MaxDist;
-                size = size_;
-                count = size_;
+                m_data.reset(new float[size_ + 1]);
+                for (int i = 0; i <= size_; i++) m_data[i] = MaxDist;
+                m_size = size_;
+                m_count = size_;
             }
             void clear(int count_) {
-                count = count_;
-                for (int i = 0; i <= count; i++) data[i] = MaxDist;
-            }
-            ~DistPriorityQueue() {
-                delete[] data;
+                if (count_ > m_size) {
+                    m_data.reset(new float[count_ + 1]);
+                    m_size = count_;
+                }
+                for (int i = 0; i <= count_; i++) m_data[i] = MaxDist;
+                m_count = count_;
             }
             bool insert(float dist) {
-                if (dist > data[1]) return false;
+                if (dist > m_data[1]) return false;
 
-                data[1] = dist;
+                m_data[1] = dist;
                 int parent = 1, next = 2;
-                while (next < count) {
-                    if (data[next] < data[next + 1]) next++;
-                    if (data[parent] < data[next]) {
-                        std::swap(data[next], data[parent]);
+                while (next < m_count) {
+                    if (m_data[next] < m_data[next + 1]) next++;
+                    if (m_data[parent] < m_data[next]) {
+                        std::swap(m_data[next], m_data[parent]);
                         parent = next;
                         next <<= 1;
                     }
                     else break;
                 }
-                if (next == count && data[parent] < data[next]) std::swap(data[parent], data[next]);
+                if (next == m_count && m_data[parent] < m_data[next]) std::swap(m_data[parent], m_data[next]);
                 return true;
             }
             float worst() {
-                return data[1];
+                return m_data[1];
             }
         };
 */
@@ -210,6 +229,11 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
+            }
+
+            inline int HashTableExponent() const 
+            { 
+                return nodeCheckStatus.HashTableExponent(); 
             }
 
             OptHashPosVector nodeCheckStatus;
