@@ -847,12 +847,13 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
   for(size_t batch = 0; batch < numBatches; batch++) {
 
     min_id = batch*batchSize;
-    max_id = min(dataSize, (batch+1)*batchSize);
+    max_id = (batch+1)*batchSize;
+    if(max_id > dataSize) max_id = dataSize;
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
 
     // Initialize results to all -1 (special value that is set to distance INFTY)
-    CUDA_CHECK(cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_results, -1, (size_t)batchSize*KVAL*sizeof(int)));
 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
       CUDA_CHECK(cudaDeviceSynchronize());
@@ -863,8 +864,6 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
       tptree->reset();
       create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
       CUDA_CHECK(cudaDeviceSynchronize());
-
-// Sort each leaf by ID
 
       end_t = clock();
 
@@ -889,7 +888,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     } // end TPT loop
 
     start_t = clock();
-    CUDA_CHECK(cudaMemcpy(&results[batch*batchSize*KVAL], d_results, batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&results[min_id*KVAL], d_results, (max_id-min_id)*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
     end_t = clock();
     temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC; 
     D2H_time += temp_time;
@@ -947,13 +946,21 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     exit(1);
   }
 
-// TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
-  
   if(typeid(T) == typeid(float)) {
-    buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+    if(m_iFeatureDim <= 64) {
+      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+    }
+    else {
+      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+    }
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
+    if(m_iFeatureDim <= 64) {
+      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+    }
+    else {
       buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+    }
   }
   else {
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");
