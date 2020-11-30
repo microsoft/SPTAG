@@ -9,6 +9,10 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
+#include <float.h>
+#include <limits.h>
+#include <unordered_set>
+#include <atomic>
 
 namespace SPTAG
 {
@@ -16,6 +20,23 @@ class IAbortOperation
 {
 public:
     virtual bool ShouldAbort() = 0;
+};
+
+struct Edge
+{
+    Edge();
+
+    int headID;
+    int fullID;
+    float distance;
+    char order;
+};
+
+struct EdgeCompare
+{
+    bool operator()(const Edge& a, int b) const;
+    bool operator()(int a, const Edge& b) const;
+    bool operator()(const Edge& a, const Edge& b) const;
 };
 
 class VectorIndex
@@ -104,6 +125,12 @@ public:
     static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
     static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
+
+    template<typename ValueType>
+    void ApproximateSearchIndex(int numThreads, int candidateNum, std::shared_ptr<VectorSet>& fullVectors, std::shared_ptr<VectorIndex> headIndex, std::unordered_set<int> headVectorIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize);
+
+    virtual SizeType* GetNeighborList(int vecIdx) = 0;
+
 
 protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;

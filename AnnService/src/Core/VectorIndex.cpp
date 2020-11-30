@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include <type_traits>
+
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
@@ -24,6 +26,31 @@ std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 #else
 std::unique_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
+
+Edge::Edge() : headID(INT_MAX), fullID(INT_MAX), distance(FLT_MAX), order(0) {}
+
+bool EdgeCompare::operator()(const Edge& a, int b) const
+{
+    return a.headID < b;
+}
+
+bool EdgeCompare::operator()(int a, const Edge& b) const
+{
+    return a < b.headID;
+}
+
+bool EdgeCompare::operator()(const Edge& a, const Edge& b) const
+{
+    if (a.headID == b.headID)
+    {
+        if (a.distance == b.distance)
+        {
+            return a.fullID < b.fullID;
+        }
+        return a.distance < b.distance;
+    }
+    return a.headID < b.headID;
+}
 
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
@@ -620,3 +647,190 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
     ret += treeNodeSize * p_treeNumber * p_vectorCount; // Tree Size
     return ret;
 }
+
+#if defined(GPUX)
+
+#include "inc/Core/Common/cuda/TailNeighbors.hxx"
+
+template<typename SUMTYPE>
+static void collectSelections(size_t numVectors, std::unordered_set<int>& headVectorIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, DistPair<SUMTYPE>* results) {
+  size_t tailIdx=0;
+//  #pragma omp parallel for
+    for(size_t vecIdx=0; vecIdx < numVectors; vecIdx++) {
+        size_t vecOffset = tailIdx*(size_t)m_replicaCount;
+        replicaCount[vecIdx]=0;
+        if(headVectorIDS.count(vecIdx) == 0) {
+
+            for(size_t resNum=0; resNum < m_replicaCount && results[vecOffset+resNum].idx != -1; resNum++) {
+                ++postingListSize[results[vecOffset + resNum].idx];
+                selections[vecOffset + resNum].headID = results[vecOffset + resNum].idx;
+                selections[vecOffset + resNum].fullID = vecIdx;
+                selections[vecOffset + resNum].distance = (float)results[vecOffset+resNum].dist;
+                selections[vecOffset + resNum].order = (char)resNum;
+                ++replicaCount[vecIdx];
+            }
+            tailIdx++;
+        }
+    }
+}
+
+template<typename ValueType>
+void VectorIndex::ApproximateSearchIndex(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headVectorIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize) {
+
+    LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
+
+// Get all vector coords as an array
+    ValueType* vectorCoords = (ValueType*)fullVectors->GetData();
+
+    typedef float KEY_T;
+    int metric = (headIndex->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine);
+
+    if(typeid(ValueType) != typeid(float)) {
+      typedef int32_t SUMTYPE;
+      DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)m_replicaCount)];
+
+      if(fullVectors->Dimension() <= 64) {
+        getTailNeighborsTPT<ValueType, KEY_T, SUMTYPE, 64>(vectorCoords, fullVectors->Count(), headIndex, headVectorIDS, 64, (DistPair<SUMTYPE>*)results, m_replicaCount, numThreads, numTrees, leafSize, metric);
+      }
+      else if (fullVectors->Dimension() <= 100) {
+        getTailNeighborsTPT<ValueType, KEY_T, SUMTYPE, 100>(vectorCoords, fullVectors->Count(), headIndex, headVectorIDS, 100, (DistPair<SUMTYPE>*)results, m_replicaCount, numThreads, numTrees, leafSize, metric);
+      }
+      else {
+        LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n");
+        exit(1);
+      }
+
+      collectSelections<SUMTYPE>(fullVectors->Count(), headVectorIDS, m_replicaCount, selections, postingListSize, replicaCount, results);
+      delete results;
+    }
+    else {
+      typedef float SUMTYPE;
+      DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)m_replicaCount)];
+
+      if(fullVectors->Dimension() <= 64) {
+        getTailNeighborsTPT<ValueType, KEY_T, SUMTYPE, 64>(vectorCoords, fullVectors->Count(), headIndex, headVectorIDS, 64, (DistPair<SUMTYPE>*)results, m_replicaCount, numThreads, numTrees, leafSize, metric);
+      }
+      else if (fullVectors->Dimension() <= 100) {
+        getTailNeighborsTPT<ValueType, KEY_T, SUMTYPE, 100>(vectorCoords, fullVectors->Count(), headIndex, headVectorIDS, 100, (DistPair<SUMTYPE>*)results, m_replicaCount, numThreads, numTrees, leafSize, metric);
+      }
+      else {
+        LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n");
+        exit(1);
+      }
+      getTailNeighborsTPT<ValueType, KEY_T, SUMTYPE, 100>(vectorCoords, fullVectors->Count(), headIndex, headVectorIDS, 100, (DistPair<SUMTYPE>*)results, m_replicaCount, numThreads, numTrees, leafSize, metric);
+
+      collectSelections<SUMTYPE>(fullVectors->Count(), headVectorIDS, m_replicaCount, selections, postingListSize, replicaCount, results);
+      delete results;
+    }
+}
+#else
+
+
+template<typename ValueType>
+void VectorIndex::ApproximateSearchIndex(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headVectorIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize) {
+
+
+                std::vector<std::thread> threads;
+                threads.reserve(numThreads);
+
+                std::atomic_int nextFullID(0);
+                std::atomic_size_t rngFailedCountTotal(0);
+
+                for (int tid = 0; tid < numThreads; ++tid)
+                {
+                    threads.emplace_back([&, tid]()
+                        {
+                            COMMON::QueryResultSet<ValueType> resultSet(NULL, candidateNum);
+
+                            size_t rngFailedCount = 0;
+
+                            while (true)
+                            {
+                                int fullID = nextFullID.fetch_add(1);
+                                if (fullID >= fullVectors->Count())
+                                {
+                                    break;
+                                }
+
+                                if (headVectorIDS.count(fullID) > 0)
+                                {
+                                    continue;
+                                }
+
+                                ValueType* buffer = reinterpret_cast<ValueType*>(fullVectors->GetVector(fullID));
+                                resultSet.SetTarget(buffer);
+                                resultSet.Reset();
+
+                                headIndex->SearchIndex(resultSet);
+
+                                size_t selectionOffset = static_cast<size_t>(fullID)* m_replicaCount;
+
+                                BasicResult* queryResults = resultSet.GetResults();
+//
+                                for (int i = 0; i < candidateNum && replicaCount[fullID] < m_replicaCount; ++i)
+                                {
+                                    if (queryResults[i].VID == -1)
+                                    {
+                                        break;
+                                    }
+
+                                    // RNG Check.
+                                    bool rngAccpeted = true;
+                                    for (int j = 0; j < replicaCount[fullID]; ++j)
+                                    {
+                                        // VQANNSearch::QueryResultSet<ValueType> resultSet(NULL, candidateNum);
+
+                                        float nnDist = headIndex->ComputeDistance(
+                                            headIndex->GetSample(queryResults[i].VID),
+                                            headIndex->GetSample(selections[selectionOffset+j].headID));
+
+                                        // LOG(Helper::LogLevel::LL_Info,  "NNDist: %f Original: %f\n", nnDist, queryResults[i].Score);
+                                        if (nnDist <= queryResults[i].Dist)
+                                        {
+                                            rngAccpeted = false;
+                                            break;
+                                        }
+                                    }
+
+                                    if (!rngAccpeted)
+                                    {
+                                        ++rngFailedCount;
+                                        continue;
+                                    }
+
+                                  ++postingListSize[queryResults[i].VID];
+
+                                  selections[selectionOffset + replicaCount[fullID]].headID = queryResults[i].VID;
+                                  selections[selectionOffset + replicaCount[fullID]].fullID = fullID;
+                                  selections[selectionOffset + replicaCount[fullID]].distance = queryResults[i].Dist;
+                                  selections[selectionOffset + replicaCount[fullID]].order = (char)replicaCount[fullID];
+                                  ++replicaCount[fullID];
+
+                                }
+//
+                            }
+
+                            rngFailedCountTotal += rngFailedCount;
+                        });
+                }
+
+                for (int tid = 0; tid < numThreads; ++tid)
+                {
+                    threads[tid].join();
+                }
+
+                LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. RNG failed count: %llu\n", static_cast<uint64_t>(rngFailedCountTotal.load()));
+
+
+}
+
+
+
+#endif
+
+    template void VectorIndex::ApproximateSearchIndex<std::int8_t>(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headIDS, int m_replicaCount,std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize);
+    template void VectorIndex::ApproximateSearchIndex<std::uint8_t>(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize);
+    template void VectorIndex::ApproximateSearchIndex<std::int16_t>(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize);
+    template void VectorIndex::ApproximateSearchIndex<float>(int numThreads, int candidateNum, std::shared_ptr<SPTAG::VectorSet>& fullVectors, std::shared_ptr<SPTAG::VectorIndex> headIndex, std::unordered_set<int> headIDS, int m_replicaCount, std::vector<Edge>& selections, std::vector<std::atomic_int>& postingListSize, std::vector<int>& replicaCount, int numTrees, int leafSize);
+
+

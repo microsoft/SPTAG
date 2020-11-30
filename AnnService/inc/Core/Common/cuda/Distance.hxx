@@ -29,6 +29,7 @@
 #include<vector>
 #include<climits>
 #include<float.h>
+#include<unordered_set>
 
 using namespace std;
 
@@ -113,6 +114,11 @@ class Point {
       total[1] += ((SUMTYPE)((SUMTYPE)coords[i+1] * (SUMTYPE)other->coords[i+1]));
     }
     return (SUMTYPE)1.0 - (total[0]+total[1]);
+  }
+
+  __forceinline__ __device__ SUMTYPE dist(Point<T,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
   }
 
 };
@@ -225,6 +231,11 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)65536) - prod[0];
   }
 #endif
+
+  __forceinline__ __device__ SUMTYPE dist(Point<uint8_t,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
+  }
 
 };
 
@@ -346,6 +357,12 @@ class Point<int8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)1) - prod[0];
   }
 #endif
+
+  __forceinline__ __device__ SUMTYPE dist(Point<int8_t,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
+  }
+
 };
 
 /*********************************************************************
@@ -360,5 +377,33 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
   return pointArray;
 } 
 
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T,SUMTYPE,Dim>* extractHeadPoints(T* data, size_t totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
+    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(headVectorIDS.size()*sizeof(Point<T,SUMTYPE,Dim>));
+
+    int headIdx=0;
+    for(size_t i=0; i<totalRows; i++) {
+        if(headVectorIDS.count(i) != 0) {
+            pointArray[headIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            pointArray[headIdx].id = i;
+            headIdx++;
+        }
+    }
+    return pointArray;
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T,SUMTYPE,Dim>* extractTailPoints(T* data, int totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
+    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc((totalRows-headVectorIDS.size())*sizeof(Point<T,SUMTYPE,Dim>));
+    int tailIdx=0;
+    for(size_t i=0; i<totalRows; i++) {
+        if(headVectorIDS.count(i) == 0) {
+            pointArray[tailIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            pointArray[tailIdx].id = i;
+            tailIdx++;
+        }
+    }
+    return pointArray;
+}
 
 #endif

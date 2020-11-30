@@ -458,6 +458,11 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template<typename T>
+        SizeType* Index<T>::GetNeighborList(int vecIdx) {
+            return m_pGraph[vecIdx];
+        }
+
         template <typename T>
         ErrorCode
             Index<T>::SetParameter(const char* p_param, const char* p_value)
