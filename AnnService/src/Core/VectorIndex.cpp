@@ -658,8 +658,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
 //#pragma omp parallel for
         for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
-            size_t vecOffset = vecIdx * (size_t)replicaCount;
             if (exceptIDS.count(vecIdx) == 0) {
+                size_t vecOffset = vecIdx * (size_t)replicaCount;
                 for (int resNum = 0; resNum < replicaCount && results[vecOffset + resNum].idx != -1; resNum++) {
                     (*selections)[vecOffset + resNum].node = results[vecOffset + resNum].idx;
                     (*selections)[vecOffset + resNum].distance = (float)results[vecOffset + resNum].dist;
@@ -685,8 +685,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
 //#pragma omp parallel for
         for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
-            size_t vecOffset = vecIdx * (size_t)replicaCount;
             if (exceptIDS.count(vecIdx) == 0) {
+                size_t vecOffset = vecIdx * (size_t)replicaCount;
                 for (int resNum = 0; resNum < replicaCount && results[vecOffset + resNum].idx != -1; resNum++) {
                     (*selections)[vecOffset + resNum].node = results[vecOffset + resNum].idx;
                     (*selections)[vecOffset + resNum].distance = (float)results[vecOffset + resNum].dist;
