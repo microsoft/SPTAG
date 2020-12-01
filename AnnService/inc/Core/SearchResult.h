@@ -8,6 +8,26 @@
 
 namespace SPTAG
 {
+    struct NodeDistPair
+    {
+        SizeType node;
+        float distance;
+
+        NodeDistPair(SizeType _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
+
+        inline bool operator < (const NodeDistPair& rhs) const
+        {
+            return distance < rhs.distance;
+        }
+
+        inline bool operator > (const NodeDistPair& rhs) const
+        {
+            return distance > rhs.distance;
+        }
+
+        virtual NodeDistPair& operator[](size_t i) { return *(this + i); }
+    };
+
     struct BasicResult
     {
         SizeType VID;

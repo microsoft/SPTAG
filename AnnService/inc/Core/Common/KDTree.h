@@ -189,7 +189,7 @@ namespace SPTAG
 
                     ++p_space.m_iNumberOfTreeCheckedLeaves;
                     ++p_space.m_iNumberOfCheckedLeaves;
-                    p_space.m_NGQueue.insert(COMMON::HeapCell(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
+                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
                     return;
                 }
 
@@ -209,7 +209,7 @@ namespace SPTAG
                     bestChild = tnode.right;
                 }
 
-                p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
+                p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
                 KDTSearch(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 

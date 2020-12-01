@@ -102,7 +102,7 @@ __global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Di
 }
 
 template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
-void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, std::shared_ptr<SPTAG::VectorIndex>& headIndex, std::unordered_set<int> headVectorIDS, int dim, DistPair<SUMTYPE>* results, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric) {
+void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* headIndex, std::unordered_set<int>& headVectorIDS, int dim, DistPair<SUMTYPE>* results, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric) {
 
     int gpuNum;
     cudaGetDevice(&gpuNum);
