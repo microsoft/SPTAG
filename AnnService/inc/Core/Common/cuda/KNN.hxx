@@ -41,7 +41,6 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
   return between <= farther.dist;
 }
 
-
 /*****************************************************************************************
  * Perform brute-force KNN on each leaf node, where only list of point ids is stored as leafs.
  * Returns for each point: the K nearest neighbors within the leaf node containing it.
@@ -257,13 +256,11 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
   return access;
 }
 
-
-
 /*****************************************************************************************
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, int min_id, int max_id) {
+__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, size_t min_id, size_t max_id) {
 
   extern __shared__ char sharememory[];
 
@@ -284,7 +281,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
   int threads_per_leaf = blocks_per_leaf*blockDim.x;
   int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
   int leafIdx= blockIdx.x / blocks_per_leaf;
-  long long int leaf_offset = tptree->leafs[leafIdx].offset;
+  size_t leaf_offset = tptree->leafs[leafIdx].offset;
 
   bool good;
 
@@ -313,7 +310,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
       max_dist = threadList[KVAL-1].dist;
 
       // Compare source query with all points in the leaf
-      for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
+      for(size_t j=0; j<tptree->leafs[leafIdx].size; ++j) {
         if(j!=i) {
           good = true;
 	  candidate.idx = tptree->leaf_points[leaf_offset+j];
@@ -367,7 +364,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
           }
         }
       }
-      for(int j=0; j<KVAL; j++) {
+      for(size_t j=0; j<KVAL; j++) {
         results[(size_t)(query.id-min_id)*KVAL+j] = threadList[j].idx;
       }
 
@@ -653,6 +650,8 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting buildGraphGPU\n");
+
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
   DTYPE* data = (DTYPE*)index->GetSample(0);
@@ -667,6 +666,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
+
 
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
@@ -769,14 +769,14 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * at compile time
  ***************************************************************************************/
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, size_t numBatches, int gpuNum) {
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, int gpuNum) {
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
 
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
-  // Number of levels set to have approximately 500 points per leaf
+  // Number of levels is based on the chosen leaf size
   int levels = (int)std::log2(dataSize/leafSize);
 
   int KNN_blocks; // number of threadblocks used
@@ -787,31 +787,47 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     points[i].id = i;
   }
 
-  size_t batchSize = (dataSize / numBatches);
-  if(batchSize * numBatches < dataSize) batchSize++;
-
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %lld batches, each of %lld elements, TPT iters:%d, tree depth:%d, KVAL:%lld\n", numBatches, batchSize, trees, levels, KVAL);
-
 // Get properties of the GPU being used
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, gpuNum);
-  size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
+  size_t totalGPUMem = ((size_t)prop.totalGlobalMem);
+  size_t batchMemAvail = totalGPUMem - (dataSize*(sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>) + 20));
+  size_t batchSize = batchMemAvail / (KVAL*sizeof(int));
 
-// If debug/verbose mode, output GPU memory details
+  if(batchSize > dataSize) batchSize = dataSize;
+  size_t numBatches = ((batchSize-1)+dataSize)/batchSize; // Round up to number of batches if needed
+
+  if(totalGPUMem <= dataSize*(sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+20)) {
+      LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build index.  Total GPU memory:%lu MB, Input data requires:%lu MiB.\n", (totalGPUMem)/1000000, (dataSize*(sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+20))/1000000);
+      exit(1);
+  }
+  if(numBatches > 10000) {
+    LOG(SPTAG::Helper::LogLevel::LL_Warning, "Warning - Insufficient GPU memory to run large batches.  Requires running %lu total batches. May perform poorly, run on smaller input size or use a GPU with more global memory to improve performance.\n", numBatches);
+  }
+
+// Log GPU memory details
   LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU number:%d, model: %s Total available GPU memory:%zu\n",  gpuNum, prop.name, totalGPUMem);
-
   // Print out memory requirements on the GPU
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory usage - input points: %lu MiB, trees: %lu MiB\n",
       (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, 
-      (13*dataSize)/1000000, 
-      ((size_t)batchSize*KVAL*sizeof(int))/1000000,
-      (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
+      (20*dataSize)/1000000);
+
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory left for batch results: %lu MiB, batch size:%lu, total batches:%lu\n", 
+      batchMemAvail/1000000,
+      batchSize,
+      numBatches);
 
   if(totalGPUMem < (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000)
   {
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to create graph.  Use more batches or a GPU more with memory.\n");
     exit(1);
   }
+
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %lu batches, each of %lu elements, TPT iters:%d, tree depth:%d, KVAL:%lu\n", numBatches, batchSize, trees, levels, KVAL);
+
+
+
 
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
@@ -827,7 +843,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
 
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (size_t)batchSize*KVAL*sizeof(int));
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lu bytes.\n", (size_t)batchSize*KVAL*sizeof(int));
   int* d_results;
   CUDA_CHECK(cudaMallocManaged(&d_results, (size_t)batchSize*KVAL*sizeof(int)));
 
@@ -899,7 +915,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
       LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
     }
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%lld):\n", max_id-1);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (id %lld, intidx %d, longindex %lld):\n", max_id-1, (max_id*KVAL-1), (max_id*KVAL)-1);
     for(size_t i=0; i<KVAL; i++) {
       LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[((max_id-1)*KVAL)+i]);
     }
@@ -919,7 +935,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
@@ -932,10 +948,6 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     LOG(SPTAG::Helper::LogLevel::LL_Error, "NeighborhoodSize (with scaling factor applied) is %d but must be a power of 2 for GPU construction.\n", m_iNeighborhoodSize);
     exit(1);
   }
-  if(numBatches > 1 && graph != 2) {
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "Multiple batches only supported for direct RNG construction (GPUGraphType=2).\n");
-    exit(1);
-  }
 
   // Have to give compiler-time known bounds on dimensions so that we can store points in registers
   // This significantly speeds up distance comparisons.
@@ -945,21 +957,20 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     LOG(SPTAG::Helper::LogLevel::LL_Error, ">100 dimensions not currently supported for GPU construction.\n");
     exit(1);
   }
-
   if(typeid(T) == typeid(float)) {
     if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, gpuNum);
     }
     else {
-      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, gpuNum);
     }
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
     if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, gpuNum);
     }
     else {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, (size_t)numBatches, gpuNum);
+      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, gpuNum);
     }
   }
   else {

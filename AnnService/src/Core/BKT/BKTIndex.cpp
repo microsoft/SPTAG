@@ -101,7 +101,7 @@ namespace SPTAG
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
-            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
             const SizeType *node = m_pGraph[tmpNode]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
@@ -141,7 +141,7 @@ namespace SPTAG
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
-                p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
                 m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
@@ -155,7 +155,7 @@ namespace SPTAG
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
         while (!p_space.m_NGQueue.empty()) { \
-            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
             const SizeType *node = m_pGraph[tmpNode]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
@@ -196,7 +196,7 @@ namespace SPTAG
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
                 if (p_space.m_Results.insert(distance2leaf)) { \
-                    p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+                    p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
                 } \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \

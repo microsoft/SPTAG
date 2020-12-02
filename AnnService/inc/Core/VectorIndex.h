@@ -9,6 +9,7 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
+#include <unordered_set>
 
 namespace SPTAG
 {
@@ -78,6 +79,8 @@ public:
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
+
+    virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize);
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);

@@ -543,12 +543,12 @@ namespace SPTAG
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
-                        p_space.m_SPTQueue.insert(COMMON::HeapCell(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
+                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
                     } 
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
                         }
                     } 
                 }
@@ -560,22 +560,22 @@ namespace SPTAG
             {
                 while (!p_space.m_SPTQueue.empty())
                 {
-                    COMMON::HeapCell bcell = p_space.m_SPTQueue.pop();
+                    NodeDistPair bcell = p_space.m_SPTQueue.pop();
                     const BKTNode& tnode = m_pTreeRoots[bcell.node];
                     if (tnode.childStart < 0) {
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_iNumberOfCheckedLeaves++;
-                            p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
+                            p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, bcell.distance));
                         }
                         if (p_space.m_iNumberOfCheckedLeaves >= p_limits) break;
                     }
                     else {
                         if (!p_space.CheckAndSet(tnode.centerid)) {
-                            p_space.m_NGQueue.insert(COMMON::HeapCell(tnode.centerid, bcell.distance));
+                            p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, bcell.distance));
                         }
                         for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(COMMON::HeapCell(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
                         } 
                     }
                 }

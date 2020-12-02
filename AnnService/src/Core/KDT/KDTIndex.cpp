@@ -101,7 +101,7 @@ namespace SPTAG
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         while (!p_space.m_NGQueue.empty()) { \
-            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
@@ -120,7 +120,7 @@ namespace SPTAG
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
                 p_space.m_iNumberOfCheckedLeaves++; \
-                p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
             } \
             if (bLocalOpt) p_space.m_iNumOfContinuousNoBetterPropagation++; \
             else p_space.m_iNumOfContinuousNoBetterPropagation = 0; \

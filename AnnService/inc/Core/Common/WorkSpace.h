@@ -4,6 +4,7 @@
 #ifndef _SPTAG_COMMON_WORKSPACE_H_
 #define _SPTAG_COMMON_WORKSPACE_H_
 
+#include "../SearchResult.h"
 #include "CommonUtils.h"
 #include "Heap.h"
 
@@ -11,25 +12,6 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        // node type in the priority queue
-        struct HeapCell
-        {
-            SizeType node;
-            float distance;
-
-            HeapCell(SizeType _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
-
-            inline bool operator < (const HeapCell& rhs) const
-            {
-                return distance < rhs.distance;
-            }
-
-            inline bool operator > (const HeapCell& rhs) const
-            {
-                return distance > rhs.distance;
-            }
-        };
-
         class OptHashPosVector
         {
         protected:
@@ -246,10 +228,10 @@ namespace SPTAG
             int m_iMaxCheck;
 
             // Prioriy queue used for neighborhood graph
-            Heap<HeapCell> m_NGQueue;
+            Heap<NodeDistPair> m_NGQueue;
 
             // Priority queue Used for Tree
-            Heap<HeapCell> m_SPTQueue;
+            Heap<NodeDistPair> m_SPTQueue;
 
             //DistPriorityQueue m_Results;
         };
