@@ -656,14 +656,17 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
         default: break;
         }
 
-//#pragma omp parallel for
+        SizeType resIdx = 0;
+        //#pragma omp parallel for
         for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
             if (exceptIDS.count(vecIdx) == 0) {
                 size_t vecOffset = vecIdx * (size_t)replicaCount;
-                for (int resNum = 0; resNum < replicaCount && results[vecOffset + resNum].idx != -1; resNum++) {
-                    (*selections)[vecOffset + resNum].node = results[vecOffset + resNum].idx;
-                    (*selections)[vecOffset + resNum].distance = (float)results[vecOffset + resNum].dist;
+                size_t resOffset = resIdx * (size_t)replicaCount;
+                for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
+                    (*selections)[vecOffset + resNum].node = results[resOffset + resNum].idx;
+                    (*selections)[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
+                resIdx++;
             }
         }
         delete results;
@@ -683,14 +686,17 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
             exit(1);
         }
 
-//#pragma omp parallel for
+        SizeType resIdx = 0;
+        //#pragma omp parallel for
         for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
             if (exceptIDS.count(vecIdx) == 0) {
                 size_t vecOffset = vecIdx * (size_t)replicaCount;
-                for (int resNum = 0; resNum < replicaCount && results[vecOffset + resNum].idx != -1; resNum++) {
-                    (*selections)[vecOffset + resNum].node = results[vecOffset + resNum].idx;
-                    (*selections)[vecOffset + resNum].distance = (float)results[vecOffset + resNum].dist;
+                size_t resOffset = resIdx * (size_t)replicaCount;
+                for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
+                    (*selections)[vecOffset + resNum].node = results[resOffset + resNum].idx;
+                    (*selections)[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
+                resIdx++;
             }
         }
         delete results;
