@@ -41,8 +41,8 @@ DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L,
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineKDTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
 DefineKDTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
-DefineKDTParameter(m_pSamples.rowsInBlock, int, 1024 * 1024, "DataBlockSize")
-DefineKDTParameter(m_pGraph.RowsInBlock(), int, 1024 * 1024, "GraphBlockSize")
-DefineKDTParameter(m_deletedID.RowsInBlock(), int, 1024 * 1024, "LabelBlockSize")
+DefineKDTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
+DefineKDTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
+DefineKDTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
 
 #endif

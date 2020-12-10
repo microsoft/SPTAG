@@ -258,7 +258,7 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
-                COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize);
+                COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 std::vector<std::vector<SizeType>> TptreeDataIndices(m_iTPTNumber, std::vector<SizeType>(m_iGraphSize));
                 std::vector<std::vector<std::pair<SizeType, SizeType>>> TptreeLeafNodes(m_iTPTNumber, std::vector<std::pair<SizeType, SizeType>>());
 
@@ -323,7 +323,7 @@ namespace SPTAG
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = m_iNeighborhoodSize * m_iNeighborhoodScale;
-                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
+                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
@@ -392,7 +392,7 @@ namespace SPTAG
                 }
 
                 SizeType R = (SizeType)indices.size();
-                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
+                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 newGraph->m_iGraphSize = R;
                 newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
@@ -446,30 +446,30 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(input)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
 
-            ErrorCode LoadGraph(std::string sGraphFilename)
+            ErrorCode LoadGraph(std::string sGraphFilename, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
             
-            ErrorCode LoadGraph(char* pGraphMemFile)
+            ErrorCode LoadGraph(char* pGraphMemFile, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
@@ -521,10 +521,6 @@ namespace SPTAG
             inline SizeType R() const { return m_iGraphSize; }
 
             inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
-
-            inline SizeType RowsInBlock() const { return m_pNeighborhoodGraph.rowsInBlock; }
-
-            inline SizeType& RowsInBlock() { return m_pNeighborhoodGraph.rowsInBlock; }
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 

@@ -147,6 +147,11 @@ protected:
     std::string m_sMetadataIndexFile = "metadataIndex.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::shared_ptr<void> m_pMetaToVec;
+
+public:
+    int m_iDataBlockSize;
+    int m_iDataCapacity;
+    int m_iMetaRecordSize;
 };
 
 

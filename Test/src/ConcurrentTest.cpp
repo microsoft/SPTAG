@@ -32,7 +32,7 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
         {
             SPTAG::ByteArray metaarr = meta->GetMetadata(i);
             std::uint64_t offset[2] = { 0, metaarr.Length() };
-            std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+            std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1, 1024 * 1024, 1024 * 1024, 10));
             SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
             if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
             i = (i + 1) % vec->Count();
@@ -120,7 +120,8 @@ void CTest(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
         SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
-        n));
+        n,
+        1024 * 1024, 1024 * 1024, 10));
 
     ConcurrentAddSearchSave<T>(algo, distCalcMethod, vecset, metaset, "testindices");
 }

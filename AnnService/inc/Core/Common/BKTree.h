@@ -51,8 +51,8 @@ namespace SPTAG
             float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length);
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod) : _K(k), _DK(k), _D(dim), _T(threadnum), _M(distMethod) {
-                centers = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
-                newTCenters = (T*)aligned_malloc(sizeof(T) * k * dim, ALIGN);
+                centers = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN);
+                newTCenters = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN);
                 counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
                 newCounts = new SizeType[threadnum * k];
@@ -65,8 +65,8 @@ namespace SPTAG
             }
 
             ~KmeansArgs() {
-                aligned_free(centers);
-                aligned_free(newTCenters);
+                _mm_free(centers);
+                _mm_free(newTCenters);
                 delete[] counts;
                 delete[] newCenters;
                 delete[] newCounts;

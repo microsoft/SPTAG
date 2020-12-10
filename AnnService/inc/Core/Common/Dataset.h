@@ -4,17 +4,6 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
-#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
-#include <malloc.h>
-#else
-#include <mm_malloc.h>
-#endif // defined(__GNUC__)
-
-#define ALIGN 32
-
-#define aligned_malloc(a, b) _mm_malloc(a, b)
-#define aligned_free(a) _mm_free(a)
-
 namespace SPTAG
 {
     namespace COMMON
@@ -30,25 +19,23 @@ namespace SPTAG
             T* data = nullptr;
             bool ownData = false;
             SizeType incRows = 0;
+            SizeType rowsInBlock;
             std::vector<T*> incBlocks;
-
-        public:
-            SizeType rowsInBlock = 1024 * 1024;
 
         public:
             Dataset() {}
 
-            Dataset(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
-                Initialize(rows_, cols_, data_, transferOnwership_);
+                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_);
             }
             ~Dataset()
             {
-                if (ownData) aligned_free(data);
-                for (T* ptr : incBlocks) aligned_free(ptr);
+                if (ownData) _mm_free(data);
+                for (T* ptr : incBlocks) _mm_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, DimensionType cols_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
@@ -56,11 +43,12 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)aligned_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
-                incBlocks.reserve(MaxSize / rowsInBlock + 1);
+                rowsInBlock = rowsInBlock_;
+                incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock - 1) / rowsInBlock);
             }
             void SetName(const std::string& name_) { name = name_; }
             const std::string& Name() const { return name; }
@@ -106,7 +94,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)aligned_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
                     }
@@ -127,7 +115,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) / rowsInBlock;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)aligned_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
+                        T* newBlock = (T*)_mm_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
                         incBlocks.push_back(newBlock);
@@ -163,27 +151,27 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> p_input)
+            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> p_input, SizeType pBlockSize, SizeType pCapacity)
             {
                 IOBINARY(p_input, ReadBinary, sizeof(SizeType), (char*)&rows);
                 IOBINARY(p_input, ReadBinary, sizeof(DimensionType), (char*)&cols);
 
-                Initialize(rows, cols);
+                Initialize(rows, cols, pBlockSize, pCapacity);
                 IOBINARY(p_input, ReadBinary, sizeof(T) * cols * rows, (char*)data);
                 LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
                 return ErrorCode::Success;
             }
 
-            ErrorCode Load(std::string sDataPointsFileName)
+            ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
             {
                 LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr);
+                return Load(ptr, blockSize, capacity);
             }
 
             // Functions for loading models from memory mapped files
-            ErrorCode Load(char* pDataPointsMemFile)
+            ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity)
             {
                 SizeType R;
                 DimensionType C;
@@ -193,7 +181,7 @@ namespace SPTAG
                 C = *((DimensionType*)pDataPointsMemFile);
                 pDataPointsMemFile += sizeof(DimensionType);
 
-                Initialize(R, C, (T*)pDataPointsMemFile);
+                Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile);
                 LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
                 return ErrorCode::Success;
             }
@@ -201,7 +189,7 @@ namespace SPTAG
             ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
             {
                 SizeType R = (SizeType)(indices.size());
-                data.Initialize(R, cols);
+                data.Initialize(R, cols, data.rowsInBlock, static_cast<SizeType>(data.incBlocks.capacity() * data.rowsInBlock));
                 for (SizeType i = 0; i < R; i++) {
                     std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
                 }
