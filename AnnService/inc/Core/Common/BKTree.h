@@ -316,7 +316,7 @@ namespace SPTAG
             std::vector<SizeType> & indices, const SizeType first, const SizeType last,
             KmeansArgs<T> & args, int samples = 1000) {
 
-            float bestLambdaFactor, bestCountStd = (std::numeric_limits<float>::max)();
+            float bestLambdaFactor = 100.0f, bestCountStd = (std::numeric_limits<float>::max)();
             for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
                 float CountStd = TryClustering(data, indices, first, last, args, samples, lambdaFactor, true);
                 if (CountStd < bestCountStd) {
