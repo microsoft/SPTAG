@@ -123,7 +123,7 @@ FileMetadataSet::GetMetadata(SizeType p_vectorID) const
         return b;
     }
     else {
-        return m_newdata.At(startoff, bytes);
+        return m_newdata.At(startoff - m_offsets[m_count], bytes);
     }
 }
 
@@ -265,7 +265,7 @@ MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeTy
     : m_count(p_count), m_metadataHolder(std::move(p_metadata))
 {
     m_offsets.Initialize(p_blockSize, p_capacity);
-    m_offsets.Append((std::uint64_t*)p_offsets.Data(), p_count + 1);
+    m_offsets.Append((std::uint64_t*)(p_offsets.Data()), p_count + 1);
     m_newdata.Initialize(p_blockSize * p_metaSize, p_capacity * p_metaSize);
 }
 

@@ -88,10 +88,10 @@ namespace SPTAG
                 {
                     auto blockNum = size / blockSize;
                     for (int i = 0; i < blockNum; i++)
-                        if (out->WriteBinary(sizeof(T) * blockSize, (char*)blocks[i]) != sizeof(T) * blockSize) return false;
+                        if (out->WriteBinary(sizeof(T) * blockSize, (char*)(blocks[i])) != sizeof(T) * blockSize) return false;
 
                     auto remainNum = size % blockSize;
-                    if (remainNum > 0 && out->WriteBinary(sizeof(T) * remainNum, (char*)blocks[blockNum]) != sizeof(T) * remainNum) return false;
+                    if (remainNum > 0 && out->WriteBinary(sizeof(T) * remainNum, (char*)(blocks[blockNum])) != sizeof(T) * remainNum) return false;
                     return true;
                 }
 
@@ -110,7 +110,7 @@ namespace SPTAG
 
                         auto curBlockPos = (size + written) % blockSize;
                         auto toWrite = min(blockSize - curBlockPos, length - written);
-                        if (in->ReadBinary(sizeof(T) * toWrite, (char*)blocks[currBlock] + curBlockPos) != sizeof(T) * toWrite) return false;
+                        if (in->ReadBinary(sizeof(T) * toWrite, (char*)(blocks[currBlock] + curBlockPos)) != sizeof(T) * toWrite) return false;
                         written += toWrite;
                     }
                     size += written;

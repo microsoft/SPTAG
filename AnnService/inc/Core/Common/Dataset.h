@@ -151,13 +151,13 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> p_input, SizeType pBlockSize, SizeType pCapacity)
+            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> pInput, SizeType blockSize, SizeType capacity)
             {
-                IOBINARY(p_input, ReadBinary, sizeof(SizeType), (char*)&rows);
-                IOBINARY(p_input, ReadBinary, sizeof(DimensionType), (char*)&cols);
+                IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&rows);
+                IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&cols);
 
-                Initialize(rows, cols, pBlockSize, pCapacity);
-                IOBINARY(p_input, ReadBinary, sizeof(T) * cols * rows, (char*)data);
+                Initialize(rows, cols, blockSize, capacity);
+                IOBINARY(pInput, ReadBinary, sizeof(T) * cols * rows, (char*)data);
                 LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
                 return ErrorCode::Success;
             }
@@ -189,7 +189,7 @@ namespace SPTAG
             ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
             {
                 SizeType R = (SizeType)(indices.size());
-                data.Initialize(R, cols, data.rowsInBlock, static_cast<SizeType>(data.incBlocks.capacity() * data.rowsInBlock));
+                data.Initialize(R, cols, rowsInBlock, static_cast<SizeType>(incBlocks.capacity() * rowsInBlock));
                 for (SizeType i = 0; i < R; i++) {
                     std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
                 }
