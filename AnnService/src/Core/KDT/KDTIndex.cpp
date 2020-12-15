@@ -383,6 +383,60 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::AddOne(const void* p_data, DimensionType p_dimension, ByteArray p_meta, bool p_withMetaIndex)
+        {
+            if (p_data == nullptr || p_dimension == 0) return ErrorCode::EmptyData;
+
+            SizeType begin;
+            ErrorCode ret;
+            {
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
+
+                begin = GetNumSamples();
+
+                if (begin == 0) {
+                    if (p_meta.Data() != nullptr) {
+                        m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                        if (p_withMetaIndex) {
+                            BuildMetaMapping(false);
+                            UpdateMetaMapping(std::string((char*)p_meta.Data(), p_meta.Length()), begin);
+                        }
+                        m_pMetadata->Add(p_meta);
+                    }
+                    if ((ret = BuildIndex(p_data, 1, p_dimension)) != ErrorCode::Success) return ret;
+                    return ErrorCode::Success;
+                }
+
+                if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
+
+                if (m_pSamples.AddBatch((const T*)p_data, 1) != ErrorCode::Success ||
+                    m_pGraph.AddBatch(1) != ErrorCode::Success ||
+                    m_deletedID.AddBatch(1) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
+                    m_pSamples.SetR(begin);
+                    m_pGraph.SetR(begin);
+                    m_deletedID.SetR(begin);
+                    return ErrorCode::MemoryOverFlow;
+                }
+
+                if (m_pMetadata != nullptr) {
+                    m_pMetadata->Add(p_meta);
+                    if (HasMetaMapping()) UpdateMetaMapping(std::string((char*)p_meta.Data(), p_meta.Length()), begin);
+                }
+            }
+
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod)
+                COMMON::Utils::Normalize((T*)m_pSamples[begin], GetFeatureDim(), COMMON::Utils::GetBase<T>());
+
+            if (begin + 1 - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0) {
+                m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph));
+            }
+
+            m_pGraph.RefineNode<T>(this, begin, true, true, m_pGraph.m_iAddCEF);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
@@ -396,11 +450,10 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
-                    m_pMetadata->AddBatch(*p_metadataSet);
-                    if (p_withMetaIndex && m_pMetadata != nullptr)
-                    {
-                        BuildMetaMapping(false);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (p_withMetaIndex) BuildMetaMapping(false);
                     }
                     if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
@@ -426,14 +479,18 @@ namespace SPTAG
                 }
 
                 if (m_pMetadata != nullptr) {
-                    m_pMetadata->AddBatch(*p_metadataSet);
-
-                    if (HasMetaMapping()) {
-                        for (SizeType i = begin; i < end; i++) {
-                            ByteArray meta = m_pMetadata->GetMetadata(i);
-                            std::string metastr((char*)meta.Data(), meta.Length());
-                            UpdateMetaMapping(metastr, i);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (HasMetaMapping()) {
+                            for (SizeType i = begin; i < end; i++) {
+                                ByteArray meta = m_pMetadata->GetMetadata(i);
+                                std::string metastr((char*)meta.Data(), meta.Length());
+                                UpdateMetaMapping(metastr, i);
+                            }
                         }
+                    }
+                    else {
+                        for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
                     }
                 }
             }

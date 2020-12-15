@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 #include "DiskIO.h"
+#include "Concurrent.h"
 
 namespace SPTAG
 {
@@ -21,7 +22,8 @@ namespace SPTAG
                 std::uint64_t size = 0;
                 std::uint64_t blockSize;
                 std::vector<T*> blocks;
-                
+                Concurrent::SpinLock lock;
+
 
             public:
                 LockFreeVector() {}
@@ -41,6 +43,7 @@ namespace SPTAG
 
                 bool Append(const T* data, size_t length)
                 {
+                    Concurrent::LockGuard<Concurrent::SpinLock> guard(lock);
                     if (size + length > blockSize * blocks.capacity()) return false;
 
                     std::uint64_t written = 0;

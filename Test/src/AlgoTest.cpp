@@ -88,9 +88,10 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
     clock_t start = clock();
     for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
         SPTAG::ByteArray metaarr = meta->GetMetadata(i);
-        std::uint64_t offset[2] = { 0, metaarr.Length() };
-        std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
-        SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset);
+        //std::uint64_t offset[2] = { 0, metaarr.Length() };
+        //std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+        //SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset);
+        SPTAG::ErrorCode ret = vecIndex->AddOne(vec->GetVector(i), vec->Dimension(), metaarr);
         if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
     }
     std::cout << "AddIndex time: " << ((float)(clock() - start) / CLOCKS_PER_SEC / vec->Count()) << "s" << std::endl;

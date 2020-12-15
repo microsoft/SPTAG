@@ -137,7 +137,7 @@ VectorIndex::GetMetaMapping(std::string& meta) const
 
 
 void
-VectorIndex::UpdateMetaMapping(std::string& meta, SizeType i)
+VectorIndex::UpdateMetaMapping(const std::string& meta, SizeType i)
 {
     MetadataMap* ptr = static_cast<MetadataMap*>(m_pMetaToVec.get());
     auto iter = ptr->find(meta);

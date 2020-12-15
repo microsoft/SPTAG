@@ -362,7 +362,7 @@ std::pair<std::uint64_t, std::uint64_t>
 MemMetadataSet::BufferSize() const
 {
     std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
-    return std::make_pair(m_offsets[m_offsets.size() - 1],
+    return std::make_pair(m_offsets.back(),
         sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
