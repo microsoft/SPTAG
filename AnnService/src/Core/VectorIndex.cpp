@@ -354,7 +354,7 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
             {
                 ByteArray meta = p_addindex->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
-                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1, m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
                 AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
             }
 

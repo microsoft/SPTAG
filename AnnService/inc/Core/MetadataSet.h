@@ -5,7 +5,7 @@
 #define _SPTAG_METADATASET_H_
 
 #include "CommonDataStructure.h"
-#include "../Helper/LockFree.h"
+#include <shared_mutex>
 
 namespace SPTAG
 {
@@ -68,17 +68,15 @@ public:
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
-    std::shared_ptr<Helper::DiskPriorityIO> m_fp = nullptr;
+    std::unique_ptr<std::shared_timed_mutex> m_lock;
 
-    Helper::LockFree::LockFreeVector<std::uint64_t> m_offsets;
+    std::vector<std::uint64_t> m_offsets;
 
     SizeType m_count;
 
-    std::string m_metaFile;
-
-    std::string m_metaindexFile;
-
-    Helper::LockFree::LockFreeVector<std::uint8_t> m_newdata;
+    std::shared_ptr<Helper::DiskPriorityIO> m_fp = nullptr;
+    
+    std::vector<std::uint8_t> m_newdata;
 };
 
 
@@ -86,6 +84,8 @@ class MemMetadataSet : public MetadataSet
 {
 public:
     MemMetadataSet(std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+
+    MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count);
 
     MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count, 
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
@@ -118,13 +118,15 @@ private:
     ErrorCode Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin,
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
 
-    Helper::LockFree::LockFreeVector<std::uint64_t> m_offsets;
+    std::unique_ptr<std::shared_timed_mutex> m_lock;
+
+    std::vector<std::uint64_t> m_offsets;
 
     SizeType m_count;
 
     ByteArray m_metadataHolder;
 
-    Helper::LockFree::LockFreeVector<std::uint8_t> m_newdata;
+    std::vector<std::uint8_t> m_newdata;
 };
 
 

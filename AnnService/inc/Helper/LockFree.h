@@ -61,15 +61,15 @@ namespace SPTAG
                     return true;
                 }
 
-                bool Append(const T data)
+                inline bool Append(const T data)
                 {
                     return Append(&data, 1);
                 }
 
-                void Clear() { size = 0; }
-                std::uint64_t Size() const { return size; }
+                inline void Clear() { size = 0; }
+                inline std::uint64_t Size() const { return size; }
 
-                T operator[](std::uint64_t offset) const { return *(blocks[offset / blockSize] + offset % blockSize); }
+                inline T operator[](std::uint64_t offset) const { return *(blocks[offset / blockSize] + offset % blockSize); }
 
                 ByteArray At(std::uint64_t offset, size_t length) const
                 {
@@ -82,6 +82,11 @@ namespace SPTAG
                         copy += toCopy;
                     }
                     return b;
+                }
+
+                inline ByteArray CopyAt(std::uint64_t offset, size_t length) const
+                {
+                    return At(offset, length);
                 }
 
                 bool Save(std::shared_ptr<Helper::DiskPriorityIO> out)

@@ -82,8 +82,6 @@ MetadataSet:: ~MetadataSet()
 
 
 FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile, std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize)
-    : m_metaFile(p_metafile),
-      m_metaindexFile(p_metaindexfile)
 {
     m_fp = f_createIO();
     auto fpidx = f_createIO();
@@ -97,12 +95,14 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
         exit(1);
     }
 
-    m_offsets.Initialize(p_blockSize, p_capacity);
-    if (!m_offsets.Load(fpidx, m_count + 1)) {
+    m_offsets.reserve(p_blockSize);
+    m_offsets.resize(m_count + 1);
+    if (fpidx->ReadBinary(sizeof(std::uint64_t) * (m_count + 1), (char*)m_offsets.data()) != sizeof(std::uint64_t) * (m_count + 1)) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
         exit(1);
     }
-    m_newdata.Initialize(p_blockSize * p_metaSize, p_capacity * p_metaSize);
+    m_newdata.reserve(p_blockSize * p_metaSize);
+    m_lock.reset(new std::shared_timed_mutex);
     LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
 }
 
@@ -115,6 +115,7 @@ FileMetadataSet::~FileMetadataSet()
 ByteArray
 FileMetadataSet::GetMetadata(SizeType p_vectorID) const
 {
+    std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     std::uint64_t startoff = m_offsets[p_vectorID];
     std::uint64_t bytes = m_offsets[p_vectorID + 1] - startoff;
     if (p_vectorID < m_count) {
@@ -123,7 +124,7 @@ FileMetadataSet::GetMetadata(SizeType p_vectorID) const
         return b;
     }
     else {
-        return m_newdata.At(startoff - m_offsets[m_count], bytes);
+        return ByteArray((std::uint8_t*)m_newdata.data() + startoff - m_offsets[m_count], bytes, false);
     }
 }
 
@@ -131,46 +132,63 @@ FileMetadataSet::GetMetadata(SizeType p_vectorID) const
 ByteArray
 FileMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
 {
-    return GetMetadata(p_vectorID);
+    std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    std::uint64_t startoff = m_offsets[p_vectorID];
+    std::uint64_t bytes = m_offsets[p_vectorID + 1] - startoff;
+    if (p_vectorID < m_count) {
+        ByteArray b = ByteArray::Alloc(bytes);
+        m_fp->ReadBinary(bytes, (char*)b.Data(), startoff);
+        return b;
+    }
+    else {
+        ByteArray b = ByteArray::Alloc(bytes);
+        memcpy(b.Data(), m_newdata.data() + (startoff - m_offsets[m_count]), bytes);
+        return b;
+    }
 }
 
 
 SizeType
 FileMetadataSet::Count() const
 {
-    return static_cast<SizeType>(m_offsets.Size() - 1);
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return static_cast<SizeType>(m_offsets.size() - 1);
 }
 
 
 bool
 FileMetadataSet::Available() const
 {
-    return m_fp != nullptr && m_offsets.Size() > 1;
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return m_fp != nullptr && m_offsets.size() > 1;
 }
 
 
 std::pair<std::uint64_t, std::uint64_t> 
 FileMetadataSet::BufferSize() const
 {
-    return std::make_pair(m_offsets[m_offsets.Size() - 1], 
-        sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.Size());
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return std::make_pair(m_offsets.back(), 
+        sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
 
 void
 FileMetadataSet::Add(const ByteArray& data)
 {
-    m_newdata.Append(data.Data(), data.Length());
-    m_offsets.Append(m_offsets[m_offsets.Size() - 1] + data.Length());
+    std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_offsets.push_back(m_offsets.back() + data.Length());
 }
 
 
 ErrorCode
 FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut)
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     SizeType count = Count();
     IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (char*)&count);
-    if (!m_offsets.Save(p_metaIndexOut)) return ErrorCode::DiskIOFail;
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t) * m_offsets.size(), (char*)m_offsets.data());
 
     std::uint64_t bufsize = 1000000;
     char* buf = new char[bufsize];
@@ -181,8 +199,10 @@ FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut,
     }
     delete[] buf;
     
-    if (m_newdata.Size() > 0 && !m_newdata.Save(p_metaOut)) return ErrorCode::DiskIOFail;
-    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.Size() - 1, m_offsets[m_offsets.Size() - 1]);
+    if (m_newdata.size() > 0) {
+        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (char*)m_newdata.data());
+    }
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 
@@ -198,24 +218,27 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
         ErrorCode ret = SaveMetadata(metaOut, metaIndexOut);
         if (ret != ErrorCode::Success) return ret;
     }
-
-    m_fp->ShutDown();
-    if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
-    if (fileexists(p_metaindexFile.c_str())) std::remove(p_metaindexFile.c_str());
-    std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
-    std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
-    if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-    m_count = Count();
-    m_newdata.Clear();
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+        m_fp->ShutDown();
+        if (fileexists(p_metaFile.c_str())) std::remove(p_metaFile.c_str());
+        if (fileexists(p_metaindexFile.c_str())) std::remove(p_metaindexFile.c_str());
+        std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
+        std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
+        if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+        m_count = Count();
+        m_newdata.clear();
+    }
     return ErrorCode::Success;
 }
 
 
 MemMetadataSet::MemMetadataSet(std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize): m_count(0), m_metadataHolder(ByteArray::c_empty)
 {
-    m_offsets.Initialize(p_blockSize, p_capacity);
-    m_offsets.Append(0);
-    m_newdata.Initialize(p_blockSize * p_metaSize, p_capacity * p_metaSize);
+    m_offsets.reserve(p_blockSize);
+    m_offsets.push_back(0);
+    m_newdata.reserve(p_blockSize * p_metaSize);
+    m_lock.reset(new std::shared_timed_mutex);
 }
 
 
@@ -224,13 +247,15 @@ MemMetadataSet::Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shar
     std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize)
 {
     IOBINARY(p_metaindexin, ReadBinary, sizeof(m_count), (char*)&m_count);
-    m_offsets.Initialize(p_blockSize, p_capacity);
-    if (!m_offsets.Load(p_metaindexin, m_count + 1)) return ErrorCode::DiskIOFail;
+    m_offsets.reserve(p_blockSize);
+    m_offsets.resize(m_count + 1);
+    IOBINARY(p_metaindexin, ReadBinary, sizeof(std::uint64_t) * (m_count + 1), (char*)m_offsets.data());
 
     m_metadataHolder = ByteArray::Alloc(m_offsets[m_count]);
     IOBINARY(p_metain, ReadBinary, m_metadataHolder.Length(), (char *)m_metadataHolder.Data());
 
-    m_newdata.Initialize(p_blockSize * p_metaSize, p_capacity * p_metaSize);
+    m_newdata.reserve(p_blockSize * p_metaSize);
+    m_lock.reset(new std::shared_timed_mutex);
     LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
     return ErrorCode::Success;
 }
@@ -260,13 +285,23 @@ MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string&
 }
 
 
+MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count)
+    : m_count(p_count), m_metadataHolder(std::move(p_metadata))
+{
+    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(p_offsets.Data());
+    m_offsets.assign(newdata, newdata + p_count + 1);
+    m_lock.reset(new std::shared_timed_mutex);
+}
+
 MemMetadataSet::MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count,
     std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize)
     : m_count(p_count), m_metadataHolder(std::move(p_metadata))
 {
-    m_offsets.Initialize(p_blockSize, p_capacity);
-    m_offsets.Append((std::uint64_t*)(p_offsets.Data()), p_count + 1);
-    m_newdata.Initialize(p_blockSize * p_metaSize, p_capacity * p_metaSize);
+    m_offsets.reserve(p_blockSize);
+    const std::uint64_t* newdata = reinterpret_cast<const std::uint64_t*>(p_offsets.Data());
+    m_offsets.assign(newdata, newdata + p_count + 1);
+    m_newdata.reserve(p_blockSize * p_metaSize);
+    m_lock.reset(new std::shared_timed_mutex);
 }
 
 
@@ -278,12 +313,13 @@ MemMetadataSet::~MemMetadataSet()
 ByteArray
 MemMetadataSet::GetMetadata(SizeType p_vectorID) const
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     std::uint64_t startoff = m_offsets[p_vectorID];
     std::uint64_t bytes = m_offsets[p_vectorID + 1] - startoff;
     if (p_vectorID < m_count) {
         return ByteArray(m_metadataHolder.Data() + startoff, bytes, false);
     } else {
-        return m_newdata.At(startoff - m_offsets[m_count], bytes);
+        return ByteArray((std::uint8_t*)m_newdata.data() + startoff - m_offsets[m_count], bytes, false);
     }
 }
 
@@ -291,6 +327,7 @@ MemMetadataSet::GetMetadata(SizeType p_vectorID) const
 ByteArray
 MemMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     std::uint64_t startoff = m_offsets[p_vectorID];
     std::uint64_t bytes = m_offsets[p_vectorID + 1] - startoff;
     if (p_vectorID < m_count) {
@@ -298,7 +335,9 @@ MemMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
         memcpy(b.Data(), m_metadataHolder.Data() + startoff, bytes);
         return b;
     } else {
-        return m_newdata.At(startoff - m_offsets[m_count], bytes);
+        ByteArray b = ByteArray::Alloc(bytes);
+        memcpy(b.Data(), m_newdata.data() + (startoff - m_offsets[m_count]), bytes);
+        return b;
     }
 }
 
@@ -306,43 +345,50 @@ MemMetadataSet::GetMetadataCopy(SizeType p_vectorID) const
 SizeType
 MemMetadataSet::Count() const
 {
-    return static_cast<SizeType>(m_offsets.Size() - 1);
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return static_cast<SizeType>(m_offsets.size() - 1);
 }
 
 
 bool
 MemMetadataSet::Available() const
 {
-    return m_offsets.Size() > 1;
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return m_offsets.size() > 1;
 }
 
 
 std::pair<std::uint64_t, std::uint64_t>
 MemMetadataSet::BufferSize() const
 {
-    return std::make_pair(m_offsets[m_offsets.Size() - 1],
-        sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.Size());
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    return std::make_pair(m_offsets[m_offsets.size() - 1],
+        sizeof(SizeType) + sizeof(std::uint64_t) * m_offsets.size());
 }
 
 
 void
 MemMetadataSet::Add(const ByteArray& data)
 {
-    m_newdata.Append(data.Data(), data.Length());
-    m_offsets.Append(m_offsets[m_offsets.Size() - 1]+ data.Length());
+    std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
+    m_offsets.push_back(m_offsets.back() + data.Length());
 }
 
 
 ErrorCode
 MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut)
 {
+    std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     SizeType count = Count();
     IOBINARY(p_metaIndexOut, WriteBinary, sizeof(SizeType), (char*)&count);
-    if (!m_offsets.Save(p_metaIndexOut)) return ErrorCode::DiskIOFail;
+    IOBINARY(p_metaIndexOut, WriteBinary, sizeof(std::uint64_t) * m_offsets.size(), (char*)m_offsets.data());
 
     IOBINARY(p_metaOut, WriteBinary, m_metadataHolder.Length(), reinterpret_cast<const char*>(m_metadataHolder.Data()));
-    if (m_newdata.Size() > 0 && !m_newdata.Save(p_metaOut)) return ErrorCode::DiskIOFail;
-    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.Size() - 1, m_offsets[m_offsets.Size() - 1]);
+    if (m_newdata.size() > 0) {
+        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (char*)m_newdata.data());
+    }
+    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 

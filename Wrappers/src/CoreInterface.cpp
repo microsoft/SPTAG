@@ -210,8 +210,7 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
         if (((char)p_meta.Data()[i]) == '\n')
             offsets[current++] = (std::uint64_t)(i + 1);
     }
-    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num,
-        m_index->m_iDataBlockSize, m_index->m_iDataCapacity, m_index->m_iMetaRecordSize));
+    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num));
     return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta));
 }
 

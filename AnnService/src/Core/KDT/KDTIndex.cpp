@@ -396,7 +396,8 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    m_pMetadata = std::move(p_metadataSet);
+                    m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                    m_pMetadata->AddBatch(*p_metadataSet);
                     if (p_withMetaIndex && m_pMetadata != nullptr)
                     {
                         BuildMetaMapping(false);
