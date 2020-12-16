@@ -389,7 +389,7 @@ MemMetadataSet::Add(const ByteArray& data)
 {
     auto& m_offsets = *static_cast<MetadataOffsets*>(m_pOffsets.get());
     std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
-    m_newdata.insert(m_newdata.begin() + m_offsets.back(), data.Data(), data.Data() + data.Length());
+    m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
     m_offsets.push_back(m_offsets.back() + data.Length());
 }
 
@@ -407,7 +407,7 @@ MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, 
     IOBINARY(p_metaOut, WriteBinary, m_metadataHolder.Length(), reinterpret_cast<const char*>(m_metadataHolder.Data()));
     if (m_newdata.size() > 0) {
         std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
-        IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (const char*)m_newdata.data());
+        IOBINARY(p_metaOut, WriteBinary, m_offsets[count] - m_offsets[m_count], (const char*)m_newdata.data());
     }
     LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;

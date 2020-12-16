@@ -84,7 +84,8 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "5");
-
+    vecIndex->SetParameter("DataBlockSize", "1024");
+    vecIndex->SetParameter("DataCapacity", "2048");
     omp_set_num_threads(5);
     
     auto t1 = std::chrono::high_resolution_clock::now();
