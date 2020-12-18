@@ -95,6 +95,7 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
+        /*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -148,7 +149,8 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
-/*
+        */
+
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -204,7 +206,7 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
-*/
+
 
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
@@ -239,7 +241,7 @@ namespace SPTAG
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_iMaxCheck);
+            workSpace->Reset(m_iMaxCheck, GetNumSamples());
 
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
 
@@ -260,7 +262,7 @@ namespace SPTAG
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples());
 
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
 
@@ -272,7 +274,7 @@ namespace SPTAG
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, GetNumSamples());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
             m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
