@@ -133,7 +133,7 @@ namespace SPTAG
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
-
+        /*
         class DistPriorityQueue {
             std::unique_ptr<float[]> m_data;
             int m_size;
@@ -176,7 +176,7 @@ namespace SPTAG
                 return m_data[1];
             }
         };
-
+        */
         // Variables for each single NN search
         struct WorkSpace
         {
@@ -185,7 +185,7 @@ namespace SPTAG
                 nodeCheckStatus.Init(maxCheck, hashexp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
-                m_Results.Resize(maxCheck / 16);
+                //m_Results.Resize(maxCheck / 16);
 
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
@@ -194,16 +194,15 @@ namespace SPTAG
                 m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
-            void Reset(int maxCheck, SizeType dataSize)
+            void Reset(int maxCheck)
             {
                 nodeCheckStatus.clear();
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
-                m_Results.clear(maxCheck / 16);
+                //m_Results.clear(maxCheck / 16);
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
-                //m_iContinuousLimit = maxCheck / 64;
-                m_iContinuousLimit = min(16 + dataSize / 2048, maxCheck / 64);
+                m_iContinuousLimit = maxCheck / 64;
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
@@ -234,7 +233,7 @@ namespace SPTAG
             // Priority queue Used for Tree
             Heap<NodeDistPair> m_SPTQueue;
 
-            DistPriorityQueue m_Results;
+            //DistPriorityQueue m_Results;
         };
     }
 }

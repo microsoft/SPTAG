@@ -390,7 +390,10 @@ MemMetadataSet::Add(const ByteArray& data)
     auto& m_offsets = *static_cast<MetadataOffsets*>(m_pOffsets.get());
     std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
-    m_offsets.push_back(m_offsets.back() + data.Length());
+    if (!m_offsets.push_back(m_offsets.back() + data.Length())) {
+        LOG(Helper::LogLevel::LL_Error, "Insert MetaIndex error! DataCapacity overflow!\n");
+        m_newdata.resize(m_newdata.size() - data.Length());
+    }
 }
 
 

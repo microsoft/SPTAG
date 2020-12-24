@@ -23,10 +23,10 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     vecIndex->SetParameter("NumberOfThreads", "5");
     vecIndex->SetParameter("AddCEF", "200");
     vecIndex->SetParameter("CEF", "1500");
-    vecIndex->SetParameter("MaxCheck", "4096");
-    vecIndex->SetParameter("MaxCheckForRefineGraph", "3200");
-    vecIndex->SetParameter("DataBlockSize", "200000");
-    vecIndex->SetParameter("DataCapacity", "200000");
+    vecIndex->SetParameter("MaxCheck", "8192");
+    vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
+    vecIndex->SetParameter("DataBlockSize", "300000");
+    vecIndex->SetParameter("DataCapacity", "300000");
 
     omp_set_num_threads(5);
 
@@ -66,6 +66,15 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
 
+    bool deleted = false;
+    for (SizeType i = 0; i < vecIndex->GetNumSamples(); i++) {
+        std::string truthstr = std::to_string(i);
+        ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
+        if (vecIndex->GetSample(truthmeta, deleted) == nullptr) {
+            std::cout << "Do not contain vector " << i << std::endl;
+        }
+    }
+
     std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
     auto t1 = std::chrono::high_resolution_clock::now();
     for (SizeType i = 0; i < queryset->Count(); i++)
@@ -77,15 +86,16 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
 
     float recall = 0;
-    bool deleted = false;
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
-        for (int j = 0; j < truth->Dimension(); j++) {
-            for (int l = 0; l < k; l++) {
-                std::string truthstr = std::to_string(nn[j]);
-                ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
-                float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
+        for (int j = 0; j < truth->Dimension(); j++)
+        { 
+            std::string truthstr = std::to_string(nn[j]);
+            ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
+            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
+            for (int l = 0; l < k; l++) 
+            {
                 if (fabs(truthdist - res[i].GetResult(l)->Dist) < 1e-6 * truthdist) {
                     recall += 1.0;
                     break;
@@ -104,13 +114,14 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
     if (fileexists("test_vector.bin") && fileexists("test_meta.bin") && fileexists("test_metaidx.bin") && fileexists("test_query.bin")) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("test_vector.bin,test_meta.bin,test_metaidx.bin"))
+        if (ErrorCode::Success != vectorReader->LoadFile("test_vector.bin"))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
         vecset = vectorReader->GetVectorSet();
-        metaset = vectorReader->GetMetadataSet();
+        
+        metaset.reset(new MemMetadataSet("test_meta.bin", "test_metaidx.bin", vecset->Count() * 2, vecset->Count() * 2, 10));
 
         if (ErrorCode::Success != vectorReader->LoadFile("test_query.bin"))
         {
@@ -139,7 +150,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
             offset += a.length();
         }
         ((std::uint64_t*)metaoffset.Data())[n] = offset;
-        metaset.reset(new MemMetadataSet(meta, metaoffset, n, 1024 * 1024, 1024 * 1024, 10));
+        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
         metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
 
         ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);

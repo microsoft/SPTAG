@@ -49,7 +49,7 @@ namespace SPTAG
 
                     std::uint64_t written = 0;
                     while (written < length) {
-                        auto currBlock = (m_size + written) / m_blockSize;
+                        std::uint64_t currBlock = (m_size + written) / m_blockSize;
                         if (currBlock >= m_blocks.size()) {
                             T* newBlock = new T[m_blockSize];
                             if (newBlock == nullptr) return false;
@@ -70,7 +70,7 @@ namespace SPTAG
                     Concurrent::LockGuard<Concurrent::SpinLock> guard(m_lock);
                     if (m_size + 1 > m_blockSize* m_blocks.capacity()) return false;
 
-                    auto currBlock = m_size / m_blockSize;
+                    std::uint64_t currBlock = m_size / m_blockSize;
                     if (currBlock >= m_blocks.size()) {
                         T* newBlock = new T[m_blockSize];
                         if (newBlock == nullptr) return false;
@@ -78,7 +78,7 @@ namespace SPTAG
                     }
 
                     *(m_blocks[currBlock] + m_size % m_blockSize) = data;
-                    m_size += 1;
+                    m_size++;
                     return true;
                 }
 

@@ -86,7 +86,7 @@ typedef std::int32_t DimensionType;
 
 const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
-const float MaxDist = (std::numeric_limits<float>::max)();
+const float MaxDist = (std::numeric_limits<float>::max)() / 10;
 const float Epsilon = 0.000000001f;
 
 extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
