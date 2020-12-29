@@ -105,7 +105,7 @@ class Point {
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
-  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
+//  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
 
@@ -299,21 +299,21 @@ class Point<int8_t, SUMTYPE, Dim> {
   __device__ __host__ SUMTYPE l2(Point<int8_t,SUMTYPE,Dim>* other) {
 
     SUMTYPE totals[4] = {0,0,0,0};
-    SUMTYPE temp[4];
-    SUMTYPE temp_other[4];
+    int32_t temp[4];
+    int32_t temp_other[4];
 
     for(int i=0; i<Dim/4; ++i) {
-      temp[0] = (coords[i] & 0x000000FF);
-      temp_other[0] = (other->coords[i] & 0x000000FF);
+      temp[0] = (int8_t)(coords[i] & 0x000000FF);
+      temp_other[0] = (int8_t)(other->coords[i] & 0x000000FF);
 
-      temp[1] = (coords[i] & 0x0000FF00) >> 8;
-      temp_other[1] = (other->coords[i] & 0x0000FF00) >> 8;
+      temp[1] = (int8_t)((coords[i] & 0x0000FF00) >> 8);
+      temp_other[1] = (int8_t)((other->coords[i] & 0x0000FF00) >> 8);
 
-      temp[2] = (coords[i] & 0x00FF0000) >> 16;
-      temp_other[2] = (other->coords[i] & 0x00FF0000) >> 16;
+      temp[2] = (int8_t)((coords[i] & 0x00FF0000) >> 16);
+      temp_other[2] = (int8_t)((other->coords[i] & 0x00FF0000) >> 16);
 
-      temp[3] = (coords[i]) >> 24;
-      temp_other[3] = (other->coords[i])>> 24;
+      temp[3] = (int8_t)((coords[i]) >> 24);
+      temp_other[3] = (int8_t)((other->coords[i])>> 24);
 
       totals[0] += (temp[0]-temp_other[0])*(temp[0]-temp_other[0]);
       totals[1] += (temp[1]-temp_other[1])*(temp[1]-temp_other[1]);
