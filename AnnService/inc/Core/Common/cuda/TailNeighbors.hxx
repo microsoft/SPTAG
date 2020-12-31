@@ -2,7 +2,6 @@
 #ifndef _SPTAG_COMMON_CUDA_TAILNEIGHBORS_H
 #define _SPTAG_COMMON_CUDA_TAILNEIGHBORS_H
 
-//#include "inc/Core/VectorIndex.h"
 #include "Distance.hxx"
 #include "KNN.hxx"
 
@@ -109,7 +108,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, gpuNum);
-//    size_t totalGPUMem = ((size_t)prop.totalGlobalMem);
     
     size_t headVecSize = headVectorIDS.size()*sizeof(Point<T,SUMTYPE,MAX_DIM>);
     size_t treeSize = 20*headVectorIDS.size();
@@ -117,7 +115,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>));
     int BATCH_SIZE = min(maxEltsPerBatch, (int)(N-headVectorIDS.size()));
 
-    if(BATCH_SIZE == 0 || ((int)(N-headVectorIDS.size())) / BATCH_SIZE > 1000) {
+   // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
+    if(BATCH_SIZE == 0 || ((int)(N-headVectorIDS.size())) / BATCH_SIZE > 10000) {
       LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index.  Total GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", ((size_t)prop.totalGlobalMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
       exit(1);
     }
@@ -148,9 +147,11 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
     size_t curr_batch_size = BATCH_SIZE;
 
-// Start of batch computation
+// Get neighbor result set for each batch of tail vectors
     for(size_t offset=0; offset<(N-headVectorIDS.size()); offset+=BATCH_SIZE) {
         curr_batch_size = BATCH_SIZE;
+
+        // Check if final batch is smaller than previous
         if(offset+BATCH_SIZE > (N-headVectorIDS.size())) {
             curr_batch_size = (N-headVectorIDS.size())-offset;
         }
@@ -166,6 +167,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         }
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "Copying results from previous iterations - kernel status:%d\n", cudaMemcpy(d_results, &results[offset*RNG_SIZE], curr_batch_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyHostToDevice));
 
+        // For each tree, create a new TPT with new random values and compute neighbors using it
         for(int tree_id=0; tree_id < NUM_TREES; ++tree_id) {
 auto t1 = std::chrono::high_resolution_clock::now();
             tptree->reset();

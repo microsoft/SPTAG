@@ -632,7 +632,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
     int metric = (GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine);
 
-    if(typeid(GetVectorValueType()) != typeid(float)) {
+    if(GetVectorValueType() != VectorValueType::Float) {
         typedef int32_t SUMTYPE;
         DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)replicaCount)];
 
