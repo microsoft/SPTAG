@@ -28,7 +28,7 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     vecIndex->SetParameter("DataBlockSize", "300000");
     vecIndex->SetParameter("DataCapacity", "300000");
 
-    omp_set_num_threads(5);
+    omp_set_num_threads(2);
 
     auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for
@@ -84,7 +84,7 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
-
+    
     float recall = 0;
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
@@ -109,7 +109,7 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
 template <typename T>
 void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
 {
-    SizeType n = 200000, q = 1000;
+    SizeType n = 200000, q = 2000;
     DimensionType m = 64;
     if (fileexists("test_vector.bin") && fileexists("test_meta.bin") && fileexists("test_metaidx.bin") && fileexists("test_query.bin")) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
@@ -208,10 +208,10 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
 {
     std::shared_ptr<VectorSet> vecset, queryset, truth;
     std::shared_ptr<MetadataSet> metaset;
-    GenerateData<T>(vecset, metaset, queryset, truth, distCalcMethod, 5);
+    GenerateData<T>(vecset, metaset, queryset, truth, distCalcMethod, 10);
 
     Add<T>(algo, distCalcMethod, vecset, metaset, "testindices");
-    Search<T>("testindices", queryset, 5, truth);
+    Search<T>("testindices", queryset, 10, truth);
 }
 
 BOOST_AUTO_TEST_SUITE(PerfTest)

@@ -133,7 +133,7 @@ namespace SPTAG
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
-        /*
+/*
         class DistPriorityQueue {
             std::unique_ptr<float[]> m_data;
             int m_size;
@@ -176,7 +176,7 @@ namespace SPTAG
                 return m_data[1];
             }
         };
-        */
+*/
         // Variables for each single NN search
         struct WorkSpace
         {
