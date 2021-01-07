@@ -85,7 +85,7 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
     
-    float recall = 0;
+    float eps = 1e-8, recall = 0;
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
@@ -96,7 +96,7 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
             float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
             for (int l = 0; l < k; l++) 
             {
-                if (fabs(truthdist - res[i].GetResult(l)->Dist) < 1e-6 * truthdist) {
+                if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (truthdist + eps)) {
                     recall += 1.0;
                     break;
                 }
