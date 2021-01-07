@@ -263,9 +263,10 @@ namespace SPTAG
         template <typename T>
         float TryClustering(const Dataset<T>& data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last,
-            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false) {
+            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
 
             InitCenters(data, indices, first, last, args, samples, 3);
+            if (abort && abort->ShouldAbort()) return 0;
 
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
@@ -290,6 +291,8 @@ namespace SPTAG
                 }
                 currDiff = RefineCenters(data, args);
                 //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
+
+                if (abort && abort->ShouldAbort()) return 0;
                 if (currDiff < 1e-3 || noImprovement >= 5) break;
             }
 
@@ -343,9 +346,10 @@ namespace SPTAG
         template <typename T>
         int KmeansClustering(const Dataset<T>& data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
-            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false) {
+            KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
             
-            TryClustering(data, indices, first, last, args, samples, lambdaFactor, debug);
+            TryClustering(data, indices, first, last, args, samples, lambdaFactor, debug, abort);
+            if (abort && abort->ShouldAbort()) return 1;
 
             int numClusters = 0;
             for (int i = 0; i < args._K; i++) if (args.counts[i] > 0) numClusters++;
@@ -382,10 +386,10 @@ namespace SPTAG
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
             template <typename T>
-            void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod)
+            void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod, IAbortOperation* abort)
             {
                 BKTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, distMethod, 1);
+                newTrees.BuildTrees<T>(data, distMethod, 1, nullptr, nullptr, false, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
@@ -394,7 +398,9 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, bool dynamicK = false)
+            void BuildTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, 
+                std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
+                bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
@@ -413,6 +419,7 @@ namespace SPTAG
                 KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod);
 
                 if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
+                if (abort && abort->ShouldAbort()) return;
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
@@ -425,6 +432,8 @@ namespace SPTAG
 
                     ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
                     while (!ss.empty()) {
+                        if (abort && abort->ShouldAbort()) return;
+
                         BKTStackItem item = ss.top(); ss.pop();
                         SizeType newBKTid = (SizeType)m_pTreeRoots.size();
                         m_pTreeRoots[item.index].childStart = newBKTid;
@@ -440,7 +449,7 @@ namespace SPTAG
                                 args._DK = std::max<int>(args._DK, 2);
                             }
 
-                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, ss.empty());
+                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, ss.empty(), abort);
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
