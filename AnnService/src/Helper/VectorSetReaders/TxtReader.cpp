@@ -111,7 +111,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
 
 
 std::shared_ptr<VectorSet>
-TxtVectorReader::GetVectorSet() const
+TxtVectorReader::GetVectorSet(SizeType start, SizeType end) const
 {
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
@@ -130,19 +130,23 @@ TxtVectorReader::GetVectorSet() const
         exit(1);
     }
 
-    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
-    ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
-    char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-
-    if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf) != totalRecordVectorBytes) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
-        exit(1);
+    if (start > row) start = row;
+    if (end < 0 || end > row) end = row;
+    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * (end - start) * col;
+    ByteArray vectorSet;
+    if (totalRecordVectorBytes > 0) {
+        vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
+        char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+        std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * start * col + +sizeof(SizeType) + sizeof(DimensionType);
+        if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf, offset) != totalRecordVectorBytes) {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+            exit(1);
+        }
     }
-
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
         m_options->m_inputValueType,
         col,
-        row));
+        end - start));
 }
 
 

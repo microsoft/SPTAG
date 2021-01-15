@@ -19,22 +19,24 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
 
+    if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "5");
     vecIndex->SetParameter("AddCEF", "200");
     vecIndex->SetParameter("CEF", "1500");
     vecIndex->SetParameter("MaxCheck", "8192");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
-    vecIndex->SetParameter("DataBlockSize", "300000");
-    vecIndex->SetParameter("DataCapacity", "300000");
 
-    omp_set_num_threads(2);
+    omp_set_num_threads(1);
 
     auto t1 = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for
     for (SizeType i = 0; i < vec->Count(); i++) {
         ByteArray metaarr = meta->GetMetadata(i);
-        ErrorCode ret = vecIndex->AddOne(vec->GetVector(i), vec->Dimension(), metaarr, true);
+        std::uint64_t offset[2] = { 0, metaarr.Length() };
+        std::shared_ptr<MetadataSet> metaset(new MemMetadataSet(metaarr, ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+        ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
+        //ErrorCode ret = vecIndex->AddOne(vec->GetVector(i), vec->Dimension(), metaarr, true);
         if (ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
     }
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -52,10 +54,11 @@ void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_pt
     std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
 
+    if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "5");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
+    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
 }
 
@@ -66,15 +69,6 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
 
-    bool deleted = false;
-    for (SizeType i = 0; i < vecIndex->GetNumSamples(); i++) {
-        std::string truthstr = std::to_string(i);
-        ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
-        if (vecIndex->GetSample(truthmeta, deleted) == nullptr) {
-            std::cout << "Do not contain vector " << i << std::endl;
-        }
-    }
-
     std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
     auto t1 = std::chrono::high_resolution_clock::now();
     for (SizeType i = 0; i < queryset->Count(); i++)
@@ -84,17 +78,17 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
-    
-    float eps = 1e-8, recall = 0;
+
+    float eps = 1e-8f, recall = 0;
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
         for (int j = 0; j < truth->Dimension(); j++)
-        { 
+        {
             std::string truthstr = std::to_string(nn[j]);
             ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
             float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
-            for (int l = 0; l < k; l++) 
+            for (int l = 0; l < k; l++)
             {
                 if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (truthdist + eps)) {
                     recall += 1.0;
@@ -120,7 +114,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
             exit(1);
         }
         vecset = vectorReader->GetVectorSet();
-        
+
         metaset.reset(new MemMetadataSet("test_meta.bin", "test_metaidx.bin", vecset->Count() * 2, vecset->Count() * 2, 10));
 
         if (ErrorCode::Success != vectorReader->LoadFile("test_query.bin"))
@@ -175,20 +169,20 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
     }
     else {
         omp_set_num_threads(5);
-        
+
         DistCalcMethod distMethod;
         Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
         if (distMethod == DistCalcMethod::Cosine) {
             COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
         }
-       
+
         ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
 
 #pragma omp parallel for
         for (SizeType i = 0; i < queryset->Count(); ++i)
         {
             SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
-            
+
             COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
             for (SizeType j = 0; j < vecset->Count(); j++)
             {
@@ -212,6 +206,9 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
 
     Add<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     Search<T>("testindices", queryset, 10, truth);
+
+    Build<T>(algo, distCalcMethod, vecset, metaset, "testindices");
+    Search<T>("testindices", queryset, 10, truth);
 }
 
 BOOST_AUTO_TEST_SUITE(PerfTest)
@@ -219,6 +216,11 @@ BOOST_AUTO_TEST_SUITE(PerfTest)
 BOOST_AUTO_TEST_CASE(BKTTest)
 {
     PTest<std::int8_t>(IndexAlgoType::BKT, "L2");
+}
+
+BOOST_AUTO_TEST_CASE(KDTTest)
+{
+    PTest<std::int8_t>(IndexAlgoType::KDT, "L2");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
