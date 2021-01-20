@@ -80,6 +80,7 @@ void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int 
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
 
     float eps = 1e-8f, recall = 0;
+    bool deleted;
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
