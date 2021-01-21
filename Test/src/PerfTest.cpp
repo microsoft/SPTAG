@@ -27,16 +27,12 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     vecIndex->SetParameter("MaxCheck", "8192");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
 
-    omp_set_num_threads(1);
-
     auto t1 = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for
     for (SizeType i = 0; i < vec->Count(); i++) {
         ByteArray metaarr = meta->GetMetadata(i);
         std::uint64_t offset[2] = { 0, metaarr.Length() };
         std::shared_ptr<MetadataSet> metaset(new MemMetadataSet(metaarr, ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
         ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
-        //ErrorCode ret = vecIndex->AddOne(vec->GetVector(i), vec->Dimension(), metaarr, true);
         if (ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
     }
     auto t2 = std::chrono::high_resolution_clock::now();

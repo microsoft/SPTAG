@@ -18,11 +18,7 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
-
-    char blocksize[] = "100";
-    vecIndex->SetParameter("DataBlockSize", blocksize);
-    vecIndex->SetParameter("GraphBlockSize", blocksize);
-    vecIndex->SetParameter("LabelBlockSize", blocksize);
+    vecIndex->SetParameter("DataBlockSize", "100");
 
     bool stop = false;
 
@@ -120,8 +116,7 @@ void CTest(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
         SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
-        n,
-        1024 * 1024, 1024 * 1024, 10));
+        n));
 
     ConcurrentAddSearchSave<T>(algo, distCalcMethod, vecset, metaset, "testindices");
 }

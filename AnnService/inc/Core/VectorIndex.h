@@ -30,8 +30,6 @@ public:
     
     virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false) = 0;
 
-    virtual ErrorCode AddOne(const void* p_data, DimensionType p_dimension, ByteArray p_meta, bool p_withMetaIndex = false) = 0;
-
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;

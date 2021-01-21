@@ -46,5 +46,6 @@ DefineBKTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
 DefineBKTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
 DefineBKTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
 DefineBKTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
+DefineBKTParameter(m_fCutFactor, float, 1.2F, "CutFactor")
 
 #endif

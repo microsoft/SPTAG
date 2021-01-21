@@ -83,16 +83,14 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
     BOOST_CHECK(nullptr != vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
-    vecIndex->SetParameter("NumberOfThreads", "5");
-    vecIndex->SetParameter("DataBlockSize", "1024");
-    vecIndex->SetParameter("DataCapacity", "2048");
-    omp_set_num_threads(5);
+    vecIndex->SetParameter("NumberOfThreads", "16");
     
     auto t1 = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for
     for (SPTAG::SizeType i = 0; i < vec->Count(); i++) {
         SPTAG::ByteArray metaarr = meta->GetMetadata(i);
-        SPTAG::ErrorCode ret = vecIndex->AddOne(vec->GetVector(i), vec->Dimension(), metaarr);
+        std::uint64_t offset[2] = { 0, metaarr.Length() };
+        std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(metaarr, SPTAG::ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
+        SPTAG::ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
         if (SPTAG::ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
     }
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -152,8 +150,7 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
         SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
         SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
-        n,
-        1024 * 1024, 1024 * 1024, 10));
+        n));
     
     Build<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
