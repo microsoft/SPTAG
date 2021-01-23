@@ -327,6 +327,7 @@ namespace SPTAG
                     bestCountStd = CountStd;
                 }
             }
+            /*
             std::vector<float> tries(16, 0);
             for (int i = 0; i < 8; i++) {
                 tries[i] = bestLambdaFactor * (i + 2) / 10;
@@ -339,6 +340,7 @@ namespace SPTAG
                     bestCountStd = CountStd;
                 }
             }
+            */
             LOG(Helper::LogLevel::LL_Info, "Best Lambda Factor:%f\n", bestLambdaFactor);
             return bestLambdaFactor;
         }
