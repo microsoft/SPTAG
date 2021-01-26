@@ -35,36 +35,46 @@ namespace SPTAG
             }
 
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
-            {
+            {                
+                SizeType* nodes = m_pNeighborhoodGraph[node];
+                const void* nodeVec = index->GetSample(node);
+                const void* insertVec = index->GetSample(insertNode);
+                
                 std::lock_guard<std::mutex> lock(m_dataUpdateLock[node]);
 
-                SizeType* nodes = m_pNeighborhoodGraph[node];
+                _mm_prefetch((const char*)nodes, _MM_HINT_T0);
+                _mm_prefetch((const char*)(nodeVec), _MM_HINT_T0);
+                _mm_prefetch((const char*)(insertVec), _MM_HINT_T0);
+                for (DimensionType i = 0; i < m_iNeighborhoodSize; i++) {
+                    _mm_prefetch((const char*)(index->GetSample(nodes[i])), _MM_HINT_T0);
+                }
+
                 SizeType tmpNode;
                 float tmpDist;
+                const void* tmpVec;
                 for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
                 {
                     tmpNode = nodes[k];
                     if (tmpNode < -1) break;
 
-                    if (tmpNode < 0 || (tmpDist = index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode))) > insertDist
-                        || (insertDist == tmpDist && insertNode < tmpNode))
+                    if (tmpNode < 0) {
+                        nodes[k] = insertNode;
+                        break;
+                    }
+
+                    tmpVec = index->GetSample(tmpNode);
+                    tmpDist = index->ComputeDistance(tmpVec, nodeVec);
+                    if (tmpDist > insertDist || (insertDist == tmpDist && insertNode < tmpNode))
                     {
-                        bool good = true;
-                        for (DimensionType t = 0; t < k; t++) {
-                            if (index->ComputeDistance(index->GetSample(insertNode), index->GetSample(nodes[t])) < insertDist) {
-                                good = false;
-                                break;
-                            }
+                        nodes[k] = insertNode;
+                        while (++k < m_iNeighborhoodSize && nodes[k] >= -1 && index->ComputeDistance(tmpVec, nodeVec) < index->ComputeDistance(tmpVec, insertVec)) {
+                            std::swap(tmpNode, nodes[k]);
+                            if (tmpNode < 0) return;
+                            tmpVec = index->GetSample(tmpNode);
                         }
-                        if (good) {
-                            nodes[k] = insertNode;
-                            while (tmpNode >= 0 && ++k < m_iNeighborhoodSize && nodes[k] >= -1 &&
-                                index->ComputeDistance(index->GetSample(tmpNode), index->GetSample(insertNode)) >=
-                                index->ComputeDistance(index->GetSample(node), index->GetSample(tmpNode)))
-                            {
-                                std::swap(tmpNode, nodes[k]);
-                            }
-                        }
+                        break;
+                    }
+                    else if (index->ComputeDistance(tmpVec, insertVec) <= insertDist) {
                         break;
                     }
                 }

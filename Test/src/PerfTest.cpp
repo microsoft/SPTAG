@@ -26,6 +26,7 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     vecIndex->SetParameter("CEF", "1500");
     vecIndex->SetParameter("MaxCheck", "8192");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
+    vecIndex->SetParameter("CutFactor", "1.2");
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for (SizeType i = 0; i < vec->Count(); i++) {
