@@ -31,10 +31,10 @@ namespace SPTAG
         {
             if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
 
-            if (m_pSamples.Load((char*)p_indexBlobs[0].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pSamples.Load((char*)p_indexBlobs[0].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
@@ -49,10 +49,10 @@ namespace SPTAG
             if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
 
             ErrorCode ret = ErrorCode::Success;
-            if ((ret = m_pSamples.Load(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if ((ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if ((ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
-            if ((ret = m_pGraph.LoadGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
-            if (p_indexStreams.size() > 3 && (ret = m_deletedID.Load(p_indexStreams[3])) != ErrorCode::Success) return ret;
+            if ((ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams.size() > 3 && (ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
@@ -216,8 +216,8 @@ namespace SPTAG
 
             omp_set_num_threads(m_iNumberOfThreads);
 
-            m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
-            m_deletedID.Initialize(p_vectorNum);
+            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, false);
+            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod)
             {
@@ -287,9 +287,9 @@ namespace SPTAG
 
             ErrorCode ret = ErrorCode::Success;
             if ((ret = m_pSamples.Refine(indices, ptr->m_pSamples)) != ErrorCode::Success) return ret;
-            if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) != ErrorCode::Success) return ret;
+            if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata, m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize)) != ErrorCode::Success) return ret;
 
-            ptr->m_deletedID.Initialize(newR);
+            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr->m_pSamples, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
@@ -346,7 +346,7 @@ namespace SPTAG
             if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr)) != ErrorCode::Success) return ret;
 
             COMMON::Labelset newDeletedID;
-            newDeletedID.Initialize(newR);
+            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             if ((ret = newDeletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
 
             if (nullptr != m_pMetadata) {
@@ -396,10 +396,10 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    m_pMetadata = std::move(p_metadataSet);
-                    if (p_withMetaIndex && m_pMetadata != nullptr)
-                    {
-                        BuildMetaMapping(false);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (p_withMetaIndex) BuildMetaMapping(false);
                     }
                     if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
@@ -425,14 +425,18 @@ namespace SPTAG
                 }
 
                 if (m_pMetadata != nullptr) {
-                    m_pMetadata->AddBatch(*p_metadataSet);
-
-                    if (HasMetaMapping()) {
-                        for (SizeType i = begin; i < end; i++) {
-                            ByteArray meta = m_pMetadata->GetMetadata(i);
-                            std::string metastr((char*)meta.Data(), meta.Length());
-                            UpdateMetaMapping(metastr, i);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (HasMetaMapping()) {
+                            for (SizeType i = begin; i < end; i++) {
+                                ByteArray meta = m_pMetadata->GetMetadata(i);
+                                std::string metastr((char*)meta.Data(), meta.Length());
+                                UpdateMetaMapping(metastr, i);
+                            }
                         }
+                    }
+                    else {
+                        for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
                     }
                 }
             }

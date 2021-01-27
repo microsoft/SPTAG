@@ -20,8 +20,8 @@ DefineBKTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineBKTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTpTreeSplit")
 
 DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
-DefineBKTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
-DefineBKTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
+DefineBKTParameter(m_pGraph.m_iNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
+DefineBKTParameter(m_pGraph.m_iCEFScale, float, 2.0F, "GraphCEFScale")
 DefineBKTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineBKTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineBKTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
@@ -43,8 +43,9 @@ DefineBKTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L,
 DefineBKTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineBKTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
 DefineBKTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
-DefineBKTParameter(m_pSamples.rowsInBlock, int, 1024 * 1024, "DataBlockSize")
-DefineBKTParameter(m_pGraph.RowsInBlock(), int, 1024 * 1024, "GraphBlockSize")
-DefineBKTParameter(m_deletedID.RowsInBlock(), int, 1024 * 1024, "LabelBlockSize")
+DefineBKTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
+DefineBKTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
+DefineBKTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
+DefineBKTParameter(m_fCutFactor, float, 2.0F, "CutFactor")
 
 #endif

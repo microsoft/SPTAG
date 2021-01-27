@@ -18,8 +18,8 @@ DefineKDTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineKDTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTPTSplit")
 
 DefineKDTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
-DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, int, 2L, "GraphNeighborhoodScale")
-DefineKDTParameter(m_pGraph.m_iCEFScale, int, 2L, "GraphCEFScale")
+DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
+DefineKDTParameter(m_pGraph.m_iCEFScale, float, 2.0F, "GraphCEFScale")
 DefineKDTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineKDTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineKDTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
@@ -41,8 +41,8 @@ DefineKDTParameter(m_iThresholdOfNumberOfContinuousNoBetterPropagation, int, 3L,
 DefineKDTParameter(m_iNumberOfInitialDynamicPivots, int, 50L, "NumberOfInitialDynamicPivots")
 DefineKDTParameter(m_iNumberOfOtherDynamicPivots, int, 4L, "NumberOfOtherDynamicPivots")
 DefineKDTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
-DefineKDTParameter(m_pSamples.rowsInBlock, int, 1024 * 1024, "DataBlockSize")
-DefineKDTParameter(m_pGraph.RowsInBlock(), int, 1024 * 1024, "GraphBlockSize")
-DefineKDTParameter(m_deletedID.RowsInBlock(), int, 1024 * 1024, "LabelBlockSize")
+DefineKDTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
+DefineKDTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
+DefineKDTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
 
 #endif

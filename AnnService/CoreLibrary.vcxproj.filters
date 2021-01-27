@@ -172,6 +172,9 @@
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Helper\LockFree.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">

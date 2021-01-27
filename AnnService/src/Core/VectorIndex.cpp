@@ -137,7 +137,7 @@ VectorIndex::GetMetaMapping(std::string& meta) const
 
 
 void
-VectorIndex::UpdateMetaMapping(std::string& meta, SizeType i)
+VectorIndex::UpdateMetaMapping(const std::string& meta, SizeType i)
 {
     MetadataMap* ptr = static_cast<MetadataMap*>(m_pMetaToVec.get());
     auto iter = ptr->find(meta);
@@ -149,7 +149,7 @@ VectorIndex::UpdateMetaMapping(std::string& meta, SizeType i)
 void
 VectorIndex::BuildMetaMapping(bool p_checkDeleted)
 {
-    MetadataMap* ptr = new MetadataMap;
+    MetadataMap* ptr = new MetadataMap(m_iDataBlockSize);
     for (SizeType i = 0; i < m_pMetadata->Count(); i++) {
         if (!p_checkDeleted || ContainSample(i)) {
             ByteArray meta = m_pMetadata->GetMetadata(i);
@@ -473,7 +473,8 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->SetMetadata(new MemMetadataSet(handles[handles.size() - 2], handles[handles.size() - 1]));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(handles[handles.size() - 2], handles[handles.size() - 1], 
+            p_vectorIndex->m_iDataBlockSize, p_vectorIndex->m_iDataCapacity, p_vectorIndex->m_iMetaRecordSize));
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
@@ -524,7 +525,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->SetMetadata(new MemMetadataSet(fp, fp));
+        p_vectorIndex->SetMetadata(new MemMetadataSet(fp, fp, p_vectorIndex->m_iDataBlockSize, p_vectorIndex->m_iDataCapacity, p_vectorIndex->m_iMetaRecordSize));
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
@@ -564,7 +565,8 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
         ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
         p_vectorIndex->SetMetadata(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
             ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
-            *((SizeType*)pMetaIndex.Data())));
+            *((SizeType*)pMetaIndex.Data()), 
+            p_vectorIndex->m_iDataBlockSize, p_vectorIndex->m_iDataCapacity, p_vectorIndex->m_iMetaRecordSize));
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {

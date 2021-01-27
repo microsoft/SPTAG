@@ -24,9 +24,9 @@ namespace SPTAG
                 m_data.SetName("DeleteID");
             }
 
-            void Initialize(SizeType capacity)
+            void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
             {
-                m_data.Initialize(capacity, 1);
+                m_data.Initialize(size, 1, blockSize, capacity);
             }
 
             inline size_t Count() const { return m_inserted.load(); }
@@ -59,26 +59,26 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
                 m_inserted = deleted;
-                return m_data.Load(input);
+                return m_data.Load(input, blockSize, capacity);
             }
 
-            inline ErrorCode Load(std::string filename)
+            inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity)
             {
                 LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr);
+                return Load(ptr, blockSize, capacity);
             }
 
-            inline ErrorCode Load(char* pmemoryFile) 
+            inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
             {
                 m_inserted = *((SizeType*)pmemoryFile);
-                return m_data.Load(pmemoryFile + sizeof(SizeType));
+                return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
 
             inline ErrorCode AddBatch(SizeType num)
@@ -95,10 +95,6 @@ namespace SPTAG
             {
                 m_data.SetR(num);
             }
-
-            inline SizeType RowsInBlock() const { return m_data.rowsInBlock; }
-
-            inline SizeType& RowsInBlock() { return m_data.rowsInBlock; }
         };
     }
 }

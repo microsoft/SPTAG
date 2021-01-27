@@ -48,10 +48,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            void Rebuild(const Dataset<T>& data)
+            void Rebuild(const Dataset<T>& data, IAbortOperation* abort)
             {
                 COMMON::KDTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, 1);
+                newTrees.BuildTrees<T>(data, 1, nullptr, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
@@ -59,7 +59,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr)
+            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
@@ -75,6 +75,8 @@ namespace SPTAG
 #pragma omp parallel for num_threads(numOfThreads)
                 for (int i = 0; i < m_iTreeNumber; i++)
                 {
+                    if (abort && abort->ShouldAbort()) break;
+                    
                     Sleep(i * 100); std::srand(clock());
 
                     std::vector<SizeType> pindices(localindices.begin(), localindices.end());
@@ -83,7 +85,7 @@ namespace SPTAG
                     m_pTreeStart[i] = i * (SizeType)pindices.size();
                     LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
                     SizeType iTreeSize = m_pTreeStart[i];
-                    DivideTree<T>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize);
+                    DivideTree<T>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
                     LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
                 }
             }
@@ -216,7 +218,9 @@ namespace SPTAG
 
             template <typename T>
             void DivideTree(const Dataset<T>& data, std::vector<SizeType>& indices, SizeType first, SizeType last,
-                SizeType index, SizeType &iTreeSize) {
+                SizeType index, SizeType &iTreeSize, IAbortOperation* abort = nullptr) {
+                if (abort && abort->ShouldAbort()) return;
+
                 ChooseDivision<T>(data, m_pTreeRoots[index], indices, first, last);
                 SizeType i = Subdivide<T>(data, m_pTreeRoots[index], indices, first, last);
                 if (i - 1 <= first)
