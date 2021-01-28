@@ -172,7 +172,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 auto t1 = std::chrono::high_resolution_clock::now();
             tptree->reset();
             create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headVectorIDS.size(), levels, 0, headVectorIDS.size());
-
+            cudaDeviceSynchronize();
+             
 auto t2 = std::chrono::high_resolution_clock::now();
 
             findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS>>>(d_headPoints, d_tailPoints, tptree, RNG_SIZE, d_results, metric, (size_t)curr_batch_size, (size_t)headVectorIDS.size());

@@ -869,7 +869,9 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
 
     // Initialize results to all -1 (special value that is set to distance INFTY)
-    CUDA_CHECK(cudaMemset(d_results, -1, (size_t)batchSize*KVAL*sizeof(int)));
+    for(int i=0; i<batchSize*KVAL; ++i) {
+      d_results[i] = -1;
+    }
 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
       CUDA_CHECK(cudaDeviceSynchronize());
