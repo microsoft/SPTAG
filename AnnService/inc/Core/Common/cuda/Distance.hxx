@@ -31,7 +31,11 @@
 #include<float.h>
 #include<unordered_set>
 
+#include "inc/Core/VectorIndex.h"
+
 using namespace std;
+
+using namespace SPTAG;
 
 // Templated infinity value
 template<typename T> __host__ __device__ T INFTY() {}
@@ -402,6 +406,30 @@ __host__ Point<T,SUMTYPE,Dim>* extractTailPoints(T* data, int totalRows, std::un
             pointArray[tailIdx].id = i;
             tailIdx++;
         }
+    }
+    return pointArray;
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T,SUMTYPE,Dim>* extractFullVectorPoints(T* data, size_t totalRows, int exact_dim) {
+    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(totalRows*sizeof(Point<T,SUMTYPE,Dim>));
+
+    for(size_t i=0; i<totalRows; ++i) {
+        pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
+        pointArray[i].id = i;
+    }
+    return pointArray;
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T,SUMTYPE,Dim>* extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex, int exact_dim) {
+
+    size_t headRows = headIndex->GetNumSamples();
+    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(headRows*sizeof(Point<T,SUMTYPE,Dim>));
+
+    for(size_t i=0; i<headRows; ++i) {
+        pointArray[i].loadChunk((T*)headIndex->GetSample(i), exact_dim);
+        pointArray[i].id = i;
     }
     return pointArray;
 }
