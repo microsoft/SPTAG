@@ -125,12 +125,12 @@ namespace SPTAG
                             m_blocks.push_back(newBlock);
                         }
 
-                        auto curBlockPos = (size + written) % m_blockSize;
+                        auto curBlockPos = (m_size + written) % m_blockSize;
                         auto toWrite = min(m_blockSize - curBlockPos, length - written);
                         if (in->ReadBinary(sizeof(T) * toWrite, (char*)(m_blocks[currBlock] + curBlockPos)) != sizeof(T) * toWrite) return false;
                         written += toWrite;
                     }
-                    size += written;
+                    m_size += written;
                     return true;
                 }
             };

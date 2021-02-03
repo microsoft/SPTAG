@@ -75,7 +75,7 @@ namespace SPTAG
 #pragma omp parallel for num_threads(numOfThreads)
                 for (int i = 0; i < m_iTreeNumber; i++)
                 {
-                    if (abort && abort->ShouldAbort()) break;
+                    if (abort && abort->ShouldAbort()) continue;
                     
                     Sleep(i * 100); std::srand(clock());
 

@@ -4,6 +4,7 @@
 #ifndef _SPTAG_COMMON_RNG_H_
 #define _SPTAG_COMMON_RNG_H_
 
+#include <xmmintrin.h>
 #include "NeighborhoodGraph.h"
 
 namespace SPTAG
