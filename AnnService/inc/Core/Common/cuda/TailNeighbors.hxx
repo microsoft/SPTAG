@@ -108,54 +108,74 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, gpuNum);
+
+    size_t headRows, tailRows;
+    if(headVectorIDS.size() == 0) { // If list of headVectors is not given, have to extract them from headIndex
+      headRows = headIndex->GetNumSamples();
+      tailRows = N;
+    }
+    else {
+      headRows = headVectorIDS.size();
+      tailRows = N - headRows;
+    }
     
-    size_t headVecSize = headVectorIDS.size()*sizeof(Point<T,SUMTYPE,MAX_DIM>);
-    size_t treeSize = 20*headVectorIDS.size();
+    size_t headVecSize = headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>);
+    size_t treeSize = 20*headRows;
     size_t tailMemAvail = ((size_t)prop.totalGlobalMem) - (headVecSize+treeSize);
     int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>));
-    int BATCH_SIZE = min(maxEltsPerBatch, (int)(N-headVectorIDS.size()));
+    int BATCH_SIZE = min(maxEltsPerBatch, (int)(tailRows));
 
    // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
-    if(BATCH_SIZE == 0 || ((int)(N-headVectorIDS.size())) / BATCH_SIZE > 10000) {
+    if(BATCH_SIZE == 0 || ((int)tailRows) / BATCH_SIZE > 10000) {
       LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index.  Total GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", ((size_t)prop.totalGlobalMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
       exit(1);
     }
 
-    LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for head vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for tail vectors:%lu MiB, total tail vectors:%lu, batch size:%d, total batches:%d\n", headVecSize/1000000, treeSize/1000000, tailMemAvail/1000000, (N-headVectorIDS.size()), BATCH_SIZE, (((BATCH_SIZE-1)+N-headVectorIDS.size()) / BATCH_SIZE));
+    LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for head vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for tail vectors:%lu MiB, total tail vectors:%lu, batch size:%d, total batches:%d\n", headVecSize/1000000, treeSize/1000000, tailMemAvail/1000000, tailRows, BATCH_SIZE, (((BATCH_SIZE-1)+tailRows) / BATCH_SIZE));
 
     const int NUM_THREADS = 64;
     int NUM_BLOCKS = min(BATCH_SIZE/NUM_THREADS, 10240);
 
-    Point<T,SUMTYPE,MAX_DIM>* headPoints = extractHeadPoints<T,SUMTYPE,MAX_DIM>(vectors, N, headVectorIDS, dim);
-    Point<T,SUMTYPE,MAX_DIM>* tailPoints = extractTailPoints<T,SUMTYPE,MAX_DIM>(vectors, N, headVectorIDS, dim);
+    Point<T,SUMTYPE,MAX_DIM>* headPoints;
+    Point<T,SUMTYPE,MAX_DIM>* tailPoints; 
+
+    // If headVectors not given, extract from headIndex and use all vectors as tails
+    if(headVectorIDS.size() == 0) {
+      headPoints = extractHeadPointsFromIndex<T,SUMTYPE,MAX_DIM>(vectors, headIndex, dim);
+      tailPoints = extractFullVectorPoints<T,SUMTYPE,MAX_DIM>(vectors, N, dim);
+    }
+    else {
+      headPoints = extractHeadPoints<T,SUMTYPE,MAX_DIM>(vectors, N, headVectorIDS, dim);
+      tailPoints = extractTailPoints<T,SUMTYPE,MAX_DIM>(vectors, N, headVectorIDS, dim);
+    }
 
     Point<T,SUMTYPE,MAX_DIM>* d_tailPoints;
     cudaMalloc(&d_tailPoints, BATCH_SIZE*sizeof(Point<T,SUMTYPE,MAX_DIM>));
 
     Point<T,SUMTYPE,MAX_DIM>* d_headPoints;
-    cudaMalloc(&d_headPoints, headVectorIDS.size()*sizeof(Point<T,SUMTYPE,MAX_DIM>));
-    cudaMemcpy(d_headPoints, headPoints, headVectorIDS.size()*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>));
+    cudaMemcpy(d_headPoints, headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
 
     DistPair<SUMTYPE>* d_results;
     cudaMalloc(&d_results, BATCH_SIZE*RNG_SIZE*sizeof(DistPair<SUMTYPE>));
 
  // Prepare memory for TPTs
-    int levels = (int)std::log2(headVectorIDS.size()/LEAF_SIZE);
+    int levels = (int)std::log2(headRows/LEAF_SIZE);
     TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree;
     CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<T,KEY_T,SUMTYPE, MAX_DIM>)));
-    tptree->initialize(headVectorIDS.size(), levels);
+    tptree->initialize(headRows, levels);
 
     size_t curr_batch_size = BATCH_SIZE;
 
 // Get neighbor result set for each batch of tail vectors
-    for(size_t offset=0; offset<(N-headVectorIDS.size()); offset+=BATCH_SIZE) {
+    for(size_t offset=0; offset < tailRows; offset+=BATCH_SIZE) {
         curr_batch_size = BATCH_SIZE;
 
         // Check if final batch is smaller than previous
-        if(offset+BATCH_SIZE > (N-headVectorIDS.size())) {
-            curr_batch_size = (N-headVectorIDS.size())-offset;
+        if(offset+BATCH_SIZE > tailRows) {
+            curr_batch_size = tailRows-offset;
         }
-        LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch with offset:%lu, size:%lu, N:%lld\n", offset, curr_batch_size, N);
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch with offset:%lu, size:%lu, TailRows:%lld\n", offset, curr_batch_size, tailRows);
 
         auto batch_t1 = std::chrono::high_resolution_clock::now();
     
@@ -171,11 +191,12 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         for(int tree_id=0; tree_id < NUM_TREES; ++tree_id) {
 auto t1 = std::chrono::high_resolution_clock::now();
             tptree->reset();
-            create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headVectorIDS.size(), levels, 0, headVectorIDS.size());
-
+            create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, levels, 0, headRows);
+            cudaDeviceSynchronize();
+             
 auto t2 = std::chrono::high_resolution_clock::now();
 
-            findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS>>>(d_headPoints, d_tailPoints, tptree, RNG_SIZE, d_results, metric, (size_t)curr_batch_size, (size_t)headVectorIDS.size());
+            findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS>>>(d_headPoints, d_tailPoints, tptree, RNG_SIZE, d_results, metric, (size_t)curr_batch_size, headRows);
             cudaDeviceSynchronize();
 
 auto t3 = std::chrono::high_resolution_clock::now();
