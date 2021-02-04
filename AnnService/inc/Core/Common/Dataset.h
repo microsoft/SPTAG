@@ -19,6 +19,7 @@ namespace SPTAG
             T* data = nullptr;
             bool ownData = false;
             SizeType incRows = 0;
+            SizeType maxRows;
             SizeType rowsInBlock;
             SizeType rowsInBlockEx;
             std::vector<T*> incBlocks;
@@ -48,7 +49,8 @@ namespace SPTAG
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
-                rowsInBlockEx = static_cast<SizeType>(log2(rowsInBlock_) + 1);
+                maxRows = capacity_;
+                rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
                 rowsInBlock = (1 << rowsInBlockEx) - 1;
                 incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
             }
@@ -90,7 +92,7 @@ namespace SPTAG
 
             ErrorCode AddBatch(const T* pData, SizeType num)
             {
-                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
@@ -111,7 +113,7 @@ namespace SPTAG
 
             ErrorCode AddBatch(SizeType num)
             {
-                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
