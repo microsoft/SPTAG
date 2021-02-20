@@ -20,18 +20,18 @@ DefineBKTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineBKTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTpTreeSplit")
 
 DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
-DefineBKTParameter(m_pGraph.m_iNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
-DefineBKTParameter(m_pGraph.m_iCEFScale, float, 2.0F, "GraphCEFScale")
+DefineBKTParameter(m_pGraph.m_fNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
+DefineBKTParameter(m_pGraph.m_fCEFScale, float, 2.0F, "GraphCEFScale")
 DefineBKTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineBKTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineBKTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
 DefineBKTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
+DefineBKTParameter(m_pGraph.m_fRNGFactor, float, 1.0f, "RNGFactor")
 
 DefineBKTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU construct KNN,loose RNG or RNG
 DefineBKTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
 DefineBKTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineBKTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
-DefineBKTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
 
 DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
@@ -46,6 +46,6 @@ DefineBKTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
 DefineBKTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
 DefineBKTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
 DefineBKTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
-DefineBKTParameter(m_fCutFactor, float, 2.0F, "CutFactor")
+DefineBKTParameter(m_fCutFactor, float, 10.0F, "CutFactor")
 
 #endif

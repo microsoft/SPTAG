@@ -627,7 +627,7 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
 
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
 {
 
     LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
@@ -706,7 +706,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 }
 #else
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);
@@ -757,7 +757,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                         {
                             float nnDist = ComputeDistance(GetSample(queryResults[i].VID), GetSample((*selections)[selectionOffset+j].node));
 
-                            if (nnDist <= queryResults[i].Dist)
+                            if (RNGFactor * nnDist <= queryResults[i].Dist)
                             {
                                 rngAccpeted = false;
                                 break;

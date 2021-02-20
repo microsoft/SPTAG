@@ -18,18 +18,18 @@ DefineKDTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
 DefineKDTParameter(m_pGraph.m_numTopDimensionTPTSplit, int, 5L, "NumTopDimensionTPTSplit")
 
 DefineKDTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "NeighborhoodSize")
-DefineKDTParameter(m_pGraph.m_iNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
-DefineKDTParameter(m_pGraph.m_iCEFScale, float, 2.0F, "GraphCEFScale")
+DefineKDTParameter(m_pGraph.m_fNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
+DefineKDTParameter(m_pGraph.m_fCEFScale, float, 2.0F, "GraphCEFScale")
 DefineKDTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
 DefineKDTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineKDTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
 DefineKDTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
+DefineKDTParameter(m_pGraph.m_fRNGFactor, float, 1.0f, "RNGFactor")
 
 DefineKDTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU construct KNN or RNG
 DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
 DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
-DefineKDTParameter(m_pGraph.m_iGPUBatches, int, 1, "GPUBatches")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
