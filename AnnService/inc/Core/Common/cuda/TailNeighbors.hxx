@@ -100,14 +100,29 @@ __global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Di
   }
 }
 
+__global__ void debug_warm_up_gpu() {
+  unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  float ia, ib;
+  ia = ib = 0.0f;
+  ib += ia + tid; 
+}
+
 template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
 void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* headIndex, std::unordered_set<int>& headVectorIDS, int dim, DistPair<SUMTYPE>* results, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric) {
 
     int gpuNum;
     cudaGetDevice(&gpuNum);
+    int resultErr;
 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, gpuNum);
+
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU Device number: %d\n", gpuNum);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Device name: %s\n", prop.name);
+
+    debug_warm_up_gpu<<<1,32>>>();
+    resultErr = cudaDeviceSynchronize();
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU test/warmup complete - kernel status:%d\n", resultErr);
 
     size_t headRows, tailRows;
     if(headVectorIDS.size() == 0) { // If list of headVectors is not given, have to extract them from headIndex
@@ -133,7 +148,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for head vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for tail vectors:%lu MiB, total tail vectors:%lu, batch size:%d, total batches:%d\n", headVecSize/1000000, treeSize/1000000, tailMemAvail/1000000, tailRows, BATCH_SIZE, (((BATCH_SIZE-1)+tailRows) / BATCH_SIZE));
 
-    const int NUM_THREADS = 64;
+    const int NUM_THREADS = 32;
     int NUM_BLOCKS = min(BATCH_SIZE/NUM_THREADS, 10240);
 
     Point<T,SUMTYPE,MAX_DIM>* headPoints;
@@ -149,15 +164,17 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
       tailPoints = extractTailPoints<T,SUMTYPE,MAX_DIM>(vectors, N, headVectorIDS, dim);
     }
 
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (BATCH_SIZE*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree<T,KEY_T,SUMTYPE, MAX_DIM>))/1000000, ((BATCH_SIZE+headRows)*sizeof(Point<T,SUMTYPE,MAX_DIM>) + (BATCH_SIZE*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree<T,KEY_T,SUMTYPE,MAX_DIM>)))/1000000);
+
     Point<T,SUMTYPE,MAX_DIM>* d_tailPoints;
-    cudaMalloc(&d_tailPoints, BATCH_SIZE*sizeof(Point<T,SUMTYPE,MAX_DIM>));
+    CUDA_CHECK(cudaMalloc(&d_tailPoints, BATCH_SIZE*sizeof(Point<T,SUMTYPE,MAX_DIM>)));
 
     Point<T,SUMTYPE,MAX_DIM>* d_headPoints;
-    cudaMalloc(&d_headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>));
-    cudaMemcpy(d_headPoints, headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMalloc(&d_headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>)));
+    CUDA_CHECK(cudaMemcpy(d_headPoints, headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
     DistPair<SUMTYPE>* d_results;
-    cudaMalloc(&d_results, BATCH_SIZE*RNG_SIZE*sizeof(DistPair<SUMTYPE>));
+    CUDA_CHECK(cudaMalloc(&d_results, BATCH_SIZE*RNG_SIZE*sizeof(DistPair<SUMTYPE>)));
 
  // Prepare memory for TPTs
     int levels = (int)std::log2(headRows/LEAF_SIZE);
@@ -166,6 +183,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     tptree->initialize(headRows, levels);
 
     size_t curr_batch_size = BATCH_SIZE;
+
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "tpt structure initialized for %lu head vectors, %d levels, leaf size:%d\n", headRows, levels, LEAF_SIZE);
 
 // Get neighbor result set for each batch of tail vectors
     for(size_t offset=0; offset < tailRows; offset+=BATCH_SIZE) {
@@ -179,25 +198,30 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
         auto batch_t1 = std::chrono::high_resolution_clock::now();
     
-        cudaMemcpy(d_tailPoints, &tailPoints[offset], curr_batch_size*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+        resultErr = cudaMemcpy(d_tailPoints, &tailPoints[offset], curr_batch_size*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice);
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Copied %lu tail points to GPU - kernel status:%d\n", curr_batch_size, resultErr);
 
         for(int i=0; i<curr_batch_size*RNG_SIZE; i++) {
             results[offset*RNG_SIZE + i].idx=-1;
             results[offset*RNG_SIZE + i].dist=INFTY<SUMTYPE>();
         }
-        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Copying results from previous iterations - kernel status:%d\n", cudaMemcpy(d_results, &results[offset*RNG_SIZE], curr_batch_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyHostToDevice));
+        resultErr = cudaMemcpy(d_results, &results[offset*RNG_SIZE], curr_batch_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyHostToDevice);
+
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Copying initialized result list to GPU - batch size:%lu - replica count:%d, copy bytes:%lu, result offset:%lu, - kernel status:%d\n", curr_batch_size, RNG_SIZE, curr_batch_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), offset*RNG_SIZE, resultErr);
 
         // For each tree, create a new TPT with new random values and compute neighbors using it
         for(int tree_id=0; tree_id < NUM_TREES; ++tree_id) {
 auto t1 = std::chrono::high_resolution_clock::now();
             tptree->reset();
             create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, levels, 0, headRows);
-            cudaDeviceSynchronize();
+            CUDA_CHECK(cudaDeviceSynchronize());
+            LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created successfully\n", tree_id);
              
 auto t2 = std::chrono::high_resolution_clock::now();
 
             findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS>>>(d_headPoints, d_tailPoints, tptree, RNG_SIZE, d_results, metric, (size_t)curr_batch_size, headRows);
-            cudaDeviceSynchronize();
+            CUDA_CHECK(cudaDeviceSynchronize());
+            LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU finished finding neighbors of tails using TPT %d\n", tree_id);
 
 auto t3 = std::chrono::high_resolution_clock::now();
 
