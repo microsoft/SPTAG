@@ -133,10 +133,13 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
       headRows = headVectorIDS.size();
       tailRows = N - headRows;
     }
+
+    size_t freeMem, totalMem;
+    CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
     
     size_t headVecSize = headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>);
     size_t treeSize = 20*headRows;
-    size_t tailMemAvail = ((size_t)prop.totalGlobalMem) - (headVecSize+treeSize);
+    size_t tailMemAvail = (freeMem*0.9) - (headVecSize+treeSize); // Only use 90% of total memory to be safe
     int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>));
     int BATCH_SIZE = min(maxEltsPerBatch, (int)(tailRows));
 
