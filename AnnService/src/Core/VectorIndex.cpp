@@ -627,7 +627,7 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
 
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
 {
 
     LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
@@ -665,8 +665,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 size_t vecOffset = vecIdx * (size_t)replicaCount;
                 size_t resOffset = resIdx * (size_t)replicaCount;
                 for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
-                    (*selections)[vecOffset + resNum].node = results[resOffset + resNum].idx;
-                    (*selections)[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
+                    selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
+                    selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
                 resIdx++;
             }
@@ -695,8 +695,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 size_t vecOffset = vecIdx * (size_t)replicaCount;
                 size_t resOffset = resIdx * (size_t)replicaCount;
                 for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
-                    (*selections)[vecOffset + resNum].node = results[resOffset + resNum].idx;
-                    (*selections)[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
+                    selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
+                    selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
                 resIdx++;
             }
@@ -706,7 +706,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 }
 #else
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, NodeDistPair* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);
@@ -755,7 +755,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                         bool rngAccpeted = true;
                         for (int j = 0; j < currReplicaCount; ++j)
                         {
-                            float nnDist = ComputeDistance(GetSample(queryResults[i].VID), GetSample((*selections)[selectionOffset+j].node));
+                            float nnDist = ComputeDistance(GetSample(queryResults[i].VID), GetSample(selections[selectionOffset+j].node));
 
                             if (RNGFactor * nnDist <= queryResults[i].Dist)
                             {
@@ -770,8 +770,8 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                             continue;
                         }
 
-                        (*selections)[selectionOffset + currReplicaCount].node = queryResults[i].VID;
-                        (*selections)[selectionOffset + currReplicaCount].distance = queryResults[i].Dist;
+                        selections[selectionOffset + currReplicaCount].node = queryResults[i].VID;
+                        selections[selectionOffset + currReplicaCount].distance = queryResults[i].Dist;
                         ++currReplicaCount;
                     }
                 }

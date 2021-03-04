@@ -95,6 +95,7 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
+/*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -135,24 +136,21 @@ namespace SPTAG
                     p_query.SortResult(); return; \
                 } \
             } \
-            float limit = m_fCutFactor * max(gnode.distance, p_query.worstDist()); \
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
-                if (distance2leaf <= limit) { \
-                    p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
-                } \
+                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
             } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
                 m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \
         } \
         p_query.SortResult(); \
+*/
 
-/*
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -208,7 +206,7 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
-*/
+
 
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
@@ -265,7 +263,7 @@ namespace SPTAG
         {
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
-            workSpace->m_iContinuousLimit = 0;
+
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
 
             m_workSpacePool->Return(workSpace);
