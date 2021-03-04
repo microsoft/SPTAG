@@ -84,7 +84,6 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
-            float m_fCutFactor;
 
         public:
             Index()
