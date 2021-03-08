@@ -4,6 +4,7 @@
 #ifndef _SPTAG_COMMON_RNG_H_
 #define _SPTAG_COMMON_RNG_H_
 
+#include <xmmintrin.h>
 #include "NeighborhoodGraph.h"
 
 namespace SPTAG
@@ -24,7 +25,7 @@ namespace SPTAG
 
                     bool good = true;
                     for (DimensionType k = 0; k < count; k++) {
-                        if (index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) <= item.Dist) {
+                        if (m_fRNGFactor * index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) <= item.Dist) {
                             good = false;
                             break;
                         }

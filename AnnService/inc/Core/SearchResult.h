@@ -24,8 +24,14 @@ namespace SPTAG
         {
             return distance > rhs.distance;
         }
+    };
 
-        virtual NodeDistPair& operator[](size_t i) { return *(this + i); }
+    struct Edge
+    {
+        SizeType node;
+        float distance;
+        SizeType tonode;
+        Edge() : node(INT_MAX), distance(FLT_MAX), tonode(INT_MAX) {}
     };
 
     struct BasicResult

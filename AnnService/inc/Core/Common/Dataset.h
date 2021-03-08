@@ -19,7 +19,9 @@ namespace SPTAG
             T* data = nullptr;
             bool ownData = false;
             SizeType incRows = 0;
+            SizeType maxRows;
             SizeType rowsInBlock;
+            SizeType rowsInBlockEx;
             std::vector<T*> incBlocks;
 
         public:
@@ -47,8 +49,10 @@ namespace SPTAG
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
-                rowsInBlock = rowsInBlock_;
-                incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock - 1) / rowsInBlock);
+                maxRows = capacity_;
+                rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
+                rowsInBlock = (1 << rowsInBlockEx) - 1;
+                incBlocks.reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
             }
             void SetName(const std::string& name_) { name = name_; }
             const std::string& Name() const { return name; }
@@ -71,7 +75,7 @@ namespace SPTAG
             {
                 if (index >= rows) {
                     SizeType incIndex = index - rows;
-                    return incBlocks[incIndex / rowsInBlock] + ((size_t)(incIndex % rowsInBlock)) * cols;
+                    return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
                 }
                 return data + ((size_t)index) * cols;
             }
@@ -88,18 +92,18 @@ namespace SPTAG
 
             ErrorCode AddBatch(const T* pData, SizeType num)
             {
-                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
-                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock) * cols * sizeof(T), ALIGN);
+                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
                     }
-                    SizeType curBlockPos = (incRows + written) % rowsInBlock;
-                    SizeType toWrite = min(rowsInBlock - curBlockPos, num - written);
+                    SizeType curBlockPos = ((incRows + written) & rowsInBlock);
+                    SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
                     std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
                     written += toWrite;
                 }
@@ -109,18 +113,18 @@ namespace SPTAG
 
             ErrorCode AddBatch(SizeType num)
             {
-                if (R() > MaxSize - num) return ErrorCode::MemoryOverFlow;
+                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
 
                 SizeType written = 0;
                 while (written < num) {
-                    SizeType curBlockIdx = (incRows + written) / rowsInBlock;
+                    SizeType curBlockIdx = (incRows + written) >> rowsInBlockEx;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(sizeof(T) * rowsInBlock * cols, ALIGN);
+                        T* newBlock = (T*)_mm_malloc(sizeof(T) * (rowsInBlock + 1) * cols, ALIGN);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-                        std::memset(newBlock, -1, sizeof(T) * rowsInBlock * cols);
+                        std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
                         incBlocks.push_back(newBlock);
                     }
-                    written += min(rowsInBlock - ((incRows + written) % rowsInBlock), num - written);
+                    written += min(rowsInBlock + 1 - ((incRows + written) & rowsInBlock), num - written);
                 }
                 incRows += written;
                 return ErrorCode::Success;
@@ -133,11 +137,11 @@ namespace SPTAG
                 IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&cols);
                 IOBINARY(p_out, WriteBinary, sizeof(T) * cols * rows, (char*)data);
                 
-                SizeType blocks = incRows / rowsInBlock;
+                SizeType blocks = (incRows >> rowsInBlockEx);
                 for (int i = 0; i < blocks; i++)
-                    IOBINARY(p_out, WriteBinary, sizeof(T) * cols * rowsInBlock, (char*)incBlocks[i]);
+                    IOBINARY(p_out, WriteBinary, sizeof(T) * cols * (rowsInBlock + 1), (char*)incBlocks[i]);
 
-                SizeType remain = incRows % rowsInBlock;
+                SizeType remain = (incRows & rowsInBlock);
                 if (remain > 0) IOBINARY(p_out, WriteBinary, sizeof(T) * cols * remain, (char*)incBlocks[blocks]);
                 LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
                 return ErrorCode::Success;
@@ -189,7 +193,7 @@ namespace SPTAG
             ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
             {
                 SizeType R = (SizeType)(indices.size());
-                data.Initialize(R, cols, rowsInBlock, static_cast<SizeType>(incBlocks.capacity() * rowsInBlock));
+                data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
                 for (SizeType i = 0; i < R; i++) {
                     std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
                 }

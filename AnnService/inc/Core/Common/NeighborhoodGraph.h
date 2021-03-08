@@ -37,8 +37,9 @@ namespace SPTAG
                                  m_iSamples(1000), 
                                  m_numTopDimensionTPTSplit(5),
                                  m_iNeighborhoodSize(32),
-                                 m_iNeighborhoodScale(2),
-                                 m_iCEFScale(2),
+                                 m_fNeighborhoodScale(2.0),
+                                 m_fCEFScale(2.0),
+                                 m_fRNGFactor(1.0),
                                  m_iRefineIter(2),
                                  m_iCEF(1000),
                                  m_iAddCEF(500),
@@ -46,8 +47,7 @@ namespace SPTAG
                                  m_iGPUGraphType(2),
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
-                                 m_iGPULeafSize(500),
-                                 m_iGPUBatches(1)
+                                 m_iGPULeafSize(500)
             {}
 
             ~NeighborhoodGraph() {}
@@ -322,7 +322,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
-                m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_iNeighborhoodScale));
+                m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale));
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
@@ -359,14 +359,14 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_iCEFScale));
+                        RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_fCEFScale));
                         if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
                     auto t2 = std::chrono::high_resolution_clock::now();
                     LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
 
-                m_iNeighborhoodSize = (DimensionType)(m_iNeighborhoodSize / m_iNeighborhoodScale);
+                m_iNeighborhoodSize = (DimensionType)(m_iNeighborhoodSize / m_fNeighborhoodScale);
 
                 if (m_iRefineIter > 0) {
                     auto t1 = std::chrono::high_resolution_clock::now();
@@ -532,8 +532,8 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            float m_iNeighborhoodScale, m_iCEFScale;
-            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches;
+            float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize;
         };
     }
 }

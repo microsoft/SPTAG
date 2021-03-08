@@ -14,7 +14,43 @@
 using namespace SPTAG;
 
 template <typename T>
-void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, const std::string out)
+void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth)
+{
+    std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
+    auto t1 = std::chrono::high_resolution_clock::now();
+    for (SizeType i = 0; i < queryset->Count(); i++)
+    {
+        res[i].SetTarget(queryset->GetVector(i));
+        vecIndex->SearchIndex(res[i]);
+    }
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
+
+    float eps = 1e-6f, recall = 0;
+    bool deleted;
+    int truthDimension = min(k, truth->Dimension());
+    for (SizeType i = 0; i < queryset->Count(); i++)
+    {
+        SizeType* nn = (SizeType*)(truth->GetVector(i));
+        for (int j = 0; j < truthDimension; j++)
+        {
+            std::string truthstr = std::to_string(nn[j]);
+            ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
+            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
+            for (int l = 0; l < k; l++)
+            {
+                if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (fabs(truthdist) + eps)) {
+                    recall += 1.0;
+                    break;
+                }
+            }
+        }
+    }
+    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
+}
+
+template <typename T>
+void PerfAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth,  std::string out)
 {
     std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
@@ -24,9 +60,8 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
     vecIndex->SetParameter("NumberOfThreads", "5");
     vecIndex->SetParameter("AddCEF", "200");
     vecIndex->SetParameter("CEF", "1500");
-    vecIndex->SetParameter("MaxCheck", "8192");
+    vecIndex->SetParameter("MaxCheck", "4096");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
-    vecIndex->SetParameter("CutFactor", "1.2");
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for (SizeType i = 0; i < vec->Count(); i++) {
@@ -41,61 +76,30 @@ void Add(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorS
 
     Sleep(10000);
 
+    Search<T>(vecIndex, queryset, k, truth);
+
     BOOST_CHECK(ErrorCode::Success == vecIndex->SaveIndex(out));
+    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(out, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+    Search<T>(vecIndex, queryset, k, truth);
 }
 
-template <typename T>
-void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
+template<typename T>
+void PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out)
 {
-
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
 
     if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "5");
+    vecIndex->SetParameter("RefineIterations", "3");
+    vecIndex->SetParameter("MaxCheck", "4096");
+    vecIndex->SetParameter("MaxCheckForRefineGraph", "8192");
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
-}
-
-template <typename T>
-void Search(const std::string folder, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth)
-{
-    std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-
-    std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
-    auto t1 = std::chrono::high_resolution_clock::now();
-    for (SizeType i = 0; i < queryset->Count(); i++)
-    {
-        res[i].SetTarget(queryset->GetVector(i));
-        vecIndex->SearchIndex(res[i]);
-    }
-    auto t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
-
-    float eps = 1e-8f, recall = 0;
-    bool deleted;
-    for (SizeType i = 0; i < queryset->Count(); i++)
-    {
-        SizeType* nn = (SizeType*)(truth->GetVector(i));
-        for (int j = 0; j < truth->Dimension(); j++)
-        {
-            std::string truthstr = std::to_string(nn[j]);
-            ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
-            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
-            for (int l = 0; l < k; l++)
-            {
-                if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (truthdist + eps)) {
-                    recall += 1.0;
-                    break;
-                }
-            }
-        }
-    }
-    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truth->Dimension(), recall / queryset->Count() / truth->Dimension());
+    Search<T>(vecIndex, queryset, k, truth);
 }
 
 template <typename T>
@@ -171,6 +175,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         DistCalcMethod distMethod;
         Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
         if (distMethod == DistCalcMethod::Cosine) {
+            std::cout << "Normalize vecset!" << std::endl;
             COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
         }
 
@@ -202,23 +207,24 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<MetadataSet> metaset;
     GenerateData<T>(vecset, metaset, queryset, truth, distCalcMethod, 10);
 
-    Add<T>(algo, distCalcMethod, vecset, metaset, "testindices");
-    Search<T>("testindices", queryset, 10, truth);
-
-    Build<T>(algo, distCalcMethod, vecset, metaset, "testindices");
-    Search<T>("testindices", queryset, 10, truth);
+    PerfAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
+    PerfBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
+    std::shared_ptr<VectorIndex> vecIndex;
+    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+    Search<T>(vecIndex, queryset, 10, truth);
 }
 
 BOOST_AUTO_TEST_SUITE(PerfTest)
 
 BOOST_AUTO_TEST_CASE(BKTTest)
 {
-    PTest<std::int8_t>(IndexAlgoType::BKT, "L2");
+    PTest<std::int8_t>(IndexAlgoType::BKT, "Cosine");
 }
 
 BOOST_AUTO_TEST_CASE(KDTTest)
 {
-    PTest<std::int8_t>(IndexAlgoType::KDT, "L2");
+    PTest<std::int8_t>(IndexAlgoType::KDT, "Cosine");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
