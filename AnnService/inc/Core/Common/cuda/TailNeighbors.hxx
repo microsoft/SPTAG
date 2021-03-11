@@ -115,7 +115,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     int resultErr;
 
     cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, gpuNum);
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum));
 
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU Device number: %d\n", gpuNum);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Device name: %s\n", prop.name);
@@ -234,6 +234,12 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
         auto batch_t2 = std::chrono::high_resolution_clock::now();
         LOG(SPTAG::Helper::LogLevel::LL_Info, "batch done and results copied to Host.  Time of batch:%.2lf\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(batch_t2-batch_t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(batch_t2-batch_t1).count())/1000);
     }
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU SSD build complete, freeing GPU memory...\n");
+
+  CUDA_CHECK(cudaFree(d_headPoints));
+  CUDA_CHECK(cudaFree(d_tailPoints));
+  CUDA_CHECK(cudaFree(d_results));
+  CUDA_CHECK(cudaFree(tptree));
 }
 
 /*************************************************************************************************
