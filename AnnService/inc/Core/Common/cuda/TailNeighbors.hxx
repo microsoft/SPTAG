@@ -274,11 +274,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
 auto t1 = std::chrono::high_resolution_clock::now();
             // Create TPT on each GPU
-//            for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-//                CUDA_CHECK(cudaSetDevice(gpuNum));
-//                tptree[gpuNum]->reset();
-//                create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree[gpuNum], d_headPoints[gpuNum], headRows, TPTlevels, 0, headRows);
-//            }
             create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams);
             CUDA_CHECK(cudaDeviceSynchronize());
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created on all GPUs\n", tree_id);
@@ -345,40 +340,6 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Mam alloc time:%0.2lf, GPU time to build index:%.2lf, Memory free time:%.2lf\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t1-premem_t).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t1-premem_t).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t2-ssd_t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t2-ssd_t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t3-ssd_t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t3-ssd_t2).count())/1000);
 
-// Get neighbor result set for each batch of tail vectors
-/*
-  for(offset[0]=0; offset < tailRows; offset+=BATCH_SIZE) {
-      curr_batch_size = BATCH_SIZE;
-    
-
-
-auto t1 = std::chrono::high_resolution_clock::now();
-            tptree->reset();
-            create_tptree<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, levels, 0, headRows);
-            CUDA_CHECK(cudaDeviceSynchronize());
-            LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created successfully\n", tree_id);
-             
-auto t2 = std::chrono::high_resolution_clock::now();
-
-            findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS>>>(d_headPoints, d_tailPoints, tptree, RNG_SIZE, d_results, metric, (size_t)curr_batch_size, headRows);
-            CUDA_CHECK(cudaDeviceSynchronize());
-            LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU finished finding neighbors of tails using TPT %d\n", tree_id);
-
-auto t3 = std::chrono::high_resolution_clock::now();
-
-LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2lf, time to compute tail neighbors:%.2lf\n", tree_id, ((double)std::chrono::duration_cast<std::chrono::seconds>(t2-t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(t3-t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count())/1000);
-        }
-        CUDA_CHECK(cudaMemcpy(&results[offset*RNG_SIZE], d_results, curr_batch_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost));
-        auto batch_t2 = std::chrono::high_resolution_clock::now();
-        LOG(SPTAG::Helper::LogLevel::LL_Info, "batch done and results copied to Host.  Time of batch:%.2lf\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(batch_t2-batch_t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(batch_t2-batch_t1).count())/1000);
-    }
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU SSD build complete, freeing GPU memory...\n");
-
-  CUDA_CHECK(cudaFree(d_headPoints));
-  CUDA_CHECK(cudaFree(d_tailPoints));
-  CUDA_CHECK(cudaFree(d_results));
-  CUDA_CHECK(cudaFree(tptree));
-*/
 }
 
 /*************************************************************************************************

@@ -232,13 +232,10 @@ class TPtree {
       for(int i=0; i<levels; ++i) {
 
         find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,stream>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level, i);
-//        CUDA_CHECK(cudaStreamSynchronize(stream));
 
         compute_mean<KEY_T><<<BLOCKS,THREADS,0,stream>>>(split_keys, node_sizes, num_nodes);
-//        CUDA_CHECK(cudaStreamSynchronize(stream));
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,stream>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, i);
-//        CUDA_CHECK(cudaStreamSynchronize(stream));
 
         nodes_on_level*=2;
       }
@@ -351,11 +348,6 @@ __host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Poin
   }
 
   // Build TPT on each GPU  
-//  for(int gpuNum=0; gpuNum<NUM_GPUS; ++gpuNum) {
-//    cudaSetDevice(gpuNum);
-//    d_trees[gpuNum]->construct_tree_async(points[gpuNum], 0, N, streams[gpuNum]);
-//  }
-
   construct_trees_multigpu<T,KEY_T,SUMTYPE,Dim>(d_trees, points, N, NUM_GPUS, streams);
 
   delete h_weights;
