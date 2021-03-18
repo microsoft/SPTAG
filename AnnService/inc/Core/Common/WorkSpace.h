@@ -180,9 +180,9 @@ namespace SPTAG
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, SizeType dataSize, int hashexp)
+            void Initialize(int maxCheck, SizeType dataSize, int hashExp)
             {
-                nodeCheckStatus.Init(maxCheck, hashexp);
+                nodeCheckStatus.Init(maxCheck, hashExp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
                 m_Results.Resize(maxCheck / 16);
@@ -194,12 +194,12 @@ namespace SPTAG
                 m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
-            void Reset(int maxCheck)
+            void Reset(int maxCheck, int resultNum)
             {
                 nodeCheckStatus.clear();
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
-                m_Results.clear(maxCheck / 16);
+                m_Results.clear(max(maxCheck / 16, resultNum));
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
                 //m_iContinuousLimit = maxCheck / 64;

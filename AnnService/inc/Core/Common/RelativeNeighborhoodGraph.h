@@ -25,7 +25,7 @@ namespace SPTAG
 
                     bool good = true;
                     for (DimensionType k = 0; k < count; k++) {
-                        if (m_fRNGFactor * index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) <= item.Dist) {
+                        if (m_fRNGFactor * index->ComputeDistance(index->GetSample(nodes[k]), index->GetSample(item.VID)) < item.Dist) {
                             good = false;
                             break;
                         }
@@ -68,7 +68,7 @@ namespace SPTAG
                     if (tmpDist > insertDist || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         nodes[k] = insertNode;
-                        while (++k < m_iNeighborhoodSize && nodes[k] >= -1 && index->ComputeDistance(tmpVec, nodeVec) < index->ComputeDistance(tmpVec, insertVec)) {
+                        while (++k < m_iNeighborhoodSize && nodes[k] >= -1 && index->ComputeDistance(tmpVec, nodeVec) <= index->ComputeDistance(tmpVec, insertVec)) {
                             std::swap(tmpNode, nodes[k]);
                             if (tmpNode < 0) return;
                             tmpVec = index->GetSample(tmpNode);
