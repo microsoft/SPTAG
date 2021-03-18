@@ -152,8 +152,10 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
   
     // Get number and offset of tail vectors to be assigned to each GPU
-    size_t* tailsPerGPU = new size_t[NUM_GPUS];
-    size_t* GPUOffset = new size_t[NUM_GPUS];
+    std::vector<size_t> tailsPerGPU(NUM_GPUS);
+    std::vector<size_t> GPUOffset(NUM_GPUS);
+//    size_t* tailsPerGPU = new size_t[NUM_GPUS];
+//    size_t* GPUOffset = new size_t[NUM_GPUS];
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         tailsPerGPU[gpuNum] = tailRows / NUM_GPUS;
         if(tailRows % NUM_GPUS > gpuNum) tailsPerGPU[gpuNum]++;
@@ -166,12 +168,15 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
 
     // Streams and memory pointers for each GPU
-    cudaStream_t* streams = new cudaStream_t[NUM_GPUS];
+//    cudaStream_t* streams = new cudaStream_t[NUM_GPUS];
+    std::vector<cudaStream_t> streams(NUM_GPUS);
+    std::vector<size_t> BATCH_SIZE(NUM_GPUS);
+
     Point<T,SUMTYPE,MAX_DIM>** d_tailPoints = new Point<T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
     Point<T,SUMTYPE,MAX_DIM>** d_headPoints = new Point<T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
     DistPair<SUMTYPE>** d_results = new DistPair<SUMTYPE>*[NUM_GPUS];
     TPtree<T,KEY_T,SUMTYPE,MAX_DIM>** tptree = new TPtree<T,KEY_T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
-    size_t* BATCH_SIZE = new size_t[NUM_GPUS];
+//    size_t* BATCH_SIZE = new size_t[NUM_GPUS];
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Setting up each of the %d GPUs...\n", NUM_GPUS);
 
@@ -201,7 +206,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         BATCH_SIZE[gpuNum] = min(maxEltsPerBatch, (int)(tailsPerGPU[gpuNum]));
   
        // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
-        if(BATCH_SIZE == 0 || ((int)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum] > 10000) {
+        if(BATCH_SIZE[gpuNum] == 0 || ((int)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum] > 10000) {
             LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index on GPU %d.  Total GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", gpuNum, ((size_t)prop.totalGlobalMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
             exit(1);
         }
@@ -226,13 +231,15 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
     } // End loop to set up memory on each GPU
 
-    delete headPoints; // headPoints copied to GPU, no longer need on CPU
+    delete[] headPoints; // headPoints copied to GPU, no longer need on CPU
 
     const int NUM_THREADS = 32;
     int NUM_BLOCKS = min((int)(BATCH_SIZE[0]/NUM_THREADS), 10240);
 
-    size_t* curr_batch_size = new size_t[NUM_GPUS];
-    size_t* offset = new size_t[NUM_GPUS];
+//    size_t* curr_batch_size = new size_t[NUM_GPUS];
+//    size_t* offset = new size_t[NUM_GPUS];
+    std::vector<size_t> curr_batch_size(NUM_GPUS);
+    std::vector<size_t> offset(NUM_GPUS);
     for(int gpuNum=0; gpuNum<NUM_GPUS; ++gpuNum) {
         offset[gpuNum] = 0;
     }
@@ -274,7 +281,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
 auto t1 = std::chrono::high_resolution_clock::now();
             // Create TPT on each GPU
-            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams);
+            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams.data());
             CUDA_CHECK(cudaDeviceSynchronize());
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created on all GPUs\n", tree_id);
 auto t2 = std::chrono::high_resolution_clock::now();
@@ -323,18 +330,18 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
         CUDA_CHECK(cudaFree(d_results[gpuNum]));
         CUDA_CHECK(cudaFree(tptree[gpuNum]));
     }
-    delete tailPoints;
+    delete[] tailPoints;
 
-    delete d_headPoints;
-    delete d_tailPoints;
-    delete d_results;
-    delete tptree;
-    delete tailsPerGPU;
-    delete GPUOffset;
-    delete streams;
-    delete BATCH_SIZE;
-    delete curr_batch_size;
-    delete offset;
+    delete[] d_headPoints;
+    delete[] d_tailPoints;
+    delete[] d_results;
+    delete[] tptree;
+//    delete[] tailsPerGPU;
+//    delete[] GPUOffset;
+//    delete[] streams;
+//    delete[] BATCH_SIZE;
+//    delete[] curr_batch_size;
+//    delete[] offset;
 
     auto ssd_t3 = std::chrono::high_resolution_clock::now();
 

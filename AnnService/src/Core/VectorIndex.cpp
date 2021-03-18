@@ -671,7 +671,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 resIdx++;
             }
         }
-        delete results;
+        delete[] results;
     }
     else {
         typedef float SUMTYPE;
@@ -701,7 +701,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 resIdx++;
             }
         }
-        delete results;
+        delete[] results;
     }
 }
 #else
