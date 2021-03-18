@@ -154,8 +154,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     // Get number and offset of tail vectors to be assigned to each GPU
     std::vector<size_t> tailsPerGPU(NUM_GPUS);
     std::vector<size_t> GPUOffset(NUM_GPUS);
-//    size_t* tailsPerGPU = new size_t[NUM_GPUS];
-//    size_t* GPUOffset = new size_t[NUM_GPUS];
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         tailsPerGPU[gpuNum] = tailRows / NUM_GPUS;
         if(tailRows % NUM_GPUS > gpuNum) tailsPerGPU[gpuNum]++;
@@ -168,7 +166,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
 
     // Streams and memory pointers for each GPU
-//    cudaStream_t* streams = new cudaStream_t[NUM_GPUS];
     std::vector<cudaStream_t> streams(NUM_GPUS);
     std::vector<size_t> BATCH_SIZE(NUM_GPUS);
 
@@ -176,7 +173,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     Point<T,SUMTYPE,MAX_DIM>** d_headPoints = new Point<T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
     DistPair<SUMTYPE>** d_results = new DistPair<SUMTYPE>*[NUM_GPUS];
     TPtree<T,KEY_T,SUMTYPE,MAX_DIM>** tptree = new TPtree<T,KEY_T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
-//    size_t* BATCH_SIZE = new size_t[NUM_GPUS];
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Setting up each of the %d GPUs...\n", NUM_GPUS);
 
@@ -236,8 +232,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     const int NUM_THREADS = 32;
     int NUM_BLOCKS = min((int)(BATCH_SIZE[0]/NUM_THREADS), 10240);
 
-//    size_t* curr_batch_size = new size_t[NUM_GPUS];
-//    size_t* offset = new size_t[NUM_GPUS];
     std::vector<size_t> curr_batch_size(NUM_GPUS);
     std::vector<size_t> offset(NUM_GPUS);
     for(int gpuNum=0; gpuNum<NUM_GPUS; ++gpuNum) {
@@ -336,12 +330,6 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
     delete[] d_tailPoints;
     delete[] d_results;
     delete[] tptree;
-//    delete[] tailsPerGPU;
-//    delete[] GPUOffset;
-//    delete[] streams;
-//    delete[] BATCH_SIZE;
-//    delete[] curr_batch_size;
-//    delete[] offset;
 
     auto ssd_t3 = std::chrono::high_resolution_clock::now();
 
