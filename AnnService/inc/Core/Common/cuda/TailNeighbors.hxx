@@ -123,8 +123,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Building SSD index with %d GPUs...\n", NUM_GPUS);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
 
-printf("%lu, %lu\n", headVectorIDS.size(), headIndex->GetNumSamples());
-
     int resultErr;
     size_t headRows, tailRows;
     headRows = headIndex->GetNumSamples();
