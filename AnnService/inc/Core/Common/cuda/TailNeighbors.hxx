@@ -123,15 +123,16 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Building SSD index with %d GPUs...\n", NUM_GPUS);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
 
+printf("%lu, %lu\n", headVectorIDS.size(), headIndex->GetNumSamples());
+
     int resultErr;
     size_t headRows, tailRows;
+    headRows = headIndex->GetNumSamples();
     if(headVectorIDS.size() == 0) { // If list of headVectors is not given, have to extract them from headIndex
-        headRows = headIndex->GetNumSamples();
         tailRows = N;
     }
     else {
-        headRows = headVectorIDS.size();
-        tailRows = N - headRows;
+        tailRows = N - headVectorIDS.size();
     }
     int TPTlevels = (int)std::log2(headRows/LEAF_SIZE);
 
@@ -142,12 +143,11 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     tailPoints = new Point<T,SUMTYPE,MAX_DIM>[tailRows];
 
     // If headVectors not given, extract from headIndex and use all vectors as tails
+    extractHeadPointsFromIndex<T,SUMTYPE,MAX_DIM>(vectors, headIndex, headPoints, dim);
     if(headVectorIDS.size() == 0) {
-        extractHeadPointsFromIndex<T,SUMTYPE,MAX_DIM>(vectors, headIndex, headPoints, dim);
         extractFullVectorPoints<T,SUMTYPE,MAX_DIM>(vectors, tailPoints, N, dim);
     }
     else {
-        extractHeadPoints<T,SUMTYPE,MAX_DIM>(vectors, headPoints, N, headVectorIDS, dim);
         extractTailPoints<T,SUMTYPE,MAX_DIM>(vectors, tailPoints, N, headVectorIDS, dim);
     }
   
