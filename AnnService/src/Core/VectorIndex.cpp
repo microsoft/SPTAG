@@ -627,7 +627,7 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
 
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
 
     LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
@@ -643,9 +643,9 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 #define DefineVectorValueType(Name, Type) \
         case VectorValueType::Name: \
             if(fullVectors->Dimension() <= 64) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs); \
             } else if (fullVectors->Dimension() <= 100) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs); \
             } else { \
                 LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n"); \
                 exit(1); \
@@ -671,17 +671,17 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 resIdx++;
             }
         }
-        delete results;
+        delete[] results;
     }
     else {
         typedef float SUMTYPE;
         DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)replicaCount)];
 
         if (fullVectors->Dimension() <= 64) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric);
+            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs);
         }
         else if (fullVectors->Dimension() <= 100) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric);
+            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs);
         }
         else {
             LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n");
@@ -701,12 +701,12 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 resIdx++;
             }
         }
-        delete results;
+        delete[] results;
     }
 }
 #else
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);

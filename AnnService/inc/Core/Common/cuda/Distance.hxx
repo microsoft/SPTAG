@@ -382,56 +382,46 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
 } 
 
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T,SUMTYPE,Dim>* extractHeadPoints(T* data, size_t totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
-    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(headVectorIDS.size()*sizeof(Point<T,SUMTYPE,Dim>));
-
+__host__ void extractHeadPoints(T* data, Point<T,SUMTYPE,Dim>* headPoints, size_t totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
     int headIdx=0;
     for(size_t i=0; i<totalRows; i++) {
         if(headVectorIDS.count(i) != 0) {
-            pointArray[headIdx].loadChunk(&data[i*exact_dim], exact_dim);
-            pointArray[headIdx].id = i;
+            headPoints[headIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            headPoints[headIdx].id = i;
             headIdx++;
         }
     }
-    return pointArray;
 }
 
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T,SUMTYPE,Dim>* extractTailPoints(T* data, int totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
-    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc((totalRows-headVectorIDS.size())*sizeof(Point<T,SUMTYPE,Dim>));
+__host__ void extractTailPoints(T* data, Point<T,SUMTYPE,Dim>* tailPoints, int totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
     int tailIdx=0;
     for(size_t i=0; i<totalRows; i++) {
         if(headVectorIDS.count(i) == 0) {
-            pointArray[tailIdx].loadChunk(&data[i*exact_dim], exact_dim);
-            pointArray[tailIdx].id = i;
+            tailPoints[tailIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            tailPoints[tailIdx].id = i;
             tailIdx++;
         }
     }
-    return pointArray;
 }
 
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T,SUMTYPE,Dim>* extractFullVectorPoints(T* data, size_t totalRows, int exact_dim) {
-    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(totalRows*sizeof(Point<T,SUMTYPE,Dim>));
+__host__ void extractFullVectorPoints(T* data, Point<T,SUMTYPE,Dim>* tailPoints, size_t totalRows, int exact_dim) {
 
     for(size_t i=0; i<totalRows; ++i) {
-        pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
-        pointArray[i].id = i;
+        tailPoints[i].loadChunk(&data[i*exact_dim], exact_dim);
+        tailPoints[i].id = i;
     }
-    return pointArray;
 }
 
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T,SUMTYPE,Dim>* extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex, int exact_dim) {
-
+__host__ void extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex, Point<T,SUMTYPE,Dim>* headPoints, int exact_dim) {
     size_t headRows = headIndex->GetNumSamples();
-    Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(headRows*sizeof(Point<T,SUMTYPE,Dim>));
 
     for(size_t i=0; i<headRows; ++i) {
-        pointArray[i].loadChunk((T*)headIndex->GetSample(i), exact_dim);
-        pointArray[i].id = i;
+        headPoints[i].loadChunk((T*)headIndex->GetSample(i), exact_dim);
+        headPoints[i].id = i;
     }
-    return pointArray;
 }
 
 #endif
