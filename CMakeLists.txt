@@ -121,6 +121,8 @@ else()
     message (FATAL_ERROR "Could not find Boost 1.67!")
 endif()
 
+option(GPU "GPU" ON)
+
 add_subdirectory (AnnService)
 add_subdirectory (Test)
 add_subdirectory (GPUSupport)

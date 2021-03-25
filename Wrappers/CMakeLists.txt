@@ -4,8 +4,16 @@
 find_package(Python2 COMPONENTS Development)
 
 find_package(CUDA)
+
+if (NOT GPU)
+    set (CUDA_FOUND false)
+endif()
+
 if (CUDA_FOUND)
+    message (STATUS "Found cuda.")
     set (Python2_FOUND false)
+else()
+    message (STATUS "Could not find cuda.")
 endif()
 
 if (Python2_FOUND)    
