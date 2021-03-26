@@ -2,6 +2,11 @@
 # Licensed under the MIT License.
 
 find_package(CUDA)
+
+if (NOT GPU)
+    set (CUDA_FOUND false)
+endif()
+
 if (CUDA_FOUND)
     message (STATUS "Found cuda.")
     message (STATUS "Include Path:" ${CUDA_INCLUDE_DIRS})
