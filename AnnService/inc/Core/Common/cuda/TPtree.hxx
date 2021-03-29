@@ -130,8 +130,8 @@ class TPtree {
       levels = levels_;
       num_leaves = pow(2,levels);
 
-      cudaMalloc(&node_ids, (N)*sizeof(int));
-      cudaMemset(node_ids, 0, N*sizeof(int));
+      CUDA_CHECK(cudaMalloc(&node_ids, (N)*sizeof(int)));
+      CUDA_CHECK(cudaMemset(node_ids, 0, N*sizeof(int)));
       tree_mem+= N*sizeof(int);
 
       num_nodes = (2*num_leaves - 1);
@@ -141,21 +141,21 @@ class TPtree {
       tree_mem+=Dim*sizeof(int);
 
       // Allocate memory for DIMS weights at each level
-      cudaMalloc(&weight_list, Dim*levels*sizeof(KEY_T));
+      CUDA_CHECK(cudaMalloc(&weight_list, Dim*levels*sizeof(KEY_T)));
 
       tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEY_T);
 
       tree_mem+= N*sizeof(int);
-      cudaMalloc(&node_sizes, num_nodes*sizeof(int));
-      cudaMemset(node_sizes, 0, num_nodes*sizeof(int));
+      CUDA_CHECK(cudaMalloc(&node_sizes, num_nodes*sizeof(int)));
+      CUDA_CHECK(cudaMemset(node_sizes, 0, num_nodes*sizeof(int)));
 
-      cudaMalloc(&split_keys, num_internals*sizeof(KEY_T));
+      CUDA_CHECK(cudaMalloc(&split_keys, num_internals*sizeof(KEY_T)));
       tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEY_T);
 
-      cudaMallocManaged(&leafs, num_leaves*sizeof(LeafNode));
+      CUDA_CHECK(cudaMalloc(&leafs, num_leaves*sizeof(LeafNode)));
       tree_mem+=num_leaves*sizeof(LeafNode);
 
-      cudaMalloc(&leaf_points, N*sizeof(int));
+      CUDA_CHECK(cudaMalloc(&leaf_points, N*sizeof(int)));
       tree_mem+=N*sizeof(int);
 
     }
@@ -168,9 +168,13 @@ class TPtree {
       cudaMemset(node_ids, 0, N*sizeof(int));
       cudaMemset(node_sizes, 0, num_nodes*sizeof(int));
       cudaMemset(split_keys, 0.0, num_nodes*sizeof(float));
+
+      LeafNode* h_leafs = new LeafNode[num_leaves];
       for(int i=0; i<num_leaves; ++i) {
-        leafs[i].size=0;
+        h_leafs[i].size=0;
       }
+      CUDA_CHECK(cudaMemcpy(leafs, h_leafs, num_leaves*sizeof(LeafNode), cudaMemcpyHostToDevice));
+      delete[] h_leafs;
     }
 
     __host__ void destroy() {
@@ -194,65 +198,40 @@ class TPtree {
       for(int i=0; i<levels; ++i) {
 
         find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level, i);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
 
         compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, i);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
 
         nodes_on_level*=2;
       }
       count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
-      cudaDeviceSynchronize();
+      CUDA_CHECK(cudaDeviceSynchronize());
 
 
-      leafs[0].offset=0;
+      LeafNode* h_leafs = new LeafNode[num_leaves];
+
+      CUDA_CHECK(cudaMemcpy(h_leafs, leafs, num_leaves*sizeof(LeafNode), cudaMemcpyDeviceToHost));
+
+      h_leafs[0].offset=0;
       for(int i=1; i<num_leaves; ++i) {
-        leafs[i].offset = leafs[i-1].offset+leafs[i-1].size;
+        h_leafs[i].offset = h_leafs[i-1].offset+h_leafs[i-1].size;
       } 
-      for(int i=0; i<num_leaves; ++i)
-        leafs[i].size=0;
 
+      for(int i=0; i<num_leaves; ++i)
+        h_leafs[i].size=0;
+
+
+      CUDA_CHECK(cudaMemcpy(leafs, h_leafs, num_leaves*sizeof(LeafNode), cudaMemcpyHostToDevice));
+      delete[] h_leafs;
+
+      CUDA_CHECK(cudaDeviceSynchronize());
       assign_leaf_points_in_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
-      cudaDeviceSynchronize();
+      CUDA_CHECK(cudaDeviceSynchronize());
       assign_leaf_points_out_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
-    }
-
-    /************************************************************************************
-     * Construct the tree asynchronously on the CUDA stream.  
-                     ** Assumes tree has been initialized and allocated **
-     * For each level of the tree, compute the mean for each node and set it as the split_key,
-     * then compute, for each element, which child node it belongs to (storing in node_ids)
-    ************************************************************************************/
-    __host__ void construct_tree_async(Point<T,SUMTYPE,Dim>* points, int min_id, int max_id, cudaStream_t stream) {
-
-      int nodes_on_level=1;
-      for(int i=0; i<levels; ++i) {
-
-        find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,stream>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level, i);
-
-        compute_mean<KEY_T><<<BLOCKS,THREADS,0,stream>>>(split_keys, node_sizes, num_nodes);
-
-        update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,stream>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, i);
-
-        nodes_on_level*=2;
-      }
-      count_leaf_sizes<<<BLOCKS,THREADS,0,stream>>>(leafs, node_ids, N, num_nodes-num_leaves);
-      CUDA_CHECK(cudaStreamSynchronize(stream));
-
-
-      leafs[0].offset=0;
-      for(int i=1; i<num_leaves; ++i) {
-        leafs[i].offset = leafs[i-1].offset+leafs[i-1].size;
-      } 
-      for(int i=0; i<num_leaves; ++i)
-        leafs[i].size=0;
-
-      assign_leaf_points_in_batch<<<BLOCKS,THREADS,0,stream>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
-      CUDA_CHECK(cudaStreamSynchronize(stream));
-      assign_leaf_points_out_batch<<<BLOCKS,THREADS,0,stream>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
     }
 
     /************************************************************************************
@@ -277,7 +256,7 @@ __host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE
     h_weights[i] = ((rand()%2)*2)-1;
   }
 
-  cudaMemcpy(d_tree->weight_list, h_weights, d_tree->levels*Dim*sizeof(KEY_T), cudaMemcpyHostToDevice);
+  CUDA_CHECK(cudaMemcpy(d_tree->weight_list, h_weights, d_tree->levels*Dim*sizeof(KEY_T), cudaMemcpyHostToDevice));
   
   d_tree->construct_tree(points, min_id, max_id);
 
@@ -303,30 +282,31 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
         nodes_on_level*=2;
     }
 
+    LeafNode* h_leafs = new LeafNode[d_trees[0]->num_leaves];
+
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         cudaSetDevice(gpuNum);
         count_leaf_sizes<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves);
-    }
 
+        CUDA_CHECK(cudaMemcpyAsync(h_leafs, d_trees[gpuNum]->leafs, d_trees[gpuNum]->num_leaves*sizeof(LeafNode), cudaMemcpyDeviceToHost, streams[gpuNum]));
 
-    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-        cudaSetDevice(gpuNum);
-        CUDA_CHECK(cudaStreamSynchronize(streams[gpuNum]));
-
-        d_trees[gpuNum]->leafs[0].offset=0;
+        h_leafs[0].offset = 0;
         for(int i=1; i<d_trees[gpuNum]->num_leaves; ++i) {
-            d_trees[gpuNum]->leafs[i].offset = d_trees[gpuNum]->leafs[i-1].offset + d_trees[gpuNum]->leafs[i-1].size;
+            h_leafs[i].offset = h_leafs[i-1].offset + h_leafs[i-1].size;
         } 
         for(int i=0; i<d_trees[gpuNum]->num_leaves; ++i) {
-            d_trees[gpuNum]->leafs[i].size=0;
+          h_leafs[i].size=0;
         }
+
+        CUDA_CHECK(cudaMemcpyAsync(d_trees[gpuNum]->leafs, h_leafs, d_trees[gpuNum]->num_leaves*sizeof(LeafNode), cudaMemcpyHostToDevice, streams[gpuNum]));
 
         assign_leaf_points_in_batch<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
     }
 
+    delete[] h_leafs;
+
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         cudaSetDevice(gpuNum);
-        CUDA_CHECK(cudaStreamSynchronize(streams[gpuNum]));
         assign_leaf_points_out_batch<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
     }
 }
