@@ -66,7 +66,7 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
-    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort);
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     

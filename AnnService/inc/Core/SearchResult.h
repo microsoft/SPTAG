@@ -31,7 +31,7 @@ namespace SPTAG
         SizeType node;
         float distance;
         SizeType tonode;
-        Edge() : node(INT_MAX), distance(FLT_MAX), tonode(INT_MAX) {}
+        Edge() : node(MaxSize), distance(MaxDist), tonode(MaxSize) {}
     };
 
     struct BasicResult

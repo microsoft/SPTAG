@@ -757,7 +757,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                         {
                             float nnDist = ComputeDistance(GetSample(queryResults[i].VID), GetSample(selections[selectionOffset+j].node));
 
-                            if (RNGFactor * nnDist <= queryResults[i].Dist)
+                            if (RNGFactor * nnDist < queryResults[i].Dist)
                             {
                                 rngAccpeted = false;
                                 break;
