@@ -135,44 +135,61 @@ namespace SPTAG
         };
 
         class DistPriorityQueue {
-            std::unique_ptr<float[]> m_data;
             int m_size;
+            std::unique_ptr<float[]> m_data;
+            int m_length;
             int m_count;
+            
         public:
             DistPriorityQueue() {}
 
             void Resize(int size_) {
-                m_data.reset(new float[size_ + 1]);
-                for (int i = 0; i <= size_; i++) m_data[i] = MaxDist;
                 m_size = size_;
+                m_data.reset(new float[size_ + 1]);
+                
+                m_data[1] = MaxDist;
+                m_length = 1;
                 m_count = size_;
             }
             void clear(int count_) {
                 if (count_ > m_size) {
-                    m_data.reset(new float[count_ + 1]);
                     m_size = count_;
+                    m_data.reset(new float[count_ + 1]);
                 }
-                for (int i = 0; i <= count_; i++) m_data[i] = MaxDist;
+                m_data[1] = MaxDist;
+                m_length = 1;
                 m_count = count_;
+                
             }
             bool insert(float dist) {
                 if (dist > m_data[1]) return false;
 
-                m_data[1] = dist;
-                int parent = 1, next = 2;
-                while (next < m_count) {
-                    if (m_data[next] < m_data[next + 1]) next++;
-                    if (m_data[parent] < m_data[next]) {
-                        std::swap(m_data[next], m_data[parent]);
-                        parent = next;
-                        next <<= 1;
+                if (m_length == m_count) {
+                    m_data[1] = dist;
+                    int parent = 1, next = 2;
+                    while (next < m_length) {
+                        if (m_data[next] < m_data[next + 1]) next++;
+                        if (m_data[next] > m_data[parent]) {
+                            std::swap(m_data[parent], m_data[next]);
+                            parent = next;
+                            next <<= 1;
+                        }
+                        else break;
                     }
-                    else break;
+                    if (next == m_length && m_data[next] > m_data[parent]) std::swap(m_data[parent], m_data[next]);
                 }
-                if (next == m_count && m_data[parent] < m_data[next]) std::swap(m_data[parent], m_data[next]);
+                else {
+                    int next = ++(m_length), parent = (next >> 1);
+                    while (parent > 0 && dist > m_data[parent]) {
+                        m_data[next] = m_data[parent];
+                        next = parent;
+                        parent >>= 1;
+                    }
+                    m_data[next] = dist;
+                }
                 return true;
             }
-            float worst() {
+            inline float worst() {
                 return m_data[1];
             }
         };
@@ -180,9 +197,9 @@ namespace SPTAG
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, SizeType dataSize, int hashexp)
+            void Initialize(int maxCheck, SizeType dataSize, int hashExp)
             {
-                nodeCheckStatus.Init(maxCheck, hashexp);
+                nodeCheckStatus.Init(maxCheck, hashExp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
                 m_Results.Resize(maxCheck / 16);
@@ -194,12 +211,12 @@ namespace SPTAG
                 m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
-            void Reset(int maxCheck)
+            void Reset(int maxCheck, int resultNum)
             {
                 nodeCheckStatus.clear();
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
-                m_Results.clear(maxCheck / 16);
+                m_Results.clear(max(maxCheck / 16, resultNum));
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
                 //m_iContinuousLimit = maxCheck / 64;

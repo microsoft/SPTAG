@@ -150,6 +150,13 @@ AnnIndex::ReadyToServe() const
 }
 
 
+void
+AnnIndex::UpdateIndex()
+{
+    m_index->UpdateIndex();
+}
+
+
 bool
 AnnIndex::Save(const char* p_savefile) const
 {

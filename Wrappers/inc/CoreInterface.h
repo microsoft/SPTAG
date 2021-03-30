@@ -36,6 +36,8 @@ public:
 
     bool ReadyToServe() const;
 
+    void UpdateIndex();
+
     bool Save(const char* p_saveFile) const;
 
     bool Add(ByteArray p_data, SizeType p_num);
