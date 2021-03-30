@@ -109,7 +109,7 @@ else()
     message (FATAL_ERROR "Could no find openmp!")
 endif()
 
-find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex)
+find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex filesystem)
 if (Boost_FOUND)
     include_directories (${Boost_INCLUDE_DIR})
     link_directories (${Boost_LIBRARY_DIR})
