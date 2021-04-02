@@ -17,11 +17,23 @@ This dataset contains:
 ```python
 import struct
 import numpy as np
+import os
 
-fvec = open('SPACEV1B.bin', 'rb')
-vec_count = struct.unpack('i', fvec.read(4))[0]
-vec_dimension = struct.unpack('i', fvec.read(4))[0]
-X = np.frombuffer(fvec.read(vec_count * vec_dimension), dtype=np.int8).reshape((vec_count, vec_dimension))
+part_count = len(os.listdir('vectors.bin'))
+for i in range(1, part_count + 1):
+    fvec = open(os.path.join('vectors.bin', 'vectors_%d.bin' % i), 'rb')
+    if i == 1:
+        vec_count = struct.unpack('i', fvec.read(4))[0]
+        vec_dimension = struct.unpack('i', fvec.read(4))[0]
+        vecbuf = bytearray(vec_count * vec_dimension)
+        vecbuf_offset = 0
+    while True:
+        part = fvec.read(1048576)
+        if len(part) == 0: break
+        vecbuf[vecbuf_offset: vecbuf_offset + len(part)] = part
+        vecbuf_offset += len(part)
+    fvec.close()
+X = np.frombuffer(vecbuf, dtype=np.int8).reshape((vec_count, vec_dimension))
 
 fq = open('query.bin', 'rb')
 q_count = struct.unpack('i', fq.read(4))[0]
