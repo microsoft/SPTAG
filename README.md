@@ -44,6 +44,13 @@ The searches in the trees and the graph are iteratively conducted.
 * cmake >= 3.12.0
 * boost >= 1.67.0
 
+### **Fast clone**
+
+```
+set GIT_LFS_SKIP_SMUDGE=1
+git clone https://github.com/microsoft/SPTAG
+```
+
 ### **Install**
 
 > For Linux:
