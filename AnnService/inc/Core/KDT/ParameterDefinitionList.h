@@ -30,6 +30,7 @@ DefineKDTParameter(m_pGraph.m_iGPUGraphType, int, 2, "GPUGraphType") // Have GPU
 DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Steps of GPU neighbor-refinement
 DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
+DefineKDTParameter(m_pGraph.m_iheadNumGPUs, int, 1, "HeadNumGPUs")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
