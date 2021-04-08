@@ -1,6 +1,6 @@
 # SPACEV1B: A billion-Scale vector dataset for text descriptors
-This is a dataset released by Microsoft Bing for large scale vector search related research usage. It consists of more than one billion document vectors 
-and 29K+ query vectors encoded by Microsoft SpaceV model. This model is trained to capture generic intent representation for both documents and queries. 
+This is a dataset released by Microsoft from SpaceV, Bing web vector search scenario, for large scale vector search related research usage. It consists of more than one billion document vectors 
+and 29K+ query vectors encoded by Microsoft SpaceV Superior model. This model is trained to capture generic intent representation for both documents and queries. 
 The goal is to match the query vector to the closest document vectors in order to achieve topk relevant documents for each query.
 
 ## Introduction
