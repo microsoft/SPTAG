@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Socket/Server.h"
+#include "inc/Core/Common.h"
 
 #include <exception>
 
@@ -21,7 +22,7 @@ Server::Server(const std::string& p_address,
     auto endPoints = resolver.resolve(p_address, p_port, errCode);
     if (errCode)
     {
-        fprintf(stderr,
+        LOG(Helper::LogLevel::LL_Error,
                 "Failed to resolve %s %s, error: %s",
                 p_address.c_str(),
                 p_port.c_str(),
@@ -37,7 +38,7 @@ Server::Server(const std::string& p_address,
     m_acceptor.bind(endpoint, errCode);
     if (errCode)
     {
-        fprintf(stderr,
+        LOG(Helper::LogLevel::LL_Error,
                 "Failed to bind %s %s, error: %s",
                 p_address.c_str(),
                 p_port.c_str(),
@@ -49,7 +50,7 @@ Server::Server(const std::string& p_address,
     m_acceptor.listen(boost::asio::socket_base::max_listen_connections, errCode);
     if (errCode)
     {
-        fprintf(stderr,
+        LOG(Helper::LogLevel::LL_Error,
                 "Failed to listen %s %s, error: %s",
                 p_address.c_str(),
                 p_port.c_str(),
