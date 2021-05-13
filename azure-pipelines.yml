@@ -24,7 +24,7 @@ phases:
        cmake ..
        make
        cd ../Release
-       ./test 
+       ./SPTAGTest 
 
     displayName: 'Command Line Script'
 
