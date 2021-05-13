@@ -150,7 +150,7 @@ SearchService::RunSocketMode()
 
     m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
                                  {
-            LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
+                                     LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
                                  });
 
     m_ioContext.run();
