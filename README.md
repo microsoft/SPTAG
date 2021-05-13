@@ -49,6 +49,11 @@ The searches in the trees and the graph are iteratively conducted.
 ```
 set GIT_LFS_SKIP_SMUDGE=1
 git clone https://github.com/microsoft/SPTAG
+
+OR
+
+git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+git config --global filter.lfs.process "git-lfs filter-process --skip"
 ```
 
 ### **Install**
