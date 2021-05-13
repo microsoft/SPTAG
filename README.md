@@ -78,7 +78,7 @@ Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
-Run the test (or Test.exe) in the Release folder to verify all the tests have passed.
+Run the SPTAGTest (or Test.exe) in the Release folder to verify all the tests have passed.
 
 ### **Usage**
 
