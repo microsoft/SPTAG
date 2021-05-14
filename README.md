@@ -49,6 +49,11 @@ The searches in the trees and the graph are iteratively conducted.
 ```
 set GIT_LFS_SKIP_SMUDGE=1
 git clone https://github.com/microsoft/SPTAG
+
+OR
+
+git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+git config --global filter.lfs.process "git-lfs filter-process --skip"
 ```
 
 ### **Install**
@@ -78,7 +83,7 @@ Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
-Run the test (or Test.exe) in the Release folder to verify all the tests have passed.
+Run the SPTAGTest (or Test.exe) in the Release folder to verify all the tests have passed.
 
 ### **Usage**
 

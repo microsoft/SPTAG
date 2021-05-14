@@ -23,10 +23,12 @@ class SerivceCmdOptions : public Helper::ArgumentsParser
 public:
     SerivceCmdOptions()
         : m_serveMode("interactive"),
-          m_configFile("AnnService.ini")
+          m_configFile("AnnService.ini"),
+          m_logFile("")
     {
         AddOptionalOption(m_serveMode, "-m", "--mode", "Service mode, interactive or socket.");
         AddOptionalOption(m_configFile, "-c", "--config", "Service config file path.");
+        AddOptionalOption(m_logFile, "-l", "--log", "Service log file path.");
     }
 
     virtual ~SerivceCmdOptions()
@@ -36,6 +38,8 @@ public:
     std::string m_serveMode;
 
     std::string m_configFile;
+
+    std::string m_logFile;
 };
 
 }
@@ -75,8 +79,12 @@ SearchService::Initialize(int p_argNum, char* p_args[])
     }
     else
     {
-        fprintf(stderr, "Failed parse Serve Mode!\n");
+        LOG(Helper::LogLevel::LL_Error, "Failed parse Serve Mode!\n");
         return false;
+    }
+
+    if (!cmdOptions.m_logFile.empty()) {
+        g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Debug, cmdOptions.m_logFile.c_str()));
     }
 
     m_serviceContext.reset(new ServiceContext(cmdOptions.m_configFile));
@@ -129,7 +137,7 @@ SearchService::RunSocketMode()
                                             handlerMap,
                                             m_serviceContext->GetServiceSettings()->m_socketThreadNum));
 
-    fprintf(stderr,
+    LOG(Helper::LogLevel::LL_Info,
             "Start to listen %s:%s ...\n",
             m_serviceContext->GetServiceSettings()->m_listenAddr.c_str(),
             m_serviceContext->GetServiceSettings()->m_listenPort.c_str());
@@ -142,11 +150,11 @@ SearchService::RunSocketMode()
 
     m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
                                  {
-                                     fprintf(stderr, "Received shutdown signals.\n");
+                                     LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
                                  });
 
     m_ioContext.run();
-    fprintf(stderr, "Start shutdown procedure.\n");
+    LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
 
     m_socketServer.reset();
     m_threadPool->stop();
@@ -207,6 +215,7 @@ SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::P
 {
     if (p_packet.Header().m_bodyLength == 0)
     {
+        LOG(Helper::LogLevel::LL_Error, "Empty package with body length equals 0!\n");
         return;
     }
 
@@ -216,7 +225,10 @@ SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::P
     }
 
     Socket::RemoteQuery remoteQuery;
-    remoteQuery.Read(p_packet.Body());
+    if(remoteQuery.Read(p_packet.Body()) == nullptr) {
+        LOG(Helper::LogLevel::LL_Error, "majorVersion is not match!\n");
+        return;
+    }
 
     auto callback = std::bind(&SearchService::SearchHanlderCallback,
                               this,
