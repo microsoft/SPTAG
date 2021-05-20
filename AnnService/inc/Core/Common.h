@@ -58,19 +58,23 @@ inline T max(T a, T b) {
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 
 #else
+
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif // !WIN32_LEAN_AND_MEAN
+
 #include <Windows.h>
 #include <Psapi.h>
 #include <malloc.h>
 
 #define FolderSep '\\'
 
-inline bool direxists(const char* path) {
-    auto dwAttr = GetFileAttributes((LPCSTR)path);
+inline bool direxists(const TCHAR* path) {
+    auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY);
 }
-inline bool fileexists(const char* path) {
-    auto dwAttr = GetFileAttributes((LPCSTR)path);
+inline bool fileexists(const TCHAR* path) {
+    auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
