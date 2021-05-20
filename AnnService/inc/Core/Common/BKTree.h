@@ -309,7 +309,7 @@ namespace SPTAG
                 CountStd += (args.counts[i] - CountAvg) * (args.counts[i] - CountAvg);
             }
             CountStd = sqrt(CountStd / args._DK) / CountAvg;
-            if (debug) LOG(Helper::LogLevel::LL_Info, "LambdaFactor:%f Max:%d Min:%d Avg:%f Std/Avg:%f\n", lambdaFactor, maxCount, minCount, CountAvg, CountStd);
+            if (debug) LOG(Helper::LogLevel::LL_Info, "LambdaFactor:%f Max:%d Min:%d Avg:%f Std/Avg:%f Dist:%f\n", lambdaFactor, maxCount, minCount, CountAvg, CountStd, currDist);
 
             return CountStd;
         }
@@ -406,7 +406,8 @@ namespace SPTAG
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
-                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_) : index(index_), first(first_), last(last_) {}
+                    bool debug;
+                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_, bool debug_ = false) : index(index_), first(first_), last(last_), debug(debug_) {}
                 };
                 std::stack<BKTStackItem> ss;
 
@@ -431,7 +432,7 @@ namespace SPTAG
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());
                     LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
 
-                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
+                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size(), true));
                     while (!ss.empty()) {
                         if (abort && abort->ShouldAbort()) return;
 
@@ -450,7 +451,7 @@ namespace SPTAG
                                 args._DK = std::max<int>(args._DK, 2);
                             }
 
-                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, ss.empty(), abort);
+                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
@@ -464,11 +465,13 @@ namespace SPTAG
                                 m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
                             }
                             else {
+                                SizeType maxCount = 0;
+                                for (int k = 0; k < m_iBKTKmeansK; k++) if (args.counts[k] > maxCount) maxCount = args.counts[k];
                                 for (int k = 0; k < m_iBKTKmeansK; k++) {
                                     if (args.counts[k] == 0) continue;
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
                                     m_pTreeRoots.emplace_back(cid);
-                                    if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
+                                    if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1, args.counts[k] == maxCount));
                                     item.first += args.counts[k];
                                 }
                             }
