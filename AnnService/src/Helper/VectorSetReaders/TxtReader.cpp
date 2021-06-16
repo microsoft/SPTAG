@@ -165,7 +165,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
                                 std::uint32_t p_fileBlockID,
                                 std::size_t p_fileBlockSize)
 {
-    std::size_t lineBufferSize = 1 << 16;
+    std::uint64_t lineBufferSize = 1 << 16;
     std::unique_ptr<char[]> currentLine(new char[lineBufferSize]);
 
     SizeType recordCount = 0;
