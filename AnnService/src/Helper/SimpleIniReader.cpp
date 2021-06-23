@@ -25,7 +25,7 @@ IniReader::~IniReader()
 
 ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskPriorityIO> p_input)
 {
-    std::size_t c_bufferSize = 1 << 16;
+    std::uint64_t c_bufferSize = 1 << 16;
 
     std::unique_ptr<char[]> line(new char[c_bufferSize]);
 
@@ -46,7 +46,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskPriorityIO> p_input)
     {
         if (!p_input->ReadString(c_bufferSize, line)) break;
 
-        std::size_t len = 0;
+        std::uint64_t len = 0;
         while (len < c_bufferSize && line[len] != '\0')
         {
             ++len;
