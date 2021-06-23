@@ -220,7 +220,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 		queryParser.Parse(remoteQuery.m_queryString, "|");
 		ByteArray vector;
 		size_t vectorSize;
-		SizeType vectorDimension;
+		SizeType vectorDimension = 0;
 		std::vector<BasicResult> servers;
 		switch (context->GetSettings()->m_valueType)
 		{

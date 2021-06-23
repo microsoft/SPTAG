@@ -380,6 +380,9 @@ namespace SPTAG
                     auto t2 = std::chrono::high_resolution_clock::now();
                     LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
+                else {
+                    LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
+                }
             }
 
             template <typename T>
