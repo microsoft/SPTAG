@@ -33,6 +33,7 @@ DefineBKTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Step
 DefineBKTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineBKTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 DefineBKTParameter(m_pGraph.m_iheadNumGPUs, int, 1, "HeadNumGPUs")
+DefineBKTParameter(m_pGraph.m_iTPTBalanceFactor, int, 2, "TPTBalanceFactor")
 
 DefineBKTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineBKTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
