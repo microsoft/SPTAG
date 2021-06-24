@@ -429,9 +429,7 @@ __global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int
   KEY_T val=0;
   int size = min(N, nodes_on_level*SAMPLES);
   int step = N/size;
-//if(threadIdx.x==0 && blockIdx.x==0) printf("find level sum, size:%d, step:%d\n", size, step);
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<size; i+=blockDim.x*gridDim.x) {
-//  for(int i=(blockIdx.x*blockDim.x+threadIdx.x)*step; i<N; i+=blockDim.x*gridDim.x*step) {
     val = weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(points[i], &weights[level*Dim], partition_dims);
     atomicAdd(&split_keys[node_ids[i]], val);
     atomicAdd(&node_sizes[node_ids[i]], 1);

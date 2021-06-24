@@ -223,8 +223,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
     int TPTlevels = (int)std::log2(headRows/LEAF_SIZE);
 
-    printf("tailRows:%ld\n", tailRows);
-
     Point<T,SUMTYPE,MAX_DIM>* headPoints;
     Point<T,SUMTYPE,MAX_DIM>* tailPoints; 
     headPoints = new Point<T,SUMTYPE,MAX_DIM>[headRows];
@@ -299,8 +297,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
         BATCH_SIZE[gpuNum] = min(maxEltsPerBatch, (int)(tailsPerGPU[gpuNum]));
 
-printf("headPointSize:%ld, treeSize:%ld, tailMemAvail:%ld, maxEltsPerBatch:%d, batch_size:%ld, total batches:%ld\n", headVecSize, treeSize, tailMemAvail, maxEltsPerBatch, BATCH_SIZE[gpuNum], ((size_t)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum]);
-  
        // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
         if(BATCH_SIZE[gpuNum] == 0 || ((int)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum] > 10000) {
             LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index on GPU %d.  Available GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", gpuNum, (freeMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
