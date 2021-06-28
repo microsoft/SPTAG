@@ -770,7 +770,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  ***************************************************************************************/
 
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, int NUM_GPUS) {
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, int NUM_GPUS, int balanceFactor) {
 
   int numDevicesOnHost;
   CUDA_CHECK(cudaGetDeviceCount(&numDevicesOnHost));
@@ -915,7 +915,7 @@ auto before_tpt = std::chrono::high_resolution_clock::now();
         CUDA_CHECK(cudaSetDevice(gpuNum));
         tptrees[gpuNum]->reset();
       }
-      create_tptree_multigpu<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>(tptrees, d_points, dataSize, levels, NUM_GPUS, streams.data());
+      create_tptree_multigpu<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>(tptrees, d_points, dataSize, levels, NUM_GPUS, streams.data(), balanceFactor);
       CUDA_CHECK(cudaDeviceSynchronize());
 
             // Copy TPTs to each GPU
@@ -985,7 +985,7 @@ auto end_t = std::chrono::high_resolution_clock::now();
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
@@ -1006,18 +1006,18 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   }
   if(typeid(T) == typeid(float)) {
     if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS);
+      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
     }
     else {
-      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS);
+      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
     }
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
     if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS);
+      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
     }
     else {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS);
+      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
     }
   }
   else {

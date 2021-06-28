@@ -48,7 +48,8 @@ namespace SPTAG
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
-                                 m_iheadNumGPUs(1)
+                                 m_iheadNumGPUs(1),
+                                 m_iTPTBalanceFactor(2)
             {}
 
             ~NeighborhoodGraph() {}
@@ -106,7 +107,7 @@ namespace SPTAG
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
               // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs);
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -537,7 +538,7 @@ namespace SPTAG
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
             float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
-            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor;
         };
     }
 }

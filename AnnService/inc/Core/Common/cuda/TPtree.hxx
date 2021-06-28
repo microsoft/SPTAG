@@ -29,6 +29,8 @@
 #include<iostream>
 #include<queue>
 #include <cuda.h>
+#include <limits.h>
+#include <curand_kernel.h>
 #include "params.h"
 #include "Distance.hxx"
 
@@ -56,6 +58,13 @@ __global__ void update_node_assignments(Point<T,SUMTYPE,Dim>* points, KEY_T* wei
  * Determine the sizes (number of points in) each leaf node and sets leafs.size
  ************************************************************************************/
 __global__ void count_leaf_sizes(LeafNode* leafs, int* node_ids, int N, int internal_nodes);
+
+
+__global__ void check_for_imbalance(int* node_ids, int* node_sizes, int nodes_on_level, int ndoe_start, float* frac_to_move, int balanceFactor);
+
+__global__ void initialize_rands(curandState* states, int iter);
+
+__global__ void rebalance_nodes(int* node_ids, int N, float* frac_to_move, curandState* states);
 
 
 /************************************************************************************
@@ -264,29 +273,74 @@ __host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE
 }
 
 
+// Construct TPT on each GPU 
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Point<T,SUMTYPE,Dim>** points, int N, int NUM_GPUS, cudaStream_t* streams) {
+__host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Point<T,SUMTYPE,Dim>** points, int N, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
     int nodes_on_level=1;
+
+    const int RUN_BLOCKS = min(N/THREADS, BLOCKS);
+
+
+    float** frac_to_move = new float*[NUM_GPUS];
+    curandState** states = new curandState*[NUM_GPUS];
+
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        CUDA_CHECK(cudaSetDevice(gpuNum));
+        CUDA_CHECK(cudaMalloc(&frac_to_move[gpuNum], d_trees[0]->num_nodes*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&states[gpuNum], N*sizeof(curandState)));
+        initialize_rands<<<RUN_BLOCKS,THREADS>>>(states[gpuNum], 0);
+
+    }
+
+  
     for(int i=0; i<d_trees[0]->levels; ++i) {
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
-            find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
+            find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
 
-            compute_mean<KEY_T><<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
 
-            update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i);
         }
 
+        // Check and rebalance all levels beyond the first (first level has only 1 node)
+        if(i > 0) {
+            for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+                cudaSetDevice(gpuNum);
+
+                // Compute imbalance factors for each node on level
+                check_for_imbalance<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->node_ids, d_trees[gpuNum]->node_sizes, nodes_on_level, nodes_on_level-1, frac_to_move[gpuNum], balanceFactor);
+
+                // Randomly reassign points to neighboring nodes as needed based on imbalance factor
+                rebalance_nodes<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->node_ids, N, frac_to_move[gpuNum], states[gpuNum]);
+            }
+        }
+
+        for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+            cudaSetDevice(gpuNum);
+
+            compute_mean<KEY_T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
+
+            update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i);
+        }
         nodes_on_level*=2;
+
     }
+
+    // Free memory used for rebalancing, etc.
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        cudaSetDevice(gpuNum);
+        cudaFree(frac_to_move[gpuNum]);
+        cudaFree(states[gpuNum]);
+    }
+    delete[] frac_to_move;
+    delete[] states;
 
     LeafNode* h_leafs = new LeafNode[d_trees[0]->num_leaves];
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         cudaSetDevice(gpuNum);
-        count_leaf_sizes<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves);
+        count_leaf_sizes<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves);
 
         CUDA_CHECK(cudaMemcpyAsync(h_leafs, d_trees[gpuNum]->leafs, d_trees[gpuNum]->num_leaves*sizeof(LeafNode), cudaMemcpyDeviceToHost, streams[gpuNum]));
 
@@ -300,20 +354,20 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
 
         CUDA_CHECK(cudaMemcpyAsync(d_trees[gpuNum]->leafs, h_leafs, d_trees[gpuNum]->num_leaves*sizeof(LeafNode), cudaMemcpyHostToDevice, streams[gpuNum]));
 
-        assign_leaf_points_in_batch<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
+        assign_leaf_points_in_batch<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
     }
 
     delete[] h_leafs;
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         cudaSetDevice(gpuNum);
-        assign_leaf_points_out_batch<<<BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
+        assign_leaf_points_out_batch<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->leafs, d_trees[gpuNum]->leaf_points, d_trees[gpuNum]->node_ids, N, d_trees[gpuNum]->num_nodes - d_trees[gpuNum]->num_leaves, 0, N);
     }
 }
 
 
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Point<T,SUMTYPE,Dim>** points, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams) {
+__host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Point<T,SUMTYPE,Dim>** points, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
   KEY_T* h_weights = new KEY_T[d_trees[0]->levels*Dim];
   for(int i=0; i<d_trees[0]->levels*Dim; ++i) {
@@ -328,7 +382,7 @@ __host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Poin
   }
 
   // Build TPT on each GPU  
-  construct_trees_multigpu<T,KEY_T,SUMTYPE,Dim>(d_trees, points, N, NUM_GPUS, streams);
+  construct_trees_multigpu<T,KEY_T,SUMTYPE,Dim>(d_trees, points, N, NUM_GPUS, streams, balanceFactor);
 
   delete h_weights;
 }
@@ -374,6 +428,7 @@ template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
 __global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
   KEY_T val=0;
   int size = min(N, nodes_on_level*SAMPLES);
+  int step = N/size;
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<size; i+=blockDim.x*gridDim.x) {
     val = weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(points[i], &weights[level*Dim], partition_dims);
     atomicAdd(&split_keys[node_ids[i]], val);

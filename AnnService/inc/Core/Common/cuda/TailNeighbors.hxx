@@ -246,6 +246,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
     GPUOffset[0] = 0;
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU 0: tails:%lu, offset:%lu\n", tailsPerGPU[0], GPUOffset[0]);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU 0: tails:%lu, offset:%lu\n", tailsPerGPU[0], GPUOffset[0]);
     for(int gpuNum=1; gpuNum < NUM_GPUS; ++gpuNum) {
         GPUOffset[gpuNum] = GPUOffset[gpuNum-1] + tailsPerGPU[gpuNum-1];
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU %d: tails:%lu, offset:%lu\n", gpuNum, tailsPerGPU[gpuNum], GPUOffset[gpuNum]);
@@ -295,7 +296,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>) + 2*sizeof(int));
 
         BATCH_SIZE[gpuNum] = min(maxEltsPerBatch, (int)(tailsPerGPU[gpuNum]));
-  
+
        // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
         if(BATCH_SIZE[gpuNum] == 0 || ((int)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum] > 10000) {
             LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index on GPU %d.  Available GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", gpuNum, (freeMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
@@ -376,7 +377,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
 auto t1 = std::chrono::high_resolution_clock::now();
             // Create TPT on each GPU
-            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams.data());
+            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams.data(), 2);
             CUDA_CHECK(cudaDeviceSynchronize());
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created on all GPUs\n", tree_id);
 
