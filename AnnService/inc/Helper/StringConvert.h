@@ -353,7 +353,6 @@ inline bool ConvertStringTo<QuantizerType>(const char* p_str, QuantizerType& p_v
     return false;
 }
 
-
 // Specialization of ConvertToString<>().
 
 template<>
@@ -407,7 +406,6 @@ inline std::string ConvertToString<QuantizerType>(const QuantizerType& p_value)
 
     return "Undefined";
 }
-
 
 template <>
 inline std::string ConvertToString<DistCalcMethod>(const DistCalcMethod& p_value)

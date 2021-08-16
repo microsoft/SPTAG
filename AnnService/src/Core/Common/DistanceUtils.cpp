@@ -62,7 +62,7 @@ inline __m128 _mm_mul_epu8(__m128i X, __m128i Y)
     return _mm_cvtepi32_ps(_mm_add_epi32(_mm_madd_epi16(xlo, ylo), _mm_madd_epi16(xhi, yhi)));
 }
 
-static inline __m128 _mm_sqdf_epu8(__m128i X, __m128i Y)
+inline __m128 _mm_sqdf_epu8(__m128i X, __m128i Y)
 {
     __m128i zero = _mm_setzero_si128();
 

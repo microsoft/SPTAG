@@ -37,8 +37,9 @@ namespace SPTAG
                                  m_iSamples(1000), 
                                  m_numTopDimensionTPTSplit(5),
                                  m_iNeighborhoodSize(32),
-                                 m_iNeighborhoodScale(2),
-                                 m_iCEFScale(2),
+                                 m_fNeighborhoodScale(2.0),
+                                 m_fCEFScale(2.0),
+                                 m_fRNGFactor(1.0),
                                  m_iRefineIter(2),
                                  m_iCEF(1000),
                                  m_iAddCEF(500),
@@ -47,7 +48,8 @@ namespace SPTAG
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
-                                 m_iGPUBatches(1)
+                                 m_iheadNumGPUs(1),
+                                 m_iTPTBalanceFactor(2)
             {}
 
             ~NeighborhoodGraph() {}
@@ -105,7 +107,7 @@ namespace SPTAG
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
               // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches);
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -258,7 +260,7 @@ namespace SPTAG
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
-                COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize);
+                COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 std::vector<std::vector<SizeType>> TptreeDataIndices(m_iTPTNumber, std::vector<SizeType>(m_iGraphSize));
                 std::vector<std::vector<std::pair<SizeType, SizeType>>> TptreeLeafNodes(m_iTPTNumber, std::vector<std::pair<SizeType, SizeType>>());
 
@@ -322,8 +324,8 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
-                m_iNeighborhoodSize = m_iNeighborhoodSize * m_iNeighborhoodScale;
-                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize);
+                m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale));
+                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
@@ -359,14 +361,14 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
-                        RefineNode<T>(index, i, false, false, m_iCEF * m_iCEFScale);
+                        RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_fCEFScale));
                         if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
                     auto t2 = std::chrono::high_resolution_clock::now();
                     LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
 
-                m_iNeighborhoodSize /= m_iNeighborhoodScale;
+                m_iNeighborhoodSize = (DimensionType)(m_iNeighborhoodSize / m_fNeighborhoodScale);
 
                 if (m_iRefineIter > 0) {
                     auto t1 = std::chrono::high_resolution_clock::now();
@@ -378,6 +380,9 @@ namespace SPTAG
                     }
                     auto t2 = std::chrono::high_resolution_clock::now();
                     LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                }
+                else {
+                    LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
                 }
             }
 
@@ -392,7 +397,7 @@ namespace SPTAG
                 }
 
                 SizeType R = (SizeType)indices.size();
-                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize);
+                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 newGraph->m_iGraphSize = R;
                 newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
@@ -446,30 +451,30 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(input)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
 
-            ErrorCode LoadGraph(std::string sGraphFilename)
+            ErrorCode LoadGraph(std::string sGraphFilename, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
             
-            ErrorCode LoadGraph(char* pGraphMemFile)
+            ErrorCode LoadGraph(char* pGraphMemFile, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile, blockSize, capacity)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
@@ -532,7 +537,8 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches;
+            float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor;
         };
     }
 }

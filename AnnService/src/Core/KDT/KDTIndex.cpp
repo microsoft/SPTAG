@@ -31,10 +31,10 @@ namespace SPTAG
         {
             if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
 
-            if (m_pSamples.Load((char*)p_indexBlobs[0].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pSamples.Load((char*)p_indexBlobs[0].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
@@ -46,13 +46,14 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
         {
-            if (p_indexStreams.size() < 3) return ErrorCode::LackOfInputs;
+            if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
             ErrorCode ret = ErrorCode::Success;
-            if ((ret = m_pSamples.Load(p_indexStreams[0])) != ErrorCode::Success) return ret;
-            if ((ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
-            if ((ret = m_pGraph.LoadGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
-            if (p_indexStreams.size() > 3 && (ret = m_deletedID.Load(p_indexStreams[3])) != ErrorCode::Success) return ret;
+            if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
+            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
@@ -62,8 +63,12 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut) const
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
         {
+            auto workSpace = m_workSpacePool->Rent();
+            m_iHashTableExp = workSpace->HashTableExponent();
+            m_workSpacePool->Return(workSpace);
+
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
 
@@ -97,7 +102,7 @@ namespace SPTAG
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         while (!p_space.m_NGQueue.empty()) { \
-            COMMON::HeapCell gnode = p_space.m_NGQueue.pop(); \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) \
@@ -116,7 +121,7 @@ namespace SPTAG
                 float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
                 p_space.m_iNumberOfCheckedLeaves++; \
-                p_space.m_NGQueue.insert(COMMON::HeapCell(nn_index, distance2leaf)); \
+                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
             } \
             if (bLocalOpt) p_space.m_iNumOfContinuousNoBetterPropagation++; \
             else p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
@@ -149,7 +154,7 @@ namespace SPTAG
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_iMaxCheck);
+            workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
 
             if (m_deletedID.Count() == 0 || p_searchDeleted)
                 SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
@@ -173,7 +178,7 @@ namespace SPTAG
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             if (m_deletedID.Count() == 0 || p_searchDeleted)
                 SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
@@ -188,7 +193,7 @@ namespace SPTAG
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
             auto workSpace = m_workSpacePool->Rent();
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph);
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
             m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
@@ -212,10 +217,10 @@ namespace SPTAG
 
             omp_set_num_threads(m_iNumberOfThreads);
 
-            m_pSamples.Initialize(p_vectorNum, p_dimension, (T*)p_data, false);
-            m_deletedID.Initialize(p_vectorNum);
+            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, false);
+            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
 
-            if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr)
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod)
             {
                 int base = COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
@@ -283,9 +288,9 @@ namespace SPTAG
 
             ErrorCode ret = ErrorCode::Success;
             if ((ret = m_pSamples.Refine(indices, ptr->m_pSamples)) != ErrorCode::Success) return ret;
-            if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata)) != ErrorCode::Success) return ret;
+            if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata, m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize)) != ErrorCode::Success) return ret;
 
-            ptr->m_deletedID.Initialize(newR);
+            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr->m_pSamples, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
@@ -342,7 +347,7 @@ namespace SPTAG
             if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr)) != ErrorCode::Success) return ret;
 
             COMMON::Labelset newDeletedID;
-            newDeletedID.Initialize(newR);
+            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             if ((ret = newDeletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
 
             if (nullptr != m_pMetadata) {
@@ -371,6 +376,8 @@ namespace SPTAG
 
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType& p_id) {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
             std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
             if (m_deletedID.Insert(p_id)) return ErrorCode::Success;
             return ErrorCode::VectorNotFound;
@@ -390,10 +397,10 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    m_pMetadata = std::move(p_metadataSet);
-                    if (p_withMetaIndex && m_pMetadata != nullptr)
-                    {
-                        BuildMetaMapping(false);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata.reset(new MemMetadataSet(m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize));
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (p_withMetaIndex) BuildMetaMapping(false);
                     }
                     if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
@@ -410,7 +417,7 @@ namespace SPTAG
                     m_deletedID.SetR(begin);
                     return ErrorCode::MemoryOverFlow;
                 }
-                if (DistCalcMethod::Cosine == m_iDistCalcMethod && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr)
+                if (DistCalcMethod::Cosine == m_iDistCalcMethod)
                 {
                     int base = COMMON::Utils::GetBase<T>();
                     for (SizeType i = begin; i < end; i++) {
@@ -419,14 +426,18 @@ namespace SPTAG
                 }
 
                 if (m_pMetadata != nullptr) {
-                    m_pMetadata->AddBatch(*p_metadataSet);
-
-                    if (HasMetaMapping()) {
-                        for (SizeType i = begin; i < end; i++) {
-                            ByteArray meta = m_pMetadata->GetMetadata(i);
-                            std::string metastr((char*)meta.Data(), meta.Length());
-                            UpdateMetaMapping(metastr, i);
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (HasMetaMapping()) {
+                            for (SizeType i = begin; i < end; i++) {
+                                ByteArray meta = m_pMetadata->GetMetadata(i);
+                                std::string metastr((char*)meta.Data(), meta.Length());
+                                UpdateMetaMapping(metastr, i);
+                            }
                         }
+                    }
+                    else {
+                        for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
                     }
                 }
             }
@@ -474,7 +485,7 @@ namespace SPTAG
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
             return ErrorCode::Success;
         }

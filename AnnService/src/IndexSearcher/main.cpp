@@ -5,8 +5,6 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Core/Common/CommonUtils.h"
-#include "inc/Core/Common/DistanceUtils.h"
-#include "inc/Core/Common/PQQuantizer.h"
 #include "inc/Core/VectorIndex.h"
 #include <omp.h>
 #include <algorithm>
@@ -28,7 +26,6 @@ public:
         AddOptionalOption(m_withMeta, "-a", "--withmeta", "Output metadata instead of vector id.");
         AddOptionalOption(m_K, "-k", "--KNN", "K nearest neighbors for search.");
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
-        AddOptionalOption(m_deNormalizeBy, "-DN", "--denorm", "For quantized vectors, undo query normalization by this factor.");
     }
 
     ~SearcherOptions() {}
@@ -48,8 +45,6 @@ public:
     int m_K = 32;
 
     int m_batch = 10000;
-
-    float m_deNormalizeBy = 1.0;
 };
 
 template <typename T>
@@ -145,26 +140,14 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     std::vector<std::set<SizeType>> truth(options->m_batch);
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
     std::vector<clock_t> latencies(options->m_batch + 1, 0);
-    
-    std::vector<std::uint8_t> quantizedVectors;
-    if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) quantizedVectors.resize(SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() * options->m_batch);
-    int baseSquare = (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr) ? 1 : SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
-    
+    int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
+
     LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0);
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
-        for (SizeType i = 0; i < numQuerys; i++) {
-            void* vec = queryVectors->GetVector(startQuery + i);
-            if (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr && options->m_inputValueType == VectorValueType::Float) {
-                float* fltvec = (float*)vec;
-                for (int idx = 0; idx < options->m_dimension; idx++) fltvec[idx] /= options->m_deNormalizeBy;
-                vec = quantizedVectors.data() + SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() * i;
-                SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeVector(fltvec, (std::uint8_t*)vec);
-            }
-            results[i].SetTarget(vec);
-        }
+        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
         if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, options->m_K);
 
         SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;

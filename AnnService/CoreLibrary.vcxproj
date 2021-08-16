@@ -165,6 +165,7 @@
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />
     <ClInclude Include="inc\Helper\DiskIO.h" />
     <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
+    <ClInclude Include="inc\Helper\LockFree.h" />
     <ClInclude Include="inc\Helper\Logging.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />
     <ClInclude Include="inc\Helper\StringConvert.h" />

@@ -17,7 +17,7 @@ namespace SPTAG
         class PQQuantizer : public Quantizer
         {
         public:
-            PQQuantizer();	
+            PQQuantizer();
 
             PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float* Codebooks);
 

@@ -30,7 +30,7 @@ namespace SPTAG
                 return m_locks[index];
             }
         private:
-            static const int PoolSize = 16383;
+            static const int PoolSize = 32767;
             std::unique_ptr<std::mutex[]> m_locks;
 
             inline unsigned hash_func(unsigned idx) const

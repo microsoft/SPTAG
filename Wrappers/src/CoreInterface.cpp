@@ -78,7 +78,8 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, 
         if (((char)p_meta.Data()[i]) == '\n')
             offsets[current++] = (std::uint64_t)(i + 1);
     }
-    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num));
+    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num,
+        m_index->m_iDataBlockSize, m_index->m_iDataCapacity, m_index->m_iMetaRecordSize));
     return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta, p_withMetaIndex));
 }
 
@@ -146,6 +147,13 @@ bool
 AnnIndex::ReadyToServe() const
 {
     return m_index != nullptr;
+}
+
+
+void
+AnnIndex::UpdateIndex()
+{
+    m_index->UpdateIndex();
 }
 
 

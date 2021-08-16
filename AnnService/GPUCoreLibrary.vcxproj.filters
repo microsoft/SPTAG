@@ -193,12 +193,6 @@
     <ClInclude Include="inc\Core\Common\cuda\Refine.hxx">
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\PQQuantizer.h">
-      <Filter>Header Files\Core\Common</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\Core\Common\Quantizer.h">
-      <Filter>Header Files\Core\Common</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu">
@@ -264,12 +258,6 @@
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
-      <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\PQQuantizer.cpp">
-      <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\Quantizer.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>

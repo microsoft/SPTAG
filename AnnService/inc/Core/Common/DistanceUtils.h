@@ -17,7 +17,6 @@ namespace SPTAG
     {
         template <typename T>
         using DistanceCalcReturn = float(*)(const T*, const T*, DimensionType);
-
         template<typename T>
         inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
 
@@ -25,7 +24,7 @@ namespace SPTAG
         {
         public:
             static std::shared_ptr<Quantizer> Quantizer;
-
+            
             template <typename T>
             static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)
             {
@@ -111,7 +110,7 @@ namespace SPTAG
                 return 1 - d;
             }
         };
-        
+
         template<typename T>
         inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
         {
@@ -149,8 +148,8 @@ namespace SPTAG
             }
             return nullptr;
         }
-        
-        
+
+
         template<>
         inline DistanceCalcReturn<std::uint8_t> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
         {
@@ -159,7 +158,7 @@ namespace SPTAG
             case SPTAG::DistCalcMethod::Cosine:
                 if (DistanceUtils::Quantizer != nullptr) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });
-                } 
+                }
                 else if (InstructionSet::AVX2())
                 {
                     return &(DistanceUtils::ComputeCosineDistance_AVX);
@@ -187,7 +186,6 @@ namespace SPTAG
                 else {
                     return &(DistanceUtils::ComputeL2Distance<std::uint8_t>);
                 }
-  
             default:
                 break;
             }

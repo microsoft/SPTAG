@@ -18,7 +18,6 @@ DefineDistCalcMethod(Cosine)
 
 #endif // DefineDistCalcMethod
 
-
 #ifdef DefineQuantizerType
 
 DefineQuantizerType(None, std::shared_ptr<void>)

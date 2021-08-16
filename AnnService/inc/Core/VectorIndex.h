@@ -9,6 +9,7 @@
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
+#include <unordered_set>
 
 namespace SPTAG
 {
@@ -65,7 +66,7 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
-    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort);
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
     
@@ -78,6 +79,8 @@ public:
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
+
+    virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
@@ -101,16 +104,16 @@ public:
 
     static ErrorCode LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
-    static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
+    static std::uint64_t EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
-    static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
+    static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
 protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
     virtual std::shared_ptr<std::vector<std::string>> GetIndexFiles() const = 0;
 
-    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const = 0;
+    virtual ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) = 0;
 
     virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
 
@@ -128,7 +131,7 @@ protected:
 
     inline SizeType GetMetaMapping(std::string& meta) const;
 
-    void UpdateMetaMapping(std::string& meta, SizeType i);
+    void UpdateMetaMapping(const std::string& meta, SizeType i);
 
     void BuildMetaMapping(bool p_checkDeleted = true);
 
@@ -145,6 +148,11 @@ protected:
     std::string m_sQuantizerFile = "quantizer.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::shared_ptr<void> m_pMetaToVec;
+
+public:
+    int m_iDataBlockSize;
+    int m_iDataCapacity;
+    int m_iMetaRecordSize;
 };
 
 

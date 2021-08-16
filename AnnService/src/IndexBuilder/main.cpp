@@ -5,7 +5,6 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common.h"
 #include "inc/Helper/SimpleIniReader.h"
-#include "inc/Core/Common/PQQuantizer.h"
 
 #include <memory>
 
@@ -20,8 +19,6 @@ public:
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
-        AddOptionalOption(m_QuantizerType, "-q", "--quantizerType", "Type of Quantization (if any).");
-        AddOptionalOption(m_QuantizerFile, "-qF", "--quantizerFile", "File Quantizer is stored in.");
     }
 
     ~BuilderOptions() {}
@@ -32,11 +29,7 @@ public:
 
     SPTAG::IndexAlgoType m_indexAlgoType;
 
-    std::string m_builderConfigFile = "";
-
-    SPTAG::QuantizerType m_QuantizerType = SPTAG::QuantizerType::None;
-
-    std::string m_QuantizerFile = "";
+    std::string m_builderConfigFile;
 };
 
 int main(int argc, char* argv[])
@@ -45,18 +38,6 @@ int main(int argc, char* argv[])
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
-    }
-
-    if (!options->m_QuantizerFile.empty()) {
-        auto ptr = SPTAG::f_createIO();
-        if (ptr == nullptr || !ptr->Initialize(options->m_QuantizerFile.c_str(), std::ios::binary | std::ios::in)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open quantizerFile:%s!\n", options->m_QuantizerFile.c_str());
-            exit(1);
-        }
-        if (SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, options->m_QuantizerType) != ErrorCode::Success) {
-            LOG(Helper::LogLevel::LL_Error, "Load quantizerFile error!\n");
-            exit(1);
-        }
     }
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);

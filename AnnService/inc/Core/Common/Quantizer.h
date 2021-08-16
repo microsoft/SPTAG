@@ -22,7 +22,7 @@ namespace SPTAG
             virtual std::uint64_t BufferSize() const = 0;
 
             virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const = 0;
-            
+
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) = 0;
 
             static ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType);
@@ -34,4 +34,4 @@ namespace SPTAG
     }
 }
 
-#endif // _SPTAG_COMMON_QUANTIZER_H_
+#endif // _SPTAG_COMMON_QUANTIZER_H_ 
