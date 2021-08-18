@@ -98,7 +98,8 @@ public:
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
-    static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
+    // Intel PM Change
+    static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex, bool data_in_pm=false, bool graph_in_pm=false, std::string p_pm_path="");
 
     static ErrorCode LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex);
 
@@ -118,8 +119,9 @@ protected:
     virtual ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
 
     virtual ErrorCode LoadConfig(Helper::IniReader& p_reader) = 0;
-
-    virtual ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams) = 0;
+    
+    // Intel PM Change
+    virtual ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, bool data_in_pm=false, bool graph_in_pm=false, std::string p_pm_path="") = 0;
 
     virtual ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) = 0;
 

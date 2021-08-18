@@ -4,10 +4,54 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+// Intel - for testing
+#include<iostream>
+
+
+// Intel PM change
+#include <memkind.h>
+
+#define ALIGN 32
+
+// round up X to the nearest multiple of Y
+#define ROUND_UP(X, Y) \
+((((uint64_t)(X) / (Y)) + ((uint64_t)(X) % (Y) != 0)) * (Y))
+
+// alignment test
+#define IS_ALIGNED(X, Y) ((uint64_t)(X) % (uint64_t)(Y) == 0)
+
+
+
 namespace SPTAG
 {
     namespace COMMON
     {
+        // Intel PM changge
+        struct KindWrapper {
+            KindWrapper() = default;
+
+            ~KindWrapper() {
+                if (isinit()) {
+                    memkind_destroy_kind(kind);
+                }
+            }
+
+            bool isinit() { return kind != nullptr; }
+
+            void init(const char* dir) {
+                if (isinit()) {
+                    return;
+                }
+
+                memkind_create_pmem(dir, 0, &kind);
+            }
+
+            // members
+            memkind_t kind;
+        };
+        static KindWrapper _pmem_kind;
+        // END Intel PM change
+
         // structure to save Data and Graph
         template <typename T>
         class Dataset
@@ -26,18 +70,25 @@ namespace SPTAG
 
         public:
             Dataset() {}
-
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            // BEGIN Intel PM Change
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true, std::string p_pm_path="" )
             {
                 Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_);
             }
+            // END Intel PM Change
             ~Dataset()
             {
-                if (ownData) _mm_free(data);
+            // BEGIN Intel PM Change
+                //if (ownData) _mm_free(data);
+                if (ownData) {
+                    auto kind = memkind_detect_kind(data);
+                    memkind_free(kind, data);
+                }
+                
                 for (T* ptr : incBlocks) _mm_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true, std::string p_pm_path="")
             {
                 rows = rows_;
                 cols = cols_;
@@ -45,7 +96,24 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    // Intel PM change
+                    size_t size = ((size_t)rows) * cols * sizeof(T);
+
+                    if (! IS_ALIGNED(size, ALIGN))  ROUND_UP(size, ALIGN);
+
+                    if (p_pm_path != "")
+                    {
+                        if (!_pmem_kind.isinit()) {
+                            _pmem_kind.init(p_pm_path.c_str());
+                        }
+
+                        data = (T*)memkind_malloc(_pmem_kind.kind, size);
+                    }
+                    else
+                    {
+                        data = (T*)memkind_malloc(MEMKIND_DEFAULT, size);
+                    }
+
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
@@ -155,27 +223,27 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> pInput, SizeType blockSize, SizeType capacity)
+            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> pInput, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&rows);
                 IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&cols);
 
-                Initialize(rows, cols, blockSize, capacity);
+                Initialize(rows, cols, blockSize, capacity, nullptr, true, p_pm_path);
                 IOBINARY(pInput, ReadBinary, sizeof(T) * cols * rows, (char*)data);
                 LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
                 return ErrorCode::Success;
             }
 
-            ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
+            ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr, blockSize, capacity);
+                return Load(ptr, blockSize, capacity, p_pm_path);
             }
 
             // Functions for loading models from memory mapped files
-            ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity)
+            ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 SizeType R;
                 DimensionType C;
@@ -185,7 +253,7 @@ namespace SPTAG
                 C = *((DimensionType*)pDataPointsMemFile);
                 pDataPointsMemFile += sizeof(DimensionType);
 
-                Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile);
+                Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile,true, p_pm_path);
                 LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
                 return ErrorCode::Success;
             }

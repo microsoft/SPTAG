@@ -438,7 +438,7 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 
 
 ErrorCode
-VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex)
+VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex, bool data_in_pm, bool graph_in_pm, std::string p_pm_path)
 {
     std::string folderPath(p_loaderFilePath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
@@ -472,7 +472,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         handles.push_back(std::move(ptr));
     }
 
-    if ((ret = p_vectorIndex->LoadIndexData(handles)) != ErrorCode::Success) return ret;
+    if ((ret = p_vectorIndex->LoadIndexData(handles,data_in_pm,graph_in_pm,p_pm_path)) != ErrorCode::Success) return ret;
 
     if (iniReader.DoesSectionExist("MetaData"))
     {

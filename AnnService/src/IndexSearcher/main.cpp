@@ -26,6 +26,10 @@ public:
         AddOptionalOption(m_withMeta, "-a", "--withmeta", "Output metadata instead of vector id.");
         AddOptionalOption(m_K, "-k", "--KNN", "K nearest neighbors for search.");
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
+        //Intel PM change
+        AddOptionalOption(m_pm_path, "-p", "--pm_path", "Path to  Persistent Memory pool.");
+        AddOptionalOption(m_vectors_in_pm, "-e", "--vectors_in_pm", "Vectors will be stored in Persistent Memory pool.");
+        AddOptionalOption(m_graph_in_pm, "-g", "--graph_in_pm", "Graph will be stored in Persistent Memory pool.");
     }
 
     ~SearcherOptions() {}
@@ -45,6 +49,10 @@ public:
     int m_K = 32;
 
     int m_batch = 10000;
+
+    std::string m_pm_path = "";
+    bool m_vectors_in_pm = false;
+    bool m_graph_in_pm = false;
 };
 
 template <typename T>
@@ -140,6 +148,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     std::vector<std::set<SizeType>> truth(options->m_batch);
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
     std::vector<clock_t> latencies(options->m_batch + 1, 0);
+    std::vector<double> latency_stats(options->m_batch, 0);
     int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
 
     LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[mem]\n");
@@ -150,7 +159,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
         if (ftruth.is_open()) LoadTruth(ftruth, truth, numQuerys, options->m_K);
 
-        SizeType subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
+        SizeType subSize ;
+#pragma omp parallel
+        {
+#pragma omp single
+        subSize = (numQuerys - 1) / omp_get_num_threads() + 1;
+        }
+
         for (int mc = 0; mc < maxCheck.size(); mc++)
         {
             index.SetParameter("MaxCheck", maxCheck[mc].c_str());
@@ -265,7 +280,7 @@ int main(int argc, char** argv)
     }
 
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
+    auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex, options->m_vectors_in_pm, options->m_graph_in_pm, options->m_pm_path);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
     {
         LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");

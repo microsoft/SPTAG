@@ -451,30 +451,30 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity, p_pm_path)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
 
-            ErrorCode LoadGraph(std::string sGraphFilename, SizeType blockSize, SizeType capacity)
+            ErrorCode LoadGraph(std::string sGraphFilename, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename, blockSize, capacity, p_pm_path)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
                 return ret;
             }
             
-            ErrorCode LoadGraph(char* pGraphMemFile, SizeType blockSize, SizeType capacity)
+            ErrorCode LoadGraph(char* pGraphMemFile, SizeType blockSize, SizeType capacity, std::string p_pm_path="")
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile, blockSize, capacity, p_pm_path)) != ErrorCode::Success) return ret;
 
                 m_iGraphSize = m_pNeighborhoodGraph.R();
                 m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
