@@ -13,12 +13,13 @@ namespace SPTAG
         {
         }
 
-        PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float* Codebooks)
+        PQQuantizer::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, float* Codebooks)
         {
             m_NumSubvectors = NumSubvectors;
             m_KsPerSubvector = KsPerSubvector;
             m_DimPerSubvector = DimPerSubvector;
             m_codebooks.reset(Codebooks);
+            m_EnableADC = EnableADC;
 
             m_BlockSize = (m_KsPerSubvector * (m_KsPerSubvector + 1)) / 2;
             m_CosineDistanceTables.reset(new float[m_BlockSize * m_NumSubvectors]);
@@ -44,11 +45,20 @@ namespace SPTAG
 
         float PQQuantizer::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
         {
-            float out = 0;
-            for (int i = 0; i < m_NumSubvectors; i++) {
-                out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+            if (GetEnableADC() == false) {
+                float out = 0;
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                }
+                return out;
             }
-            return out;
+            else {
+                float out = 0;
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += pY[i * m_KsPerSubvector + pX[i]] * pY[i * m_KsPerSubvector + pX[i]];
+                }
+                return out;
+            }
         }
 
         float PQQuantizer::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
@@ -135,6 +145,11 @@ namespace SPTAG
         DimensionType PQQuantizer::GetDimPerSubvector() const
         {
             return m_DimPerSubvector;
+        }
+
+        bool PQQuantizer::GetEnableADC() const
+        {
+            return m_EnableADC;
         }
 
         inline SizeType PQQuantizer::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) {

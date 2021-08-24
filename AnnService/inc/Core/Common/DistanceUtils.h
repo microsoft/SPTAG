@@ -6,6 +6,7 @@
 
 #include <xmmintrin.h>
 #include <functional>
+#include <iostream>
 
 #include "CommonUtils.h"
 #include "InstructionUtils.h"
@@ -110,7 +111,6 @@ namespace SPTAG
                 return 1 - d;
             }
         };
-
         template<typename T>
         inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
         {
@@ -148,7 +148,6 @@ namespace SPTAG
             }
             return nullptr;
         }
-
 
         template<>
         inline DistanceCalcReturn<std::uint8_t> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)

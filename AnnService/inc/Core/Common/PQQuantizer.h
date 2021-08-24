@@ -19,7 +19,7 @@ namespace SPTAG
         public:
             PQQuantizer();
 
-            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, float* Codebooks);
+            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, float* Codebooks);
 
             ~PQQuantizer();
 
@@ -41,6 +41,8 @@ namespace SPTAG
 
             DimensionType GetDimPerSubvector() const;
 
+            bool GetEnableADC() const;
+
             QuantizerType GetQuantizerType() {
                 return QuantizerType::PQQuantizer;
             }
@@ -50,6 +52,7 @@ namespace SPTAG
             SizeType m_KsPerSubvector;
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
+            bool m_EnableADC;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
