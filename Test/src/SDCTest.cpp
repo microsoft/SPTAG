@@ -251,14 +251,14 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     }
     delete[] kmeans;
     std::cout << "Building Finish!" << std::endl; 
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m / M), false, codebooks);
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<float>>(M, Ks, (m / M), false, codebooks);
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
     baseQuantizer->SaveQuantizer(ptr);
     ptr->ShutDown();
 
     BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
-    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, VectorValueType::Float);
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
         
 
