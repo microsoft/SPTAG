@@ -288,7 +288,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
   bool good;
 
   // Each point in the leaf is handled by a separate thread
-  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
+  for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       query = data[tptree->leaf_points[leaf_offset + i]];
 
@@ -662,7 +662,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   int KNN_blocks; // number of threadblocks used
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(index, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
@@ -800,7 +800,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
 
   int KNN_blocks; // number of threadblocks used
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(index, dataSize, dim);
 
   for(size_t i=0;  i<dataSize; i++) {
     points[i].id = i;
@@ -869,7 +869,6 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT structure initialized for %lu points, %d levels, leaf size:%d\n", dataSize, levels, leafSize);
 
     CUDA_CHECK(cudaMallocManaged(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
-
   }
 
   // Set num blocks for all GPU kernel calls

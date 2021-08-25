@@ -105,6 +105,7 @@ void PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<V
 template <typename T>
 void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
 {
+
     SizeType n = 2000, q = 2000;
     DimensionType m = 128;
     /*
@@ -127,6 +128,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         }
         queryset = vectorReader->GetVectorSet();
     }
+
     else { */
         ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
         for (SizeType i = 0; i < n; i++) {
@@ -158,6 +160,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         }
         queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
         queryset->Save("test_query.bin");
+
     //}
     /*
     if (fileexists(("test_truth." + distCalcMethod).c_str())) {
@@ -170,6 +173,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         }
         truth = vectorReader->GetVectorSet();
     }
+
     else { */
         omp_set_num_threads(5);
 
@@ -207,14 +211,12 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<VectorSet> vecset, queryset, truth;
     std::shared_ptr<MetadataSet> metaset;
     GenerateData<T>(vecset, metaset, queryset, truth, distCalcMethod, 10);
-    
     PerfAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     PerfBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     std::shared_ptr<VectorIndex> vecIndex;
     BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     Search<T>(vecIndex, queryset, 10, truth);
-    
 }
 
 BOOST_AUTO_TEST_SUITE(PerfTest)
