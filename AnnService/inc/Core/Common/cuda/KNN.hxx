@@ -868,8 +868,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     tptrees[gpuNum]->initialize(dataSize, levels);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT structure initialized for %lu points, %d levels, leaf size:%d\n", dataSize, levels, leafSize);
 
-    CUDA_CHECK(cudaMalloc(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
-
+    CUDA_CHECK(cudaMallocManaged(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
   }
 
   // Set num blocks for all GPU kernel calls

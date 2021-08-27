@@ -148,7 +148,7 @@ namespace SPTAG
                     float* currCenters = args.newCenters + k * args._D;
                     for (DimensionType j = 0; j < args._D; j++) currCenters[j] /= args.counts[k];
 
-                    if (args._M == DistCalcMethod::Cosine) {
+                    if (args._M == DistCalcMethod::Cosine && SPTAG::COMMON::DistanceUtils::Quantizer == nullptr) {
                         COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
                     }
                     for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
@@ -255,7 +255,8 @@ namespace SPTAG
                 }
                 args.ClearCounts();
                 args.ClearDists(MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, false, 0);
+                float baseSquare = (SPTAG::COMMON::DistanceUtils::Quantizer != nullptr ? 1.0 : COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>()) / (100.0f * (batchEnd - first));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, baseSquare);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);

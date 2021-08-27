@@ -18,6 +18,13 @@ DefineDistCalcMethod(Cosine)
 
 #endif // DefineDistCalcMethod
 
+#ifdef DefineQuantizerType
+
+DefineQuantizerType(None, std::shared_ptr<void>)
+DefineQuantizerType(PQQuantizer, std::shared_ptr<SPTAG::COMMON::PQQuantizer>)
+
+#endif // DefineQuantizerType
+
 
 #ifdef DefineErrorCode
 

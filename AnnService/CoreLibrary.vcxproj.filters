@@ -175,6 +175,12 @@
     <ClInclude Include="inc\Helper\LockFree.h">
       <Filter>Header Files\Helper</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\PQQuantizer.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\Quantizer.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -232,6 +238,9 @@
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\Quantizer.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
