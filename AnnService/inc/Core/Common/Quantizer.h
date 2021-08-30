@@ -21,6 +21,10 @@ namespace SPTAG
 
             virtual void ReconstructVector(const std::uint8_t* qvec, void* vecout) = 0;
 
+            virtual SizeType ReconstructSize();
+
+            virtual DimensionType ReconstructDim();
+
             virtual std::uint64_t BufferSize() const = 0;
 
             virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const = 0;

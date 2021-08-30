@@ -318,7 +318,7 @@ namespace SPTAG
             }
 #endif
 
-            template <typename T>
+            template <typename T, typename R>
             void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");

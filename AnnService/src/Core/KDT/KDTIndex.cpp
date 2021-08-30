@@ -234,11 +234,29 @@ namespace SPTAG
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
+
             m_pTrees.BuildTrees<T>(m_pSamples, m_iNumberOfThreads);
+
             auto t2 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
             
-            m_pGraph.BuildGraph<T>(this);
+            if (nullptr != COMMON::DistanceUtils::Quantizer)
+            {
+                switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+m_pGraph.BuildGraph<T,Type>(this); \
+break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                }
+            }
+            else
+            {
+                m_pGraph.BuildGraph<T, T>(this);
+            }
             auto t3 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
 
@@ -292,6 +310,7 @@ namespace SPTAG
 
             ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
+
             (*newtree).BuildTrees<T>(ptr->m_pSamples, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
             if (HasMetaMapping()) ptr->BuildMetaMapping(false);

@@ -40,7 +40,7 @@ namespace SPTAG
             public:
                 RebuildJob(COMMON::Dataset<T>* p_data, COMMON::KDTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_data(p_data), m_tree(p_tree), m_graph(p_graph) {}
                 void exec(IAbortOperation* p_abort) {
-                    m_tree->Rebuild<T>(*m_data, p_abort);
+                        m_tree->Rebuild<T>(*m_data, p_abort);
                 }
             private:
                 COMMON::Dataset<T>* m_data;
