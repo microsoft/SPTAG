@@ -320,23 +320,8 @@ namespace SPTAG
             auto t2 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
             
-            if (nullptr != COMMON::DistanceUtils::Quantizer)
-            {
-                switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
-                {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-m_pGraph.BuildGraph<T,Type>(this, &(m_pTrees.GetSampleMap())); \
-break;
+            m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
 
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                }
-            }
-            else
-            {
-                m_pGraph.BuildGraph<T, T>(this, &(m_pTrees.GetSampleMap()));
-            }
             auto t3 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
 

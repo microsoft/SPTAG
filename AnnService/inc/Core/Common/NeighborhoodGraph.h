@@ -122,6 +122,29 @@ namespace SPTAG
 #else
             template <typename T>
             void PartitionByTptree(VectorIndex* index, std::vector<SizeType>& indices, const SizeType first, const SizeType last,
+                std::vector<std::pair<SizeType, SizeType>>& leaves)
+            {
+                if (nullptr != COMMON::DistanceUtils::Quantizer)
+                {
+                    switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                    {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+PartitionByTptreeCore<T, Type>(index, indices, first, last, leaves); \
+break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                    }
+                }
+                else
+                {
+                    PartitionByTptreeCore<T, T>(index, indices, first, last, leaves);
+                }
+            }
+
+            template <typename T, typename R>
+            void PartitionByTptreeCore(VectorIndex* index, std::vector<SizeType>& indices, const SizeType first, const SizeType last,
                 std::vector<std::pair<SizeType, SizeType>> & leaves)
             {
                 if (last - first <= m_iTPTLeafSize)
@@ -130,7 +153,14 @@ namespace SPTAG
                 }
                 else
                 {
-                    std::vector<float> Mean(index->GetFeatureDim(), 0);
+                    SizeType cols = index->GetFeatureDim();
+                    bool quantizer_exists = (nullptr != COMMON::DistanceUtils::Quantizer);
+                    R* v_holder = nullptr;
+                    if (quantizer_exists) {
+                        cols = COMMON::DistanceUtils::Quantizer->ReconstructDim();
+                        v_holder = (R*) _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                    }
+                    std::vector<float> Mean(cols, 0);
 
                     int iIteration = 100;
                     SizeType end = min(first + m_iSamples, last);
@@ -138,27 +168,47 @@ namespace SPTAG
                     // calculate the mean of each dimension
                     for (SizeType j = first; j <= end; j++)
                     {
-                        const T* v = (const T*)index->GetSample(indices[j]);
-                        for (DimensionType k = 0; k < index->GetFeatureDim(); k++)
+                        R* v;
+                        if (quantizer_exists)
+                        {
+                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            v = v_holder;
+                        }
+                        else
+                        {
+                            v = (R*)index->GetSample(indices[j]);
+                        }
+                        
+                        for (DimensionType k = 0; k < cols; k++)
                         {
                             Mean[k] += v[k];
                         }
                     }
-                    for (DimensionType k = 0; k < index->GetFeatureDim(); k++)
+                    for (DimensionType k = 0; k < cols; k++)
                     {
                         Mean[k] /= count;
                     }
                     std::vector<BasicResult> Variance;
-                    Variance.reserve(index->GetFeatureDim());
-                    for (DimensionType j = 0; j < index->GetFeatureDim(); j++)
+                    Variance.reserve(cols);
+                    for (DimensionType j = 0; j < cols; j++)
                     {
                         Variance.emplace_back(j, 0.0f);
                     }
                     // calculate the variance of each dimension
                     for (SizeType j = first; j <= end; j++)
                     {
-                        const T* v = (const T*)index->GetSample(indices[j]);
-                        for (DimensionType k = 0; k < index->GetFeatureDim(); k++)
+                        R* v;
+                        if (quantizer_exists)
+                        {
+                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            v = v_holder;
+                        }
+                        else
+                        {
+                            v = (R*)index->GetSample(indices[j]);
+                        }
+
+                        for (DimensionType k = 0; k < cols; k++)
                         {
                             float dist = v[k] - Mean[k];
                             Variance[k].Dist += dist*dist;
@@ -167,10 +217,10 @@ namespace SPTAG
                     std::sort(Variance.begin(), Variance.end(), COMMON::Compare);
                     std::vector<SizeType> indexs(m_numTopDimensionTPTSplit);
                     std::vector<float> weight(m_numTopDimensionTPTSplit), bestweight(m_numTopDimensionTPTSplit);
-                    float bestvariance = Variance[index->GetFeatureDim() - 1].Dist;
+                    float bestvariance = Variance[cols - 1].Dist;
                     for (int i = 0; i < m_numTopDimensionTPTSplit; i++)
                     {
-                        indexs[i] = Variance[index->GetFeatureDim() - 1 - i].VID;
+                        indexs[i] = Variance[cols - 1 - i].VID;
                         bestweight[i] = 0;
                     }
                     bestweight[0] = 1;
@@ -194,7 +244,16 @@ namespace SPTAG
                         for (SizeType j = 0; j < count; j++)
                         {
                             Val[j] = 0;
-                            const T* v = (const T*)index->GetSample(indices[first + j]);
+                            R* v;
+                            if (quantizer_exists)
+                            {
+                                COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
+                                v = v_holder;
+                            }
+                            else
+                            {
+                                v = (R*)index->GetSample(indices[first + j]);
+                            }
                             for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
                             {
                                 Val[j] += weight[k] * v[indexs[k]];
@@ -224,7 +283,17 @@ namespace SPTAG
                     while (i <= j)
                     {
                         float val = 0;
-                        const T* v = (const T*)index->GetSample(indices[i]);
+                        R* v;
+                        if (quantizer_exists)
+                        {
+                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
+                            v = v_holder;
+                        }
+                        else
+                        {
+                            v = (R*)index->GetSample(indices[i]);
+                        }
+
                         for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
                         {
                             val += bestweight[k] * v[indexs[k]];
@@ -252,8 +321,8 @@ namespace SPTAG
                     weight.clear();
                     bestweight.clear();
 
-                    PartitionByTptree<T>(index, indices, first, i - 1, leaves);
-                    PartitionByTptree<T>(index, indices, i, last, leaves);
+                    PartitionByTptreeCore<T, R>(index, indices, first, i - 1, leaves);
+                    PartitionByTptreeCore<T, R>(index, indices, i, last, leaves);
                 }
             }
 
@@ -318,7 +387,7 @@ namespace SPTAG
             }
 #endif
 
-            template <typename T, typename R>
+            template <typename T>
             void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
