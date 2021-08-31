@@ -34,6 +34,10 @@ namespace SPTAG
 
             void ReconstructVector(const std::uint8_t* qvec, void* vecout);
 
+            virtual SizeType ReconstructSize();
+
+            virtual DimensionType ReconstructDim();
+
             virtual std::uint64_t BufferSize() const;
 
             virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const;
@@ -169,6 +173,18 @@ namespace SPTAG
                     sub_vecout[j] = codebook_entry[j];
                 }
             }
+        }
+
+        template <typename T>
+        SizeType PQQuantizer<T>::ReconstructSize()
+        {       
+            return sizeof(T) * ReconstructDim();
+        }
+
+        template <typename T>
+        DimensionType PQQuantizer<T>::ReconstructDim()
+        {
+            return m_DimPerSubvector * m_NumSubvectors;
         }
 
         template <typename T>
