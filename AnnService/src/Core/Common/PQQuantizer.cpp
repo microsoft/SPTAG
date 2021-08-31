@@ -45,21 +45,27 @@ namespace SPTAG
 
         float PQQuantizer::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
         {
-            if (GetEnableADC() == false) {
+            //std::cout << GetEnableADC() << std::endl;
+            if (GetEnableADC() == true) {
+                //std::cout << "Using ADC!" << std::endl;
                 float out = 0;
+                //const float* rpY = pY;
+                const std::uint8_t* x = pX;
+                std::uint8_t* X= const_cast<std::uint8_t *>(x);
+                float* rpX = reinterpret_cast<float*>(X);
                 for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                    out += rpX[i * m_KsPerSubvector + pY[i]];
                 }
                 return out;
             }
-            else {
-                float out = 0;
-                for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += pY[i * m_KsPerSubvector + pX[i]] * pY[i * m_KsPerSubvector + pX[i]];
-                }
-                return out;
+            //std::cout << "Using SDC!" << std::endl;
+            float out = 0;
+            for (int i = 0; i < m_NumSubvectors; i++) {
+                out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
             }
-        }
+            return out;
+        } 
+
 
         float PQQuantizer::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
         {
@@ -81,7 +87,7 @@ namespace SPTAG
                 const float* subvec = vec + i * m_DimPerSubvector;
                 float* basevec = m_codebooks.get() + i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
-                    float dist = distCalc(subvec, basevec + j * m_DimPerSubvector, m_DimPerSubvector);
+                    float dist = distCalc(subvec, basevec + (int)j * m_DimPerSubvector, m_DimPerSubvector);
                     if (dist < minDist) {
                         bestIndex = j;
                         minDist = dist;
@@ -101,6 +107,7 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
             IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
+            IOBINARY(p_out, WriteBinary, sizeof(bool), (char*)&m_EnableADC);
             IOBINARY(p_out, WriteBinary, sizeof(float) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
@@ -111,6 +118,7 @@ namespace SPTAG
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
             IOBINARY(p_in, ReadBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
+            IOBINARY(p_in, ReadBinary, sizeof(bool), (char*)&m_EnableADC);
             m_codebooks.reset(new float[m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector]);
             IOBINARY(p_in, ReadBinary, sizeof(float) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
 
@@ -147,7 +155,7 @@ namespace SPTAG
             return m_DimPerSubvector;
         }
 
-        bool PQQuantizer::GetEnableADC() const
+        bool PQQuantizer::GetEnableADC()
         {
             return m_EnableADC;
         }

@@ -41,7 +41,6 @@ namespace SPTAG
 
             DimensionType GetDimPerSubvector() const;
 
-            bool GetEnableADC() const;
 
             QuantizerType GetQuantizerType() {
                 return QuantizerType::PQQuantizer;
@@ -55,6 +54,7 @@ namespace SPTAG
             bool m_EnableADC;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
+            inline bool GetEnableADC();
 
             std::unique_ptr<float[]> m_codebooks;
             std::unique_ptr<float[]> m_CosineDistanceTables;
