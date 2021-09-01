@@ -209,7 +209,7 @@ break;
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
                     KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
@@ -217,7 +217,7 @@ break;
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
+            void SearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
@@ -229,7 +229,30 @@ break;
         private:
 
             template <typename T>
-            void KDTSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query,
+            void KDTSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T>& p_query,
+                COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
+            {
+                if (nullptr != COMMON::DistanceUtils::Quantizer)
+                {
+                    switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                    {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, distBound);
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                    }
+                }
+                else
+                {
+                    return KDTSearchCore<T, T>(p_data, fComputeDistance, p_query, p_space, node, distBound);
+                }
+
+            }
+
+            template <typename T, typename Q>
+            void KDTSearchCore(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
                            COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
@@ -244,13 +267,13 @@ break;
 
                     ++p_space.m_iNumberOfTreeCheckedLeaves;
                     ++p_space.m_iNumberOfCheckedLeaves;
-                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
+                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetQuantizedTarget(), data, p_data.C())));
                     return;
                 }
 
                 auto& tnode = m_pTreeRoots[node];
 
-                float diff = (p_query.GetTarget())[tnode.split_dim] - tnode.split_value;
+                float diff = ((Q*) p_query.GetTarget())[tnode.split_dim] - tnode.split_value;
                 float distanceBound = distBound + diff * diff;
                 SizeType otherChild, bestChild;
                 if (diff < 0)
@@ -265,7 +288,7 @@ break;
                 }
 
                 p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
-                KDTSearch(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
+                KDTSearchCore<T,Q>(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 
 

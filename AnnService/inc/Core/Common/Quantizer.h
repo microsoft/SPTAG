@@ -19,11 +19,13 @@ namespace SPTAG
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) = 0;
 
+            virtual SizeType QuantizeSize() = 0;
+
             virtual void ReconstructVector(const std::uint8_t* qvec, void* vecout) = 0;
 
-            virtual SizeType ReconstructSize();
+            virtual SizeType ReconstructSize() = 0;
 
-            virtual DimensionType ReconstructDim();
+            virtual DimensionType ReconstructDim() = 0;
 
             virtual std::uint64_t BufferSize() const = 0;
 

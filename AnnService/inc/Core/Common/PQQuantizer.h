@@ -32,6 +32,8 @@ namespace SPTAG
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout);
 
+            virtual SizeType QuantizeSize();
+
             void ReconstructVector(const std::uint8_t* qvec, void* vecout);
 
             virtual SizeType ReconstructSize();
@@ -161,6 +163,12 @@ namespace SPTAG
                 }
                 vecout[i] = bestIndex;
             }
+        }
+
+        template <typename T>
+        SizeType PQQuantizer<T>::QuantizeSize()
+        {
+            return m_NumSubvectors * m_DimPerSubvector;
         }
 
         template <typename T>
