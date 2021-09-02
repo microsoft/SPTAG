@@ -436,15 +436,15 @@ void SDCPQTest(IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<VectorSet> vecset, queryset, truth, ReconstructVecset;
     std::shared_ptr<MetadataSet> metaset;
     SPTAG::COMMON::DistanceUtils::IsSearching = false;
-    //GeneratePQData_SDC<T>(ReconstructVecset, vecset, metaset, queryset, truth, distCalcMethod, 10);
+    GeneratePQData_SDC<T>(ReconstructVecset, vecset, metaset, queryset, truth, distCalcMethod, 10);
     
     //SDCAdd<T>(algo, distCalcMethod, reconstruct_vecset, metaset, queryset, 10, truth, "testindices");
     //std::cout << "PerfAdd Finish!" << std::endl;
     
-    //SDCBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
+    SDCBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     std::cout << "PerfBuild Finish!" << std::endl;
     std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices-sdc", vecIndex));
+    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::COMMON::DistanceUtils::IsSearching = true;
     SDCSearch<T>(vecIndex, queryset, 10, truth);
