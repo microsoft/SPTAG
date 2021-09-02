@@ -29,6 +29,8 @@ namespace SPTAG
 
             virtual QuantizerType GetQuantizerType() = 0;
 
+            //virtual bool IsSearching() = 0;
+
             virtual DimensionType GetNumSubvectors() const = 0;
         };
     }

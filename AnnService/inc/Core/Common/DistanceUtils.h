@@ -25,6 +25,7 @@ namespace SPTAG
         {
         public:
             static std::shared_ptr<Quantizer> Quantizer;
+            static bool IsSearching;
             
             template <typename T>
             static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)
@@ -155,7 +156,7 @@ namespace SPTAG
             switch (p_method)
             {
             case SPTAG::DistCalcMethod::Cosine:
-                if (DistanceUtils::Quantizer != nullptr) {
+                if (DistanceUtils::Quantizer != nullptr && DistanceUtils::IsSearching == true) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });
                 }
                 else if (InstructionSet::AVX2())
@@ -171,7 +172,7 @@ namespace SPTAG
                 }
 
             case SPTAG::DistCalcMethod::L2:
-                if (DistanceUtils::Quantizer != nullptr) {
+                if (DistanceUtils::Quantizer != nullptr && DistanceUtils::IsSearching == true) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->L2Distance(pX, pY); });
                 }
                 else if (InstructionSet::AVX2())

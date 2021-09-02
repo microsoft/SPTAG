@@ -16,6 +16,7 @@ using namespace SPTAG::COMMON;
 #endif
 
 std::shared_ptr<Quantizer> DistanceUtils::Quantizer = nullptr;
+bool DistanceUtils::IsSearching = false;
 
 inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
 {

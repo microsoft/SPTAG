@@ -46,12 +46,15 @@ namespace SPTAG
                 return QuantizerType::PQQuantizer;
             }
 
+            //virtual bool IsSearching() const;
+
         private:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
-            bool m_EnableADC;
+            bool m_EnableADC; 
+            //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
             inline bool GetEnableADC();

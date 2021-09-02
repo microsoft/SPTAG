@@ -50,12 +50,15 @@ namespace SPTAG
                 //std::cout << "Using ADC!" << std::endl;
                 float out = 0;
                 //const float* rpY = pY;
+                
                 const std::uint8_t* x = pX;
                 std::uint8_t* X= const_cast<std::uint8_t *>(x);
                 float* rpX = reinterpret_cast<float*>(X);
                 for (int i = 0; i < m_NumSubvectors; i++) {
                     out += rpX[i * m_KsPerSubvector + pY[i]];
                 }
+                
+               
                 return out;
             }
             //std::cout << "Using SDC!" << std::endl;
@@ -108,6 +111,7 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(bool), (char*)&m_EnableADC);
+            //IOBINARY(p_out, WriteBinary, sizeof(bool), (char*)&m_IsSearching);
             IOBINARY(p_out, WriteBinary, sizeof(float) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
@@ -119,6 +123,7 @@ namespace SPTAG
             IOBINARY(p_in, ReadBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_in, ReadBinary, sizeof(bool), (char*)&m_EnableADC);
+            //IOBINARY(p_in, ReadBinary, sizeof(bool), (char*)&m_IsSearching);
             m_codebooks.reset(new float[m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector]);
             IOBINARY(p_in, ReadBinary, sizeof(float) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
 
@@ -141,7 +146,11 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "Load quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
-
+        /*
+        bool PQQuantizer::IsSearching() const
+        {
+            return m_IsSearching;
+        }*/
         DimensionType PQQuantizer::GetNumSubvectors() const
         {
             return m_NumSubvectors;

@@ -1,6 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
 #include "inc/Test.h"
 #include <random>
 #include "inc/Helper/VectorSetReader.h"
@@ -24,6 +21,7 @@ void ADCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet
     for (SizeType i = 0; i < queryset->Count() - size_orignal; i++)
     {
         res[i].SetTarget(queryset->GetVector(i + size_orignal));
+        //prefetch L2
         vecIndex->SearchIndex(res[i]);
     }
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -136,7 +134,7 @@ void ADCBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<Ve
 
 
 template <typename T>
-void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k, int & size_original)
+void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k, int& size_original)
 {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -153,7 +151,7 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     ByteArray real_vec = ByteArray::Alloc(sizeof(float) * n * m);
     ByteArray reconstruct_vec = ByteArray::Alloc(sizeof(float) * n * m);
     //ByteArray PQquery = ByteArray::Alloc(sizeof(T) * q * (m / M));
-    ByteArray PQquery = ByteArray::Alloc(sizeof(float) * (2 * q * m + q * M * Ks));
+    ByteArray PQquery = ByteArray::Alloc(sizeof(float) * (2 * q * m + q * QuanDim * Ks));
     ByteArray real_query = ByteArray::Alloc(sizeof(float) * q * m);
     std::vector< std::vector<std::uint8_t> > baseQ(n, std::vector<std::uint8_t>(QuanDim));
     float* querys = new float[q * m];
@@ -191,13 +189,13 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
         }
         real_queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<T>(), m, q));
     }
-   
+
     std::string CODEBOOK_FILE = "test-quantizer-adc.bin";
     float* codebooks = new float[M * Ks * QuanDim];
     if (fileexists("codebooks.bin")) {
-    //if (0) {
+        //if (0) {
         std::shared_ptr<VectorSet> temp_codebooks;
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), M * Ks, VectorFileType::DEFAULT));
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), Ks * M, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("codebooks.bin"))
         {
@@ -205,13 +203,13 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
             exit(1);
         }
         temp_codebooks = vectorReader->GetVectorSet();
-        std::cout << temp_codebooks->Dimension() << " " << temp_codebooks->Count() << std::endl;
+        //std::cout << temp_codebooks->Dimension() << " " << temp_codebooks->Count() << std::endl;
         float* temp = new float[Ks * M];
         for (int i = 0; i < QuanDim; i++) {
             temp = (float*)temp_codebooks->GetVector(i);
             for (int j = 0; j < Ks; j++) {
                 for (int l = 0; l < M; l++) {
-                    codebooks[l * Ks * QuanDim + j * QuanDim + i] = temp[j * M + l];
+                    codebooks[i * Ks * M + j * M + l] = temp[j * M + l];
                 }
             }
             //std::cout << codebooks[i] << std::endl;
@@ -348,22 +346,31 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     }
     */
     std::cout << "Quantize Vector" << std::endl;
-    auto t1 = std::chrono::high_resolution_clock::now();
     querys = (float*)real_queryset->GetData();
     for (int i = 0; i < q; i++) {
         for (int j = 0; j < m; j++) {
-            ((float*)PQquery.Data())[i * m + j] = (float)querys[i * m + j];
+            ((float *)PQquery.Data())[i * m + j] = querys[i * m + j];
         }
     }
     size_original = (q * m + M * Ks - 1) / (M * Ks);
+    int pre_size = size_original * M * Ks;
+    int total_size = Ks * QuanDim;
+    int block_size = Ks * M;
+    auto L2Dist = COMMON::DistanceCalcSelector<float>(DistCalcMethod::L2);
+    float* dataPtr = (float*)(PQquery.Data()) + pre_size;
+    auto t1 = std::chrono::high_resolution_clock::now();
+
     for (int i = 0; i < q; i++) {
-        for (DimensionType j = 0; j < M; j++) {
-            ((float*)PQquery.Data())[size_original * M * Ks + i * (m / M) + j] = 0;
-            for (DimensionType ii = 0; ii < Ks; ii++) {
-                for (int l = 0; l < (m / M); l++) {
-                    ((float*)PQquery.Data())[size_original * M * Ks + q * m + i * (m / M) + j] += (querys[i * m + j * (m / M) + l] - codebooks[j * Ks * (m / M) + ii * (m / M) + l]) * (querys[i * m + j * (m / M) + l] - codebooks[j * Ks * (m / M) + ii * (m / M) + l]);
-                }
+        float* destPtr = dataPtr + total_size * i;
+        float* queryPtr = querys + i * m;
+        for (int j = 0; j < QuanDim ; j++) {
+            float *basec = codebooks + j * block_size;
+            for (int ii = 0; ii < Ks; ii++) {
+                destPtr[ii] = L2Dist(queryPtr, basec, M);
+                basec += M;
             }
+            destPtr += Ks;
+            queryPtr += M;
         }
     }
 
@@ -396,12 +403,11 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     }
 
     ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * 2 * k);
-    /*
+    
 #pragma omp parallel for
     for (SizeType i = 0; i < real_queryset->Count(); ++i)
     {
         SizeType* neighbors = ((SizeType*)tru.Data()) + i * 2 * k;
-
         COMMON::QueryResultSet<T> res((const T*)real_queryset->GetVector(i), 2 * k);
         for (SizeType j = 0; j < real_vecset->Count(); j++)
         {
@@ -413,7 +419,7 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     }
     truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), 2 * k, real_queryset->Count()));
     truth->Save("test_truth_adc." + distCalcMethod);
-    */
+    /*
 #pragma omp parallel for
     for (SizeType i = 0; i < queryset->Count(); ++i)
     {
@@ -430,7 +436,7 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     }
     truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
     truth->Save("test_truth." + distCalcMethod);
-    //}
+    //}*/
 }
 
 template <typename T>
@@ -441,13 +447,13 @@ void ADCPQTest(IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<MetadataSet> metaset;
     GeneratePQData_ADC<T>(vecset, metaset, queryset, truth, distCalcMethod, 10, size_o);
 
-    ADCAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices", size_o);
+    ADCAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices-adc", size_o);
     std::cout << "PerfAdd Finish!" << std::endl;
 
-    ADCBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices", size_o);
+    ADCBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices-adc", size_o);
     std::cout << "PerfBuild Finish!" << std::endl;
     std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
+    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices-adc", vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     ADCSearch<T>(vecIndex, queryset, 10, truth, size_o);
 }
