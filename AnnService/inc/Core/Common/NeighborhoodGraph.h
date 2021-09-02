@@ -124,7 +124,7 @@ namespace SPTAG
             void PartitionByTptree(VectorIndex* index, std::vector<SizeType>& indices, const SizeType first, const SizeType last,
                 std::vector<std::pair<SizeType, SizeType>>& leaves)
             {
-                if (nullptr != COMMON::DistanceUtils::Quantizer)
+                if (COMMON::DistanceUtils::Quantizer)
                 {
                     switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
                     {
@@ -154,7 +154,7 @@ break;
                 else
                 {
                     SizeType cols = index->GetFeatureDim();
-                    bool quantizer_exists = (nullptr != COMMON::DistanceUtils::Quantizer);
+                    bool quantizer_exists = (bool) COMMON::DistanceUtils::Quantizer;
                     R* v_holder = nullptr;
                     if (quantizer_exists) {
                         cols = COMMON::DistanceUtils::Quantizer->ReconstructDim();

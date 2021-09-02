@@ -61,7 +61,7 @@ namespace SPTAG
             template <typename T>
             void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
             {
-                if (nullptr != COMMON::DistanceUtils::Quantizer)
+                if (COMMON::DistanceUtils::Quantizer)
                 {
                     switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
                     {
@@ -232,7 +232,7 @@ break;
             void KDTSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T>& p_query,
                 COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
             {
-                if (nullptr != COMMON::DistanceUtils::Quantizer)
+                if (COMMON::DistanceUtils::Quantizer)
                 {
                     switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
                     {
@@ -423,7 +423,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             {
                 SizeType i = first;
                 SizeType j = last;
-                bool quantizer_exists = (nullptr != COMMON::DistanceUtils::Quantizer);
+                bool quantizer_exists = (bool) COMMON::DistanceUtils::Quantizer;
                 R* v_holder = nullptr;
                 if (quantizer_exists)
                 {

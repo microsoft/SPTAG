@@ -5,6 +5,7 @@
 #define _SPTAG_COMMON_QUERYRESULTSET_H_
 
 #include "../SearchQuery.h"
+#include "DistanceUtils.h"
 #include <algorithm>
 
 namespace SPTAG
@@ -48,6 +49,10 @@ public:
     inline void SetTarget(const T *p_target)
     {
         m_target = p_target;
+        if (m_quantizedTarget)
+        {
+            COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+        }
     }
 
     inline const T* GetTarget() const
