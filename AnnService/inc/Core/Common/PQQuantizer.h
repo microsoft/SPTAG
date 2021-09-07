@@ -48,6 +48,8 @@ namespace SPTAG
 
             virtual DimensionType GetNumSubvectors() const;
 
+            virtual float GetBase();
+
             SizeType GetKsPerSubvector() const;
 
             DimensionType GetDimPerSubvector() const;
@@ -239,6 +241,12 @@ namespace SPTAG
             }
             LOG(Helper::LogLevel::LL_Info, "Load quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
+        }
+
+        template <typename T>
+        float PQQuantizer<T>::GetBase()
+        {
+            return COMMON::Utils::GetBase<T>();
         }
 
         template <typename T>

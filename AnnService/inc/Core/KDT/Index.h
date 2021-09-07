@@ -94,7 +94,19 @@ namespace SPTAG
 
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine && !SPTAG::COMMON::DistanceUtils::Quantizer) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                if (m_iDistCalcMethod == DistCalcMethod::Cosine) {
+                    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+                        m_iBaseSquare = SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() * SPTAG::COMMON::DistanceUtils::Quantizer->GetBase();
+                    }
+                    else
+                    {
+                        m_iBaseSquare = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
+                    }
+                }
+                else
+                {
+                    m_iBaseSquare = 1;
+                }
             }
 
             ~Index() {}

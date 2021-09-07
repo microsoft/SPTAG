@@ -40,6 +40,8 @@ namespace SPTAG
             virtual VectorValueType GetReconstructType() = 0;
 
             virtual DimensionType GetNumSubvectors() const = 0;
+
+            virtual float GetBase() = 0;
         };
     }
 }
