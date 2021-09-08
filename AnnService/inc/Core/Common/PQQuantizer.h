@@ -27,7 +27,9 @@ namespace SPTAG
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
 
-            virtual void QuantizeVector(const float* vec, std::uint8_t* vecout);
+            virtual void QuantizeVector(const float* vec, std::uint8_t* vecout); 
+            
+            virtual void SetADC(const bool EnableADC);
 
             virtual std::uint64_t BufferSize() const;
 

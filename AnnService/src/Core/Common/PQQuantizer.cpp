@@ -43,6 +43,11 @@ namespace SPTAG
         {
         }
 
+        void PQQuantizer::SetADC(bool EnableADC)
+        {
+            m_EnableADC = EnableADC;
+        }
+
         float PQQuantizer::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
         {
             //std::cout << GetEnableADC() << std::endl;
@@ -55,9 +60,11 @@ namespace SPTAG
                 std::uint8_t* X= const_cast<std::uint8_t *>(x);
                 float* rpX = reinterpret_cast<float*>(X);
                 for (int i = 0; i < m_NumSubvectors; i++) {
+                    //std::cout << rpX[i * m_KsPerSubvector + pY[i]] << std::endl;
                     out += rpX[i * m_KsPerSubvector + pY[i]];
                 }
-                
+
+                //std::cout << out << std::endl;
                
                 return out;
             }
