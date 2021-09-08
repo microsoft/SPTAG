@@ -64,7 +64,6 @@ void ADCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet
             float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(nn[j]));
             for (int l = 0; l < k; l++) {
                 if (visited[l]) continue;
-                std::cout << res[i].GetResult(l)->Dist << " " << truthdist << std::endl;
 
                 if (res[i].GetResult(l)->VID == nn[j]) {
                     recall += 1.0;
@@ -356,9 +355,6 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         }
         res.SortResult();
         for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
-        for (int j = 0; j < k; j++) {
-            std::cout << "real dist = " << res.GetResult(j)->Dist << std::endl;
-        }
     }
     truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, real_queryset->Count()));
     truth->Save("test_truth_adc." + distCalcMethod);
