@@ -40,7 +40,7 @@ public:
 
     ~QueryResultSet()
     {
-        if (nullptr != m_quantizedTarget)
+        if (m_quantizedTarget)
         {
             _mm_free(m_quantizedTarget);
         }
@@ -64,7 +64,7 @@ public:
     {
         if (nullptr != COMMON::DistanceUtils::Quantizer)
         {
-            if (nullptr == m_quantizedTarget)
+            if (!m_quantizedTarget)
             {
                 m_quantizedTarget = (T*) _mm_malloc(COMMON::DistanceUtils::Quantizer->QuantizeSize(), ALIGN);
                 COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
@@ -126,7 +126,7 @@ private:
         if (next == maxidx && m_results[parent] < m_results[next]) std::swap(m_results[parent], m_results[next]);
     }
 
-    T* m_quantizedTarget;
+    T* m_quantizedTarget = nullptr;
 };
 }
 }

@@ -499,9 +499,18 @@ break;
             void RefineNode(VectorIndex* index, const SizeType node, bool updateNeighbors, bool searchDeleted, int CEF)
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
+                void* rec_query = nullptr;
+                if (COMMON::DistanceUtils::Quantizer) {
+                    rec_query = _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                    COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
+                    query.SetTarget((T*)rec_query);
+                }
                 index->RefineSearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
-
+                if (rec_query)
+                {
+                    _mm_free(rec_query);
+                }
                 if (updateNeighbors) {
                     // update neighbors
                     for (int j = 0; j <= CEF; j++)

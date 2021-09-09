@@ -153,6 +153,7 @@
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\PerfTest.cpp" />
+    <ClCompile Include="src\ReconstructIndexSimilarityTest.cpp" />
     <ClCompile Include="src\SDCTest.cpp" />
     <ClCompile Include="src\StringConvertTest.cpp" />
   </ItemGroup>
