@@ -280,7 +280,7 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
     int nodes_on_level=1;
 
     const int RUN_BLOCKS = min(N/THREADS, BLOCKS);
-
+    const int RAND_BLOCKS = min(N/THREADS, 1024); // Use fewer blocks for kernels using random numbers to cut down memory usage
 
     float** frac_to_move = new float*[NUM_GPUS];
     curandState** states = new curandState*[NUM_GPUS];
@@ -288,18 +288,15 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         CUDA_CHECK(cudaSetDevice(gpuNum));
         CUDA_CHECK(cudaMalloc(&frac_to_move[gpuNum], d_trees[0]->num_nodes*sizeof(float)));
-        CUDA_CHECK(cudaMalloc(&states[gpuNum], N*sizeof(curandState)));
-        initialize_rands<<<RUN_BLOCKS,THREADS>>>(states[gpuNum], 0);
-
+        CUDA_CHECK(cudaMalloc(&states[gpuNum], RAND_BLOCKS*THREADS*sizeof(curandState)));
+        initialize_rands<<<RAND_BLOCKS,THREADS>>>(states[gpuNum], 0);
     }
-
   
     for(int i=0; i<d_trees[0]->levels; ++i) {
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
             find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
-
 
         }
 
@@ -312,7 +309,7 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
                 check_for_imbalance<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->node_ids, d_trees[gpuNum]->node_sizes, nodes_on_level, nodes_on_level-1, frac_to_move[gpuNum], balanceFactor);
 
                 // Randomly reassign points to neighboring nodes as needed based on imbalance factor
-                rebalance_nodes<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->node_ids, N, frac_to_move[gpuNum], states[gpuNum]);
+                rebalance_nodes<<<RAND_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->node_ids, N, frac_to_move[gpuNum], states[gpuNum]);
             }
         }
 
