@@ -41,7 +41,7 @@ void SDCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet
             for (int l = 0; l < k; l++) {
                 if (visited[l]) continue;
 
-                std::cout << res[i].GetResult(l)->Dist << " " << truthdist << std::endl;
+                //std::cout << res[i].GetResult(l)->Dist << " " << truthdist << std::endl;
                 if (res[i].GetResult(l)->VID == nn[j]) {
                     recall += 1.0;
                     visited[l] = true;
@@ -120,11 +120,11 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
 
     int QuanDim = m / M;
     ByteArray PQvec = ByteArray::Alloc(sizeof(std::uint8_t) * n * QuanDim);
-    ByteArray reconstruct_vec = ByteArray::Alloc(sizeof(float) * n * m);
+    ByteArray reconstruct_vec = ByteArray::Alloc(sizeof(T) * n * m);
     ByteArray PQquery = ByteArray::Alloc(sizeof(std::uint8_t) * q * QuanDim);
 
     if (fileexists("vectors.bin") && fileexists("querys.bin")) {
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), m, VectorFileType::DEFAULT));
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("vectors.bin"))
         {
@@ -156,14 +156,14 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     }
     else {
         std::cout << "Generating random data!" << std::endl;
-        ByteArray real_vec = ByteArray::Alloc(sizeof(float) * n * m);
+        ByteArray real_vec = ByteArray::Alloc(sizeof(T) * n * m);
         for (int i = 0; i < n * m; i++) {
-            ((float*)real_vec.Data())[i] = (float)COMMON::Utils::rand(255, 0);
+            ((T*)real_vec.Data())[i] = (T)COMMON::Utils::rand(255, 0);
         }
         real_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), m, n));
-        ByteArray real_query = ByteArray::Alloc(sizeof(float) * q * m);
+        ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
         for (int i = 0; i < q * m; i++) {
-            ((float*)real_query.Data())[i] = (float)COMMON::Utils::rand(255, 0);
+            ((T*)real_query.Data())[i] = (T)COMMON::Utils::rand(255, 0);
         }
         real_queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<T>(), m, q));
 
@@ -184,10 +184,10 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     //std::cout << "Building codebooks!"<<std::endl;
     std::string CODEBOOK_FILE = "test-quantizer-sdc.bin";
 
-    float* codebooks = new float[M * Ks * QuanDim];
+    T* codebooks = new T[M * Ks * QuanDim];
     if (fileexists("codebooks.bin")) {
         std::shared_ptr<VectorSet> temp_codebooks;
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), Ks * M, VectorFileType::DEFAULT));
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), Ks * M, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("codebooks.bin"))
         {
@@ -196,9 +196,21 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         }
         temp_codebooks = vectorReader->GetVectorSet();
         //std::cout << temp_codebooks->Dimension() << " " << temp_codebooks->Count() << std::endl;
-        std::memcpy(codebooks, temp_codebooks->GetData(), sizeof(float) * QuanDim * Ks * M);
+        std::memcpy(codebooks, temp_codebooks->GetData(), sizeof(T) * QuanDim * Ks * M);
     }
     else {
+        std::shared_ptr<VectorSet> temp_codebooks;
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), Ks * M, VectorFileType::DEFAULT));
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile("codebooks.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read coodebooks file.\n");
+            exit(1);
+        }
+        temp_codebooks = vectorReader->GetVectorSet();
+        //std::cout << temp_codebooks->Dimension() << " " << temp_codebooks->Count() << std::endl;
+        std::memcpy(codebooks, temp_codebooks->GetData(), sizeof(T) * QuanDim * Ks * M);
+        /*
         std::cout << "Building codebooks!" << std::endl;
         float* kmeans = new float[Ks * QuanDim];
         for (int i = 0; i < M; i++) {
@@ -267,6 +279,7 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         }
         delete[] kmeans;
         std::cout << "Building Finish!" << std::endl;
+        */
     }
     std::cout << "Codebooks Building Finish!" << std::endl;
    
@@ -284,20 +297,20 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     std::cout << "Quantize Vector" << std::endl;
     for (int i = 0; i < n; i++) {
         //std::cout << real_vecset->Dimension() << " " << real_vecset->Count() << std::endl;
-        baseQuantizer->QuantizeVector((const float*)(real_vecset->GetVector(i)), ((T*)PQvec.Data()) + i * QuanDim);
+        baseQuantizer->QuantizeVector((const T*)(real_vecset->GetVector(i)), ((std::uint8_t*)PQvec.Data()) + i * QuanDim);
         //std::cout << i << " " << baseQ[i].size() << std::endl;
     }
-    vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), QuanDim, n));
+    vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<std::uint8_t>(), QuanDim, n));
     vecset->Save("SDCtest_vector.bin");
 
 
     for (int i = 0; i < n; i++) {
-        T* quan = (T*)(vecset->GetVector(i));
+        uint8_t* quan = (uint8_t*)(vecset->GetVector(i));
         for (int j = 0; j < QuanDim; j++) {
-            std::memcpy(((float*)(reconstruct_vec.Data())) + i * m + j * M, codebooks + j * Ks * M + quan[j] * M, sizeof(float) * M);
+            std::memcpy(((T*)(reconstruct_vec.Data())) + i * m + j * M, codebooks + j * Ks * M + quan[j] * M, sizeof(T) * M);
         }
     }
-    vecset.reset(new BasicVectorSet(reconstruct_vec, GetEnumValueType<float>(), m, n));
+    vecset.reset(new BasicVectorSet(reconstruct_vec, GetEnumValueType<T>(), m, n));
     vecset->Save("SDCtest_reconstruct.bin");
 
     std::cout << "Quantize Query Vector" << std::endl;
@@ -306,7 +319,7 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     auto t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < q; i++) {
         //std::cout << real_vecset->Dimension() << " " << real_vecset->Count() << std::endl;
-        baseQuantizer->QuantizeVector((const float*)(real_queryset->GetVector(i)), ((T*)PQquery.Data()) + i * QuanDim);
+        baseQuantizer->QuantizeVector((const T*)(real_queryset->GetVector(i)), ((std::uint8_t*)PQquery.Data()) + i * QuanDim);
         //std::cout << i << " " << baseQ[i].size() << std::endl;
     }
 
@@ -337,17 +350,17 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
     }
 
-    ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
+    ByteArray tru = ByteArray::Alloc(sizeof(T) * queryset->Count() * k);
     
 #pragma omp parallel for
     for (SizeType i = 0; i < real_queryset->Count(); ++i)
     {
         SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
 
-        COMMON::QueryResultSet<float> res((const float*)real_queryset->GetVector(i), k);
+        COMMON::QueryResultSet<T> res((const T*)real_queryset->GetVector(i), k);
         for (SizeType j = 0; j < real_vecset->Count(); j++)
         {
-            float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), (const float*)(real_vecset->GetVector(j)), real_queryset->Dimension(), distMethod);
+            T dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), (const T*)(real_vecset->GetVector(j)), real_queryset->Dimension(), distMethod);
             res.AddPoint(j, dist);
         }
         res.SortResult();
@@ -356,7 +369,7 @@ void GeneratePQData_SDC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         //    std::cout << "real dist = " << res.GetResult(j)->Dist << std::endl;
         //}
     }
-    truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, real_queryset->Count()));
+    truth.reset(new BasicVectorSet(tru, GetEnumValueType<T>(), k, real_queryset->Count()));
     truth->Save("test_truth_sdc." + distCalcMethod);
     
     //std::cout << "real truth size:" << real_queryset->Count() << " " << real_vecset->Count() << std::endl;
@@ -408,19 +421,18 @@ void SReplace(const char* filename, std::string oStr, std::string nStr) {
     std::remove(filename);
     std::rename((filename + std::string(".tmp")).c_str(), filename);
 }
-
 template <typename T>
-void SDCPQTest(IndexAlgoType algo, std::string distCalcMethod)
+void SDCPrepare(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth)
 {
-    std::shared_ptr<VectorSet> real_vecset, vecset, queryset, real_queryset, truth;
+    std::shared_ptr<VectorSet> real_vecset, vecset, real_queryset;
     std::shared_ptr<MetadataSet> metaset;
     GeneratePQData_SDC<T>(vecset, real_vecset, metaset, queryset, real_queryset, truth, distCalcMethod, 10);
-    
+
     //SDCAdd<T>(algo, distCalcMethod, reconstruct_vecset, metaset, queryset, 10, truth, "testindices");
     //std::cout << "PerfAdd Finish!" << std::endl;
 
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
-    SDCBuild<float>(algo, distCalcMethod, vecset, metaset, real_queryset, 10, truth, "testindices-sdc");
+    SDCBuild<T>(algo, distCalcMethod, vecset, metaset, real_queryset, 10, truth, "testindices-sdc");
     //return;
     std::remove("testindices-sdc\\vectors.bin");
     std::rename("SDCtest_vector.bin", "testindices-sdc\\vectors.bin");
@@ -431,7 +443,12 @@ void SDCPQTest(IndexAlgoType algo, std::string distCalcMethod)
     SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
-    std::cout << "PerfBuild Finish!" << std::endl;
+    std::cout << "SDCBuild Finish!" << std::endl;
+}
+
+template <typename T>
+void SDCPQTest(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth)
+{
     std::shared_ptr<VectorIndex> vecIndex;
     BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices-sdc", vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
@@ -444,8 +461,10 @@ BOOST_AUTO_TEST_SUITE(SDCTest)
 
 BOOST_AUTO_TEST_CASE(SDCBKTTest)
 {
-    SDCPQTest<std::uint8_t>(IndexAlgoType::BKT, "L2");
-    
+    std::shared_ptr<VectorSet> queryset, truth;
+    SDCPrepare<float>(IndexAlgoType::BKT, "L2", queryset, truth);
+    SDCPQTest<std::uint8_t>(IndexAlgoType::BKT, "L2", queryset, truth);
+
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
 }
 

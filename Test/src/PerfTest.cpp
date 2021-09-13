@@ -159,6 +159,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
     }
     else { 
+        std::cout << "Generating Data!" << std::endl;
         ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
         for (SizeType i = 0; i < n; i++) {
             for (DimensionType j = 0; j < m; j++) {
