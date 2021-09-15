@@ -36,8 +36,6 @@ namespace SPTAG
             
             virtual SizeType QuantizeSize();
 
-            virtual void SetADC(bool EnableADC);
-
             void ReconstructVector(const std::uint8_t* qvec, void* vecout);
 
             virtual SizeType ReconstructSize();
@@ -76,7 +74,7 @@ namespace SPTAG
             SizeType m_KsPerSubvector;
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
-            bool m_EnableADC; 
+            bool m_EnableADC;
             //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
@@ -279,12 +277,6 @@ namespace SPTAG
         bool PQQuantizer<T>::GetEnableADC()
         {
             return m_EnableADC;
-        }
-
-        template <typename T>
-        void PQQuantizer<T>::SetADC(bool enableADC)
-        {
-            m_EnableADC = enableADC;
         }
 
         template <typename T>

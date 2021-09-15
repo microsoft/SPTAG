@@ -8,14 +8,14 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
-
-using namespace SPTAG;
-
 #include "inc/Core/Common/DistanceUtils.h"
 #include <thread>
 #include <iostream>
 #include <unordered_set>
 #include <ctime>
+
+using namespace SPTAG;
+
 template <typename T>
 void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth)
 {
