@@ -62,7 +62,7 @@ public:
 
     inline const T* GetQuantizedTarget()
     {
-        if (nullptr != COMMON::DistanceUtils::Quantizer)
+        if (COMMON::DistanceUtils::Quantizer && !COMMON::DistanceUtils::Quantizer->GetEnableADC())
         {
             if (!m_quantizedTarget)
             {

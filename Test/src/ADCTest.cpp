@@ -1,10 +1,6 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
 #include "inc/Test.h"
 #include <random>
 #include "inc/Helper/VectorSetReader.h"
-#include "inc/Core/Common/PQQuantizer.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -24,7 +20,10 @@ void ADCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet
     auto t1 = std::chrono::high_resolution_clock::now();
     for (SizeType i = 0; i < queryset->Count(); i++)
     {
-        res[i].SetTarget(queryset->GetVector(i));
+        void* ptr = queryset->GetVector(i);
+        res[i].SetTarget(ptr);
+        //prefetch L2
+        //_mm_prefetch((char *)ptr, 2);
         vecIndex->SearchIndex(res[i]);
     }
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -81,22 +80,8 @@ void ADCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet
             }
         }
     }
-    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension * 2);
-}
 
     LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
-}
-    auto t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "Add time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(vec->Count())) << "us" << std::endl;
-
-    Sleep(10000);
-
-    Search<T>(vecIndex, queryset, k, truth);
-
-    BOOST_CHECK(ErrorCode::Success == vecIndex->SaveIndex(out));
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(out, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-    Search<T>(vecIndex, queryset, k, truth);
 }
 
 template<typename T>
@@ -121,14 +106,9 @@ void ADCBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<Ve
 template <typename T>
 void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<VectorSet>& real_vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& real_queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
 {
-    std::shared_ptr<VectorSet> real_vecset, real_queryset;
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dist(0.01, 100.0);
-    int n = 500, q = 10;
-    int m = 128;
-    int M = 4;
-    int Ks = 256;
 
     const int n = 1500, q = 100;
     const int m = 768;
@@ -175,9 +155,6 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     else {
         std::cout << "Generating Data!" << std::endl;
         ByteArray real_vec = ByteArray::Alloc(sizeof(T) * n * m);
-    std::vector< std::vector<std::uint8_t> > baseQ(n, std::vector<std::uint8_t>(QuanDim));
-
-    float* vecs = new float[n * m];
         for (int i = 0; i < n * m; i++) {
             ((T*)real_vec.Data())[i] = (T)COMMON::Utils::rand(255, 0);
         }
@@ -286,21 +263,21 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         delete[] kmeans;
     }
     std::cout << "Codebooks Building Finish!" << std::endl;
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(QuanDim, Ks, M, true, codebooks);
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<T>>(QuanDim, Ks, M, true, codebooks);
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
     baseQuantizer->SaveQuantizer(ptr);
     ptr->ShutDown();
 
     BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
-    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<T>());
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
     std::cout << "Quantize Vector" << std::endl;
     for (int i = 0; i < n; i++) {
         //std::cout << real_vecset->Dimension() << " " << real_vecset->Count() << std::endl;
-        baseQuantizer->QuantizeVector((const T*)(real_vecset->GetVector(i)), ((std::uint8_t *)PQvec.Data()) + i * QuanDim);
+        baseQuantizer->QuantizeVector((const T*)(real_vecset->GetVector(i)), ((std::uint8_t*)PQvec.Data()) + i * QuanDim);
         //std::cout << i << " " << baseQ[i].size() << std::endl;
     }
     vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<std::uint8_t>(), QuanDim, n));
@@ -312,14 +289,6 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         for (int j = 0; j < QuanDim; j++) {
             std::memcpy(((T*)(reconstruct_vec.Data())) + i * m + j * M, codebooks + j * Ks * M + quan[j] * M, sizeof(T) * M);
         }
-    */
-    ByteArray PQquery = ByteArray::Alloc(sizeof(float) * q * M * Ks + sizeof(float) * q * m);
-    ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
-    float* querys = new float[q * m];
-    std::vector< std::vector<std::uint8_t> > baseQ1(n, std::vector<std::uint8_t>(m / M));
-    for (int i = 0; i < q * m; i++) {
-        querys[i] = COMMON::Utils::rand(255, 0); 
-        ((T*)real_query.Data())[i] = (T)querys[i];
     }
     vecset.reset(new BasicVectorSet(reconstruct_vec, GetEnumValueType<T>(), m, n));
     vecset->Save("ADCtest_reconstruct.bin");
@@ -436,7 +405,7 @@ void ADCPrepare(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
 
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr->Initialize("test-quantizer-adc.bin", std::ios::binary | std::ios::in));
-    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<T>());
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
     std::cout << "ADCBuild Finish!" << std::endl;
@@ -466,4 +435,3 @@ BOOST_AUTO_TEST_CASE(ADCBKTTest)
 }
 
 BOOST_AUTO_TEST_SUITE_END()
-

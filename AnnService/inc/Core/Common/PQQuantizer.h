@@ -35,7 +35,8 @@ namespace SPTAG
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout);
             
             virtual SizeType QuantizeSize();
-            virtual void SetADC(const bool EnableADC);
+
+            virtual void SetADC(bool EnableADC);
 
             void ReconstructVector(const std::uint8_t* qvec, void* vecout);
 
@@ -57,7 +58,7 @@ namespace SPTAG
 
             DimensionType GetDimPerSubvector() const;
 
-            bool GetEnableADC() const;
+            virtual bool GetEnableADC();
 
             VectorValueType GetReconstructType()
             {
@@ -79,7 +80,6 @@ namespace SPTAG
             //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
-            inline bool GetEnableADC();
 
             std::unique_ptr<T[]> m_codebooks;
             std::unique_ptr<float[]> m_CosineDistanceTables;
@@ -276,9 +276,15 @@ namespace SPTAG
         }
 
         template <typename T>
-        bool PQQuantizer<T>::GetEnableADC() const
+        bool PQQuantizer<T>::GetEnableADC()
         {
             return m_EnableADC;
+        }
+
+        template <typename T>
+        void PQQuantizer<T>::SetADC(bool enableADC)
+        {
+            m_EnableADC = enableADC;
         }
 
         template <typename T>

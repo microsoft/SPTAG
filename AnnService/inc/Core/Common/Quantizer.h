@@ -35,6 +35,8 @@ namespace SPTAG
 
             static ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType, VectorValueType reconstructType);
 
+            virtual bool GetEnableADC() = 0;
+
             virtual QuantizerType GetQuantizerType() = 0;
 
             virtual VectorValueType GetReconstructType() = 0;
