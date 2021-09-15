@@ -45,6 +45,9 @@
     <ClCompile Include="src\SDCTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ADCTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\ReconstructIndexSimilarityTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

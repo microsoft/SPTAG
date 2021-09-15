@@ -13,6 +13,7 @@
 #include <memory>
 #include <cassert>
 
+
 namespace SPTAG
 {
     namespace COMMON
@@ -32,8 +33,9 @@ namespace SPTAG
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout);
-
+            
             virtual SizeType QuantizeSize();
+            virtual void SetADC(const bool EnableADC);
 
             void ReconstructVector(const std::uint8_t* qvec, void* vecout);
 
@@ -66,14 +68,18 @@ namespace SPTAG
                 return QuantizerType::PQQuantizer;
             }
 
+            //virtual bool IsSearching() const;
+
         private:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
-            bool m_EnableADC;
+            bool m_EnableADC; 
+            //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
+            inline bool GetEnableADC();
 
             std::unique_ptr<T[]> m_codebooks;
             std::unique_ptr<float[]> m_CosineDistanceTables;

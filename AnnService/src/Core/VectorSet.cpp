@@ -51,7 +51,6 @@ BasicVectorSet::GetVector(SizeType p_vectorID) const
     return reinterpret_cast<void*>(m_data.Data() + ((size_t)p_vectorID) * m_perVectorDataSize);
 }
 
-
 void*
 BasicVectorSet::GetData() const
 {

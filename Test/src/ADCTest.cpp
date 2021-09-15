@@ -9,6 +9,7 @@
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/PQQuantizer.h"
 #include <thread>
 #include <iostream>
 #include <unordered_set>
@@ -17,7 +18,7 @@
 using namespace SPTAG;
 
 template <typename T>
-void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth)
+void ADCSearch(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth)
 {
     std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -39,9 +40,14 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
         SizeType* nn = (SizeType*)(truth->GetVector(i));
         for (int j = 0; j < truthDimension; j++)
         {
-            std::string truthstr = std::to_string(nn[j]);
-            ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
-            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
+            if (nn[j] < 0) {
+                LOG(Helper::LogLevel::LL_Info, "error nn[%d][%d]:%d", i, j, nn[j]);
+                continue;
+            }
+            //std::string truthstr = std::to_string(nn[j]);
+            //ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
+            //float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(truthmeta, deleted));
+            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(nn[j]));
             for (int l = 0; l < k; l++)
             {
                 if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (fabs(truthdist) + eps)) {
@@ -53,54 +59,33 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
     }
     LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
     */
-    truthDimension = k * 2;
+
     for (SizeType i = 0; i < queryset->Count(); i++) {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
-        std::cout << "Query " << i + 1 << std::endl;
-        for (int l = 0; l < k; l++) {
-            std::cout << res[i].GetResult(l)->VID << " ";
-        }
-        std::cout << std::endl;
-        for (int l = 0; l < truthDimension; l++) {
-            std::cout << nn[l] << " ";
-        }
-        std::cout << std::endl;
-        for (int l = 0; l < k; l++)
-        {
-            for (int j = 0; j < truthDimension; j++)
-            {
+        std::vector<bool> visited(k, false);
+        for (int j = 0; j < truthDimension; j++) {
+            float truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vecIndex->GetSample(nn[j]));
+            for (int l = 0; l < k; l++) {
+                if (visited[l]) continue;
+
                 if (res[i].GetResult(l)->VID == nn[j]) {
                     recall += 1.0;
+                    visited[l] = true;
                     break;
                 }
+                //else if (fabs(res[i].GetResult(l)->Dist - truthdist) <= eps) {
+                //	recall += 1.0;
+                //	visited[l] = true;
+                //	break;
+                //}
             }
         }
     }
     LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension * 2);
 }
 
-template <typename T>
-void ADCAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out)
-{
-    std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
-
-    if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
-    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
-    vecIndex->SetParameter("NumberOfThreads", "5");
-    vecIndex->SetParameter("AddCEF", "200");
-    vecIndex->SetParameter("CEF", "1500");
-    vecIndex->SetParameter("MaxCheck", "4096");
-    vecIndex->SetParameter("MaxCheckForRefineGraph", "4096");
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    for (SizeType i = 0; i < vec->Count(); i++) {
-        ByteArray metaarr = meta->GetMetadata(i);
-        std::uint64_t offset[2] = { 0, metaarr.Length() };
-        std::shared_ptr<MetadataSet> metaset(new MemMetadataSet(metaarr, ByteArray((std::uint8_t*)offset, 2 * sizeof(std::uint64_t), false), 1));
-        ErrorCode ret = vecIndex->AddIndex(vec->GetVector(i), 1, vec->Dimension(), metaset, true);
-        if (ErrorCode::Success != ret) std::cerr << "Error AddIndex(" << (int)(ret) << ") for vector " << i << std::endl;
-    }
+    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
+}
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "Add time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(vec->Count())) << "us" << std::endl;
 
@@ -124,17 +109,17 @@ void ADCBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<Ve
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "5");
     vecIndex->SetParameter("RefineIterations", "3");
-    vecIndex->SetParameter("MaxCheck", "4096");
+    vecIndex->SetParameter("MaxCheck", "8192");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "8192");
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
-    Search<T>(vecIndex, queryset, k, truth);
+    ADCSearch<T>(vecIndex, queryset, k, truth);
 }
 
 
 template <typename T>
-void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
+void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<VectorSet>& real_vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& real_queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
 {
     std::shared_ptr<VectorSet> real_vecset, real_queryset;
     std::random_device rd;
@@ -145,113 +130,163 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     int M = 4;
     int Ks = 256;
 
+    const int n = 1500, q = 100;
+    const int m = 768;
+    const int M = 8;
+    const int Ks = 256;
 
-    /*
-    if (fileexists("test_vector.bin") && fileexists("test_meta.bin") && fileexists("test_metaidx.bin") && fileexists("test_query.bin")) {
+
+    int QuanDim = m / M;
+    ByteArray PQvec = ByteArray::Alloc(sizeof(std::uint8_t) * n * QuanDim);
+    ByteArray reconstruct_vec = ByteArray::Alloc(sizeof(T) * n * m);
+    ByteArray PQquery = ByteArray::Alloc(sizeof(T) * q * QuanDim * Ks);
+
+    if (fileexists("vectors.bin") && fileexists("querys.bin")) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("test_vector.bin"))
+        if (ErrorCode::Success != vectorReader->LoadFile("vectors.bin"))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
-        vecset = vectorReader->GetVectorSet();
+        real_vecset = vectorReader->GetVectorSet();
 
-        metaset.reset(new MemMetadataSet("test_meta.bin", "test_metaidx.bin", vecset->Count() * 2, vecset->Count() * 2, 10));
-
-        if (ErrorCode::Success != vectorReader->LoadFile("test_query.bin"))
+        std::cout << real_vecset->Dimension() << " " << real_vecset->Count() << std::endl;
+        if (ErrorCode::Success != vectorReader->LoadFile("querys.bin"))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
             exit(1);
         }
-        queryset = vectorReader->GetVectorSet();
+        real_queryset = vectorReader->GetVectorSet();
+
+        ByteArray meta = ByteArray::Alloc(n * 6);
+        ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
+        std::uint64_t offset = 0;
+        for (SizeType i = 0; i < n; i++) {
+            ((std::uint64_t*)metaoffset.Data())[i] = offset;
+            std::string a = std::to_string(i);
+            memcpy(meta.Data() + offset, a.c_str(), a.length());
+            offset += a.length();
+        }
+        ((std::uint64_t*)metaoffset.Data())[n] = offset;
+        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
+        metaset->SaveMetadata("test_meta_adc.bin", "test_metaidx_adc.bin");
     }
     else {
-       */
-    int QuanDim = m / M;
-    ByteArray PQvec = ByteArray::Alloc(sizeof(T) * n * QuanDim);
-    ByteArray real_vec = ByteArray::Alloc(sizeof(T) * n * m);
+        std::cout << "Generating Data!" << std::endl;
+        ByteArray real_vec = ByteArray::Alloc(sizeof(T) * n * m);
     std::vector< std::vector<std::uint8_t> > baseQ(n, std::vector<std::uint8_t>(QuanDim));
 
     float* vecs = new float[n * m];
-    for (int i = 0; i < n * m; i++) {
-        vecs[i] = COMMON::Utils::rand(255, 0);
-        ((T*)real_vec.Data())[i] = (T)vecs[i];
+        for (int i = 0; i < n * m; i++) {
+            ((T*)real_vec.Data())[i] = (T)COMMON::Utils::rand(255, 0);
+        }
+        real_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), m, n));
+        ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
+        for (int i = 0; i < q * m; i++) {
+            ((T*)real_query.Data())[i] = (T)COMMON::Utils::rand(255, 0);
+        }
+        real_queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<T>(), m, q));
+
+        ByteArray meta = ByteArray::Alloc(n * 6);
+        ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
+        std::uint64_t offset = 0;
+        for (SizeType i = 0; i < n; i++) {
+            ((std::uint64_t*)metaoffset.Data())[i] = offset;
+            std::string a = std::to_string(i);
+            memcpy(meta.Data() + offset, a.c_str(), a.length());
+            offset += a.length();
+        }
+        ((std::uint64_t*)metaoffset.Data())[n] = offset;
+        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
+        metaset->SaveMetadata("test_meta_adc.bin", "test_metaidx_adc.bin");
     }
 
-    real_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), m, n));
-    std::cout << "Building codebooks!" << std::endl;
-    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
-    float* codebooks = new float[M * Ks * QuanDim];
-
-    float* kmeans = new float[Ks * QuanDim];
-    for (int i = 0; i < M; i++) {
-        for (int j = 0; j < Ks; j++) {
-            for (int t = 0; t < QuanDim; t++) {
-                kmeans[j * QuanDim + t] = vecs[j * m + i * QuanDim + t];
-            }
+    std::string CODEBOOK_FILE = "test-quantizer-adc.bin";
+    T* codebooks = new T[M * Ks * QuanDim];
+    if (fileexists("codebooks.bin")) {
+        std::shared_ptr<VectorSet> temp_codebooks;
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), Ks * M, VectorFileType::DEFAULT));
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile("codebooks.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read coodebooks file.\n");
+            exit(1);
         }
-        int cnt = 100;
-        int* belong = new int[n];
-        while (cnt--) {
-            //calculate cluster
-            for (int ii = 0; ii < n; ii++) {
+        temp_codebooks = vectorReader->GetVectorSet();
+        std::memcpy(codebooks, temp_codebooks->GetData(), sizeof(T) * QuanDim * Ks * M);
+    }
+    else {
+        std::cout << "Building codebooks!" << std::endl;
+        T* kmeans = new T[Ks * QuanDim];
+        for (int i = 0; i < M; i++) {
+            for (int j = 0; j < Ks; j++) {
+                for (int t = 0; t < QuanDim; t++) {
+                    kmeans[j * QuanDim + t] = ((T*)(real_vecset->GetData()))[j * m + i * QuanDim + t];
+                }
+            }
+            int cnt = 5;
+            int* belong = new int[n];
+            while (cnt--) {
+                //calculate cluster
+                for (int ii = 0; ii < n; ii++) {
+                    double min_dis = 1e9;
+                    int min_id = 0;
+                    for (int jj = 0; jj < Ks; jj++) {
+                        double now_dis = 0;
+                        for (int kk = 0; kk < QuanDim; kk++) {
+                            now_dis += (1.0 * ((T*)(real_vecset->GetData()))[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]) * (1.0 * ((T*)(real_vecset->GetData()))[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]);
+                        }
+                        if (now_dis < min_dis) {
+                            min_dis = now_dis;
+                            min_id = jj;
+                        }
+                    }
+                    belong[ii] = min_id;
+                }
+                //recalculate kmeans
+                for (int ii = 0; ii < Ks; ii++) {
+                    int num = 0;
+                    T* newmeans = new T[QuanDim]();
+                    for (int jj = 0; jj < n; jj++) {
+                        if (belong[jj] == ii) {
+                            num++;
+                            for (int kk = 0; kk < QuanDim; kk++) {
+                                newmeans[kk] += ((T*)(real_vecset->GetData()))[jj * m + i * QuanDim + kk];
+                            }
+                        }
+                    }
+                    for (int jj = 0; jj < QuanDim; jj++) {
+                        newmeans[jj] /= num;
+                        kmeans[ii * QuanDim + jj] = newmeans[jj];
+                    }
+                    delete[] newmeans;
+                }
+            }
+            //use kmeans to calculate codebook
+            for (int j = 0; j < Ks; j++) {
                 double min_dis = 1e9;
                 int min_id = 0;
-                for (int jj = 0; jj < Ks; jj++) {
+                for (int ii = 0; ii < n; ii++) {
                     double now_dis = 0;
-                    for (int kk = 0; kk < QuanDim; kk++) {
-                        now_dis += (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]) * (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]);
+                    for (int t = 0; t < QuanDim; t++) {
+                        now_dis += (((T*)(real_vecset->GetData()))[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]) * (((T*)(real_vecset->GetData()))[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]);
                     }
                     if (now_dis < min_dis) {
                         min_dis = now_dis;
-                        min_id = jj;
+                        min_id = ii;
                     }
                 }
-                belong[ii] = min_id;
-            }
-            //recalculate kmeans
-            for (int ii = 0; ii < Ks; ii++) {
-                int num = 0;
-                float* newmeans = new float[QuanDim]();
-                for (int jj = 0; jj < n; jj++) {
-                    if (belong[jj] == ii) {
-                        num++;
-                        for (int kk = 0; kk < QuanDim; kk++) {
-                            newmeans[kk] += vecs[jj * m + i * QuanDim + kk];
-                        }
-                    }
-                }
-                for (int jj = 0; jj < QuanDim; jj++) {
-                    newmeans[jj] /= num;
-                    kmeans[ii * QuanDim + jj] = newmeans[jj];
-                }
-                delete[] newmeans;
-            }
-        }
-        //use kmeans to calculate codebook
-        for (int j = 0; j < Ks; j++) {
-            double min_dis = 1e9;
-            int min_id = 0;
-            for (int ii = 0; ii < n; ii++) {
-                double now_dis = 0;
                 for (int t = 0; t < QuanDim; t++) {
-                    now_dis += (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]) * (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]);
-                }
-                if (now_dis < min_dis) {
-                    min_dis = now_dis;
-                    min_id = ii;
+                    codebooks[i * Ks * QuanDim + j * QuanDim + t] = ((T*)(real_vecset->GetData()))[min_id * m + i * QuanDim + t];
                 }
             }
-            for (int t = 0; t < QuanDim; t++) {
-                codebooks[i * Ks * QuanDim + j * QuanDim + t] = vecs[min_id * m + i * QuanDim + t];
-            }
+            delete[] belong;
         }
-        delete[] belong;
+        delete[] kmeans;
     }
-    delete[] kmeans;
-    std::cout << "Building Finish!" << std::endl;
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(M, Ks, (m / M), false, codebooks);
+    std::cout << "Codebooks Building Finish!" << std::endl;
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer>(QuanDim, Ks, M, true, codebooks);
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
     baseQuantizer->SaveQuantizer(ptr);
@@ -261,51 +296,22 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
     SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
+    SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
+    std::cout << "Quantize Vector" << std::endl;
+    for (int i = 0; i < n; i++) {
+        //std::cout << real_vecset->Dimension() << " " << real_vecset->Count() << std::endl;
+        baseQuantizer->QuantizeVector((const T*)(real_vecset->GetVector(i)), ((std::uint8_t *)PQvec.Data()) + i * QuanDim);
+        //std::cout << i << " " << baseQ[i].size() << std::endl;
+    }
+    vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<std::uint8_t>(), QuanDim, n));
+    vecset->Save("ADCtest_vector.bin");
+
 
     for (int i = 0; i < n; i++) {
-        auto nvec = &vecs[i * m];
-        baseQuantizer->QuantizeVector(nvec, baseQ[i].data());
-    }
-    for (SizeType i = 0; i < n; i++) {
-        for (DimensionType j = 0; j < (m / M); j++) {
-            ((T*)PQvec.Data())[i * (m / M) + j] = (T)baseQ[i][j];
+        std::uint8_t* quan = (std::uint8_t*)(vecset->GetVector(i));
+        for (int j = 0; j < QuanDim; j++) {
+            std::memcpy(((T*)(reconstruct_vec.Data())) + i * m + j * M, codebooks + j * Ks * M + quan[j] * M, sizeof(T) * M);
         }
-    }
-    vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), (m / M), n));
-    vecset->Save("test_vector_adc.bin");
-
-    ByteArray meta = ByteArray::Alloc(n * 6);
-    ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
-    std::uint64_t offset = 0;
-    for (SizeType i = 0; i < n; i++) {
-        ((std::uint64_t*)metaoffset.Data())[i] = offset;
-        std::string a = std::to_string(i);
-        memcpy(meta.Data() + offset, a.c_str(), a.length());
-        offset += a.length();
-    }
-    ((std::uint64_t*)metaoffset.Data())[n] = offset;
-    metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
-    metaset->SaveMetadata("test_meta_adc.bin", "test_metaidx_adc.bin");
-    /*
-    ByteArray PQquery = ByteArray::Alloc(sizeof(T) * q * (m / M));
-    ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
-    float* querys = new float[q * m];
-    std::vector< std::vector<std::uint8_t> > baseQ1(n, std::vector<std::uint8_t>(m / M));
-    for (int i = 0; i < q * m; i++) {
-        querys[i] = COMMON::Utils::rand(255, 0);
-        ((T*)real_query.Data())[i] = (T)querys[i];
-    }
-    real_queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<T>(), m, q));
-    auto t1 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < q; i++) {
-        auto nquery = &querys[i * m];
-        baseQuantizer->QuantizeVector(nquery, baseQ1[i].data());
-    }
-    for (SizeType i = 0; i < q; i++) {
-        for (DimensionType j = 0; j < (m / M); j++) {
-            ((T*)PQquery.Data())[i * (m / M) + j] = (T)baseQ1[i][j];
-        }
-    }
     */
     ByteArray PQquery = ByteArray::Alloc(sizeof(float) * q * M * Ks + sizeof(float) * q * m);
     ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
@@ -315,42 +321,51 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
         querys[i] = COMMON::Utils::rand(255, 0); 
         ((T*)real_query.Data())[i] = (T)querys[i];
     }
+    vecset.reset(new BasicVectorSet(reconstruct_vec, GetEnumValueType<T>(), m, n));
+    vecset->Save("ADCtest_reconstruct.bin");
+
+
+    std::cout << "Quantize Query Vector" << std::endl;
+
+    int total_size = Ks * QuanDim;
+    int block_size = Ks * M;
+    auto L2Dist = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
+    T* destPtr = (T*)(PQquery.Data());
+    T* queryPtr = (T*)(real_queryset->GetData());
     auto t1 = std::chrono::high_resolution_clock::now();
+
     for (int i = 0; i < q; i++) {
-        for (int j = 0; j < m; j++) {
-            ((float*)PQquery.Data())[i * m + j] = querys[i];
-        }
-    }
-    for (int i = 0; i < q; i++) {
-        auto nquery = &querys[i * m];
-        for (DimensionType j = 0; j < M; j++) {
-            ((float*)PQquery.Data())[i * (m / M) + j] = 0;
-            for (DimensionType ii = 0; ii < 256; ii++) {
-                for (int l = 0; l < (m / M); l++) {
-                    ((float*)PQquery.Data())[q * m + i * (m / M) + j] += (querys[i * m + j * (m / M) + l] - codebooks[j * Ks * (m / M) + ii * (m / M) + l]) * (querys[i * m + j * (m / M) + l] - codebooks[j * Ks * (m / M) + ii * (m / M) + l]);
-                }
+        for (int j = 0; j < QuanDim; j++) {
+            T* basec = codebooks + j * block_size;
+            for (int ii = 0; ii < Ks; ii++) {
+                destPtr[ii] = L2Dist(queryPtr, basec + ii * M, M);
             }
+            destPtr += Ks;
+            queryPtr += M;
         }
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "Query Quantization time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(q)) << "us" << std::endl;
 
-    queryset.reset(new BasicVectorSet(PQquery, GetEnumValueType<T>(), (m / M), q));
+    //real_queryset.reset(new BasicVectorSet(querys, GetEnumValueType<float>(), m, q));
+    queryset.reset(new BasicVectorSet(PQquery, GetEnumValueType<T>(), Ks * QuanDim, q));
     queryset->Save("test_query_adc.bin");
     //}
-/*
-    if (fileexists(("test_truth." + distCalcMethod).c_str())) {
+
+    /*
+    if (fileexists(("test_truth_adc." + distCalcMethod).c_str())) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), k, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("test_truth." + distCalcMethod))
+        if (ErrorCode::Success != vectorReader->LoadFile("test_truth_adc." + distCalcMethod))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
             exit(1);
         }
         truth = vectorReader->GetVectorSet();
     }
-    else { */
+    else {
+    */
     omp_set_num_threads(5);
 
     DistCalcMethod distMethod;
@@ -360,53 +375,95 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Meta
         COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
     }
 
-    ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * 2 * k);
+    ByteArray tru = ByteArray::Alloc(sizeof(T) * queryset->Count() * k);
 
 #pragma omp parallel for
     for (SizeType i = 0; i < real_queryset->Count(); ++i)
     {
-        SizeType* neighbors = ((SizeType*)tru.Data()) + i * 2 * k;
-
-        COMMON::QueryResultSet<T> res((const T*)real_queryset->GetVector(i), 2 * k);
+        SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
+        COMMON::QueryResultSet<T> res((const T*)real_queryset->GetVector(i), k);
         for (SizeType j = 0; j < real_vecset->Count(); j++)
         {
-            float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(real_vecset->GetVector(j)), real_queryset->Dimension(), distMethod);
+            T dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), (const T*)(real_vecset->GetVector(j)), real_queryset->Dimension(), distMethod);
             res.AddPoint(j, dist);
         }
         res.SortResult();
-        for (int j = 0; j < 2 * k; j++) neighbors[j] = res.GetResult(j)->VID;
+        for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
     }
-    truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), 2 * k, real_queryset->Count()));
+    truth.reset(new BasicVectorSet(tru, GetEnumValueType<T>(), k, real_queryset->Count()));
     truth->Save("test_truth_adc." + distCalcMethod);
     //}
 }
 
-template <typename T>
-void ADCPQTest(IndexAlgoType algo, std::string distCalcMethod)
-{
-    std::shared_ptr<VectorSet> vecset, queryset, truth;
-    std::shared_ptr<MetadataSet> metaset;
-    GeneratePQData_ADC<T>(vecset, metaset, queryset, truth, distCalcMethod, 10);
+void Replace(const char* filename, std::string oStr, std::string nStr) {
+    auto ptr = SPTAG::f_createIO();
+    BOOST_ASSERT(ptr->Initialize(filename, std::ios::in));
+    auto ptrout = SPTAG::f_createIO();
+    BOOST_ASSERT(ptrout->Initialize((filename + std::string(".tmp")).c_str(), std::ios::out));
 
-    ADCAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
-    std::cout << "PerfAdd Finish!" << std::endl;
+    std::uint64_t c_bufferSize = 1 << 16;
+    std::unique_ptr<char[]> line(new char[c_bufferSize]);
 
-    ADCBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
-    std::cout << "PerfBuild Finish!" << std::endl;
-    std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-    Search<T>(vecIndex, queryset, 10, truth);
+    while (true)
+    {
+        if (!ptr->ReadString(c_bufferSize, line)) break;
+
+        std::string tmp(line.get());
+        tmp = Helper::StrUtils::ReplaceAll(tmp, oStr, nStr) + "\n";
+        ptrout->WriteString(tmp.c_str());
+    }
+    ptr->ShutDown();
+    ptrout->ShutDown();
+
+    std::remove(filename);
+    std::rename((filename + std::string(".tmp")).c_str(), filename);
 }
 
+template <typename T>
+void ADCPrepare(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth)
+{
+    std::shared_ptr<VectorSet> real_vecset, vecset, real_queryset;
+    std::shared_ptr<MetadataSet> metaset;
+    GeneratePQData_ADC<T>(vecset, real_vecset, metaset, queryset, real_queryset, truth, distCalcMethod, 10);
+
+    SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
+    ADCBuild<T>(algo, distCalcMethod, vecset, metaset, real_queryset, 10, truth, "testindices-adc");
+
+    std::remove("testindices-adc\\vectors.bin");
+    std::rename("ADCtest_vector.bin", "testindices-adc\\vectors.bin");
+    //need to change "Float" to type T
+    Replace("testindices-adc\\indexloader.ini", "Float", "UInt8");
+
+    auto ptr = SPTAG::f_createIO();
+    BOOST_ASSERT(ptr->Initialize("test-quantizer-adc.bin", std::ios::binary | std::ios::in));
+    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
+    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
+
+    std::cout << "ADCBuild Finish!" << std::endl;
+
+}
+
+template <typename T>
+void ADCPQTest(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth)
+{
+    std::shared_ptr<VectorIndex> vecIndex;
+    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices-adc", vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+
+    ADCSearch<T>(vecIndex, queryset, 10, truth);
+
+}
 
 BOOST_AUTO_TEST_SUITE(ADCTest)
 
 BOOST_AUTO_TEST_CASE(ADCBKTTest)
 {
-    ADCPQTest<std::uint8_t>(IndexAlgoType::BKT, "L2");
+    std::shared_ptr<VectorSet> queryset, truth;
+    ADCPrepare<float>(IndexAlgoType::BKT, "L2", queryset, truth);
+    ADCPQTest<std::uint8_t>(IndexAlgoType::BKT, "L2", queryset, truth);
 
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
