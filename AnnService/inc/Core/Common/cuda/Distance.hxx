@@ -382,19 +382,6 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
 } 
 
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t rows, int exact_dim) {
-  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
-
-  T* data;
-
-  for(int i=0; i<rows; i++) {
-    data = (T*)index->GetSample(i);
-    pointArray[i].loadChunk(data, exact_dim);
-  }
-  return pointArray;
-}
-
-template<typename T, typename SUMTYPE, int Dim>
 __host__ void extractHeadPoints(T* data, Point<T,SUMTYPE,Dim>* headPoints, size_t totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
     int headIdx=0;
     for(size_t i=0; i<totalRows; i++) {

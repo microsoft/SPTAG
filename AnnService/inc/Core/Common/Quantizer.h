@@ -19,7 +19,13 @@ namespace SPTAG
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) = 0;
 
+            virtual SizeType QuantizeSize() = 0;
+
             virtual void ReconstructVector(const std::uint8_t* qvec, void* vecout) = 0;
+
+            virtual SizeType ReconstructSize() = 0;
+
+            virtual DimensionType ReconstructDim() = 0;
 
             virtual std::uint64_t BufferSize() const = 0;
 
@@ -29,11 +35,17 @@ namespace SPTAG
 
             static ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType, VectorValueType reconstructType);
 
+            virtual bool GetEnableADC() = 0;
+
+            virtual void SetEnableADC(bool enableADC) = 0;
+
             virtual QuantizerType GetQuantizerType() = 0;
 
             virtual VectorValueType GetReconstructType() = 0;
 
             virtual DimensionType GetNumSubvectors() const = 0;
+
+            virtual float GetBase() = 0;
         };
     }
 }

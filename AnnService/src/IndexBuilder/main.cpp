@@ -7,6 +7,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 #include <memory>
+#include <inc/Core/Common/DistanceUtils.h>
 
 using namespace SPTAG;
 
@@ -19,6 +20,8 @@ public:
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+        AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
+        AddOptionalOption(m_reconstructType, "-rt", "--reconstructtype", "Reconstruction value type for quantized vectors. Default is float.");
     }
 
     ~BuilderOptions() {}
@@ -30,6 +33,10 @@ public:
     SPTAG::IndexAlgoType m_indexAlgoType;
 
     std::string m_builderConfigFile;
+
+    std::string m_quantizerFile = "";
+
+    VectorValueType m_reconstructType = VectorValueType::Float;
 };
 
 int main(int argc, char* argv[])
@@ -73,6 +80,17 @@ int main(int argc, char* argv[])
     for (const auto& iter : iniReader.GetParameters("Index"))
     {
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
+    }
+
+    if (!options->m_quantizerFile.compare(""))
+    {
+        auto ptr = SPTAG::f_createIO();
+        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+            exit(1);
+        }
+        COMMON::DistanceUtils::Quantizer->LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
     }
 
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);

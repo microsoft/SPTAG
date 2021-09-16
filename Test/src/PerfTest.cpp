@@ -130,36 +130,36 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
     }
 
     else { */
-        ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
-        for (SizeType i = 0; i < n; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
+    ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
+    for (SizeType i = 0; i < n; i++) {
+        for (DimensionType j = 0; j < m; j++) {
+            ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
         }
-        vecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
-        vecset->Save("test_vector.bin");
+    }
+    vecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
+    vecset->Save("test_vector.bin");
 
-        ByteArray meta = ByteArray::Alloc(n * 6);
-        ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
-        std::uint64_t offset = 0;
-        for (SizeType i = 0; i < n; i++) {
-            ((std::uint64_t*)metaoffset.Data())[i] = offset;
-            std::string a = std::to_string(i);
-            memcpy(meta.Data() + offset, a.c_str(), a.length());
-            offset += a.length();
-        }
-        ((std::uint64_t*)metaoffset.Data())[n] = offset;
-        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
-        metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
+    ByteArray meta = ByteArray::Alloc(n * 6);
+    ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
+    std::uint64_t offset = 0;
+    for (SizeType i = 0; i < n; i++) {
+        ((std::uint64_t*)metaoffset.Data())[i] = offset;
+        std::string a = std::to_string(i);
+        memcpy(meta.Data() + offset, a.c_str(), a.length());
+        offset += a.length();
+    }
+    ((std::uint64_t*)metaoffset.Data())[n] = offset;
+    metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
+    metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
 
-        ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);
-        for (SizeType i = 0; i < q; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)query.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
+    ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);
+    for (SizeType i = 0; i < q; i++) {
+        for (DimensionType j = 0; j < m; j++) {
+            ((T*)query.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
         }
-        queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
-        queryset->Save("test_query.bin");
+    }
+    queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
+    queryset->Save("test_query.bin");
 
     //}
     /*
@@ -175,33 +175,33 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
     }
 
     else { */
-        omp_set_num_threads(5);
+    omp_set_num_threads(5);
 
-        DistCalcMethod distMethod;
-        Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
-        if (distMethod == DistCalcMethod::Cosine) {
-            std::cout << "Normalize vecset!" << std::endl;
-            COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
-        }
+    DistCalcMethod distMethod;
+    Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
+    if (distMethod == DistCalcMethod::Cosine) {
+        std::cout << "Normalize vecset!" << std::endl;
+        COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
+    }
 
-        ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
+    ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
 
 #pragma omp parallel for
-        for (SizeType i = 0; i < queryset->Count(); ++i)
-        {
-            SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
+    for (SizeType i = 0; i < queryset->Count(); ++i)
+    {
+        SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
 
-            COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
-            for (SizeType j = 0; j < vecset->Count(); j++)
-            {
-                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
-                res.AddPoint(j, dist);
-            }
-            res.SortResult();
-            for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
+        COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
+        for (SizeType j = 0; j < vecset->Count(); j++)
+        {
+            float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
+            res.AddPoint(j, dist);
         }
-        truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
-        truth->Save("test_truth." + distCalcMethod);
+        res.SortResult();
+        for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
+    }
+    truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
+    truth->Save("test_truth." + distCalcMethod);
     //}
 }
 

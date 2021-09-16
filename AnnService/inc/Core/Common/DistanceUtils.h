@@ -155,7 +155,7 @@ namespace SPTAG
             switch (p_method)
             {
             case SPTAG::DistCalcMethod::Cosine:
-                if (DistanceUtils::Quantizer != nullptr) {
+                if (DistanceUtils::Quantizer) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });
                 }
                 else if (InstructionSet::AVX2())
@@ -171,7 +171,7 @@ namespace SPTAG
                 }
 
             case SPTAG::DistCalcMethod::L2:
-                if (DistanceUtils::Quantizer != nullptr) {
+                if (DistanceUtils::Quantizer) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->L2Distance(pX, pY); });
                 }
                 else if (InstructionSet::AVX2())
