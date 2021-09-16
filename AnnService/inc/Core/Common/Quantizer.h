@@ -37,6 +37,8 @@ namespace SPTAG
 
             virtual bool GetEnableADC() = 0;
 
+            virtual void SetEnableADC(bool enableADC) = 0;
+
             virtual QuantizerType GetQuantizerType() = 0;
 
             virtual VectorValueType GetReconstructType() = 0;

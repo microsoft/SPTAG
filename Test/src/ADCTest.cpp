@@ -117,11 +117,12 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
 
 
     int QuanDim = m / M;
+    
     ByteArray PQvec = ByteArray::Alloc(sizeof(std::uint8_t) * n * QuanDim);
     ByteArray reconstruct_vec = ByteArray::Alloc(sizeof(T) * n * m);
     ByteArray PQquery = ByteArray::Alloc(sizeof(T) * q * QuanDim * Ks);
 
-    if (fileexists("vectors.bin") && fileexists("querys.bin")) {
+    /*if (fileexists("vectors.bin") && fileexists("querys.bin")) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("vectors.bin"))
@@ -152,13 +153,13 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
         metaset->SaveMetadata("test_meta_adc.bin", "test_metaidx_adc.bin");
     }
-    else {
+    else {*/
         std::cout << "Generating Data!" << std::endl;
         ByteArray real_vec = ByteArray::Alloc(sizeof(T) * n * m);
         for (int i = 0; i < n * m; i++) {
             ((T*)real_vec.Data())[i] = (T)COMMON::Utils::rand(255, 0);
         }
-        real_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<T>(), m, n));
+        real_vecset.reset(new BasicVectorSet(real_vec , GetEnumValueType<T>(), m, n));
         ByteArray real_query = ByteArray::Alloc(sizeof(T) * q * m);
         for (int i = 0; i < q * m; i++) {
             ((T*)real_query.Data())[i] = (T)COMMON::Utils::rand(255, 0);
@@ -177,11 +178,11 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         ((std::uint64_t*)metaoffset.Data())[n] = offset;
         metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
         metaset->SaveMetadata("test_meta_adc.bin", "test_metaidx_adc.bin");
-    }
+    //}
 
     std::string CODEBOOK_FILE = "test-quantizer-adc.bin";
     T* codebooks = new T[M * Ks * QuanDim];
-    if (fileexists("codebooks.bin")) {
+    /*if (fileexists("codebooks.bin")) {
         std::shared_ptr<VectorSet> temp_codebooks;
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), Ks * M, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
@@ -193,7 +194,7 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
         temp_codebooks = vectorReader->GetVectorSet();
         std::memcpy(codebooks, temp_codebooks->GetData(), sizeof(T) * QuanDim * Ks * M);
     }
-    else {
+    else {*/
         std::cout << "Building codebooks!" << std::endl;
         T* kmeans = new T[Ks * QuanDim];
         for (int i = 0; i < M; i++) {
@@ -261,7 +262,7 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
             delete[] belong;
         }
         delete[] kmeans;
-    }
+    //}
     std::cout << "Codebooks Building Finish!" << std::endl;
     auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<T>>(QuanDim, Ks, M, true, codebooks);
     auto ptr = SPTAG::f_createIO();
@@ -406,6 +407,7 @@ void ADCPrepare(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr->Initialize("test-quantizer-adc.bin", std::ios::binary | std::ios::in));
     SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<T>());
+    SPTAG::COMMON::DistanceUtils::Quantizer->SetEnableADC(true);
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
     std::cout << "ADCBuild Finish!" << std::endl;

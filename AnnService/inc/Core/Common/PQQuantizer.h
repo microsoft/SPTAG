@@ -58,6 +58,8 @@ namespace SPTAG
 
             virtual bool GetEnableADC();
 
+            virtual void SetEnableADC(bool enableADC);
+
             VectorValueType GetReconstructType()
             {
                 return GetEnumValueType<T>();
@@ -277,6 +279,12 @@ namespace SPTAG
         bool PQQuantizer<T>::GetEnableADC()
         {
             return m_EnableADC;
+        }
+
+        template <typename T>
+        void PQQuantizer<T>::SetEnableADC(bool enableADC)
+        {
+            m_EnableADC = enableADC;
         }
 
         template <typename T>
