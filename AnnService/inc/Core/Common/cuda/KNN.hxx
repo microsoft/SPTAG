@@ -662,7 +662,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   int KNN_blocks; // number of threadblocks used
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(index, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
@@ -868,7 +868,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     tptrees[gpuNum]->initialize(dataSize, levels);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT structure initialized for %lu points, %d levels, leaf size:%d\n", dataSize, levels, leafSize);
 
-    CUDA_CHECK(cudaMalloc(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
+    CUDA_CHECK(cudaMallocManaged(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
 
   }
 

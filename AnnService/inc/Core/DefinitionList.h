@@ -10,6 +10,26 @@ DefineVectorValueType(Float, float)
 
 #endif // DefineVectorValueType
 
+#ifdef DefineVectorValueType2
+
+DefineVectorValueType2(Int8, Int8, std::int8_t, std::int8_t)
+DefineVectorValueType2(Int8, UInt8, std::int8_t, std::uint8_t)
+DefineVectorValueType2(Int8, Int16, std::int8_t, std::int16_t)
+DefineVectorValueType2(Int8, Float, std::int8_t, float)
+DefineVectorValueType2(UInt8, Int8, std::uint8_t, std::int8_t)
+DefineVectorValueType2(UInt8, UInt8, std::uint8_t, std::uint8_t)
+DefineVectorValueType2(UInt8, Int16, std::uint8_t, std::int16_t)
+DefineVectorValueType2(UInt8, Float, std::uint8_t, float)
+DefineVectorValueType2(Int16, Int8, std::int16_t, std::int8_t)
+DefineVectorValueType2(Int16, UInt8, std::int16_t, std::uint8_t)
+DefineVectorValueType2(Int16, Int16, std::int16_t, std::int16_t)
+DefineVectorValueType2(Int16, Float, std::int16_t, float)
+DefineVectorValueType2(Float, Int8, float, std::int8_t)
+DefineVectorValueType2(Float, UInt8, float, std::uint8_t)
+DefineVectorValueType2(Float, Int16, float, std::int16_t)
+DefineVectorValueType2(Float, Float, float, float)
+
+#endif // DefineVectorValueType2
 
 #ifdef DefineDistCalcMethod
 
@@ -17,6 +37,13 @@ DefineDistCalcMethod(L2)
 DefineDistCalcMethod(Cosine)
 
 #endif // DefineDistCalcMethod
+
+#ifdef DefineQuantizerType
+
+DefineQuantizerType(None, std::shared_ptr<void>)
+DefineQuantizerType(PQQuantizer, std::shared_ptr<SPTAG::COMMON::PQQuantizer>)
+
+#endif // DefineQuantizerType
 
 
 #ifdef DefineErrorCode

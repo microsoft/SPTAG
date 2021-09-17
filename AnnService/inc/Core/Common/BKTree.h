@@ -149,8 +149,15 @@ namespace SPTAG
                     for (DimensionType j = 0; j < args._D; j++) currCenters[j] /= args.counts[k];
 
                     if (args._M == DistCalcMethod::Cosine) {
-                        COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
+                        if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+                            COMMON::Utils::Normalize(currCenters, args._D, SPTAG::COMMON::DistanceUtils::Quantizer->GetBase());
+                        }
+                        else
+                        {
+                            COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
+                        }
                     }
+
                     for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
                 }
                 diff += args.fComputeDistance(args.centers + k*args._D, TCenter, args._D);
@@ -255,7 +262,9 @@ namespace SPTAG
                 }
                 args.ClearCounts();
                 args.ClearDists(MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, false, 0);
+                float base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
+                float baseSquare = (base*base) / (100.0f * (batchEnd - first));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, baseSquare);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
@@ -283,7 +292,8 @@ namespace SPTAG
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
-            float originalLambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first);
+            float base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
+            float originalLambda = (base*base) / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
                 std::random_shuffle(indices.begin() + first, indices.begin() + last);
@@ -564,24 +574,24 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
-                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
+                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data[node.centerid], data.C())));
                     } 
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                         }
                     } 
                 }
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query,
+            void SearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
                 COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty())
@@ -601,7 +611,7 @@ namespace SPTAG
                         }
                         for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                         } 
                     }
                 }
