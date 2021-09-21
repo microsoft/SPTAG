@@ -3,7 +3,7 @@
 ### **Index Build**
  ```bash
  Usage:
- ./IndexBuiler [options]
+ ./indexbuiler [options]
  Options:
   -d, --dimension <value>       Dimension of vector, required.
   -v, --vectortype <value>      Input vector data type (e.g. Float, Int8, Int16), required.
@@ -19,7 +19,7 @@
   ### **Index Search**
   ```bash
   Usage:
-  ./IndexSearcher <index folder> [options]
+  ./indexsearcher <index folder> [options]
   Options
    Index.QueryFile=XXX           Input Query file
    Index.ResultFile=XXX	       Output result file
@@ -48,7 +48,7 @@ where each line represents the K nearest neighbors of a query separated by a bla
 ### **Server**
 ```bash
 Usage:
-./Server [options]
+./server [options]
 Options: 
   -m, --mode <value>              Service mode, interactive or socket.
   -c, --config <value>            Configure file of the index
@@ -75,7 +75,7 @@ IndexFolder=BKT_gist
 ### **Client**
 ```bash
 Usage:
-./Client [options]
+./client [options]
 Options:
 -s, --server                       Server address
 -p, --port                         Server port
@@ -87,7 +87,7 @@ Options:
 ### **Aggregator**
 ```bash
 Usage:
-./Aggregator
+./aggregator
 
 Write Aggregator.ini as follows:
 
