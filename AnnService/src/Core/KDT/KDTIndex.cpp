@@ -44,14 +44,19 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, bool data_in_pm , bool graph_in_pm , std::string p_pm_path ) 
         {
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
+            std::string data_pm_path = "";
+            if (data_in_pm) data_pm_path = p_pm_path;
+            std::string graph_pm_path = "";
+            if (graph_in_pm) graph_pm_path = p_pm_path;
+
             ErrorCode ret = ErrorCode::Success;
-            if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity,data_pm_path)) != ErrorCode::Success) return ret;
             if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
-            if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity, graph_pm_path)) != ErrorCode::Success) return ret;
             if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 

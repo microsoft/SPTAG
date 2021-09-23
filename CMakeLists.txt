@@ -78,7 +78,7 @@ else()
     message (FATAL_ERROR "Could no find openmp!")
 endif()
 
-find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex filesystem)
+find_package(Boost 1.66 COMPONENTS system thread serialization wserialization regex filesystem)
 if (Boost_FOUND)
     include_directories (${Boost_INCLUDE_DIR})
     link_directories (${Boost_LIBRARY_DIR})
@@ -89,6 +89,8 @@ if (Boost_FOUND)
 else()
     message (FATAL_ERROR "Could not find Boost >= 1.67!")
 endif()
+
+link_libraries(memkind)
 
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
