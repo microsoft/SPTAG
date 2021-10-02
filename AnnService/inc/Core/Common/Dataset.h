@@ -45,7 +45,7 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN);
+                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN_SPTAG);
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
@@ -98,7 +98,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN);
+                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN_SPTAG);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
                     }
@@ -119,7 +119,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) >> rowsInBlockEx;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(sizeof(T) * (rowsInBlock + 1) * cols, ALIGN);
+                        T* newBlock = (T*)_mm_malloc(sizeof(T) * (rowsInBlock + 1) * cols, ALIGN_SPTAG);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
                         incBlocks.push_back(newBlock);
