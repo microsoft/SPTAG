@@ -633,33 +633,6 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
 #if defined(GPU)
 
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
-struct test_EdgeCompare {
-    bool operator()(const Edge& a, int b) const
-    {
-        return a.node < b;
-    };
-
-    bool operator()(int a, const Edge& b) const
-    {
-        return a < b.node;
-    };
-
-    __host__ __device__ bool operator()(const Edge& a, const Edge& b) {
-        if (a.node == b.node)
-        {
-            if (a.distance == b.distance)
-            {
-                return a.tonode < b.tonode;
-            }
-
-            return a.distance < b.distance;
-        }
-        return a.node < b.node;
-    }
-} g_edgeComparer;
-
-
-
 
 void VectorIndex::SortSelections(std::vector<Edge>* selections) {
   LOG(Helper::LogLevel::LL_Debug, "Starting sort of final input on GPU\n");
@@ -774,10 +747,10 @@ struct EdgeCompare
 
         return a.node < b.node;
     };
-} test_edgeComparer;
+} g_edgeComparer;
 
 void VectorIndex::SortSelections(std::vector<Edge>* selections) {
-  std::sort(selections->begin(), selections->end(), test_edgeComparer);
+  std::sort(selections->begin(), selections->end(), g_edgeComparer);
 }
 
 void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
