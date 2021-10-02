@@ -291,7 +291,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
       
         // Auto-compute batch size based on available memory on the GPU
         size_t headVecSize = headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>);
-        size_t treeSize = 20*headRows;
+        size_t randSize = (size_t)(min((int)headRows, (int)1024))*48; // Memory used for GPU random number generator
+        size_t treeSize = 20*headRows + randSize;
 
         size_t tailMemAvail = (freeMem*0.9) - (headVecSize+treeSize); // Only use 90% of total memory to be safe
 
