@@ -67,11 +67,11 @@ public:
 
     int m_debugQuery = -1;
 
-    std::string m_quantizerFile = "";
+    std::string m_quantizerFile;
 
     bool m_enableADC = false;
 
-    VectorValueType m_reconstructType = VectorValueType::Float;
+    VectorValueType m_reconstructType;
 };
 
 template <typename T>
@@ -456,7 +456,7 @@ int main(int argc, char** argv)
 
     vecIndex->UpdateIndex();
 
-    if (!options->m_quantizerFile.compare(""))
+    if (!options->m_quantizerFile.empty())
     {
         auto ptr = SPTAG::f_createIO();
         if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
@@ -464,7 +464,12 @@ int main(int argc, char** argv)
             LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
             exit(1);
         }
-        COMMON::DistanceUtils::Quantizer->LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
+        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
+        if (code != ErrorCode::Success)
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+            exit(1);
+        }
         COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
     }
 

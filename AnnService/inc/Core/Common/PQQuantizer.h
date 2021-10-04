@@ -225,11 +225,17 @@ namespace SPTAG
         template <typename T>
         ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in)
         {
+            LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
+            LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
+            LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
+            LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
+            LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
             m_BlockSize = (m_KsPerSubvector * (m_KsPerSubvector + 1)) / 2;
             m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
@@ -247,7 +253,7 @@ namespace SPTAG
                     }
                 }
             }
-            LOG(Helper::LogLevel::LL_Info, "Load quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
 
