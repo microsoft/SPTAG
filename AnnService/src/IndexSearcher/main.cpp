@@ -36,7 +36,6 @@ public:
         AddOptionalOption(m_debugQuery, "-q", "--debugquery", "Debug query number.");
         AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
         AddOptionalOption(m_enableADC, "-adc", "--adc", "Enable ADC Distance computation");
-        AddOptionalOption(m_reconstructType, "-rt", "--reconstructtype", "Reconstruction value type for quantized vectors. Default is float.");
     }
 
     ~SearcherOptions() {}
@@ -70,8 +69,6 @@ public:
     std::string m_quantizerFile;
 
     bool m_enableADC = false;
-
-    VectorValueType m_reconstructType;
 };
 
 template <typename T>
@@ -97,8 +94,9 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                     break;
                 }
                 else if (vectorSet != nullptr) {
-                    float dist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(results[i].GetResult(j)->VID));
-                    float truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                    auto distCalc = COMMON::DistanceCalcSelector<T>(index->GetDistCalcMethod());
+                    float dist = distCalc((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension());
+                    float truthDist = distCalc((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension());
                     if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                         thisrecall[i] += 1;
                         visited[j] = true;
@@ -123,7 +121,8 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
             for (SizeType id : truth[i]) {
                 float truthDist = 0.0;
                 if (vectorSet != nullptr) {
-                    truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                    auto distCalc = COMMON::DistanceCalcSelector<T>(index->GetDistCalcMethod());
+                    truthDist = distCalc(querySet->GetVector(i), vectorSet->GetVector(id), querySet->Dimension());
                 }
                 truthvec.emplace_back(id, truthDist);
             }
@@ -464,7 +463,7 @@ int main(int argc, char** argv)
             LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
             exit(1);
         }
-        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
+        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_inputValueType);
         if (code != ErrorCode::Success)
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
@@ -473,7 +472,7 @@ int main(int argc, char** argv)
         COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
     }
 
-    switch (vecIndex->GetVectorValueType())
+    switch (options->m_inputValueType)
     {
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
