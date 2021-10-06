@@ -172,7 +172,7 @@ namespace SPTAG
                 {
                     const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
                     SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
-                    for (int j = 0; j < m_KsPerSubvector, j++)
+                    for (int j = 0; j < m_KsPerSubvector; j++)
                     {
                         ADCtable[i * m_NumSubvectors + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
                     }
@@ -181,7 +181,7 @@ namespace SPTAG
                 {
                     const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
                     SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
-                    for (int j = 0; j < m_KsPerSubvector, j++)
+                    for (int j = 0; j < m_KsPerSubvector; j++)
                     {
                         ADCtable[(m_NumSubvectors*m_KsPerSubvector) + i * m_NumSubvectors + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
                     }
