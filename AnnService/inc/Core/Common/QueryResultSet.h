@@ -125,8 +125,6 @@ private:
         }
         if (next == maxidx && m_results[parent] < m_results[next]) std::swap(m_results[parent], m_results[next]);
     }
-
-    T* m_quantizedTarget = nullptr;
 };
 }
 }
