@@ -69,8 +69,6 @@ namespace SPTAG
                 return QuantizerType::PQQuantizer;
             }
 
-            //virtual bool IsSearching() const;
-
         private:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;
@@ -125,29 +123,38 @@ namespace SPTAG
 
         template <typename T>
         float PQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
+            // pX must be query distance table for ADC
         {
-            if (GetEnableADC() == false) {
-                float out = 0;
+            float out = 0;
+            if (GetEnableADC()) {               
                 for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                    out += ((float*) pX)[i * m_KsPerSubvector + pY[i]];
                 }
-                return out;
             }
             else {
-                float out = 0;
                 for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += pY[i * m_KsPerSubvector + pX[i]] * pY[i * m_KsPerSubvector + pX[i]];
-                }
-                return out;
+                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                }                
             }
+            return out;
         }
 
         template <typename T>
         float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
+            // pX must be query distance table for ADC
         {
             float out = 0;
-            for (int i = 0; i < m_NumSubvectors; i++) {
-                out += m_CosineDistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+            if (GetEnableADC())
+            {
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += ((float*)pX)[(m_NumSubvectors * m_KsPerSubvector) + (i * m_KsPerSubvector) + pY[i]];
+                }
+            }
+            else
+            {
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += m_CosineDistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                }
             }
             return DistanceUtils::ConvertCosineSimilarityToDistance(out);
         }
@@ -155,30 +162,65 @@ namespace SPTAG
         template <typename T>
         void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout)
         {
-            auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
+            if (GetEnableADC())
+            {
+                auto distCalcL2 = DistanceCalcSelector<T>(DistCalcMethod::L2);
+                auto distCalcCosine = DistanceCalcSelector<T>(DistCalcMethod::L2);
+                float* ADCtable = (float*) vecout;
 
-            for (int i = 0; i < m_NumSubvectors; i++) {
-                int bestIndex = -1;
-                float minDist = std::numeric_limits<float>::infinity();
-
-                const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
-                SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
-                for (int j = 0; j < m_KsPerSubvector; j++) {
-                    float dist = distCalc(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
-                    if (dist < minDist) {
-                        bestIndex = j;
-                        minDist = dist;
+                for (int i = 0; i < m_NumSubvectors; i++)
+                {
+                    const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
+                    SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
+                    for (int j = 0; j < m_KsPerSubvector, j++)
+                    {
+                        ADCtable[i * m_NumSubvectors + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
-                assert(bestIndex != -1);
-                vecout[i] = bestIndex;
+                for (int i = 0; i < m_NumSubvectors; i++)
+                {
+                    const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
+                    SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
+                    for (int j = 0; j < m_KsPerSubvector, j++)
+                    {
+                        ADCtable[(m_NumSubvectors*m_KsPerSubvector) + i * m_NumSubvectors + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                    }
+                }
             }
+            else 
+            {
+                auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
+
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    int bestIndex = -1;
+                    float minDist = std::numeric_limits<float>::infinity();
+
+                    const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
+                    SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
+                    for (int j = 0; j < m_KsPerSubvector; j++) {
+                        float dist = distCalc(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        if (dist < minDist) {
+                            bestIndex = j;
+                            minDist = dist;
+                        }
+                    }
+                    assert(bestIndex != -1);
+                    vecout[i] = bestIndex;
+                }
+            }           
         }
 
         template <typename T>
         SizeType PQQuantizer<T>::QuantizeSize()
         {
-            return m_NumSubvectors;
+            if (GetEnableADC())
+            {
+                return sizeof(float) * m_NumSubvectors * m_KsPerSubvector * 2;
+            }
+            else
+            {
+                return m_NumSubvectors;
+            }           
         }
 
         template <typename T>
