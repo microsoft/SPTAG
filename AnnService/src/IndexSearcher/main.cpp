@@ -122,7 +122,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                 float truthDist = 0.0;
                 if (vectorSet != nullptr) {
                     auto distCalc = COMMON::DistanceCalcSelector<T>(index->GetDistCalcMethod());
-                    truthDist = distCalc(querySet->GetVector(i), vectorSet->GetVector(id), querySet->Dimension());
+                    truthDist = distCalc((const T*) querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension());
                 }
                 truthvec.emplace_back(id, truthDist);
             }
@@ -418,6 +418,23 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+    if (!options->m_quantizerFile.empty())
+    {
+        auto ptr = SPTAG::f_createIO();
+        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+            exit(1);
+        }
+        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_inputValueType);
+        if (code != ErrorCode::Success)
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+            exit(1);
+        }
+        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
+    }
+
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
     auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
@@ -454,23 +471,6 @@ int main(int argc, char** argv)
     }
 
     vecIndex->UpdateIndex();
-
-    if (!options->m_quantizerFile.empty())
-    {
-        auto ptr = SPTAG::f_createIO();
-        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-            exit(1);
-        }
-        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_inputValueType);
-        if (code != ErrorCode::Success)
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-            exit(1);
-        }
-        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
-    }
 
     switch (options->m_inputValueType)
     {
