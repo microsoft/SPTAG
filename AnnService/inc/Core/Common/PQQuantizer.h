@@ -128,7 +128,7 @@ namespace SPTAG
             float out = 0;
             if (GetEnableADC()) {               
                 for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += ((float*) pX)[i * m_KsPerSubvector + pY[i]];
+                    out += ((float*) pX)[i * m_KsPerSubvector + (size_t) pY[i]];
                 }
             }
             else {
@@ -147,7 +147,7 @@ namespace SPTAG
             if (GetEnableADC())
             {
                 for (int i = 0; i < m_NumSubvectors; i++) {
-                    out += ((float*)pX)[(m_NumSubvectors * m_KsPerSubvector) + (i * m_KsPerSubvector) + pY[i]];
+                    out += ((float*)pX)[(m_NumSubvectors * m_KsPerSubvector) + (i * m_KsPerSubvector) + (size_t) pY[i]];
                 }
             }
             else
@@ -174,16 +174,8 @@ namespace SPTAG
                     SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                     for (int j = 0; j < m_KsPerSubvector; j++)
                     {
-                        ADCtable[i * m_NumSubvectors + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
-                    }
-                }
-                for (int i = 0; i < m_NumSubvectors; i++)
-                {
-                    const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
-                    SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
-                    for (int j = 0; j < m_KsPerSubvector; j++)
-                    {
-                        ADCtable[(m_NumSubvectors*m_KsPerSubvector) + i * m_NumSubvectors + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        ADCtable[i * m_KsPerSubvector + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        ADCtable[(m_NumSubvectors * m_KsPerSubvector) + i * m_KsPerSubvector + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
             }
