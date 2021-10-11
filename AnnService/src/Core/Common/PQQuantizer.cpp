@@ -182,5 +182,7 @@ namespace SPTAG
             }
             return (m_BlockSize * i) + ((j * (j + 1)) / 2) + k;
         }
+
+        
     }
 }

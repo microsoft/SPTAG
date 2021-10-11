@@ -1,15 +1,28 @@
+//#include "inc/Test.h"
+//#include <random>
+//#include "inc/Helper/VectorSetReader.h"
+//#include "inc/Core/VectorIndex.h"
+//#include "inc/Core/Common/CommonUtils.h"
+//#include "inc/Core/Common/QueryResultSet.h"
+//#include "inc/Core/Common/DistanceUtils.h"
+//#include "inc/Core/Common/PQQuantizer.h"
+//#include <thread>
+//#include <iostream>
+//#include <unordered_set>
+//#include <ctime>
+
+#include <bitset>
 #include "inc/Test.h"
-#include <random>
 #include "inc/Helper/VectorSetReader.h"
+#include "inc/Core/Common/PQQuantizer.h"
+#include <random>
+#include "inc/Helper/SimpleIniReader.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/CommonUtils.h"
-#include "inc/Core/Common/QueryResultSet.h"
-#include "inc/Core/Common/DistanceUtils.h"
-#include "inc/Core/Common/PQQuantizer.h"
-#include <thread>
-#include <iostream>
+
 #include <unordered_set>
 #include <ctime>
+#include <inc/Core/Common.h>
 
 using namespace SPTAG;
 
@@ -304,14 +317,9 @@ void GeneratePQData_ADC(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<Vect
     auto t1 = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < q; i++) {
-        for (int j = 0; j < QuanDim; j++) {
-            T* basec = codebooks + j * block_size;
-            for (int ii = 0; ii < Ks; ii++) {
-                destPtr[ii] = L2Dist(queryPtr, basec + ii * M, M);
-            }
-            destPtr += Ks;
-            queryPtr += M;
-        }
+        baseQuantizer->GetADCDistanceTable((float *)queryPtr, destPtr);
+        destPtr += Ks * QuanDim;
+        queryPtr += M * QuanDim;
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -397,13 +405,13 @@ void ADCPrepare(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
 
     SPTAG::COMMON::DistanceUtils::Quantizer = nullptr;
     ADCBuild<T>(algo, distCalcMethod, vecset, metaset, real_queryset, 10, truth, "testindices-adc");
-
+    
     std::remove("testindices-adc\\vectors.bin");
     std::rename("ADCtest_vector.bin", "testindices-adc\\vectors.bin");
     //need to change "Float" to type T
     Replace("testindices-adc\\indexloader.ini", "Float", "UInt8");
-
-    auto ptr = SPTAG::f_createIO();
+   
+    auto ptr = SPTAG::f_createIO(); 
     BOOST_ASSERT(ptr->Initialize("test-quantizer-adc.bin", std::ios::binary | std::ios::in));
     SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer);
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
