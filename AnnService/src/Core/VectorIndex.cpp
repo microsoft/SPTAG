@@ -25,6 +25,8 @@ std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
 
+
+
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
 VectorIndex::VectorIndex()
@@ -626,9 +628,18 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
     return ret;
 }
 
+
+
 #if defined(GPU)
 
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
+
+void VectorIndex::SortSelections(std::vector<Edge>* selections) {
+  LOG(Helper::LogLevel::LL_Debug, "Starting sort of final input on GPU\n");
+  GPU_SortSelections(selections);
+}
+
+
 
 void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
@@ -674,6 +685,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                 resIdx++;
             }
         }
+
         delete[] results;
     }
     else {
@@ -708,6 +720,38 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
     }
 }
 #else
+
+struct EdgeCompare
+{
+    bool operator()(const Edge& a, int b) const
+    {
+        return a.node < b;
+    };
+
+    bool operator()(int a, const Edge& b) const
+    {
+        return a < b.node;
+    };
+
+    bool operator()(const Edge& a, const Edge& b) const
+    {
+        if (a.node == b.node)
+        {
+            if (a.distance == b.distance)
+            {
+                return a.tonode < b.tonode;
+            }
+
+            return a.distance < b.distance;
+        }
+
+        return a.node < b.node;
+    };
+} g_edgeComparer;
+
+void VectorIndex::SortSelections(std::vector<Edge>* selections) {
+  std::sort(selections->begin(), selections->end(), g_edgeComparer);
+}
 
 void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
