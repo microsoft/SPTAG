@@ -61,6 +61,24 @@ if (CUDA_FOUND)
     CUDA_ADD_EXECUTABLE(gpuindexbuilder ${AnnService}/src/IndexBuilder/main.cpp)
     target_link_libraries(gpuindexbuilder GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(gpuindexbuilder PRIVATE ${Definition})
+
+    set(VECTORSEARCH_INC_DIR ${AnnService}/inc/SSDServing/VectorSearch)
+    set(VECTORSEARCH_IMP_DIR ${AnnService}/src/SSDServing/VectorSearch)
+    file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
+    file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
+    if(NOT WIN32)
+        list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
+            )
+    elseif(WIN32)
+        list(REMOVE_ITEM SSD_SERVING_HDR_FILES
+            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
+            )
+    endif()
+
+    CUDA_ADD_EXECUTABLE(gpussdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
+    target_link_libraries(gpussdserving GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_compile_definitions(gpussdserving PRIVATE ${Definition} _exe)
 else()
     message (STATUS "Could not find cuda.")
 endif()

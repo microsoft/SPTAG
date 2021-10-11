@@ -73,3 +73,41 @@ if (NOT LIBRARYONLY)
       ARCHIVE DESTINATION lib
       LIBRARY DESTINATION lib)
 endif()
+
+set(VECTORSEARCH_INC_DIR ${AnnService}/inc/SSDServing/VectorSearch)
+set(VECTORSEARCH_IMP_DIR ${AnnService}/src/SSDServing/VectorSearch)
+file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
+file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
+if(NOT WIN32)
+    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
+            )
+elseif(WIN32)
+    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
+            )
+endif()
+
+add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
+target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})
+target_compile_definitions(ssdserving PRIVATE _exe)
+
+# for Test
+add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
+target_link_libraries(ssdservingLib SPTAGLibStatic ${Boost_LIBRARIES})
+
+find_package(MPI)
+if (MPI_FOUND)
+    message (STATUS "Found MPI.")
+    message (STATUS "MPI Include Path: ${MPI_CXX_INCLUDE_PATH}")
+    message (STATUS "MPI Libraries: ${MPI_CXX_LIBRARIES}")
+    include_directories (${MPI_CXX_INCLUDE_PATH})
+    file(GLOB PARTITION_FILES ${AnnService}/src/BalancedDataPartition/*.cpp)
+    add_executable(balanceddatapartition ${PARTITION_FILES})
+    target_link_libraries(balanceddatapartition SPTAGLibStatic ${Boost_LIBRARIES} ${MPI_CXX_LIBRARIES})
+endif()
+
+install(TARGETS ssdservingLib ssdserving
+  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib)

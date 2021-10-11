@@ -82,7 +82,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SSDServing.lib;CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -153,6 +153,7 @@
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\PerfTest.cpp" />
+    <ClCompile Include="src\SSDServingTest.cpp" />
     <ClCompile Include="src\StringConvertTest.cpp" />
   </ItemGroup>
   <ItemGroup>
