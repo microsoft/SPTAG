@@ -1,12 +1,13 @@
 ## **Quick start**
 
-### **Index Build**
+### **Memory SPTAG Index Build**
  ```bash
  Usage:
  ./IndexBuiler [options]
  Options:
   -d, --dimension <value>       Dimension of vector, required.
   -v, --vectortype <value>      Input vector data type (e.g. Float, Int8, Int16), required.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
   -i, --input <value>           Input raw data, required.
   -o, --outputfolder <value>    Output folder, required.
   -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
@@ -16,20 +17,147 @@
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
-  ### **Index Search**
+  ### **Memory SPTAG Index Search**
   ```bash
   Usage:
-  ./IndexSearcher <index folder> [options]
-  Options
-   Index.QueryFile=XXX           Input Query file
-   Index.ResultFile=XXX	       Output result file
-   Index.TruthFile=XXX           Truth file that can help to calculate the recall
-   Index.K=XXX                   How many nearest neighbors return
-   Index.MaxCheck=XXX            The maxcheck of the search
+  ./IndexSearcher [options]
+  Options:
+  -d, --dimension <value>       Dimension of vector.
+  -v, --vectortype <value>      Input vector data type. Default is float.
+  -i, --input <value>           Input query data.
+  -f, --filetype <value>        Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -x, --index <value>           Index folder.
+
+  -t, --thread <value>          Thread Number.
+  --delimiter <value>           Vector delimiter.
+  -r, --truth <value>           Truth file.
+  -o, --result <value>          Output result file.
+  -m, --maxcheck <value>        MaxCheck for index.
+  -a, --withmeta <value>        Output metadata instead of vector id.
+  -k, --KNN <value>             K nearest neighbors for search.
+  -tk, --truthKNN <value>       truth set number.
+  -df, --data <value>           original data file.
+  -dft, --dataFileType <value>  original data file type. (TXT, or DEFAULT)
+  -b, --batchsize <value>       Batch query size.
+  -g, --gentruth <value>        Generate truth file.
+  Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
+   ### **SPANN Index Build**
+   Create a configure file buildconfig.ini as follows:
+   ```
+[Base]
+ValueType=UInt8
+DistCalcMethod=L2
+IndexAlgoType=BKT
+Dim=128
+VectorPath=base.1B.u8bin
+VectorType=DEFAULT
+VectorSize=1000000000
+VectorDelimiter=
+QueryPath=query.public.10K.u8bin
+QueryType=DEFAULT
+QuerySize=100000
+QueryDelimiter=
+WarmupPath=query.public.10K.u8bin
+WarmupType=DEFAULT
+WarmupSize=100000
+WarmupDelimiter=
+TruthPath=public_query_gt100.bin
+TruthType=DEFAULT
+IndexDirectory=sift1b
+
+[SelectHead]
+isExecute=true
+TreeNumber=1
+BKTKmeansK=32
+BKTLeafSize=8
+SamplesNumber=1000
+SaveBKT=false
+SelectThreshold=10
+SplitFactor=6
+SplitThreshold=25
+Ratio=0.12
+NumberOfThreads=45
+
+[BuildHead]
+isExecute=true
+NeighborhoodSize=32
+TPTNumber=32
+TPTLeafSize=2000
+MaxCheck=16324
+MaxCheckForRefineGraph=16324
+RefineIterations=3
+NumberOfThreads=45
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+InternalResultNum=64
+ReplicaCount=8
+PostingPageLimit=3
+NumberOfThreads=45
+MaxCheck=16324
+TmpDir=/tmp/
+   ```
+Then run ./SSDServing buildconfig.ini to build the index.
+
+   ### **SPANN Index Search**
+    Create a configure file searchconfig.ini as follows:
+   ```
+[Base]
+ValueType=UInt8
+DistCalcMethod=L2
+IndexAlgoType=BKT
+Dim=128
+VectorPath=base.1B.u8bin
+VectorType=DEFAULT
+VectorSize=1000000000
+VectorDelimiter=
+QueryPath=query.public.10K.u8bin
+QueryType=DEFAULT
+QuerySize=100000
+QueryDelimiter=
+WarmupPath=query.public.10K.u8bin
+WarmupType=DEFAULT
+WarmupSize=100000
+WarmupDelimiter=
+TruthPath=public_query_gt100.bin
+TruthType=DEFAULT
+IndexDirectory=sift1b
+
+[SearchSSDIndex]
+isExecute=true
+BuildSsdIndex=false
+InternalResultNum=32
+NumberOfThreads=45
+ResultNum=10
+MaxCheck=2048
+MaxDistRatio=8.0
+SearchPostingPageLimit=3
+   ```
+Then run ./SSDServing searchconfig.ini to do the query search.
+
 ### ** Input File format **
+
+
+#### DEFAULT (Binary)
 > Input raw data for index build and input query file for index search (suppose vector dimension is 3):
+
+```
+<4 bytes int representing num_vectors><4 bytes int representing num_dimension>
+<num_vectors * num_dimension * sizeof(data type) bytes raw data>
+```
+
+> Truth file to calculate recall (suppose K is 2):
+```
+< 4 bytes int representing num_queries><4 bytes int representing K>
+<num_queries * K * sizeof(int) representing truth neighbor ids>
+```
+
+#### TXT
+> Input raw data for index build and input query file for index search (suppose vector dimension is 3):
+
 ```
 <metadata1>\t<v11>|<v12>|<v13>|
 <metadata2>\t<v21>|<v22>|<v23>|
