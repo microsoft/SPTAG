@@ -112,7 +112,7 @@ SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
             return ErrorCode::Fail;
         }
 
-        m_vectorDimension = static_cast<SizeType>(outLen / GetValueTypeSize(p_targetType));
+        m_vectorDimension = outLen / GetValueTypeSize(p_targetType);
         m_vector = ByteArray(temp.Data(), outLen, temp.DataHolder());
 
         return ErrorCode::Success;

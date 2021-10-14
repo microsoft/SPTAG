@@ -15,21 +15,10 @@
 #include "inc/Helper/DiskIO.h"
 
 #ifndef _MSC_VER
-#include <stdio.h>
-#include <unistd.h>
-#include <cstring>
-#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-
-#if defined(__INTEL_COMPILER)
-#include <malloc.h>
-#else
-#include <mm_malloc.h>
-#endif
-
 #define FolderSep '/'
-
+#define mkdir(a) mkdir(a, ACCESSPERMS)
 inline bool direxists(const char* path) {
     struct stat info;
     return stat(path, &info) == 0 && (info.st_mode & S_IFDIR);
@@ -51,46 +40,30 @@ inline T max(T a, T b) {
 #define _rotl(x, n) (((x) << (n)) | ((x) >> (32-(n))))
 #endif
 
-#define mkdir(a) mkdir(a, ACCESSPERMS)
-#define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
-#define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
-#define Sleep(a) usleep(a * 1000)
-#define strtok_s(a, b, c) strtok_r(a, b, c)
-
 #else
-
-#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif // !WIN32_LEAN_AND_MEAN
-
 #include <Windows.h>
 #include <Psapi.h>
-#include <malloc.h>
-
 #define FolderSep '\\'
-
-inline bool direxists(const TCHAR* path) {
-    auto dwAttr = GetFileAttributes(path);
+#define mkdir(a) CreateDirectory(a, NULL)
+inline bool direxists(const char* path) {
+    auto dwAttr = GetFileAttributes((LPCSTR)path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY);
 }
-inline bool fileexists(const TCHAR* path) {
-    auto dwAttr = GetFileAttributes(path);
+inline bool fileexists(const char* path) {
+    auto dwAttr = GetFileAttributes((LPCSTR)path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
-
-#define mkdir(a) CreateDirectory(a, NULL)
 #endif
 
 namespace SPTAG
 {
-#define ALIGN 32
-
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;
 
 const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
-const float MaxDist = (std::numeric_limits<float>::max)() / 10;
+const float MaxDist = (std::numeric_limits<float>::max)();
 const float Epsilon = 0.000000001f;
 
 extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
@@ -98,7 +71,7 @@ extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 
-extern std::shared_ptr<Helper::Logger> g_pLogger;
+extern std::unique_ptr<Helper::Logger> g_pLogger;
 
 #define LOG(l, ...) g_pLogger->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 

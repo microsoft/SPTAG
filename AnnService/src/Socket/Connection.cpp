@@ -3,7 +3,6 @@
 
 #include "inc/Socket/Connection.h"
 #include "inc/Socket/ConnectionManager.h"
-#include "inc/Core/Common.h"
 
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
@@ -35,10 +34,12 @@ Connection::Connection(ConnectionID p_connectionID,
 void
 Connection::Start()
 {
-    LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
+#ifdef _DEBUG
+    fprintf(stderr, "Connection Start, local: %u, remote: %s:%u\n",
             static_cast<uint32_t>(m_socket.local_endpoint().port()),
             m_socket.remote_endpoint().address().to_string().c_str(),
             static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+#endif
 
     if (!m_stopped.exchange(false))
     {
@@ -53,10 +54,12 @@ Connection::Start()
 void
 Connection::Stop()
 {
-    LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
+#ifdef _DEBUG
+    fprintf(stderr, "Connection Stop, local: %u, remote: %s:%u\n",
             static_cast<uint32_t>(m_socket.local_endpoint().port()),
             m_socket.remote_endpoint().address().to_string().c_str(),
             static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+#endif
 
     if (m_stopped.exchange(true))
     {

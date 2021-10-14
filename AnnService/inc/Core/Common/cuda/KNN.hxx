@@ -29,8 +29,6 @@
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 
-#include <chrono>
-
 template<typename T, typename SUMTYPE, int Dim>
 __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
   SUMTYPE between;
@@ -42,6 +40,7 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
   }
   return between <= farther.dist;
 }
+
 
 /*****************************************************************************************
  * Perform brute-force KNN on each leaf node, where only list of point ids is stored as leafs.
@@ -258,11 +257,13 @@ __device__ int compute_accessibility(int* results, int id, int target, int KVAL)
   return access;
 }
 
+
+
 /*****************************************************************************************
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, size_t min_id, size_t max_id) {
+__global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, int metric, int min_id, int max_id) {
 
   extern __shared__ char sharememory[];
 
@@ -283,12 +284,12 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
   int threads_per_leaf = blocks_per_leaf*blockDim.x;
   int thread_id_in_leaf = blockIdx.x % blocks_per_leaf * blockDim.x + threadIdx.x;
   int leafIdx= blockIdx.x / blocks_per_leaf;
-  size_t leaf_offset = tptree->leafs[leafIdx].offset;
+  long long int leaf_offset = tptree->leafs[leafIdx].offset;
 
   bool good;
 
   // Each point in the leaf is handled by a separate thread
-  for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
+  for(int i=thread_id_in_leaf; i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       query = data[tptree->leaf_points[leaf_offset + i]];
 
@@ -312,7 +313,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
       max_dist = threadList[KVAL-1].dist;
 
       // Compare source query with all points in the leaf
-      for(size_t j=0; j<tptree->leafs[leafIdx].size; ++j) {
+      for(long long int j=0; j<tptree->leafs[leafIdx].size; ++j) {
         if(j!=i) {
           good = true;
 	  candidate.idx = tptree->leaf_points[leaf_offset+j];
@@ -361,11 +362,12 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
 	        threadList[k].idx = -1;
 	      }
               max_dist = threadList[KVAL-1].dist;
+//	    max_dist = min(threadList[KVAL-1].dist, ((SUMTYPE)DIST_FACTOR)*threadList[0].dist);
 	    }
           }
         }
       }
-      for(size_t j=0; j<KVAL; j++) {
+      for(int j=0; j<KVAL; j++) {
         results[(size_t)(query.id-min_id)*KVAL+j] = threadList[j].idx;
       }
 
@@ -651,8 +653,6 @@ __global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, i
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
 void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int refines, int graphtype, int initSize, int refineDepth, int leafSize) {
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting buildGraphGPU\n");
-
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
   DTYPE* data = (DTYPE*)index->GetSample(0);
@@ -667,7 +667,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
-
 
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
@@ -685,7 +684,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)dataSize*KVAL*sizeof(int));
   int* d_results;
-  CUDA_CHECK(cudaMalloc(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
+  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)dataSize*KVAL*sizeof(int)));
   // Initialize results to all -1 (special value that is set to distance INFTY)
   CUDA_CHECK(cudaMemset(d_results, -1, (long long int)dataSize*KVAL*sizeof(int)));
 
@@ -762,237 +761,179 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
 }
 
+
 /****************************************************************************************
  * Create graph on the GPU in a series of 1 or more batches, graph is saved into @results and is stored on the CPU
  * graphType: KNN=0, loose RNG=1, strict RNG=2
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
-
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL, int trees, int* results, int graphtype, int leafSize, int NUM_GPUS, int balanceFactor) {
-
-  int numDevicesOnHost;
-  CUDA_CHECK(cudaGetDeviceCount(&numDevicesOnHost));
-
-  if(numDevicesOnHost < NUM_GPUS) {
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "HeadNumGPUs parameter %d, but only %d devices available on system.  Exiting.\n", NUM_GPUS, numDevicesOnHost);
-    exit(1);
-  }
-
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Building Head graph with %d GPUs...\n", NUM_GPUS);
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
-
-  double tree_time=0.0;
-  double KNN_time=0.0;
-  double D2H_time = 0.0;
-  double prep_time = 0.0;
-
-  auto start_t = std::chrono::high_resolution_clock::now();
+void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches, int gpuNum) {
 
   int dim = index->GetFeatureDim();
   int metric = (int)index->GetDistCalcMethod();
 
   DTYPE* data = (DTYPE*)index->GetSample(0);
 
-  // Number of levels is based on the chosen leaf size
+  // Number of levels set to have approximately 500 points per leaf
   int levels = (int)std::log2(dataSize/leafSize);
 
   int KNN_blocks; // number of threadblocks used
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(index, dataSize, dim);
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
-  for(size_t i=0;  i<dataSize; i++) {
+  for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
 
-  std::vector<size_t> resPerGPU(NUM_GPUS);
-  for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-    resPerGPU[gpuNum] = dataSize / NUM_GPUS;
-    if(dataSize % NUM_GPUS > gpuNum) resPerGPU[gpuNum]++; 
-  }
-  std::vector<size_t> GPUOffset(NUM_GPUS);
-  GPUOffset[0] = 0;
-  LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU 0: results:%lu, offset:%lu\n", resPerGPU[0], GPUOffset[0]);
-  for(int gpuNum=1; gpuNum < NUM_GPUS; ++gpuNum) {
-    GPUOffset[gpuNum] = GPUOffset[gpuNum-1] + resPerGPU[gpuNum-1];
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU %d: results:%lu, offset:%lu\n", gpuNum, resPerGPU[gpuNum], GPUOffset[gpuNum]);
-  }
+  int batchSize = (dataSize / numBatches);
+  if(batchSize * numBatches < dataSize) batchSize++;
 
-  std::vector<cudaStream_t> streams(NUM_GPUS);
-  std::vector<size_t> batchSize(NUM_GPUS);
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Creating RNG graph using %d batches, each of %d elements, TPT iters:%d, tree depth:%d, KVAL:%d\n", numBatches, batchSize, trees, levels, KVAL);
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>** d_points = new Point<DTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
-  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** tptrees = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
-  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** d_tptrees = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
+// Get properties of the GPU being used
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, gpuNum);
+  size_t totalGPUMem = ((size_t)prop.totalGlobalMem) / 1000000;
 
-  int** d_results = new int*[NUM_GPUS];
-  cudaError_t resultErr;
+// If debug/verbose mode, output GPU memory details
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU: %s Total available GPU memory:%zu\n",  prop.name, totalGPUMem);
 
-  // Allocate and initialize GPU data on each device
-  for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
-    CUDA_CHECK(cudaSetDevice(gpuNum));
-    CUDA_CHECK(cudaStreamCreate(&streams[gpuNum]));
+  // Print out memory requirements on the GPU
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU memory used - input points: %zu MB - tree: %d MB - neighbor lists: %zu MB - Total: %zu MB\n",
+      (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>))/1000000, 
+      (13*dataSize)/1000000, 
+      ((long long int)batchSize*KVAL*sizeof(int))/1000000,
+      (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000);
 
-    cudaDeviceProp prop;
-    CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum));
-
-    LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s\n", gpuNum, prop.name);
-
-    size_t freeMem, totalMem;
-    CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
-
-    // Auto-compute batch size based on available memory on the GPU
-    size_t dataPointSize = dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>);
-    size_t treeSize = 20*dataSize;
-    size_t resMemAvail = (freeMem*0.9) - (dataPointSize+treeSize); // Only use 90% of total memory to be safe
-    int maxEltsPerBatch = resMemAvail / (sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>) + KVAL*sizeof(int));
-    batchSize[gpuNum] = min(maxEltsPerBatch, (int)(resPerGPU[gpuNum]));
-
-    // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
-    if(batchSize[gpuNum] == 0 || ((int)resPerGPU[gpuNum]) / batchSize[gpuNum] > 10000) {
-      LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build Head index on GPU %d.  Available GPU memory:%lu MB, Points and tpt require:%lu MB, leaving a maximum batch size of %d results to be computed, which is too small to run efficiently.\n", gpuNum, (freeMem)/1000000, (dataPointSize+treeSize)/1000000, maxEltsPerBatch);
-      exit(1);
-    }
-
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory for Points vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for results:%lu MiB, total vectors:%lu, batch size:%d, total batches:%d\n", dataPointSize/1000000, treeSize/1000000, resMemAvail/1000000, resPerGPU[gpuNum], batchSize[gpuNum], (((batchSize[gpuNum]-1)+resPerGPU[gpuNum]) / batchSize[gpuNum]));
-
-
-    // Allocate memory on GPUs and copy points to each GPU
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU:%d - Alloc'ing Points on device: %zu bytes and initializing TPTree memory.\n", gpuNum, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
-    CUDA_CHECK(cudaMalloc(&d_points[gpuNum], dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
-    CUDA_CHECK(cudaMemcpy(d_points[gpuNum], points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
-
-    CUDA_CHECK(cudaMalloc(&d_tptrees[gpuNum], sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
-    tptrees[gpuNum] = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>;
-    tptrees[gpuNum]->initialize(dataSize, levels);
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT structure initialized for %lu points, %d levels, leaf size:%d\n", dataSize, levels, leafSize);
-
-    CUDA_CHECK(cudaMalloc(&d_results[gpuNum], (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
-
+  if(totalGPUMem < (dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)+batchSize*KVAL*sizeof(int)+13*dataSize)/1000000)
+  {
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to create graph.  Use more batches or a GPU more with memory.\n");
+    exit(1);
   }
 
-  // Set num blocks for all GPU kernel calls
-  KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
+/* Copy all input data to device, but generate portion of result set each batch */
+  Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing Points on device: %zu bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
+  CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
+
+  CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
+
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing TPtree memory and initializing tree\n");
+  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
+  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
+  tptree->initialize(dataSize, levels);
+  KNN_blocks= max(tptree->num_leaves, BLOCKS);
+
+
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Alloc'ing memory for results on device: %lld bytes.\n", (long long int)batchSize*KVAL*sizeof(int));
+  int* d_results;
+  CUDA_CHECK(cudaMallocManaged(&d_results, (long long int)batchSize*KVAL*sizeof(int)));
 
 //  srand(time(NULL)); // random number seed for TP tree random hyperplane partitions
-    srand(1); // random number seed for TP tree random hyperplane partitions
-  
-  std::vector<size_t> curr_batch_size(NUM_GPUS);
-  std::vector<size_t> batchOffset(NUM_GPUS);
-  for(int gpuNum=0; gpuNum<NUM_GPUS; ++gpuNum) {
-    batchOffset[gpuNum]=0;
-  }
+  srand(1); // random number seed for TP tree random hyperplane partitions
 
-  auto batch_start_t = std::chrono::high_resolution_clock::now();
-  prep_time = ((double)std::chrono::duration_cast<std::chrono::seconds>(batch_start_t - start_t).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(batch_start_t - start_t).count())/1000);
+  double tree_time=0.0;
+  double KNN_time=0.0;
+  double D2H_time = 0.0;
+  double temp_time=0.0;
 
-  bool done = false;
-  while(!done) { // Continue until all GPUs have completed all of their batches
-  
-    // Prep next batch for each GPU
-    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-      curr_batch_size[gpuNum] = batchSize[gpuNum];
-     // Check if final batch is smaller than previous
-      if(batchOffset[gpuNum]+batchSize[gpuNum] > resPerGPU[gpuNum]) {
-        curr_batch_size[gpuNum] = resPerGPU[gpuNum]-batchOffset[gpuNum];
-      }
-      LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU %d - starting batch with offset:%lu, with GPU offset:%lu, size:%lu, TailRows:%lld\n", gpuNum, batchOffset[gpuNum], GPUOffset[gpuNum], curr_batch_size[gpuNum], resPerGPU[gpuNum]);
+  time_t start_t, end_t;
+  time_t tot_start_t, tot_end_t;
+  int min_id, max_id;
 
-      CUDA_CHECK(cudaSetDevice(gpuNum));
-      // Initialize results to all -1 (special value that is set to distance INFTY)
-      CUDA_CHECK(cudaMemset(d_results[gpuNum], -1, (size_t)batchSize[gpuNum]*KVAL*sizeof(int)));
+  tot_start_t = clock();
+  for(int batch = 0; batch < numBatches; batch++) {
 
-    }
+    min_id = batch*batchSize;
+    max_id = min(dataSize, (batch+1)*batchSize);
 
-    CUDA_CHECK(cudaDeviceSynchronize());
+    LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting batch %d, computing neighbor list for vertices %d through %d\n", batch, min_id, max_id-1);
+
+    // Initialize results to all -1 (special value that is set to distance INFTY)
+    CUDA_CHECK(cudaMemset(d_results, -1, (long long int)batchSize*KVAL*sizeof(int)));
 
     for(int tree_id=0; tree_id < trees; ++tree_id) { // number of TPTs used to create approx. KNN graph
-
-auto before_tpt = std::chrono::high_resolution_clock::now();
-      // Reset and create each TPT
-      for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
-        CUDA_CHECK(cudaSetDevice(gpuNum));
-        tptrees[gpuNum]->reset();
-      }
-      create_tptree_multigpu<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>(tptrees, d_points, dataSize, levels, NUM_GPUS, streams.data(), balanceFactor);
       CUDA_CHECK(cudaDeviceSynchronize());
 
-            // Copy TPTs to each GPU
-      for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-          CUDA_CHECK(cudaSetDevice(gpuNum));
-          CUDA_CHECK(cudaMemcpy(d_tptrees[gpuNum], tptrees[gpuNum], sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
-      }
-
-auto after_tpt = std::chrono::high_resolution_clock::now();
-
-      for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
-
-        CUDA_CHECK(cudaSetDevice(gpuNum));
-        // Compute the STRICT RNG for each leaf node
-        findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS>>>(d_points[gpuNum], d_tptrees[gpuNum], KVAL, d_results[gpuNum], metric, GPUOffset[gpuNum]+batchOffset[gpuNum], GPUOffset[gpuNum]+batchOffset[gpuNum]+curr_batch_size[gpuNum]);
-      }
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT iteration %d - ", tree_id);
+      start_t = clock();
+     // Create TPT
+      tptree->reset();
+      create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
       CUDA_CHECK(cudaDeviceSynchronize());
 
-auto after_work = std::chrono::high_resolution_clock::now();
+// Sort each leaf by ID
+
+      end_t = clock();
+
+      temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "tree: %0.3lf, ", temp_time);
+      tree_time += temp_time;
+
+      start_t = clock();
+
+
+     // Compute the STRICT RNG for each leaf node
+      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
+   
+      CUDA_CHECK(cudaDeviceSynchronize());
+
+      end_t = clock();
+
+      temp_time += (double)(end_t-start_t)/CLOCKS_PER_SEC;
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "graph build: %0.3lf\n", temp_time);
+      KNN_time += temp_time;
  
-      double loop_tpt_time = ((double)std::chrono::duration_cast<std::chrono::seconds>(after_tpt - before_tpt).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(after_tpt - before_tpt).count())/1000);
-      double loop_work_time = ((double)std::chrono::duration_cast<std::chrono::seconds>(after_work - after_tpt).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(after_work - after_tpt).count())/1000);
-      LOG(SPTAG::Helper::LogLevel::LL_Debug, "All GPUs finished tree %d - tree build time:%.2lf, neighbor compute time:%.2lf\n", tree_id, loop_tpt_time, loop_work_time);
-      tree_time += loop_tpt_time;
-      KNN_time += loop_work_time;
+    } // end TPT loop
 
-    } // TPT Loop
+    start_t = clock();
+    CUDA_CHECK(cudaMemcpy(&results[(size_t)batch*batchSize*KVAL], d_results, (size_t)batchSize*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
+    end_t = clock();
+    temp_time = (double)(end_t-start_t)/CLOCKS_PER_SEC; 
+    D2H_time += temp_time;
 
-auto before_copy = std::chrono::high_resolution_clock::now();
-    for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
-      CUDA_CHECK(cudaMemcpy(&results[(GPUOffset[gpuNum]+batchOffset[gpuNum])*KVAL], d_results[gpuNum], curr_batch_size[gpuNum]*KVAL*sizeof(int), cudaMemcpyDeviceToHost));
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Batch complete, time to copy results:%0.3lf\n", temp_time);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of first vertex of batch (%d):\n", min_id);
+    for(int i=0; i<KVAL; i++) {
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[min_id*KVAL+i]);
     }
-auto after_copy = std::chrono::high_resolution_clock::now();
-    
-    double batch_copy_time = ((double)std::chrono::duration_cast<std::chrono::seconds>(after_copy - before_copy).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(after_copy - before_copy).count())/1000);
-    LOG(SPTAG::Helper::LogLevel::LL_Debug, "All GPUs finished batch - time to copy result:%.2lf\n", batch_copy_time);
-    D2H_time += batch_copy_time;
-
-    // Update all batchOffsets and check if done
-    done=true;
-    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-      batchOffset[gpuNum] += curr_batch_size[gpuNum];
-      if(batchOffset[gpuNum] < resPerGPU[gpuNum]) {
-        done=false;
-      }
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Neighbors of last vertex of batch (%d):\n", max_id-1);
+    for(int i=0; i<KVAL; i++) {
+      LOG(SPTAG::Helper::LogLevel::LL_Debug, "%d, ", results[(max_id-1)*KVAL+i]);
     }
-  } // Batches loop (while !done) 
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "\n");
+  } // end batch loop
+  tot_end_t = clock();
 
-auto end_t = std::chrono::high_resolution_clock::now();
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Total times - trees:%0.3lf, graph build:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", tree_time, KNN_time, D2H_time, (double)(tot_end_t - tot_start_t)/CLOCKS_PER_SEC);
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Total times - prep time:%0.3lf, tree build:%0.3lf, neighbor compute:%0.3lf, Copy results:%0.3lf, Total runtime:%0.3lf\n", prep_time, tree_time, KNN_time, D2H_time, ((double)std::chrono::duration_cast<std::chrono::seconds>(end_t - start_t).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(end_t - start_t).count())/1000));
-
-  for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
-    tptrees[gpuNum]->destroy();
-    delete tptrees[gpuNum];
-    cudaFree(d_tptrees[gpuNum]);
-    cudaFree(d_points[gpuNum]);
-    cudaFree(d_results[gpuNum]);
-  }
-  delete[] tptrees;
-  delete[] d_points;
-  delete[] d_results;
-  delete[] d_tptrees;
+  tptree->destroy();
+  cudaFree(tptree);
+  cudaFree(d_points);
 }
+
 
 /***************************************************************************************
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
 template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor) {
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches, int gpuNum) {
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
 
+  cudaSetDevice(gpuNum);
+
   // Make sure that neighborhood size is a power of 2
   if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
     LOG(SPTAG::Helper::LogLevel::LL_Error, "NeighborhoodSize (with scaling factor applied) is %d but must be a power of 2 for GPU construction.\n", m_iNeighborhoodSize);
+    exit(1);
+  }
+  if(numBatches > 1 && graph != 2) {
+    LOG(SPTAG::Helper::LogLevel::LL_Error, "Multiple batches only supported for direct RNG construction (GPUGraphType=2).\n");
     exit(1);
   }
 
@@ -1004,21 +945,14 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     LOG(SPTAG::Helper::LogLevel::LL_Error, ">100 dimensions not currently supported for GPU construction.\n");
     exit(1);
   }
+
+// TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
+  
   if(typeid(T) == typeid(float)) {
-    if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, float, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
-    }
-    else {
-      buildGraphGPU_Batch<T, float, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
-    }
+    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-    if(m_iFeatureDim <= 64) {
-      buildGraphGPU_Batch<T, int32_t, 64>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
-    }
-    else {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
-    }
+      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else {
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");

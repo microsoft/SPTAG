@@ -40,8 +40,8 @@ namespace SPTAG
             public:
                 RebuildJob(COMMON::Dataset<T>* p_data, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph, 
                     DistCalcMethod p_distMethod) : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod) {}
-                void exec(IAbortOperation* p_abort) {
-                    m_tree->Rebuild<T>(*m_data, m_distMethod, p_abort);
+                void exec() {
+                    m_tree->Rebuild<T>(*m_data, m_distMethod);
                 }
             private:
                 COMMON::Dataset<T>* m_data;
@@ -143,7 +143,7 @@ namespace SPTAG
                 return std::move(files);
             }
 
-            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout);
+            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const;
             ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);

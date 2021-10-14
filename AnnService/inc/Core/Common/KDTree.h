@@ -48,10 +48,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            void Rebuild(const Dataset<T>& data, IAbortOperation* abort)
+            void Rebuild(const Dataset<T>& data)
             {
                 COMMON::KDTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, 1, nullptr, abort);
+                newTrees.BuildTrees<T>(data, 1);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
@@ -59,7 +59,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
+            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr)
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
@@ -75,8 +75,6 @@ namespace SPTAG
 #pragma omp parallel for num_threads(numOfThreads)
                 for (int i = 0; i < m_iTreeNumber; i++)
                 {
-                    if (abort && abort->ShouldAbort()) continue;
-                    
                     Sleep(i * 100); std::srand(clock());
 
                     std::vector<SizeType> pindices(localindices.begin(), localindices.end());
@@ -85,7 +83,7 @@ namespace SPTAG
                     m_pTreeStart[i] = i * (SizeType)pindices.size();
                     LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
                     SizeType iTreeSize = m_pTreeStart[i];
-                    DivideTree<T>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
+                    DivideTree<T>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize);
                     LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
                 }
             }
@@ -134,37 +132,6 @@ namespace SPTAG
 
             ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
             {
-                if (m_bOldVersion) {
-                    struct KdtreeNode
-                    {
-                        int left;
-                        int right;
-                        short split_dim;
-                        float split_value;
-                    } tmpNode;
-
-                    IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
-
-                    int treeNodeSize = 0;
-                    for (int i = 0; i < m_iTreeNumber; i++)
-                    {
-                        m_pTreeStart.push_back(treeNodeSize);
-
-                        int iNodeSize;
-                        IOBINARY(p_input, ReadBinary, sizeof(iNodeSize), (char*)&iNodeSize);
-                        m_pTreeRoots.resize(treeNodeSize + iNodeSize);
-                        for (int j = treeNodeSize; j < treeNodeSize + iNodeSize; j++) {
-                            IOBINARY(p_input, ReadBinary, sizeof(KdtreeNode), (char*)(&tmpNode));
-                            m_pTreeRoots[j].left = tmpNode.left + treeNodeSize;
-                            m_pTreeRoots[j].right = tmpNode.right + treeNodeSize;
-                            m_pTreeRoots[j].split_dim = tmpNode.split_dim;
-                            m_pTreeRoots[j].split_value = tmpNode.split_value;
-                        }
-                        treeNodeSize += iNodeSize;
-                    }
-                    LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
-                    return ErrorCode::Success;
-                }
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 m_pTreeStart.resize(m_iTreeNumber);
                 IOBINARY(p_input, ReadBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
@@ -222,7 +189,7 @@ namespace SPTAG
 
                     ++p_space.m_iNumberOfTreeCheckedLeaves;
                     ++p_space.m_iNumberOfCheckedLeaves;
-                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
+                    p_space.m_NGQueue.insert(COMMON::HeapCell(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
                     return;
                 }
 
@@ -242,16 +209,14 @@ namespace SPTAG
                     bestChild = tnode.right;
                 }
 
-                p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
+                p_space.m_SPTQueue.insert(COMMON::HeapCell(otherChild, distanceBound));
                 KDTSearch(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 
 
             template <typename T>
             void DivideTree(const Dataset<T>& data, std::vector<SizeType>& indices, SizeType first, SizeType last,
-                SizeType index, SizeType &iTreeSize, IAbortOperation* abort = nullptr) {
-                if (abort && abort->ShouldAbort()) return;
-
+                SizeType index, SizeType &iTreeSize) {
                 ChooseDivision<T>(data, m_pTreeRoots[index], indices, first, last);
                 SizeType i = Subdivide<T>(data, m_pTreeRoots[index], indices, first, last);
                 if (i - 1 <= first)
@@ -379,7 +344,6 @@ namespace SPTAG
         public:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
-            bool m_bOldVersion;
         };
     }
 }

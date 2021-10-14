@@ -17,47 +17,35 @@ namespace SPTAG
         class ThreadPool
         {
         public:
-            class Abort : public IAbortOperation
-            {
-            private:
-                bool m_stopped;
-
-            public:
-                Abort(bool p_status = true) { m_stopped = p_status; }
-                ~Abort() {}
-                virtual bool ShouldAbort() { return m_stopped; }
-                void SetAbort(bool p_status) { m_stopped = p_status; }
-            };
-
             class Job
             {
             public:
                 virtual ~Job() {}
-                virtual void exec(IAbortOperation* p_abort) = 0;
+                virtual void exec() = 0;
             };
 
-            ThreadPool() {}
+            ThreadPool(): m_stopped(true) {}
 
             ~ThreadPool() 
             {
-                m_abort.SetAbort(true);
+                m_stopped = true;
                 m_cond.notify_all();
-                for (auto&& t : m_threads) t.join();
+                for (auto && t : m_threads) t.join();
                 m_threads.clear();
             }
 
             void init(int numberOfThreads = 1)
             {
-                m_abort.SetAbort(false);
+                m_stopped = false;
                 for (int i = 0; i < numberOfThreads; i++)
                 {
-                    m_threads.emplace_back([this] {
+                    m_threads.push_back(std::thread([this] {
                         Job *j;
                         while (get(j))
                         {
                             try 
                             {
-                                j->exec(&m_abort);
+                                j->exec();
                             }
                             catch (std::exception& e) {
                                 LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
@@ -65,7 +53,7 @@ namespace SPTAG
                             
                             delete j;
                         }
-                    });
+                    }));
                 }
             }
 
@@ -81,12 +69,12 @@ namespace SPTAG
             bool get(Job*& j)
             {
                 std::unique_lock<std::mutex> lock(m_lock);
-                while (m_jobs.empty() && !m_abort.ShouldAbort()) m_cond.wait(lock);
-                if (!m_abort.ShouldAbort()) {
+                while (m_jobs.empty() && !m_stopped) m_cond.wait(lock);
+                if (!m_stopped) {
                     j = m_jobs.front();
                     m_jobs.pop();
                 }
-                return !m_abort.ShouldAbort();
+                return !m_stopped;
             }
 
             size_t jobsize()
@@ -97,7 +85,7 @@ namespace SPTAG
 
         protected:
             std::queue<Job*> m_jobs;
-            Abort m_abort;
+            bool m_stopped;
             std::mutex m_lock;
             std::condition_variable m_cond;
             std::vector<std::thread> m_threads;

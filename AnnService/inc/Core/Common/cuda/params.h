@@ -36,8 +36,6 @@
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
 #define KEYTYPE float // Keys used to divide TPTs at each node
 
-#define REORDER 1 // Option to re-order queries for perf improvement (1 = reorder, 0 = no reorder)
-
 #define CUDA_CHECK(func)                                                       \
   do {                                                                         \
     cudaError_t rt = (func);                                                   \

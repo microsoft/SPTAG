@@ -4,7 +4,6 @@
 #ifndef _SPTAG_COMMON_WORKSPACE_H_
 #define _SPTAG_COMMON_WORKSPACE_H_
 
-#include "../SearchResult.h"
 #include "CommonUtils.h"
 #include "Heap.h"
 
@@ -12,6 +11,25 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        // node type in the priority queue
+        struct HeapCell
+        {
+            SizeType node;
+            float distance;
+
+            HeapCell(SizeType _node = -1, float _distance = MaxDist) : node(_node), distance(_distance) {}
+
+            inline bool operator < (const HeapCell& rhs) const
+            {
+                return distance < rhs.distance;
+            }
+
+            inline bool operator > (const HeapCell& rhs) const
+            {
+                return distance > rhs.distance;
+            }
+        };
+
         class OptHashPosVector
         {
         protected:
@@ -20,8 +38,6 @@ namespace SPTAG
 
             // Could we use the second hash block.
             bool m_secondHash;
-
-            int m_exp;
 
             // Max pool size.
             int m_poolSize;
@@ -32,19 +48,19 @@ namespace SPTAG
             std::unique_ptr<SizeType[]> m_hashTable;
 
 
-            inline unsigned hash_func2(unsigned idx, int poolSize, int loop)
+            inline unsigned hash_func2(unsigned idx, int loop)
             {
-                return (idx + loop) & poolSize;
+                return (idx + loop) & m_poolSize;
             }
 
 
-            inline unsigned hash_func(unsigned idx, int poolSize)
+            inline unsigned hash_func(unsigned idx)
             {
-                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & poolSize;
+                return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & m_poolSize;
             }
 
         public:
-            OptHashPosVector(): m_secondHash(false), m_exp(2), m_poolSize(8191) {}
+            OptHashPosVector() {}
 
             ~OptHashPosVector() {}
 
@@ -57,7 +73,6 @@ namespace SPTAG
                     size >>= 1;
                 }
                 m_secondHash = true;
-                m_exp = exp;
                 m_poolSize = (1 << (ex + exp)) - 1;
                 m_hashTable.reset(new SizeType[(m_poolSize + 1) * 2]);
                 clear();
@@ -78,32 +93,17 @@ namespace SPTAG
                 }
             }
 
-            inline int HashTableExponent() const { return m_exp; }
 
             inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1
-                return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
+                return _CheckAndSet(m_hashTable.get(), idx + 1) == 0;
             }
 
-            inline void DoubleSize()
+
+            inline int _CheckAndSet(SizeType* hashTable, SizeType idx)
             {
-                int new_poolSize = ((m_poolSize + 1) << 1) - 1; 
-                SizeType* new_hashTable = new SizeType[(new_poolSize + 1) * 2];
-                memset(new_hashTable, 0, sizeof(SizeType) * (new_poolSize + 1) * 2);
-
-                m_secondHash = false;
-                for (int i = 0; i <= new_poolSize; i++)
-                    if (m_hashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, m_hashTable[i]);
-
-                m_exp++;
-                m_poolSize = new_poolSize;
-                m_hashTable.reset(new_hashTable);
-            }
-
-            inline int _CheckAndSet(SizeType* hashTable, int poolSize, bool isFirstTable, SizeType idx)
-            {
-                unsigned index = hash_func((unsigned)idx, poolSize);
+                unsigned index = hash_func((unsigned)idx);
                 for (int loop = 0; loop < m_maxLoop; ++loop)
                 {
                     if (!hashTable[index])
@@ -118,108 +118,90 @@ namespace SPTAG
                         return 0;
                     }
                     // Get next hash position.
-                    index = hash_func2(index, poolSize, loop);
+                    index = hash_func2(index, loop);
                 }
 
-                if (isFirstTable)
+                if (hashTable == m_hashTable.get())
                 {
                     // Use second hash block.
                     m_secondHash = true;
-                    return _CheckAndSet(hashTable + poolSize + 1, poolSize, false, idx);
+                    return _CheckAndSet(m_hashTable.get() + m_poolSize + 1, idx);
                 }
 
-                DoubleSize();
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
-                return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
+                // Do not include this item.
+                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 4).\n");
+                return -1;
             }
         };
-
+/*
         class DistPriorityQueue {
-            int m_size;
-            std::unique_ptr<float[]> m_data;
-            int m_length;
-            int m_count;
-            
+            float* data;
+            int size;
+            int count;
         public:
-            DistPriorityQueue(): m_size(0), m_length(0), m_count(0) {}
+            DistPriorityQueue() {}
 
             void Resize(int size_) {
-                m_size = size_;
-                m_data.reset(new float[size_ + 1]);
-                
-                m_data[1] = MaxDist;
-                m_length = 1;
-                m_count = size_;
+                data = new float[size_ + 1];
+                for (int i = 0; i <= size_; i++) data[i] = MaxDist;
+                size = size_;
+                count = size_;
             }
             void clear(int count_) {
-                if (count_ > m_size) {
-                    m_size = count_;
-                    m_data.reset(new float[count_ + 1]);
-                }
-                m_data[1] = MaxDist;
-                m_length = 1;
-                m_count = count_;
-                
+                count = count_;
+                for (int i = 0; i <= count; i++) data[i] = MaxDist;
+            }
+            ~DistPriorityQueue() {
+                delete[] data;
             }
             bool insert(float dist) {
-                if (dist > m_data[1]) return false;
+                if (dist > data[1]) return false;
 
-                if (m_length == m_count) {
-                    m_data[1] = dist;
-                    int parent = 1, next = 2;
-                    while (next < m_length) {
-                        if (m_data[next] < m_data[next + 1]) next++;
-                        if (m_data[next] > m_data[parent]) {
-                            std::swap(m_data[parent], m_data[next]);
-                            parent = next;
-                            next <<= 1;
-                        }
-                        else break;
+                data[1] = dist;
+                int parent = 1, next = 2;
+                while (next < count) {
+                    if (data[next] < data[next + 1]) next++;
+                    if (data[parent] < data[next]) {
+                        std::swap(data[next], data[parent]);
+                        parent = next;
+                        next <<= 1;
                     }
-                    if (next == m_length && m_data[next] > m_data[parent]) std::swap(m_data[parent], m_data[next]);
+                    else break;
                 }
-                else {
-                    int next = ++(m_length), parent = (next >> 1);
-                    while (parent > 0 && dist > m_data[parent]) {
-                        m_data[next] = m_data[parent];
-                        next = parent;
-                        parent >>= 1;
-                    }
-                    m_data[next] = dist;
-                }
+                if (next == count && data[parent] < data[next]) std::swap(data[parent], data[next]);
                 return true;
             }
-            inline float worst() {
-                return m_data[1];
+            float worst() {
+                return data[1];
             }
         };
-
+*/
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, SizeType dataSize, int hashExp)
+            void Initialize(int maxCheck, SizeType dataSize, int hashexp)
             {
-                nodeCheckStatus.Init(maxCheck, hashExp);
+                nodeCheckStatus.Init(maxCheck, hashexp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
-                m_Results.Resize(maxCheck / 16);
+                //m_Results.Resize(maxCheck / 16);
 
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
-                //m_iContinuousLimit = maxCheck / 64;
+                m_iContinuousLimit = maxCheck / 64;
                 m_iMaxCheck = maxCheck;
                 m_iNumOfContinuousNoBetterPropagation = 0;
             }
 
-            void Reset(int maxCheck, int resultNum)
+            void Reset(int maxCheck)
             {
                 nodeCheckStatus.clear();
                 m_SPTQueue.clear();
                 m_NGQueue.clear();
-                m_Results.clear(max(maxCheck / 16, resultNum));
+                //m_Results.clear(maxCheck / 16);
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
-                //m_iContinuousLimit = maxCheck / 64;
+                m_iContinuousLimit = maxCheck / 64;
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
@@ -228,11 +210,6 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
-            }
-
-            inline int HashTableExponent() const 
-            { 
-                return nodeCheckStatus.HashTableExponent(); 
             }
 
             OptHashPosVector nodeCheckStatus;
@@ -245,12 +222,12 @@ namespace SPTAG
             int m_iMaxCheck;
 
             // Prioriy queue used for neighborhood graph
-            Heap<NodeDistPair> m_NGQueue;
+            Heap<HeapCell> m_NGQueue;
 
             // Priority queue Used for Tree
-            Heap<NodeDistPair> m_SPTQueue;
+            Heap<HeapCell> m_SPTQueue;
 
-            DistPriorityQueue m_Results;
+            //DistPriorityQueue m_Results;
         };
     }
 }

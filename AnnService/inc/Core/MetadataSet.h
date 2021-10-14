@@ -34,7 +34,7 @@ public:
  
     virtual void AddBatch(MetadataSet& data);
     
-    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata, std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize) const;
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata) const;
 
     virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut) const;
 
@@ -45,8 +45,7 @@ public:
 class FileMetadataSet : public MetadataSet
 {
 public:
-    FileMetadataSet(const std::string& p_metaFile, const std::string& p_metaindexFile, 
-        std::uint64_t p_blockSize = 1024 * 1024, std::uint64_t p_capacity = MaxSize, std::uint64_t p_metaSize = 10);
+    FileMetadataSet(const std::string& p_metaFile, const std::string& p_metaindexFile);
     
     ~FileMetadataSet();
 
@@ -67,14 +66,16 @@ public:
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
-    std::shared_ptr<void> m_lock;
+    std::shared_ptr<Helper::DiskPriorityIO> m_fp = nullptr;
 
-    std::vector<std::uint64_t> m_offsets;
+    std::vector<std::uint64_t> m_pOffsets;
 
     SizeType m_count;
 
-    std::shared_ptr<Helper::DiskPriorityIO> m_fp = nullptr;
-    
+    std::string m_metaFile;
+
+    std::string m_metaindexFile;
+
     std::vector<std::uint8_t> m_newdata;
 };
 
@@ -82,18 +83,13 @@ private:
 class MemMetadataSet : public MetadataSet
 {
 public:
-    MemMetadataSet(std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+    MemMetadataSet();
 
     MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count);
 
-    MemMetadataSet(ByteArray p_metadata, ByteArray p_offsets, SizeType p_count, 
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+    MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile);
 
-    MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile, 
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
-
-    MemMetadataSet(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin, 
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+    MemMetadataSet(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin);
 
     ~MemMetadataSet();
 
@@ -114,18 +110,17 @@ public:
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
-    ErrorCode Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin,
-        std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
+    ErrorCode Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin);
 
-    std::shared_ptr<void> m_lock;
-
-    std::shared_ptr<void> m_pOffsets;
+    std::vector<std::uint64_t> m_offsets;
 
     SizeType m_count;
 
     ByteArray m_metadataHolder;
 
     std::vector<std::uint8_t> m_newdata;
+
+    std::shared_ptr<void> m_lock;
 };
 
 

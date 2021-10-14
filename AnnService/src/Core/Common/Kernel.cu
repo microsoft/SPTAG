@@ -27,7 +27,6 @@
 #include <device_launch_parameters.h>
 #include <typeinfo>
 #include <cuda_fp16.h>
-#include <curand_kernel.h>
 
 #include "inc/Core/Common/cuda/params.h"
 #include "inc/Core/Common/cuda/TPtree.hxx"
@@ -82,39 +81,5 @@ __global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, 
         idx = atomicAdd(&leafs[leaf_id].size, 1);
         leaf_points[idx + leafs[leaf_id].offset] = i;
     }
-}
-
-
-//#define BAL 2 // Balance factor - will only rebalance nodes that are at least 2x larger than their sibling
-
-// Computes the fraction of points that need to be moved from each unbalanced node on the level
-__global__ void check_for_imbalance(int* node_ids, int* node_sizes, int nodes_on_level, int node_start, float* frac_to_move, int bal_factor) {
-  int neighborId;
-  for(int i=node_start + blockIdx.x*blockDim.x + threadIdx.x; i<node_start+nodes_on_level; i+=blockDim.x*gridDim.x) {
-    frac_to_move[i] = 0.0;
-    neighborId = (i-1) + 2*(i&1); // neighbor is either left or right of current
-    if(node_sizes[i] > bal_factor*node_sizes[neighborId]) {
-      frac_to_move[i] = ((float)node_sizes[i] - (((float)(node_sizes[i]+node_sizes[neighborId]))/2.0)) / (float)node_sizes[i];
-    }
-  }
-}
-
-// Initialize random number generator for each thread
-__global__ void initialize_rands(curandState* states, int iter) {
-  int id = threadIdx.x + blockIdx.x*blockDim.x;
-  curand_init(1234, id, iter, &states[id]);
-}
-
-// Randomly move points to sibling nodes based on the fraction that need to be moved out of unbalanced nodes
-__global__ void rebalance_nodes(int* node_ids, int N, float* frac_to_move, curandState* states) {
-  int neighborId;
-  int threadId = blockIdx.x*blockDim.x+threadIdx.x;
-
-  for(int i=threadId; i<N; i+=blockDim.x*gridDim.x) {
-    if((frac_to_move[node_ids[i]] > 0.0) && (curand_uniform(&states[threadId]) < frac_to_move[node_ids[i]])) {
-      neighborId = (node_ids[i]-1) + 2*(node_ids[i]&1); // Compute idx of left or right neighbor
-      node_ids[i] = neighborId;
-    }
-  }
 }
 

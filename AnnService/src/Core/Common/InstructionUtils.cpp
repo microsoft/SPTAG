@@ -15,20 +15,6 @@ namespace SPTAG {
         bool InstructionSet::SSE2(void) { return CPU_Rep.HW_SSE2; }
         bool InstructionSet::AVX(void) { return CPU_Rep.HW_AVX; }
         bool InstructionSet::AVX2(void) { return CPU_Rep.HW_AVX2; }
-        
-        void InstructionSet::PrintInstructionSet(void) 
-        {
-            if (CPU_Rep.HW_AVX2)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
-            else if (CPU_Rep.HW_AVX)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
-            else if (CPU_Rep.HW_SSE2)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
-            else if (CPU_Rep.HW_SSE)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
-            else
-                LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
-        }
 
         // from https://stackoverflow.com/a/7495023/5053214
         InstructionSet::InstructionSet_Internal::InstructionSet_Internal() :

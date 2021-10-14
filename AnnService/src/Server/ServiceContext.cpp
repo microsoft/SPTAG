@@ -53,7 +53,7 @@ ServiceContext::ServiceContext(const std::string& p_configFilePath)
         }
         else
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed loading index: %s\n", indexName.c_str());
+            fprintf(stderr, "Failed loading index: %s\n", indexName.c_str());
         }
     }
 

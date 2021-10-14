@@ -24,9 +24,9 @@ namespace SPTAG
                 m_data.SetName("DeleteID");
             }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
+            void Initialize(SizeType capacity)
             {
-                m_data.Initialize(size, 1, blockSize, capacity);
+                m_data.Initialize(capacity, 1);
             }
 
             inline size_t Count() const { return m_inserted.load(); }
@@ -59,26 +59,26 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input)
             {
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
                 m_inserted = deleted;
-                return m_data.Load(input, blockSize, capacity);
+                return m_data.Load(input);
             }
 
-            inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::string filename)
             {
                 LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr, blockSize, capacity);
+                return Load(ptr);
             }
 
-            inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(char* pmemoryFile) 
             {
                 m_inserted = *((SizeType*)pmemoryFile);
-                return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
+                return m_data.Load(pmemoryFile + sizeof(SizeType));
             }
 
             inline ErrorCode AddBatch(SizeType num)

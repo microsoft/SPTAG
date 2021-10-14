@@ -87,7 +87,6 @@ namespace SPTAG
                     m_handle->write(msg.c_str(), msg.size());
                 }
 
-                m_handle->flush();
                 va_end(args);
             }
         private:

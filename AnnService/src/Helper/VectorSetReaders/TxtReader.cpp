@@ -111,7 +111,7 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
 
 
 std::shared_ptr<VectorSet>
-TxtVectorReader::GetVectorSet(SizeType start, SizeType end) const
+TxtVectorReader::GetVectorSet() const
 {
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
@@ -130,23 +130,19 @@ TxtVectorReader::GetVectorSet(SizeType start, SizeType end) const
         exit(1);
     }
 
-    if (start > row) start = row;
-    if (end < 0 || end > row) end = row;
-    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * (end - start) * col;
-    ByteArray vectorSet;
-    if (totalRecordVectorBytes > 0) {
-        vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
-        char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
-        std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * start * col + +sizeof(SizeType) + sizeof(DimensionType);
-        if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf, offset) != totalRecordVectorBytes) {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
-            exit(1);
-        }
+    std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * row * col;
+    ByteArray vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
+    char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+
+    if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf) != totalRecordVectorBytes) {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        exit(1);
     }
+
     return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
         m_options->m_inputValueType,
         col,
-        end - start));
+        row));
 }
 
 
@@ -165,7 +161,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
                                 std::uint32_t p_fileBlockID,
                                 std::size_t p_fileBlockSize)
 {
-    std::uint64_t lineBufferSize = 1 << 16;
+    std::size_t lineBufferSize = 1 << 16;
     std::unique_ptr<char[]> currentLine(new char[lineBufferSize]);
 
     SizeType recordCount = 0;
@@ -174,7 +170,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
     std::streamoff startpos = p_fileBlockID * p_fileBlockSize;
 
     std::shared_ptr<Helper::DiskPriorityIO> input = f_createIO(), output = f_createIO(), meta = f_createIO(), metaIndex = f_createIO();
-    if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in | std::ios::binary))
+    if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in))
     {
         LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n",p_filePath.c_str());
         exit(1);

@@ -29,7 +29,6 @@ namespace SPTAG {
             static bool SSE(void);
             static bool SSE2(void);
             static bool AVX2(void);
-            static void PrintInstructionSet(void);
 
         private:
             static const InstructionSet_Internal CPU_Rep;

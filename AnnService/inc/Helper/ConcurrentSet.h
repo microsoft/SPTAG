@@ -50,7 +50,7 @@ namespace SPTAG
             {
                 typedef typename std::unordered_map<K, V>::iterator iterator;
             public:
-                ConcurrentMap(int capacity = 8) { m_lock.reset(new std::shared_timed_mutex); m_data.reserve(capacity); }
+                ConcurrentMap() { m_lock.reset(new std::shared_timed_mutex); }
 
                 ~ConcurrentMap() {}
 
