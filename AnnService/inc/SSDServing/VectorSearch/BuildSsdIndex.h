@@ -519,7 +519,7 @@ namespace SPTAG {
                             void* reconstructVector = nullptr;
                             if (SPTAG::COMMON::DistanceUtils::Quantizer)
                             {
-                                reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                                reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                                 SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*) fullVectors->GetVector(samples[j]), reconstructVector);
                                 sampleANN.SetTarget(reconstructVector);
                                 sampleTruth.SetTarget(reconstructVector);
