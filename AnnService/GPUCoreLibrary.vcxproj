@@ -19,7 +19,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v142</PlatformToolset>
@@ -68,7 +68,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
-      <CodeGeneration>compute_70,sm_70</CodeGeneration>
+      <CodeGeneration>compute_70,sm_70;compute_75,sm_75</CodeGeneration>
       <Defines>WIN32;%(Defines)</Defines>
       <Runtime>MTd</Runtime>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
@@ -82,7 +82,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GPU;DEBUG;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -96,7 +96,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
-      <CodeGeneration>compute_70,sm_70</CodeGeneration>
+      <CodeGeneration>compute_70,sm_70;compute_75,sm_75</CodeGeneration>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
       <FastMath>true</FastMath>
       <Optimization>O2</Optimization>
@@ -174,6 +174,7 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />

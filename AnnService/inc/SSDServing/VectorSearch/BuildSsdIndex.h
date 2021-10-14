@@ -20,45 +20,92 @@ namespace SPTAG {
             {
                 const std::uint16_t c_pageSize = 4096;
 
-                struct Edge
-                {
-                    Edge() : headID(INT_MAX), fullID(INT_MAX), distance(FLT_MAX), order(0)
-                    {
-                    }
-
-                    int headID;
-                    int fullID;
-                    float distance;
-					char order;
-                };
-
                 struct EdgeCompare
                 {
                     bool operator()(const Edge& a, int b) const
                     {
-                        return a.headID < b;
+                        return a.node < b;
                     };
 
                     bool operator()(int a, const Edge& b) const
                     {
-                        return a < b.headID;
+                        return a < b.node;
                     };
 
                     bool operator()(const Edge& a, const Edge& b) const
                     {
-                        if (a.headID == b.headID)
+                        if (a.node == b.node)
                         {
                             if (a.distance == b.distance)
                             {
-                                return a.fullID < b.fullID;
+                                return a.tonode < b.tonode;
                             }
 
                             return a.distance < b.distance;
                         }
 
-                        return a.headID < b.headID;
+                        return a.node < b.node;
                     };
                 } g_edgeComparer;
+
+                struct Selection {
+                    std::string m_tmpfile;
+                    size_t m_totalsize;
+                    size_t m_start;
+                    size_t m_end;
+                    std::vector<Edge> m_selections;
+                    
+
+                    Selection(size_t totalsize, std::string tmpdir) : m_tmpfile(tmpdir + FolderSep + "selection_tmp"), m_totalsize(totalsize), m_start(0), m_end(totalsize) { remove(m_tmpfile.c_str()); m_selections.resize(totalsize); }
+
+                    void SaveBatch()
+                    {
+                        auto f_out = f_createIO();
+                        if (f_out == nullptr || !f_out->Initialize(m_tmpfile.c_str(), std::ios::out | std::ios::binary | (fileexists(m_tmpfile.c_str())? std::ios::in : 0))) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to save selection for batching!\n", m_tmpfile.c_str());
+                            exit(1);
+                        }
+                        if (f_out->WriteBinary(sizeof(Edge) * (m_end - m_start), (const char*)m_selections.data(), sizeof(Edge) * m_start) != sizeof(Edge) * (m_end - m_start)) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot write to %s!\n", m_tmpfile.c_str());
+                            exit(1);
+                        }
+                        std::vector<Edge> batch_selection;
+                        m_selections.swap(batch_selection);
+                        m_start = m_end = 0;
+                    }
+
+                    void LoadBatch(size_t start, size_t end)
+                    {
+                        auto f_in = f_createIO();
+                        if (f_in == nullptr || !f_in->Initialize(m_tmpfile.c_str(), std::ios::in | std::ios::binary)) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to load selection batch!\n", m_tmpfile.c_str());
+                            exit(1);
+                        }
+
+                        size_t readsize = end - start;
+                        m_selections.resize(readsize);
+                        if (f_in->ReadBinary(readsize * sizeof(Edge), (char*)m_selections.data(), start * sizeof(Edge)) != readsize * sizeof(Edge)) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot read from %s! start:%zu size:%zu\n", m_tmpfile.c_str(), start, readsize);
+                            exit(1);
+                        }
+                        m_start = start;
+                        m_end = end;
+                    }
+
+                    size_t lower_bound(SizeType node)
+                    {
+                        auto ptr = std::lower_bound(m_selections.begin(), m_selections.end(), node, g_edgeComparer);
+                        return m_start + (ptr - m_selections.begin());
+                    }
+
+                    Edge& operator[](size_t offset)
+                    {
+                        if (offset < m_start || offset >= m_end) {
+                            LOG(Helper::LogLevel::LL_Error, "Error read offset in selections:%zu\n", offset);
+                        }
+                        return m_selections[offset - m_start];
+                    }
+                };
 
                 void LoadHeadVectorIDSet(const std::string& p_filename, std::unordered_set<int>& p_set)
                 {
@@ -85,7 +132,7 @@ namespace SPTAG {
                 }
 
                 void SelectPostingOffset(size_t p_spacePerVector,
-                    const std::vector<std::atomic_int>& p_postingListSizes,
+                    const std::vector<int>& p_postingListSizes,
                     std::unique_ptr<int[]>& p_postPageNum,
                     std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                     std::vector<int>& p_postingOrderInIndex)
@@ -173,18 +220,25 @@ namespace SPTAG {
 
                 void OutputSSDIndexFile(const std::string& p_outputFile,
                     size_t p_spacePerVector,
-                    const std::vector<std::atomic_int>& p_postingListSizes,
-                    const std::vector<Edge>& p_postingSelections,
+                    const std::vector<int>& p_postingListSizes,
+                    Selection& p_postingSelections,
                     const std::unique_ptr<int[]>& p_postPageNum,
                     const std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                     const std::vector<int>& p_postingOrderInIndex,
-                    std::shared_ptr<VectorSet> p_fullVectors)
+                    std::shared_ptr<VectorSet> p_fullVectors,
+                    size_t p_postingListOffset)
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start output...\n");
 
                     auto ptr = SPTAG::f_createIO();
-                    if (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out))
+                    int retry = 3;
+                    while (retry > 0 && (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out)))
                     {
+                        LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
+                        retry--;
+                    }
+
+                    if (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
                         exit(1);
                     }
@@ -315,17 +369,16 @@ namespace SPTAG {
                             listOffset = targetOffset;
                         }
 
-
-                        std::size_t selectIdx = std::lower_bound(p_postingSelections.begin(), p_postingSelections.end(), id, g_edgeComparer) - p_postingSelections.begin();
+                        std::size_t selectIdx = p_postingSelections.lower_bound(id + (int)p_postingListOffset);
                         for (int j = 0; j < p_postingListSizes[id]; ++j)
                         {
-                            if (p_postingSelections[selectIdx].headID != id)
+                            if (p_postingSelections[selectIdx].node != id + (int)p_postingListOffset)
                             {
-                                LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
+                                LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH! node:%d offset:%zu\n", id + (int)p_postingListOffset, selectIdx);
                                 exit(1);
                             }
 
-                            i32Val = p_postingSelections[selectIdx++].fullID;
+                            i32Val = p_postingSelections[selectIdx++].tonode;
                             if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
                                 LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                                 exit(1);
@@ -384,128 +437,153 @@ namespace SPTAG {
                 std::unordered_set<int> headVectorIDS;
                 LoadHeadVectorIDSet(COMMON_OPTS.m_headIDFile, headVectorIDS);
 
-                SearchDefault<ValueType> searcher;
-                LOG(Helper::LogLevel::LL_Info, "Start setup index...\n");
-                searcher.Setup(p_opts);
-
-                LOG(Helper::LogLevel::LL_Info, "Setup index finish, start setup hint...\n");
-                searcher.SetHint(numThreads, candidateNum, false, p_opts);
-
-                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
+                SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : COMMON_OPTS.m_valueType;
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (ErrorCode::Success != vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
                 {
                     LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
                     exit(1);
                 }
-                auto fullVectors = vectorReader->GetVectorSet();
-                if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine) fullVectors->Normalize(p_opts.m_iNumberOfThreads);
 
-                LOG(Helper::LogLevel::LL_Info, "Full vector loaded.\n");
-
-                std::vector<Edge> selections(static_cast<size_t>(fullVectors->Count())* p_opts.m_replicaCount);
-
-                std::vector<int> replicaCount(fullVectors->Count(), 0);
-                std::vector<std::atomic_int> postingListSize(searcher.HeadIndex()->GetNumSamples());
-                for (auto& pls : postingListSize) pls = 0;
-
-                LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
-
-                std::vector<std::thread> threads;
-                threads.reserve(numThreads);
-
-                std::atomic_int nextFullID(0);
-                std::atomic_size_t rngFailedCountTotal(0);
-
-                for (int tid = 0; tid < numThreads; ++tid)
+                SizeType fullCount = 0;
+                size_t vectorInfoSize = 0;
                 {
-                    threads.emplace_back([&, tid]()
+                    auto fullVectors = vectorReader->GetVectorSet();
+                    fullCount = fullVectors->Count();
+                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
+                }
+
+                Selection selections(static_cast<size_t>(fullCount)* p_opts.m_replicaCount, p_opts.m_tmpdir);
+                LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
+                std::vector<std::atomic_int> replicaCount(fullCount);
+                std::vector<std::atomic_int> postingListSize(headVectorIDS.size());
+                for (auto& pls : postingListSize) pls = 0;
+                std::unordered_set<int> emptySet;
+                SizeType batchSize = (fullCount + p_opts.m_batches - 1) / p_opts.m_batches;
+
+                if (p_opts.m_batches > 1) selections.SaveBatch();
+                {
+                    SearchDefault<ValueType> searcher;
+                    LOG(Helper::LogLevel::LL_Info, "Start setup index...\n");
+                    ByteArray myByteArray;
+                    searcher.Setup(p_opts, myByteArray);
+
+                    LOG(Helper::LogLevel::LL_Info, "Setup index finish, start setup hint...\n");
+                    searcher.SetHint(numThreads, candidateNum, false, p_opts);
+
+                    TimeUtils::StopW rngw;
+                    LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
+                    SizeType sampleSize = p_opts.m_samples;
+                    SizeType sampleK = candidateNum;
+                    float sampleE = 1e-6f;
+                    std::vector<SizeType> samples(sampleSize, 0);
+                    std::vector<SizeType> recalls(sampleSize, 0);
+                    for (int i = 0; i < p_opts.m_batches; i++) {
+                        SizeType start = i * batchSize;
+                        SizeType end = min(start + batchSize, fullCount);
+                        auto fullVectors = vectorReader->GetVectorSet(start, end);
+                        if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine) fullVectors->Normalize(p_opts.m_iNumberOfThreads);
+
+                        if (p_opts.m_batches > 1) {
+                            selections.LoadBatch(static_cast<size_t>(start)* p_opts.m_replicaCount, static_cast<size_t>(end)* p_opts.m_replicaCount);
+                            emptySet.clear();
+                            for (auto vid : headVectorIDS) {
+                                if (vid >= start && vid < end) emptySet.insert(vid - start);
+                            }
+                        }
+                        else {
+                            emptySet = headVectorIDS;
+                        }
+
+                        int sampleNum = 0;
+                        for (int j = start; j < end && sampleNum < sampleSize; j++)
                         {
-                            COMMON::QueryResultSet<ValueType> resultSet(NULL, candidateNum);
-                            SearchStats searchStats;
+                            if (headVectorIDS.count(j) == 0) samples[sampleNum++] = j - start;
+                        }
 
-                            size_t rngFailedCount = 0;
-
-                            while (true)
+#pragma omp parallel for schedule(dynamic)
+                        for (int j = 0; j < sampleNum; j++)
+                        {
+                            COMMON::QueryResultSet<void> sampleANN(nullptr, sampleK);
+                            COMMON::QueryResultSet<void> sampleTruth(nullptr, sampleK);
+                            void* reconstructVector = nullptr;
+                            if (SPTAG::COMMON::DistanceUtils::Quantizer)
                             {
-                                int fullID = nextFullID.fetch_add(1);
-                                if (fullID >= fullVectors->Count())
-                                {
-                                    break;
-                                }
-
-                                if (headVectorIDS.count(fullID) > 0)
-                                {
-                                    continue;
-                                }
-
-                                ValueType* buffer = reinterpret_cast<ValueType*>(fullVectors->GetVector(fullID));
-                                resultSet.SetTarget(buffer);
-                                resultSet.Reset();
-
-                                searcher.Search(resultSet, searchStats);
-
-                                size_t selectionOffset = static_cast<size_t>(fullID)* p_opts.m_replicaCount;
-
-                                BasicResult* queryResults = resultSet.GetResults();
-                                for (int i = 0; i < candidateNum && replicaCount[fullID] < p_opts.m_replicaCount; ++i)
-                                {
-                                    if (queryResults[i].VID == -1)
-                                    {
-                                        break;
-                                    }
-
-                                    // RNG Check.
-                                    bool rngAccpeted = true;
-                                    for (int j = 0; j < replicaCount[fullID]; ++j)
-                                    {
-                                        // VQANNSearch::QueryResultSet<ValueType> resultSet(NULL, candidateNum);
-
-                                        float nnDist = searcher.HeadIndex()->ComputeDistance(
-                                            searcher.HeadIndex()->GetSample(queryResults[i].VID),
-                                            searcher.HeadIndex()->GetSample(selections[selectionOffset + j].headID));
-
-                                        // LOG(Helper::LogLevel::LL_Info,  "NNDist: %f Original: %f\n", nnDist, queryResults[i].Score);
-                                        if (nnDist <= queryResults[i].Dist)
-                                        {
-                                            rngAccpeted = false;
-                                            break;
-                                        }
-                                    }
-
-                                    if (!rngAccpeted)
-                                    {
-                                        ++rngFailedCount;
-                                        continue;
-                                    }
-
-                                    ++postingListSize[queryResults[i].VID];
-
-                                    selections[selectionOffset + replicaCount[fullID]].headID = queryResults[i].VID;
-                                    selections[selectionOffset + replicaCount[fullID]].fullID = fullID;
-                                    selections[selectionOffset + replicaCount[fullID]].distance = queryResults[i].Dist;
-									selections[selectionOffset + replicaCount[fullID]].order = (char)replicaCount[fullID];
-                                    ++replicaCount[fullID];
-                                }
+                                reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                                SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*) fullVectors->GetVector(samples[j]), reconstructVector);
+                                sampleANN.SetTarget(reconstructVector);
+                                sampleTruth.SetTarget(reconstructVector);
+                            }
+                            else 
+                            {
+                                sampleANN.SetTarget(fullVectors->GetVector(samples[j]));
+                                sampleTruth.SetTarget(fullVectors->GetVector(samples[j]));
                             }
 
-                            rngFailedCountTotal += rngFailedCount;
-                        });
+                            searcher.HeadIndex()->SearchIndex(sampleANN);
+                            for (SizeType y = 0; y < searcher.HeadIndex()->GetNumSamples(); y++)
+                            {
+                                float dist = searcher.HeadIndex()->ComputeDistance(sampleTruth.GetQuantizedTarget(), searcher.HeadIndex()->GetSample(y));
+                                sampleTruth.AddPoint(y, dist);
+                            }
+                            sampleTruth.SortResult();
+
+                            recalls[j] = 0;
+                            std::vector<bool> visited(sampleK, false);
+                            for (SizeType y = 0; y < sampleK; y++) 
+                            {
+                                for (SizeType z = 0; z < sampleK; z++) 
+                                {
+                                    if (visited[z]) continue;
+
+                                    if (fabs(sampleANN.GetResult(z)->Dist - sampleTruth.GetResult(y)->Dist) < sampleE) 
+                                    {
+                                        recalls[j]++;
+                                        visited[z] = true;
+                                        break;
+                                    }
+                               }
+                            }
+                            if (reconstructVector)
+                            {
+                                _mm_free(reconstructVector);
+                            }
+                        }
+                        float acc = 0;
+                        for (int j = 0; j < sampleNum; j++) acc += float(recalls[j]);
+                        acc = acc / sampleNum / sampleK;
+
+                        LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), sampleK, acc);
+                        searcher.HeadIndex()->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opts.m_replicaCount, numThreads, p_opts.m_gpuSSDNumTrees, p_opts.m_gpuSSDLeafSize, p_opts.m_rngFactor, p_opts.m_numGPUs);
+
+                        for (SizeType j = start; j < end; j++) {
+                            replicaCount[j] = 0;
+                            size_t vecOffset = j * (size_t)p_opts.m_replicaCount;
+                            if (headVectorIDS.count(j) == 0) {
+                                for (int resNum = 0; resNum < p_opts.m_replicaCount && selections[vecOffset + resNum].node != INT_MAX; resNum++) {
+                                    ++postingListSize[selections[vecOffset + resNum].node];
+                                    selections[vecOffset + resNum].tonode = j;
+                                    //selections[vecOffset + resNum].order = (char)resNum;
+                                    ++replicaCount[j];
+                                }
+                            }
+                        }
+
+                        if (p_opts.m_batches > 1) selections.SaveBatch();
+                    }
+
+                    double rngElapsedMinutes = rngw.getElapsedMin();
+                    LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", rngElapsedMinutes);
                 }
 
-                for (int tid = 0; tid < numThreads; ++tid)
-                {
-                    threads[tid].join();
-                }
-
-                LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. RNG failed count: %llu\n", static_cast<uint64_t>(rngFailedCountTotal.load()));
-
-                std::sort(selections.begin(), selections.end(), g_edgeComparer);
-
+                if (p_opts.m_batches > 1) selections.LoadBatch(0, static_cast<size_t>(fullCount)* p_opts.m_replicaCount);
+                std::sort(selections.m_selections.begin(), selections.m_selections.end(), g_edgeComparer);
+                
                 int postingSizeLimit = INT_MAX;
                 if (p_opts.m_postingPageLimit > 0)
                 {
-                    postingSizeLimit = static_cast<int>(p_opts.m_postingPageLimit * c_pageSize / (fullVectors->PerVectorDataSize() + sizeof(int)));
+                    postingSizeLimit = static_cast<int>(p_opts.m_postingPageLimit * c_pageSize / vectorInfoSize);
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", postingSizeLimit);
@@ -528,7 +606,8 @@ namespace SPTAG {
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
-
+                
+#pragma omp parallel for schedule(dynamic)
                 for (int i = 0; i < postingListSize.size(); ++i)
                 {
                     if (postingListSize[i] <= postingSizeLimit)
@@ -536,39 +615,39 @@ namespace SPTAG {
                         continue;
                     }
 
-                    std::size_t selectIdx = std::lower_bound(selections.begin(), selections.end(), i, g_edgeComparer) - selections.begin();
-					/*
-					int deletenum = postingListSize[i] - postingSizeLimit;
-					for (char remove = p_opts.m_replicaCount - 1; deletenum > 0 && remove > 0; remove--)
-					{
-						for (int dropID = postingListSize[i] - 1; deletenum > 0 && dropID >= 0; --dropID)
-						{
-							if (selections[selectIdx + dropID].order == remove) {
-								selections[selectIdx + dropID].order = -1;
-								--replicaCount[selections[selectIdx + dropID].fullID];
-								deletenum--;
-							}
-						}
-					}
+                    std::size_t selectIdx = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), i, g_edgeComparer) - selections.m_selections.begin();
+                    /*
+                    int deletenum = postingListSize[i] - postingSizeLimit;
+                    for (char remove = p_opts.m_replicaCount - 1; deletenum > 0 && remove > 0; remove--)
+                    {
+                        for (int dropID = postingListSize[i] - 1; deletenum > 0 && dropID >= 0; --dropID)
+                        {
+                            if (selections.m_selections[selectIdx + dropID].order == remove) {
+                                selections.m_selections[selectIdx + dropID].order = -1;
+                                --replicaCount[selections.m_selections[selectIdx + dropID].tonode];
+                                deletenum--;
+                            }
+                        }
+                    }
 
-					for (int iid = 0; iid < postingSizeLimit + deletenum; iid++) {
-						if (selections[selectIdx + iid].order < 0) {
-							for (int ij = iid + 1; ij < postingListSize[i]; ij++) {
-								if (selections[selectIdx + ij].order >= 0) {
-									std::swap(selections[selectIdx + iid], selections[selectIdx + ij]);
-									break;
-								}
-							}
-						}
-					}
-					*/
-					
+                    for (int iid = 0; iid < postingSizeLimit + deletenum; iid++) {
+                        if (selections.m_selections[selectIdx + iid].order < 0) {
+                            for (int ij = iid + 1; ij < postingListSize[i]; ij++) {
+                                if (selections.m_selections[selectIdx + ij].order >= 0) {
+                                    std::swap(selections.m_selections[selectIdx + iid], selections.m_selections[selectIdx + ij]);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    */
+                    
                     for (size_t dropID = postingSizeLimit; dropID < postingListSize[i]; ++dropID)
                     {
-                        int fullID = selections[selectIdx + dropID].fullID;
-                        --replicaCount[fullID];
+                        int tonode = selections.m_selections[selectIdx + dropID].tonode;
+                        --replicaCount[tonode];
                     }
-					
+                    
                     postingListSize[i] = postingSizeLimit;
                 }
 
@@ -606,22 +685,43 @@ namespace SPTAG {
                     }
                 }
 
-                // VectorSize + VectorIDSize
-                size_t vectorInfoSize = sizeof(ValueType) * fullVectors->Dimension() + sizeof(int);
+                size_t postingFileSize = (postingListSize.size() + COMMON_OPTS.m_ssdIndexFileNum - 1) / COMMON_OPTS.m_ssdIndexFileNum;
 
-                std::unique_ptr<int[]> postPageNum;
-                std::unique_ptr<std::uint16_t[]> postPageOffset;
-                std::vector<int> postingOrderInIndex;
-                SelectPostingOffset(vectorInfoSize, postingListSize, postPageNum, postPageOffset, postingOrderInIndex);
+                std::vector<size_t> selectionsBatchOffset(COMMON_OPTS.m_ssdIndexFileNum + 1, 0);
+                for (int i = 0; i < COMMON_OPTS.m_ssdIndexFileNum; i++) {
+                    size_t curPostingListEnd = min(postingListSize.size(), (i + 1) * postingFileSize);
+                    selectionsBatchOffset[i + 1] = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), (SizeType)curPostingListEnd, g_edgeComparer) - selections.m_selections.begin();
+                }
 
-                OutputSSDIndexFile(outputFile,
-                    vectorInfoSize,
-                    postingListSize,
-                    selections,
-                    postPageNum,
-                    postPageOffset,
-                    postingOrderInIndex,
-                    fullVectors);
+                if (COMMON_OPTS.m_ssdIndexFileNum > 1) selections.SaveBatch();
+
+                auto fullVectors = vectorReader->GetVectorSet();
+                if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine && !SPTAG::COMMON::DistanceUtils::Quantizer) fullVectors->Normalize(p_opts.m_iNumberOfThreads);
+     
+                for (int i = 0; i < COMMON_OPTS.m_ssdIndexFileNum; i++) {
+                    size_t curPostingListOffSet = i * postingFileSize;
+                    size_t curPostingListEnd = min(postingListSize.size(), (i + 1) * postingFileSize);
+                    std::vector<int> curPostingListSizes(
+                        postingListSize.begin() + curPostingListOffSet,
+                        postingListSize.begin() + curPostingListEnd);
+
+                    std::unique_ptr<int[]> postPageNum;
+                    std::unique_ptr<std::uint16_t[]> postPageOffset;
+                    std::vector<int> postingOrderInIndex;
+                    SelectPostingOffset(vectorInfoSize, curPostingListSizes, postPageNum, postPageOffset, postingOrderInIndex);
+                    
+                    if (COMMON_OPTS.m_ssdIndexFileNum > 1) selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]);
+
+                    OutputSSDIndexFile((i == 0)? outputFile : outputFile + "_" + std::to_string(i),
+                        vectorInfoSize,
+                        curPostingListSizes,
+                        selections,
+                        postPageNum,
+                        postPageOffset,
+                        postingOrderInIndex,
+                        fullVectors,
+                        curPostingListOffSet);
+                }
 
                 double elapsedMinutes = sw.getElapsedMin();
                 LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedMinutes, elapsedMinutes / 60.0);

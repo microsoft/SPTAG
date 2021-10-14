@@ -20,14 +20,31 @@ namespace SPTAG {
 				int m_replicaCount;
 				int m_postingPageLimit;
 				bool m_outputEmptyReplicaID;
+				int m_batches;
+				std::string m_tmpdir;
+				float m_rngFactor;
+				int m_samples;
+
+				// GPU building
+				int m_gpuSSDNumTrees;
+				int m_gpuSSDLeafSize;
+                                int m_numGPUs;
 
 				// Searching
 				std::string m_searchResult;
 				std::string m_logFile;
 				int m_qpsLimit;
 				int m_resultNum;
+				int m_truthResultNum;
 				int m_queryCountLimit;
 				int m_maxCheck;
+				int m_hashExp;
+				float m_maxDistRatio;
+				int m_ioThreads;
+				int m_searchPostingPageLimit;
+				int m_rerank;
+				bool m_enableADC;
+				std::string m_rerankFilePath;
 
 				Options() {
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \

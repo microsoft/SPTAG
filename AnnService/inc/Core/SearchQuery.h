@@ -65,6 +65,10 @@ public:
 
     ~QueryResult()
     {
+        if (m_quantizedTarget)
+        {
+            _mm_free(m_quantizedTarget);
+        }
     }
 
 
@@ -73,6 +77,7 @@ public:
         m_target = p_target;
         m_resultNum = p_resultNum;
         m_withMeta = p_withMeta;
+        m_quantizedTarget = nullptr;
 
         m_results = Array<BasicResult>::Alloc(p_resultNum);
     }
@@ -93,6 +98,11 @@ public:
     inline void SetTarget(const void* p_target)
     {
         m_target = p_target;
+        if (m_quantizedTarget)
+        {
+            _mm_free(m_quantizedTarget);
+        }
+        m_quantizedTarget = nullptr;
     }
 
 
@@ -181,6 +191,8 @@ public:
 
 protected:
     const void* m_target;
+
+    void* m_quantizedTarget;
 
     int m_resultNum;
 

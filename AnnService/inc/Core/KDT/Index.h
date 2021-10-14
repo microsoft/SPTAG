@@ -39,8 +39,8 @@ namespace SPTAG
             class RebuildJob : public Helper::ThreadPool::Job {
             public:
                 RebuildJob(COMMON::Dataset<T>* p_data, COMMON::KDTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_data(p_data), m_tree(p_tree), m_graph(p_graph) {}
-                void exec() {
-                    m_tree->Rebuild<T>(*m_data);
+                void exec(IAbortOperation* p_abort) {
+                        m_tree->Rebuild<T>(*m_data, p_abort);
                 }
             private:
                 COMMON::Dataset<T>* m_data;
@@ -94,7 +94,19 @@ namespace SPTAG
 
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                if (m_iDistCalcMethod == DistCalcMethod::Cosine) {
+                    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+                        m_iBaseSquare = SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() * SPTAG::COMMON::DistanceUtils::Quantizer->GetBase();
+                    }
+                    else
+                    {
+                        m_iBaseSquare = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
+                    }
+                }
+                else
+                {
+                    m_iBaseSquare = 1;
+                }
             }
 
             ~Index() {}
@@ -141,7 +153,7 @@ namespace SPTAG
                 return std::move(files);
             }
 
-            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout) const;
+            ErrorCode SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configout);
             ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams);
 
             ErrorCode LoadConfig(Helper::IniReader& p_reader);

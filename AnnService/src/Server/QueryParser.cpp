@@ -148,7 +148,7 @@ QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
 
     if (vectorStrBegin == nullptr || 0 == estDimension)
     {
-        return ErrorCode::Fail;
+        return ErrorCode::Success;
     }
 
     m_vectorElements.reserve(estDimension);

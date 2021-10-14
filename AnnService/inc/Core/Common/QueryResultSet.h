@@ -5,6 +5,7 @@
 #define _SPTAG_COMMON_QUERYRESULTSET_H_
 
 #include "../SearchQuery.h"
+#include "DistanceUtils.h"
 #include <algorithm>
 
 namespace SPTAG
@@ -37,14 +38,40 @@ public:
     {
     }
 
+    ~QueryResultSet()
+    {
+    }
+
     inline void SetTarget(const T *p_target)
     {
         m_target = p_target;
+        if (m_quantizedTarget)
+        {
+            _mm_free(m_quantizedTarget);
+        }
+        m_quantizedTarget = nullptr;
     }
 
     inline const T* GetTarget() const
     {
         return reinterpret_cast<const T*>(m_target);
+    }
+
+    T* GetQuantizedTarget()
+    {
+        if (COMMON::DistanceUtils::Quantizer)
+        {
+            if (!m_quantizedTarget)
+            {
+                m_quantizedTarget = _mm_malloc(COMMON::DistanceUtils::Quantizer->QuantizeSize(), ALIGN);
+                COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+            }
+            return reinterpret_cast<T*>(m_quantizedTarget);
+        }
+        else
+        {
+            return (T*)reinterpret_cast<const T*>(m_target);
+        }
     }
 
     inline float worstDist() const

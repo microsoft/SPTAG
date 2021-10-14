@@ -5,7 +5,7 @@
 // DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr)
 DefineBasicParameter(m_valueType, SPTAG::VectorValueType, SPTAG::VectorValueType::Undefined, "ValueType")
 DefineBasicParameter(m_distCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Undefined, "DistCalcMethod")
-DefineBasicParameter(m_indexAlgoType, SPTAG::IndexAlgoType, SPTAG::IndexAlgoType::BKT, "IndexAlgoType")
+DefineBasicParameter(m_indexAlgoType, SPTAG::IndexAlgoType, SPTAG::IndexAlgoType::KDT, "IndexAlgoType")
 DefineBasicParameter(m_dim, SPTAG::DimensionType, -1, "Dim")
 DefineBasicParameter(m_vectorPath, std::string, std::string(""), "VectorPath")
 DefineBasicParameter(m_vectorType, SPTAG::VectorFileType, SPTAG::VectorFileType::DEFAULT, "VectorType")
@@ -27,5 +27,8 @@ DefineBasicParameter(m_headIDFile, std::string, std::string("SPTAGHeadVectorIDs.
 DefineBasicParameter(m_headVectorFile, std::string, std::string("SPTAGHeadVectors.bin"), "HeadVectors")
 DefineBasicParameter(m_headIndexFolder, std::string, std::string("SPTAGHeadIndex"), "HeadIndexFolder")
 DefineBasicParameter(m_ssdIndex, std::string, std::string("SPTAGFullList.bin"), "SSDIndex")
+DefineBasicParameter(m_deleteHeadVectors, bool, false, "DeleteHeadVectors")
+DefineBasicParameter(m_ssdIndexFileNum, int, 1, "SSDIndexFileNum")
+DefineBasicParameter(m_quantizerFilePath, std::string, std::string(), "QuantizerFilePath")
 
 #endif

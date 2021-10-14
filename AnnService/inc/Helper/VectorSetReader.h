@@ -43,7 +43,7 @@ public:
 
     virtual ErrorCode LoadFile(const std::string& p_filePath) = 0;
 
-    virtual std::shared_ptr<VectorSet> GetVectorSet() const = 0;
+    virtual std::shared_ptr<VectorSet> GetVectorSet(SizeType start = 0, SizeType end = -1) const = 0;
 
     virtual std::shared_ptr<MetadataSet> GetMetadataSet() const = 0;
 

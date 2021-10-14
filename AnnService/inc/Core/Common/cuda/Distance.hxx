@@ -29,8 +29,13 @@
 #include<vector>
 #include<climits>
 #include<float.h>
+#include<unordered_set>
+
+#include "inc/Core/VectorIndex.h"
 
 using namespace std;
+
+using namespace SPTAG;
 
 // Templated infinity value
 template<typename T> __host__ __device__ T INFTY() {}
@@ -104,7 +109,7 @@ class Point {
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
-  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
+//  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
 
@@ -113,6 +118,11 @@ class Point {
       total[1] += ((SUMTYPE)((SUMTYPE)coords[i+1] * (SUMTYPE)other->coords[i+1]));
     }
     return (SUMTYPE)1.0 - (total[0]+total[1]);
+  }
+
+  __forceinline__ __device__ SUMTYPE dist(Point<T,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
   }
 
 };
@@ -226,6 +236,11 @@ class Point<uint8_t, SUMTYPE, Dim> {
   }
 #endif
 
+  __forceinline__ __device__ SUMTYPE dist(Point<uint8_t,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
+  }
+
 };
 
 // Specialized version of Point structure for SIGNED 1-byte datatype (int8)
@@ -288,21 +303,21 @@ class Point<int8_t, SUMTYPE, Dim> {
   __device__ __host__ SUMTYPE l2(Point<int8_t,SUMTYPE,Dim>* other) {
 
     SUMTYPE totals[4] = {0,0,0,0};
-    SUMTYPE temp[4];
-    SUMTYPE temp_other[4];
+    int32_t temp[4];
+    int32_t temp_other[4];
 
     for(int i=0; i<Dim/4; ++i) {
-      temp[0] = (coords[i] & 0x000000FF);
-      temp_other[0] = (other->coords[i] & 0x000000FF);
+      temp[0] = (int8_t)(coords[i] & 0x000000FF);
+      temp_other[0] = (int8_t)(other->coords[i] & 0x000000FF);
 
-      temp[1] = (coords[i] & 0x0000FF00) >> 8;
-      temp_other[1] = (other->coords[i] & 0x0000FF00) >> 8;
+      temp[1] = (int8_t)((coords[i] & 0x0000FF00) >> 8);
+      temp_other[1] = (int8_t)((other->coords[i] & 0x0000FF00) >> 8);
 
-      temp[2] = (coords[i] & 0x00FF0000) >> 16;
-      temp_other[2] = (other->coords[i] & 0x00FF0000) >> 16;
+      temp[2] = (int8_t)((coords[i] & 0x00FF0000) >> 16);
+      temp_other[2] = (int8_t)((other->coords[i] & 0x00FF0000) >> 16);
 
-      temp[3] = (coords[i]) >> 24;
-      temp_other[3] = (other->coords[i])>> 24;
+      temp[3] = (int8_t)((coords[i]) >> 24);
+      temp_other[3] = (int8_t)((other->coords[i])>> 24);
 
       totals[0] += (temp[0]-temp_other[0])*(temp[0]-temp_other[0]);
       totals[1] += (temp[1]-temp_other[1])*(temp[1]-temp_other[1]);
@@ -346,6 +361,12 @@ class Point<int8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)1) - prod[0];
   }
 #endif
+
+  __forceinline__ __device__ SUMTYPE dist(Point<int8_t,SUMTYPE,Dim>* other, int metric) {
+    if(metric == 0) return l2(other);
+    else return cosine(other);
+  }
+
 };
 
 /*********************************************************************
@@ -360,5 +381,60 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
   return pointArray;
 } 
 
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t rows, int exact_dim) {
+  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+
+  T* data;
+
+  for(int i=0; i<rows; i++) {
+    data = (T*)index->GetSample(i);
+    pointArray[i].loadChunk(data, exact_dim);
+  }
+  return pointArray;
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ void extractHeadPoints(T* data, Point<T,SUMTYPE,Dim>* headPoints, size_t totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
+    int headIdx=0;
+    for(size_t i=0; i<totalRows; i++) {
+        if(headVectorIDS.count(i) != 0) {
+            headPoints[headIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            headPoints[headIdx].id = i;
+            headIdx++;
+        }
+    }
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ void extractTailPoints(T* data, Point<T,SUMTYPE,Dim>* tailPoints, int totalRows, std::unordered_set<int> headVectorIDS, int exact_dim) {
+    int tailIdx=0;
+    for(size_t i=0; i<totalRows; i++) {
+        if(headVectorIDS.count(i) == 0) {
+            tailPoints[tailIdx].loadChunk(&data[i*exact_dim], exact_dim);
+            tailPoints[tailIdx].id = i;
+            tailIdx++;
+        }
+    }
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ void extractFullVectorPoints(T* data, Point<T,SUMTYPE,Dim>* tailPoints, size_t totalRows, int exact_dim) {
+
+    for(size_t i=0; i<totalRows; ++i) {
+        tailPoints[i].loadChunk(&data[i*exact_dim], exact_dim);
+        tailPoints[i].id = i;
+    }
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ void extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex, Point<T,SUMTYPE,Dim>* headPoints, int exact_dim) {
+    size_t headRows = headIndex->GetNumSamples();
+
+    for(size_t i=0; i<headRows; ++i) {
+        headPoints[i].loadChunk((T*)headIndex->GetSample(i), exact_dim);
+        headPoints[i].id = i;
+    }
+}
 
 #endif

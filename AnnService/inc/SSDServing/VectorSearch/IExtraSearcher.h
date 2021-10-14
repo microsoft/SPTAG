@@ -1,21 +1,27 @@
 #pragma once
 #include "inc/Core/VectorIndex.h"
-
-#include "inc/SSDServing/VectorSearch/SearchStats.h"
-#include "inc/SSDServing/VectorSearch/VectorSearchUtils.h"
-#include "inc/SSDServing/VectorSearch/Options.h"
+#include "inc/Core/Common/WorkSpace.h"
 #include "inc/Core/Common/QueryResultSet.h"
-#include "inc/SSDServing/VectorSearch/DiskListCommonUtils.h"
-#include "inc/SSDServing/VectorSearch/DiskFileReader.h"
+#include "inc/SSDServing/VectorSearch/SearchStats.h"
+
+#ifndef _MSC_VER
+#include "inc/SSDServing/VectorSearch/AsyncFileReaderLinux.h"
+#else
+#include "inc/SSDServing/VectorSearch/AsyncFileReader.h"
+#endif
+
+#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
+#include <malloc.h>
+#else
+#include <mm_malloc.h>
+#endif // defined(__GNUC__)
 
 #include <memory>
 #include <vector>
-#include <functional>
-#include <windows.h>
 
 namespace SPTAG {
     namespace SSDServing {
-        namespace VectorSearch{
+        namespace VectorSearch {
             template<typename T>
             class PageBuffer
             {
@@ -30,7 +36,7 @@ namespace SPTAG {
                     if (m_pageBufferSize < p_size)
                     {
                         m_pageBufferSize = p_size;
-                        m_pageBuffer.reset(new T[m_pageBufferSize], std::default_delete<T[]>());
+                        m_pageBuffer.reset(static_cast<T*>(_mm_malloc(sizeof(T) * m_pageBufferSize, 512)), [=](T* ptr) { _mm_free(ptr); });
                     }
                 }
 
@@ -46,28 +52,22 @@ namespace SPTAG {
                 std::size_t m_pageBufferSize;
             };
 
-            struct DiskListRequest : public DiskFileReadRequest
+            struct DiskListRequest : public SPTAG::Helper::AsyncReadRequest
             {
-                bool m_success;
-
-                uint32_t m_requestID;
+                void* m_pListInfo;
             };
             
             struct ExtraWorkSpace
             {
-                ExtraWorkSpace() {
-                    m_processIocp.Reset(::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, 0));
-                }
+                ExtraWorkSpace() {}
 
-                ~ExtraWorkSpace() {
-
-                }
+                ~ExtraWorkSpace() {}
 
                 std::vector<int> m_postingIDs;
 
-                HashBasedDeduper m_deduper;
+                COMMON::OptHashPosVector m_deduper;
 
-                HandleWrapper m_processIocp;
+                RequestQueue m_processIocp;
 
                 std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
 
@@ -88,20 +88,12 @@ namespace SPTAG {
                 {
                 }
 
-                virtual void InitWorkSpace(ExtraWorkSpace* p_space, int p_resNumHint) = 0;
-
-                virtual void FinishPrepare()
-                {
-                }
+                virtual size_t GetMaxListSize() const = 0;
 
                 virtual void Search(ExtraWorkSpace* p_exWorkSpace,
                     COMMON::QueryResultSet<ValueType>& p_queryResults,
                     std::shared_ptr<VectorIndex> p_index,
                     SearchStats& p_stats) = 0;
-
-                virtual void Search(ExtraWorkSpace* p_exWorkSpace,
-                    COMMON::QueryResultSet<ValueType>& p_queryResults,
-                    std::shared_ptr<VectorIndex> p_index) = 0;
             };
         }
     }

@@ -112,25 +112,10 @@
     <ClInclude Include="inc\SSDServing\VectorSearch\BuildSsdIndex.h">
       <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\VectorSearchUtils.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="inc\SSDServing\VectorSearch\ParameterDefinitionList.h">
       <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchSsdIndex.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskListCommonUtils.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskFileReader.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\PrioritizedDiskFileReader.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskAccessUtils.h">
       <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h">
@@ -147,6 +132,9 @@
     </ClInclude>
     <ClInclude Include="inc\SSDServing\IndexBuildManager\Utils.h">
       <Filter>IndexBuildManager\Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\SSDServing\VectorSearch\AsyncFileReader.h">
+      <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -168,26 +156,11 @@
     <CudaCompile Include="src\SSDServing\VectorSearch\BootVectorSearch.cpp">
       <Filter>VectorSearch\Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="src\SSDServing\VectorSearch\DiskFileReader.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\SSDServing\VectorSearch\PrioritizedDiskFileReader.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\SSDServing\VectorSearch\DiskAccessUtils.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </CudaCompile>
     <CudaCompile Include="src\SSDServing\VectorSearch\TimeUtils.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\SSDServing\VectorSearch\VectorSearchUtils.cpp">
       <Filter>VectorSearch\Source Files</Filter>
     </CudaCompile>
     <CudaCompile Include="src\SSDServing\IndexBuildManager\Utils.cpp">
       <Filter>IndexBuildManager\Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\SSDServing\VectorSearch\ExtraFullGraphSearcher.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>

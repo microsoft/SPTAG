@@ -7,6 +7,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 #include <memory>
+#include <inc/Core/Common/DistanceUtils.h>
 
 using namespace SPTAG;
 
@@ -19,6 +20,8 @@ public:
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
+        AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
+        AddOptionalOption(m_reconstructType, "-rt", "--reconstructtype", "Reconstruction value type for quantized vectors. Default is float.");
     }
 
     ~BuilderOptions() {}
@@ -30,6 +33,10 @@ public:
     SPTAG::IndexAlgoType m_indexAlgoType;
 
     std::string m_builderConfigFile;
+
+    std::string m_quantizerFile;
+
+    VectorValueType m_reconstructType;
 };
 
 int main(int argc, char* argv[])
@@ -38,6 +45,21 @@ int main(int argc, char* argv[])
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
+    }
+    if (!options->m_quantizerFile.empty())
+    {
+        auto ptr = SPTAG::f_createIO();
+        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+            exit(1);
+        }
+        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
+        if (code != ErrorCode::Success)
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+            exit(1);
+        }
     }
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
@@ -74,6 +96,9 @@ int main(int argc, char* argv[])
     {
         indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
     }
+
+    LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
+    LOG(Helper::LogLevel::LL_Info, "Set ReconstructType = %s\n", SPTAG::Helper::Convert::ConvertToString(options->m_reconstructType));
 
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))

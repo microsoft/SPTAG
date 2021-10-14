@@ -20,7 +20,7 @@ public:
 
     virtual ErrorCode LoadFile(const std::string& p_filePaths);
 
-    virtual std::shared_ptr<VectorSet> GetVectorSet() const;
+    virtual std::shared_ptr<VectorSet> GetVectorSet(SizeType start = 0, SizeType end = -1) const;
 
     virtual std::shared_ptr<MetadataSet> GetMetadataSet() const;
 

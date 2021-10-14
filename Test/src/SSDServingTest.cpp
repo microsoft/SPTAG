@@ -119,10 +119,10 @@ std::string CreateBaseConfig(SPTAG::VectorValueType p_valueType, SPTAG::DistCalc
 	config << "TruthType=" << SPTAG::Helper::Convert::ConvertToString(p_truthType) << std::endl;
 	config << "GenerateTruth=" << SPTAG::Helper::Convert::ConvertToString(p_generateTruth) << std::endl;
 	config << "IndexDirectory=" << "zbtest" << std::endl;
-	config << "HeadVectorIDs=zbtest\\" << p_headIDFile << std::endl;
-	config << "HeadVectors=zbtest\\" << p_headVectorsFile << std::endl;
-	config << "HeadIndexFolder=zbtest\\" << p_headIndexFolder << std::endl;
-	config << "SSDIndex=zbtest\\" << p_ssdIndex << std::endl;
+	config << "HeadVectorIDs=" << p_headIDFile << std::endl;
+	config << "HeadVectors=" << p_headVectorsFile << std::endl;
+	config << "HeadIndexFolder=" << p_headIndexFolder << std::endl;
+	config << "SSDIndex=" << p_ssdIndex << std::endl;
 	config << std::endl;
 	return config.str();
 }
@@ -325,6 +325,47 @@ void TestSearchSSDIndex(
 	config.close();
 
 	SPTAG::SSDServing::BootProgram(configName.c_str());
+}
+
+void RunFromMap() {
+	std::map<std::string, std::map<std::string, std::string>> myMap;
+	myMap["Base"]["IndexAlgoType"] = "KDT";
+	std::string dataFilePath = "sddtest/vectors_Int8_DEFAULT.bin";
+	std::string indexFilePath = "zbtest";
+	SPTAG::SSDServing::BootProgram(
+		true, 
+		&myMap, 
+		nullptr, 
+		SPTAG::VectorValueType::Int8, 
+		SPTAG::DistCalcMethod::L2, 
+		dataFilePath.c_str(), 
+		indexFilePath.c_str()
+	);
+
+	std::ostringstream config;
+	config << "[Base]" << std::endl;
+	config << "ValueType=" << "Int8" << std::endl;
+	config << "DistCalcMethod=" << "L2" << std::endl;
+	config << "IndexAlgoType=" << "KDT" << std::endl;
+	config << "VectorPath=" << "sddtest/vectors_Int8_DEFAULT.bin"  << std::endl;
+	config << "QueryPath=" << "sddtest/vectors_Int8_DEFAULT.query" << std::endl;
+	config << "QueryType=" << "DEFAULT" << std::endl;
+	config << "TruthPath=" << "sddtest/vectors_Int8_L2_DEFAULT_DEFAULT.truth" << std::endl;
+	config << "TruthType=" << "DEFAULT" << std::endl;
+	config << "IndexDirectory=" << "zbtest" << std::endl;
+	config << "GenerateTruth=" << "true" << std::endl;
+	config << std::endl;
+
+	TestSearchSSDIndex(
+		"run_from_map_search_config.ini",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		config.str()
+		);
 }
 
 BOOST_AUTO_TEST_SUITE(SSDServingTest)
@@ -614,5 +655,9 @@ SCSSD(Int16, L2, KDT, XVEC, XVEC)
 SCSSD(Int16, Cosine, BKT, XVEC, XVEC)
 SCSSD(Int16, Cosine, KDT, XVEC, XVEC)
 #undef SCSSD
+
+BOOST_AUTO_TEST_CASE(RUN_FROM_MAP) {
+	RunFromMap();
+}
 
 BOOST_AUTO_TEST_SUITE_END()

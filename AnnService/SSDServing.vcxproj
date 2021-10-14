@@ -26,12 +26,7 @@
     <ClCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp" />
     <ClCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp" />
     <ClCompile Include="src\SSDServing\VectorSearch\BootVectorSearch.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\DiskAccessUtils.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\DiskFileReader.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\ExtraFullGraphSearcher.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\PrioritizedDiskFileReader.cpp" />
     <ClCompile Include="src\SSDServing\VectorSearch\TimeUtils.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\VectorSearchUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h" />
@@ -52,16 +47,12 @@
     <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\BootVectorSearch.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\BuildSsdIndex.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskAccessUtils.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskFileReader.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\DiskListCommonUtils.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\ExtraFullGraphSearcher.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\IExtraSearcher.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\PrioritizedDiskFileReader.h" />
+    <ClInclude Include="inc\SSDServing\VectorSearch\AsyncFileReader.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchSsdIndex.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\VectorSearchUtils.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\Options.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchProcessor.h" />
@@ -88,13 +79,13 @@
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -140,12 +131,13 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_MBCS;_SCL_SECURE_NO_WARNINGS;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_$(OutputType);_DEBUG;_MBCS;_SCL_SECURE_NO_WARNINGS;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OpenMPSupport>true</OpenMPSupport>
+      <AdditionalOptions>/Zc:twoPhase- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

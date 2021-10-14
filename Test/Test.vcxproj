@@ -145,6 +145,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\ADCTest.cpp" />
     <ClCompile Include="src\AlgoTest.cpp" />
     <ClCompile Include="src\Base64HelperTest.cpp" />
     <ClCompile Include="src\CommonHelperTest.cpp" />
@@ -152,6 +153,8 @@
     <ClCompile Include="src\DistanceTest.cpp" />
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\PerfTest.cpp" />
+    <ClCompile Include="src\ReconstructIndexSimilarityTest.cpp" />
     <ClCompile Include="src\SSDServingTest.cpp" />
     <ClCompile Include="src\StringConvertTest.cpp" />
   </ItemGroup>

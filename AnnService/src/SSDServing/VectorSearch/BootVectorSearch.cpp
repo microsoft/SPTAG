@@ -4,9 +4,13 @@
 #include "inc/Helper/SimpleIniReader.h"
 
 namespace SPTAG {
+
+	
+	std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new SSDServing::VectorSearch::AsyncFileIO()); };
+	
 	namespace SSDServing {
 		namespace VectorSearch {
-			
+
 			ErrorCode Bootstrap(Options& opts) {
                 if (opts.m_buildSsdIndex)
                 {

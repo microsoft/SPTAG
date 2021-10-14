@@ -1,5 +1,7 @@
 #include <unordered_set>
+#include <unordered_map>
 #include <queue>
+#include <random>
 
 #include "inc/Core/Common/BKTree.h"
 
@@ -11,6 +13,8 @@
 namespace SPTAG {
 	namespace SSDServing {
 		namespace SelectHead_BKT {
+
+            std::mt19937 g_random;
 
             struct HeadCandidate
             {
@@ -305,13 +309,11 @@ namespace SPTAG {
                     }
                 }
 
-                int selectedCenterid;
                 if (childrenSize >= p_opts.m_selectThreshold)
                 {
                     if (node.centerid < (*p_tree)[0].centerid)
                     {
-                        selectedCenterid = node.centerid;
-                        p_selected.push_back(selectedCenterid);
+                        p_selected.push_back(node.centerid);
                     }
 
                     if (childrenSize > p_opts.m_splitThreshold)
@@ -322,10 +324,10 @@ namespace SPTAG {
                             });
 
                         size_t selectCnt = static_cast<size_t>(std::ceil(childrenSize * 1.0 / p_opts.m_splitFactor) + 0.5);
+                        //if (selectCnt > 1) selectCnt -= 1;
                         for (size_t i = 0; i < selectCnt && i < children.size(); ++i)
                         {
-                            selectedCenterid = (*p_tree)[children[i].first].centerid;
-                            p_selected.push_back(selectedCenterid);
+                            p_selected.push_back((*p_tree)[children[i].first].centerid);
                         }
                     }
 
@@ -335,16 +337,23 @@ namespace SPTAG {
                 return childrenSize;
             }
 
-
-
-            void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree,
+            void SelectHeadDynamically_Old(const std::shared_ptr<COMMON::BKTree> p_tree,
                 int p_vectorCount,
                 const Options& p_opts,
-                std::vector<int>& p_selected)
+                std::vector<int>& p_selected) 
             {
                 p_selected.clear();
                 p_selected.reserve(p_vectorCount);
 
+                if (CalcHeadCnt(p_opts.m_ratio, p_vectorCount) >= p_vectorCount)
+                {
+                    for (int i = 0; i < p_vectorCount; ++i)
+                    {
+                        p_selected.push_back(i);
+                    }
+
+                    return;
+                }
                 Options opts = p_opts;
 
                 int selectThreshold = p_opts.m_selectThreshold;
@@ -376,9 +385,9 @@ namespace SPTAG {
                             opts.m_splitThreshold,
                             diff * 100.0);
 
-                        if (minDiff > abs(diff))
+                        if (minDiff > fabs(diff))
                         {
-                            minDiff = abs(diff);
+                            minDiff = fabs(diff);
 
                             selectThreshold = opts.m_selectThreshold;
                             splitThreshold = opts.m_splitThreshold;
@@ -407,30 +416,202 @@ namespace SPTAG {
                 SelectHeadDynamicallyInternal(p_tree, 0, opts, p_selected);
                 std::sort(p_selected.begin(), p_selected.end());
                 p_selected.erase(std::unique(p_selected.begin(), p_selected.end()), p_selected.end());
-
-
             }
 
-			ErrorCode SelectHead(std::shared_ptr<VectorSet> vectorSet, std::shared_ptr<COMMON::BKTree> bkt, Options& opts, std::unordered_map<int, int>& counter) {
-                std::vector<int> selected;
+            void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree,
+                int p_vectorCount,
+                const Options& p_opts,
+                std::vector<int>& p_selected)
+            {
+                p_selected.clear();
+                p_selected.reserve(p_vectorCount);
+
+                if (CalcHeadCnt(p_opts.m_ratio, p_vectorCount) >= p_vectorCount)
+                {
+                    for (int i = 0; i < p_vectorCount; ++i)
+                    {
+                        p_selected.push_back(i);
+                    }
+
+                    return;
+                }
+
+                const double c_minSSRatio = 1.8;
+                const double c_maxSSRatio = 2.2;
+
+                Options opts = p_opts;
+
+                int selectThreshold = p_opts.m_selectThreshold;
+                int splitThreshold = p_opts.m_splitThreshold;
+
+                double minDiff = 100;
+
+                int trySelect = min(p_vectorCount, p_opts.m_selectThreshold);
+                int lastTrySelect = trySelect;
+                int tryStep = 0;
+                int randomTry = 0;
+
+                std::unordered_map<int, int> usedTrySelect;
+
+                while (1 <= trySelect && trySelect <= p_vectorCount)
+                {
+                    LOG(Helper::LogLevel::LL_Info, "Start try Select Threshold: %d\n", trySelect);
+
+                    opts.m_selectThreshold = trySelect;
+
+                    if (usedTrySelect.count(trySelect) == 0)
+                    {
+                        int l = p_opts.m_splitFactor;
+                        int r = max(p_opts.m_splitFactor + 2, static_cast<int>(trySelect * (c_maxSSRatio + 1)));
+
+                        while (l < r - 1)
+                        {
+                            opts.m_splitThreshold = (l + r) / 2;
+                            p_selected.clear();
+
+                            SelectHeadDynamicallyInternal(p_tree, 0, opts, p_selected);
+                            std::sort(p_selected.begin(), p_selected.end());
+                            p_selected.erase(std::unique(p_selected.begin(), p_selected.end()), p_selected.end());
+
+                            double diff = static_cast<double>(p_selected.size()) / p_vectorCount - p_opts.m_ratio;
+
+                            LOG(Helper::LogLevel::LL_Info,
+                                "    Split Threshold: %d, diff: %.2lf%%.\n",
+                                opts.m_splitThreshold,
+                                diff * 100.0);
+
+                            if (minDiff > fabs(diff))
+                            {
+                                minDiff = fabs(diff);
+
+                                selectThreshold = opts.m_selectThreshold;
+                                splitThreshold = opts.m_splitThreshold;
+                            }
+
+                            if (diff > 0)
+                            {
+                                l = (l + r) / 2;
+                            }
+                            else
+                            {
+                                r = (l + r) / 2;
+                            }
+                        }
+                        usedTrySelect.emplace(trySelect, opts.m_splitThreshold);
+                    }
+                    else {
+                        opts.m_splitThreshold = usedTrySelect[trySelect];
+                        randomTry = max(randomTry, 1);
+                    }
+
+                    double ssratio = static_cast<double>(opts.m_splitThreshold) / trySelect;
+                    double diffOffset = minDiff / p_opts.m_ratio;
+
+                    LOG(Helper::LogLevel::LL_Info, "Best abs(diff): %.3lf%%, target offset %.3lf, SSRatio: %.3lf\n\n", minDiff * 100.0, diffOffset, ssratio);
+
+                    if (randomTry == 0)
+                    {
+                        if (ssratio < c_minSSRatio)
+                        {
+                            if (tryStep >= 0)
+                            {
+                                tryStep = -1;
+                            }
+                            else if (abs(tryStep) < 128)
+                            {
+                                tryStep *= 2;
+                            }
+
+                            trySelect += tryStep;
+                        }
+                        else if (ssratio > c_maxSSRatio)
+                        {
+                            if (tryStep <= 0)
+                            {
+                                tryStep = 1;
+                            }
+                            else if (abs(tryStep) < 128)
+                            {
+                                tryStep *= 2;
+                            }
+
+                            trySelect += tryStep;
+                        }
+                        else if (diffOffset > 0.02)
+                        {
+                            randomTry = 1;
+                        }
+                        else
+                        {
+                            break;
+                        }
+
+                        trySelect = min(p_vectorCount, max(1, trySelect));
+                    }
+
+                    if (0 < randomTry && randomTry < p_opts.m_maxRandomTryCount)
+                    {
+                        std::uniform_int_distribution<> distrib(-8, 8);
+                        do
+                        {
+                            tryStep = distrib(g_random);
+                        } while (tryStep == 0);
+
+                        trySelect += tryStep;
+                        trySelect = min(p_vectorCount, max(1, trySelect));
+
+                        ++randomTry;
+                    }
+                    else if (lastTrySelect == trySelect)
+                    {
+                        break;
+                    }
+
+
+                    lastTrySelect = trySelect;
+                }
+
+                opts.m_selectThreshold = selectThreshold;
+                opts.m_splitThreshold = splitThreshold;
+
+                LOG(Helper::LogLevel::LL_Info,
+                    "Final Select Threshold: %d, Split Threshold: %d.\n",
+                    opts.m_selectThreshold,
+                    opts.m_splitThreshold);
+
+                p_selected.clear();
+                SelectHeadDynamicallyInternal(p_tree, 0, opts, p_selected);
+                std::sort(p_selected.begin(), p_selected.end());
+                p_selected.erase(std::unique(p_selected.begin(), p_selected.end()), p_selected.end());
+            }
+
+			ErrorCode SelectHead(std::shared_ptr<VectorSet> vectorSet, std::shared_ptr<COMMON::BKTree> bkt, Options& opts, std::unordered_map<int, int>& counter, std::vector<int>& selected) {
                 selected.reserve(vectorSet->Count());
 
-                LOG(Helper::LogLevel::LL_Info, "Start selecting nodes...\n");
-                if (!opts.m_selectDynamically)
+                if (vectorSet->Count() == 1)
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Select Head Statically...\n");
-                    SelectHeadStatically(bkt, vectorSet->Count(), opts, selected);
+                    selected.push_back(0);
                 }
                 else
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Select Head Dynamically...\n");
-                    SelectHeadDynamically(bkt, vectorSet->Count(), opts, selected);
+                    LOG(Helper::LogLevel::LL_Info, "Start selecting nodes...\n");
+                    if (!opts.m_selectDynamically)
+                    {
+                        LOG(Helper::LogLevel::LL_Info, "Select Head Statically...\n");
+                        SelectHeadStatically(bkt, vectorSet->Count(), opts, selected);
+                    }
+                    else
+                    {
+                        LOG(Helper::LogLevel::LL_Info, "Select Head Dynamically...\n");
+                        SelectHeadDynamically_Old(bkt, vectorSet->Count(), opts, selected);
+                    }
                 }
 
-                LOG(Helper::LogLevel::LL_Info,
-                    "Seleted Nodes: %u, about %.2lf%% of total.\n",
-                    static_cast<unsigned int>(selected.size()),
-                    selected.size() * 100.0 / vectorSet->Count());
+                if (selected.empty())
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
+                    exit(1);
+                }
 
                 if (opts.m_calcStd) {
                     std::vector<int> leafSizes;
@@ -468,41 +649,6 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "standard deviation is %.3f.\n", std);
                 }
 
-                if (!opts.m_noOutput)
-                {
-                    std::sort(selected.begin(), selected.end());
-
-                    std::shared_ptr<Helper::DiskPriorityIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
-                    if (output == nullptr || outputIDs == nullptr ||
-                        !output->Initialize(COMMON_OPTS.m_headVectorFile.c_str(), std::ios::binary | std::ios::out) ||
-                        !outputIDs->Initialize(COMMON_OPTS.m_headIDFile.c_str(), std::ios::binary | std::ios::out)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n", COMMON_OPTS.m_headVectorFile.c_str(), COMMON_OPTS.m_headIDFile.c_str());
-                        exit(1);
-                    }
-
-                    SizeType val = static_cast<SizeType>(selected.size());
-                    if (output->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                        exit(1);
-                    }
-                    DimensionType dt = vectorSet->Dimension();
-                    if (output->WriteBinary(sizeof(dt), reinterpret_cast<char*>(&dt)) != sizeof(dt)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                        exit(1);
-                    }
-                    for (auto& ele : selected)
-                    {
-                        uint64_t vid = static_cast<uint64_t>(ele);
-                        if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                            exit(1);
-                        }
-                        if (output->WriteBinary(vectorSet->PerVectorDataSize(), (char*)(vectorSet->GetVector((SizeType)vid))) != vectorSet->PerVectorDataSize()) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                            exit(1);
-                        }
-                    }
-                }
 				return ErrorCode::Success;
 			}
 		}

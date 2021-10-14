@@ -1,6 +1,8 @@
 #pragma once
 
 #include "inc/Core/Common.h"
+#include "inc/Helper/StringConvert.h"
+#include "inc/Helper/CommonHelper.h"
 #include <string>
 
 namespace SPTAG {
@@ -32,6 +34,9 @@ namespace SPTAG {
                 std::string m_headVectorFile;
                 std::string m_headIndexFolder;
                 std::string m_ssdIndex;
+                bool m_deleteHeadVectors;
+                int m_ssdIndexFileNum;
+                std::string m_quantizerFilePath; //Optional
 
                 BaseOptions() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

@@ -17,18 +17,6 @@
 
 #define PREFETCH
 
-#ifndef _MSC_VER
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/resource.h>
-#include <cstring>
-
-#define InterlockedCompareExchange(a,b,c) __sync_val_compare_and_swap(a, c, b)
-#define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
-#define Sleep(a) usleep(a * 1000)
-#define strtok_s(a, b, c) strtok_r(a, b, c)
-#endif
-
 namespace SPTAG
 {
     namespace COMMON

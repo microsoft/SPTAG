@@ -4,6 +4,7 @@
 #include "inc/Core/Common.h"
 #include <algorithm>
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/VectorSet.h"
 #include "inc/SSDServing/VectorSearch/Options.h"
 #include "inc/Helper/SimpleIniReader.h"
@@ -24,7 +25,7 @@ namespace SPTAG {
             for (size_t i = 0; i < size; i++)
             {
 				float temp = nums[i] - mean;
-                var += pow(temp, 2);
+                var += pow(temp, 2.0);
             }
             var /= static_cast<float>(size);
 
@@ -43,60 +44,63 @@ namespace SPTAG {
 			bool operator < (const Neighbor& another) const;
 		};
 
-		void writeTruthFile(const std::string truthFile, size_t queryNumber, const int K, std::vector<std::vector<SPTAG::SizeType>>& truthset, SPTAG::TruthFileType TFT);
+		void writeTruthFile(const std::string truthFile, size_t queryNumber, const int K, std::vector<std::vector<SPTAG::SizeType>>& truthset, std::vector<std::vector<float>>& distset, SPTAG::TruthFileType TFT);
 
 		template<typename T>
 		void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
 			const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType) {
-			
-			std::vector< std::vector< SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
+			if (querySet->Dimension() != vectorSet->Dimension() && !SPTAG::COMMON::DistanceUtils::Quantizer)
+			{
+				LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
+				exit(-1);
+			}
 
+			std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
+			std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
 #pragma omp parallel for
 			for (int i = 0; i < querySet->Count(); ++i)
 			{
-				if (querySet->Dimension() != vectorSet->Dimension())
-				{
-					LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
-					exit(-1);
-				}
-
-				std::vector<Neighbor> neighbours;
-				bool isFirst = true;
+				SPTAG::COMMON::QueryResultSet<T> query((const T*)(querySet->GetVector(i)), K);
 				for (SPTAG::SizeType j = 0; j < vectorSet->Count(); j++)
 				{
-					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance<T>(reinterpret_cast<T *>(querySet->GetVector(i)), reinterpret_cast<T*>(vectorSet->GetVector(j)), querySet->Dimension(), distMethod);
-
-					Neighbor nei(j, dist);
-					neighbours.push_back(nei);
-					if (neighbours.size() == K && isFirst)
-					{
-						std::make_heap(neighbours.begin(), neighbours.end());
-						isFirst = false;
-					}
-					if (neighbours.size() > K)
-					{
-						std::push_heap(neighbours.begin(), neighbours.end());
-						std::pop_heap(neighbours.begin(), neighbours.end());
-						neighbours.pop_back();
-					}
+					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance<T>(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension(), distMethod);
+					query.AddPoint(j, dist);
 				}
+				query.SortResult();
 
-				if (K != neighbours.size())
+				for (int k = 0; k < K; k++)
 				{
-					LOG(Helper::LogLevel::LL_Error, "K is too big.\n");
-					exit(-1);
-				}
-
-				std::sort(neighbours.begin(), neighbours.end());
-
-				for (size_t k = 0; k < K; k++)
-				{
-					truthset[i][k] = neighbours[k].key;
+					truthset[i][k] = (query.GetResult(k))->VID;
+					distset[i][k] = (query.GetResult(k))->Dist;
 				}
 
 			}
 
-			writeTruthFile(truthFile, querySet->Count(), K, truthset, p_truthFileType);
+			writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
+
+			auto ptr = SPTAG::f_createIO();
+			if (ptr == nullptr || !ptr->Initialize((truthFile + ".dist.bin").c_str(), std::ios::out | std::ios::binary)) {
+				LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
+				exit(1);
+			}
+
+			int int32_queryNumber = (int)querySet->Count();
+			ptr->WriteBinary(4, (char*)&int32_queryNumber);
+			ptr->WriteBinary(4, (char*)&K);
+
+			for (size_t i = 0; i < int32_queryNumber; i++)
+			{
+				for (int k = 0; k < K; k++) {
+					if (ptr->WriteBinary(4, (char*)(&(truthset[i][k]))) != 4) {
+						LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+						exit(1);
+					}
+					if (ptr->WriteBinary(4, (char*)(&(distset[i][k]))) != 4) {
+						LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+						exit(1);
+					}
+				}
+			}
 		}
 
 		bool readSearchSSDSec(const char* iniFile, VectorSearch::Options& opts);

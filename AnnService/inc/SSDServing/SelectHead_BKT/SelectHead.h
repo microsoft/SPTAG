@@ -4,7 +4,12 @@
 namespace SPTAG {
 	namespace SSDServing {
 		namespace SelectHead_BKT {
-			ErrorCode SelectHead(std::shared_ptr<VectorSet> vs, std::shared_ptr<COMMON::BKTree> bkt, Options& opts, std::unordered_map<int, int>& counter);
+			inline int CalcHeadCnt(double p_ratio, int p_vectorCount)
+			{
+				return static_cast<int>(std::round(p_ratio * p_vectorCount));
+			}
+
+			ErrorCode SelectHead(std::shared_ptr<VectorSet> vs, std::shared_ptr<COMMON::BKTree> bkt, Options& opts, std::unordered_map<int, int>& counter, std::vector<int>& selected);
 		}
 	}
 }

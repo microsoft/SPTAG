@@ -8,6 +8,8 @@
 #include <atomic>
 #include <iostream>
 
+using namespace SPTAG;
+
 std::unique_ptr<SPTAG::Client::ClientWrapper> g_client;
 
 int main(int argc, char** argv)
@@ -25,7 +27,7 @@ int main(int argc, char** argv)
     }
 
     g_client->WaitAllFinished();
-    fprintf(stdout, "connection done\n");
+    LOG(Helper::LogLevel::LL_Info, "connection done\n");
 
     std::string line;
     std::cout << "Query: " << std::flush;

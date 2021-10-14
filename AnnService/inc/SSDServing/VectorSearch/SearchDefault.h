@@ -1,12 +1,7 @@
 #pragma once
 
-#ifdef _MSC_VER
 #include "inc/SSDServing/VectorSearch/IExtraSearcher.h"
 #include "inc/SSDServing/VectorSearch/ExtraFullGraphSearcher.h"
-#else // non windows
-#include "inc/SSDServing/VectorSearch/IExtraSearcherLinux.h"
-#include "inc/SSDServing/VectorSearch/ExtraFullGraphSearcherLinux.h"
-#endif
 
 #include "inc/SSDServing/IndexBuildManager/Utils.h"
 #include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
@@ -43,6 +38,23 @@ namespace SPTAG {
 					}
 				}
 
+				void ReadVectorIDsFile(ByteArray& p_myArray) {
+					p_myArray = p_myArray.Alloc(sizeof(long long) * m_index->GetNumSamples());
+					if (COMMON_OPTS.m_headIDFile.empty()) {
+						LOG(Helper::LogLevel::LL_Error, "Config error: VectorTranlateMap Empty for Searching SSD vectors.\n");
+						exit(1);
+					}
+					auto ptr = f_createIO();
+					if (ptr == nullptr || !ptr->Initialize(COMMON_OPTS.m_headIDFile.c_str(), std::ios::binary | std::ios::in)) {
+						LOG(Helper::LogLevel::LL_Error, "Failed open %s\n", COMMON_OPTS.m_headIDFile.c_str());
+						exit(1);
+					}
+					if (ptr->ReadBinary(sizeof(long long) * m_index->GetNumSamples(), reinterpret_cast<char*>(p_myArray.Data())) != sizeof(long long) * m_index->GetNumSamples()) {
+						LOG(Helper::LogLevel::LL_Error, "Failed to read vectorTanslateMap!\n");
+						exit(1);
+					}
+				}
+
 				void LoadHeadIndex(Options& p_opts) {
 					LOG(Helper::LogLevel::LL_Info, "Start loading head index. \n");
 
@@ -53,6 +65,7 @@ namespace SPTAG {
 
 					m_index->SetParameter("NumberOfThreads", std::to_string(p_opts.m_iNumberOfThreads));
 					m_index->SetParameter("MaxCheck", std::to_string(p_opts.m_maxCheck));
+					m_index->SetParameter("HashTableExponent", std::to_string(p_opts.m_hashExp));
 
 					if (!p_opts.m_headConfig.empty())
 					{
@@ -67,36 +80,22 @@ namespace SPTAG {
 							m_index->SetParameter(iter.first.c_str(), iter.second.c_str());
 						}
 					}
-
+					m_index->UpdateIndex();
 					LOG(Helper::LogLevel::LL_Info, "End loading head index. \n");
 				}
 
-				void LoadVectorIdsSSDIndex(std::string vectorTranslateMap, std::string extraFullGraphFile)
+				void LoadVectorIdsSSDIndex(long long* vectorTranslateMap, std::string extraFullGraphFile, int postingPageLimit, int ioThreads)
 				{
-					if (vectorTranslateMap.empty()) {
-						LOG(Helper::LogLevel::LL_Error, "Config error: VectorTranlateMap Empty for Searching SSD vectors.\n");
-						exit(1);
-					}
-
 					if (extraFullGraphFile.empty()) {
 						LOG(Helper::LogLevel::LL_Error, "Config error: SsdIndex empty for Searching SSD vectors.\n");
 						exit(1);
 					}
 
-					m_vectorTranslateMap.reset(new long long[m_index->GetNumSamples()]);
+					m_vectorTranslateMap = vectorTranslateMap;
 
-					auto ptr = f_createIO();
-					if (ptr == nullptr || !ptr->Initialize(vectorTranslateMap.c_str(), std::ios::binary | std::ios::in)) {
-						LOG(Helper::LogLevel::LL_Error, "Failed open %s\n", vectorTranslateMap.c_str());
-						exit(1);
-					}
-					if (ptr->ReadBinary(sizeof(long long) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get())) != sizeof(long long) * m_index->GetNumSamples()) {
-						LOG(Helper::LogLevel::LL_Error, "Failed to read vectorTanslateMap!\n");
-						exit(1);
-					}
 					LOG(Helper::LogLevel::LL_Info, "Using FullGraph without cache.\n");
 
-					m_extraSearcher.reset(new ExtraFullGraphSearcher<ValueType>(extraFullGraphFile));
+					m_extraSearcher.reset(new ExtraFullGraphSearcher<ValueType>(extraFullGraphFile, postingPageLimit, ioThreads));
 				}
 
 				void CheckHeadIndexType() {
@@ -106,13 +105,25 @@ namespace SPTAG {
 							SPTAG::Helper::Convert::ConvertToString(v1).c_str(),
 							SPTAG::Helper::Convert::ConvertToString(v2).c_str()
 						);
-						exit(1);
+						//exit(1);
 					}
+				}
+
+				template <typename DataType>
+				DataType GetParameter(const std::string& p_config, const std::string& p_param, DataType& p_defaultVal) const {
+					size_t begin = p_config.find(p_param);
+					if (begin == std::string::npos) return p_defaultVal;
+
+					size_t valuebegin = p_config.find("=", begin), end = p_config.find("\n", begin);
+					if (valuebegin == std::string::npos || end == std::string::npos) return p_defaultVal;
+
+					std::string value = p_config.substr(valuebegin + 1, end - valuebegin - 1);
+					return Helper::Convert::ConvertStringTo<DataType>(value.c_str(), p_defaultVal);
 				}
 
 				void LoadIndex4ANNIndexTestTool(const std::string& p_config,
 					const std::vector<ByteArray>& p_indexBlobs,
-					std::string& vectorTranslateMap,
+					long long* vectorTranslateMap,
 					std::string& extraFullGraphFile)
 				{
 					if (VectorIndex::LoadIndex(p_config, p_indexBlobs, m_index) != SPTAG::ErrorCode::Success) {
@@ -120,16 +131,32 @@ namespace SPTAG {
 						exit(1);
 					}
 					CheckHeadIndexType();
-					LoadVectorIdsSSDIndex(vectorTranslateMap, extraFullGraphFile);
+					LoadVectorIdsSSDIndex(vectorTranslateMap, extraFullGraphFile, 
+						GetParameter(p_config, "SearchPostingPageLimit", (std::numeric_limits<int>::max)()),
+						GetParameter(p_config, "IOThreadsPerHandler", 4));
 				}
 
-				void Setup(Options& p_config)
+				void Setup(Options& p_config, ByteArray& p_myArray)
 				{
+					m_maxDistRatio = p_config.m_maxDistRatio;
 					LoadHeadIndex(p_config);
 					CheckHeadIndexType();
 					if (!p_config.m_buildSsdIndex)
 					{
-						LoadVectorIdsSSDIndex(COMMON_OPTS.m_headIDFile, COMMON_OPTS.m_ssdIndex);
+						ReadVectorIDsFile(p_myArray);
+						LoadVectorIdsSSDIndex(reinterpret_cast<long long*>(p_myArray.Data()), COMMON_OPTS.m_ssdIndex, p_config.m_searchPostingPageLimit, p_config.m_ioThreads);
+						int internalResultNum = std::max<int>(p_config.m_internalResultNum, p_config.m_resultNum);
+						for (int i = 0; i < p_config.m_iNumberOfThreads; i++) {
+							ExtraWorkSpace* ws = new ExtraWorkSpace();
+							ws->m_postingIDs.reserve(internalResultNum);
+							ws->m_deduper.Init(p_config.m_maxCheck, p_config.m_hashExp);
+							ws->m_pageBuffers.resize(internalResultNum);
+							for (int pi = 0; pi < internalResultNum; pi++) {
+								ws->m_pageBuffers[pi].ReservePageBuffer(m_extraSearcher->GetMaxListSize());
+							}
+							ws->m_diskRequests.resize(internalResultNum);
+							m_workspaces.push(ws);
+						}
 					}
 				}
 
@@ -150,35 +177,25 @@ namespace SPTAG {
 					ExtraWorkSpace* auto_ws = nullptr;
 					if (nullptr != m_extraSearcher)
 					{
-						auto_ws = GetWs();
+						auto_ws = GetWs(p_queryResults.GetResultNum());
 						auto_ws->m_postingIDs.clear();
 
+						float limitDist = p_queryResults.GetResult(0)->Dist * m_maxDistRatio;
 						for (int i = 0; i < p_queryResults.GetResultNum(); ++i)
 						{
 							auto res = p_queryResults.GetResult(i);
-							if (res->VID != -1)
-							{
-								auto_ws->m_postingIDs.emplace_back(res->VID);
-							}
+							if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+							auto_ws->m_postingIDs.emplace_back(res->VID);
 						}
-					}
 
-					if (m_vectorTranslateMap != nullptr)
-					{
 						for (int i = 0; i < p_queryResults.GetResultNum(); ++i)
 						{
 							auto res = p_queryResults.GetResult(i);
-							if (res->VID != -1)
-							{
-								res->VID = static_cast<int>(m_vectorTranslateMap[res->VID]);
-							}
+							if (res->VID == -1) break;
+							res->VID = static_cast<int>(m_vectorTranslateMap[res->VID]);
 						}
-					}
 
-					if (nullptr != m_extraSearcher)
-					{
 						p_queryResults.Reverse();
-
 						m_extraSearcher->Search(auto_ws, p_queryResults, m_index, p_stats);
 						RetWs(auto_ws);
 					}
@@ -198,7 +215,7 @@ namespace SPTAG {
 					m_index->SearchIndex(p_queryResults);
 
 					ExtraWorkSpace* auto_ws = nullptr;
-					auto_ws = GetWs();
+					auto_ws = GetWs(p_queryResults.GetResultNum());
 					auto_ws->m_postingIDs.clear();
 
 					for (int i = 0; i < p_queryResults.GetResultNum(); ++i)
@@ -213,7 +230,9 @@ namespace SPTAG {
 
 					p_queryResults.Reverse();
 
-					m_extraSearcher->Search(auto_ws, p_queryResults, m_index);
+					//TODO may be removed
+					SearchStats stats;
+					m_extraSearcher->Search(auto_ws, p_queryResults, m_index, stats);
 					RetWs(auto_ws);
 				}
 
@@ -232,7 +251,7 @@ namespace SPTAG {
 
 					~SearchAsyncJob() {}
 
-					void exec() {
+					void exec(IAbortOperation* p_abort) {
 						m_processor->ProcessAsyncSearch(m_queryResults, m_stats, std::move(m_callback));
 					}
 				};
@@ -262,12 +281,23 @@ namespace SPTAG {
 					return m_index;
 				}
 
-				ExtraWorkSpace* GetWs() {
+				SPTAG::DimensionType GetDimension() {
+					return HeadIndex()->GetFeatureDim();
+				}
+
+				ExtraWorkSpace* GetWs(int internalResultNum) {
 					ExtraWorkSpace* ws = nullptr;
 					if (!m_workspaces.pop(ws)) {
 						ws = new ExtraWorkSpace();
+						ws->m_postingIDs.reserve(internalResultNum);
+						ws->m_deduper.Init(atoi(m_index->GetParameter("MaxCheck").c_str()),
+							atoi(m_index->GetParameter("HashTableExponent").c_str()));
+						ws->m_pageBuffers.resize(internalResultNum);
+						for (int pi = 0; pi < internalResultNum; pi++) {
+							ws->m_pageBuffers[pi].ReservePageBuffer(m_extraSearcher->GetMaxListSize());
+						}
+						ws->m_diskRequests.resize(internalResultNum);
 					}
-
 					return ws;
 				}
 
@@ -302,7 +332,7 @@ namespace SPTAG {
 
 				std::shared_ptr<VectorIndex> m_index;
 
-				std::unique_ptr<long long[]> m_vectorTranslateMap;
+				long long* m_vectorTranslateMap = nullptr;
 
 				std::unique_ptr<IExtraSearcher<ValueType>> m_extraSearcher;
 
@@ -311,6 +341,8 @@ namespace SPTAG {
 				std::atomic<std::int32_t> m_tids;
 
 				boost::lockfree::stack<ExtraWorkSpace*> m_workspaces;
+
+				float m_maxDistRatio;
 			};
 		}
 	}

@@ -13,6 +13,7 @@ namespace SPTAG {
 				int m_iBKTKmeansK;
 				int m_iBKTLeafSize; 
 				int m_iSamples;
+				float m_fBalanceFactor;
 				int m_iNumberOfThreads;
 				bool m_saveBKT;
 				// Section 3: for selecting head
@@ -25,10 +26,13 @@ namespace SPTAG {
 				int m_selectThreshold;
 				int m_splitFactor;
 				int m_splitThreshold;
+				int m_maxRandomTryCount;
 				double m_ratio;
+				int m_headVectorCount;
 				bool m_recursiveCheckSmallCluster;
 				bool m_printSizeCount;
-				
+				std::string m_selectType;
+
 				Options() {
 #define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \

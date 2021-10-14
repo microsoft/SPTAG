@@ -9,7 +9,7 @@ bool SPTAG::SSDServing::Neighbor::operator < (const SPTAG::SSDServing::Neighbor&
 	return this->dist == another.dist ? this->key < another.key : this->dist < another.dist;
 }
 
-void SPTAG::SSDServing::writeTruthFile(const std::string truthFile, size_t queryNumber, const int K, std::vector<std::vector<SPTAG::SizeType>>& truthset, SPTAG::TruthFileType TFT) {
+void SPTAG::SSDServing::writeTruthFile(const std::string truthFile, size_t queryNumber, const int K, std::vector<std::vector<SPTAG::SizeType>>& truthset, std::vector<std::vector<float>>& distset, SPTAG::TruthFileType TFT) {
 	auto ptr = SPTAG::f_createIO();
 	if (TFT == SPTAG::TruthFileType::TXT)
 	{
@@ -42,6 +42,31 @@ void SPTAG::SSDServing::writeTruthFile(const std::string truthFile, size_t query
 		for (size_t i = 0; i < queryNumber; i++)
 		{
 			if (ptr->WriteBinary(sizeof(K), (char*)&K) != sizeof(K) || ptr->WriteBinary(K * 4, (char*)(truthset[i].data())) != K * 4) {
+				LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+				exit(1);
+			}
+		}
+	}
+	else if (TFT == SPTAG::TruthFileType::DEFAULT) {
+		if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::out | std::ios::binary)) {
+			LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", truthFile.c_str());
+			exit(1);
+		}
+
+		int int32_queryNumber = (int)queryNumber;
+		ptr->WriteBinary(4, (char*)&int32_queryNumber);
+		ptr->WriteBinary(4, (char*)&K);
+
+		for (size_t i = 0; i < queryNumber; i++)
+		{
+			if (ptr->WriteBinary(K * 4, (char*)(truthset[i].data())) != K * 4) {
+				LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
+				exit(1);
+			}
+		}
+		for (size_t i = 0; i < queryNumber; i++)
+		{
+			if (ptr->WriteBinary(K * 4, (char*)(distset[i].data())) != K * 4) {
 				LOG(Helper::LogLevel::LL_Error, "Fail to write the truth file!\n");
 				exit(1);
 			}
