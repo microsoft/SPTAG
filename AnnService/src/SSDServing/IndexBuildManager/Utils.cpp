@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include <inc/SSDServing/IndexBuildManager/Utils.h>
 
 SPTAG::SSDServing::Neighbor::Neighbor(SPTAG::SizeType k, float d) : key(k), dist(d) {}

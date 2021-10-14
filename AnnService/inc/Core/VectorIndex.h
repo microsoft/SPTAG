@@ -13,6 +13,16 @@
 
 namespace SPTAG
 {
+
+struct Edge
+{
+    SizeType node;
+    float distance;
+    SizeType tonode;
+    Edge() : node(MaxSize), distance(MaxDist), tonode(MaxSize) {}
+};
+
+
 class IAbortOperation
 {
 public:
@@ -81,6 +91,8 @@ public:
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);
+
+    static void SortSelections(std::vector<Edge>* selections);
 
     virtual std::string GetParameter(const std::string& p_param) const;
     virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);

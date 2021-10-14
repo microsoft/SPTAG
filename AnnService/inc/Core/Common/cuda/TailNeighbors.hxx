@@ -7,6 +7,9 @@
 
 #include <cub/cub.cuh>
 #include <chrono>
+#include<thrust/execution_policy.h>
+#include<thrust/sort.h>
+#include <parallel/algorithm>
 
 using namespace SPTAG;
 using namespace std;
@@ -316,9 +319,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
       
         // Auto-compute batch size based on available memory on the GPU
         size_t headVecSize = headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>);
-
-        int randSize = min((int)headRows, (int)1024)*48; // Memory used for GPU random number generator
-        size_t treeSize = 20*headRows + (size_t)randSize;
+        size_t randSize = (size_t)(min((int)headRows, (int)1024))*48; // Memory used for GPU random number generator
+        size_t treeSize = 20*headRows + randSize;
 
         size_t tailMemAvail = (freeMem*0.9) - (headVecSize+treeSize); // Only use 90% of total memory to be safe
 
@@ -485,6 +487,113 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Mam alloc time:%0.2lf, GPU time to build index:%.2lf, Memory free time:%.2lf\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t1-premem_t).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t1-premem_t).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t2-ssd_t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t2-ssd_t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t3-ssd_t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t3-ssd_t2).count())/1000);
 
 }
+
+__host__ __device__ struct GPUEdge
+{
+    SizeType node;
+    float distance;
+    SizeType tonode;
+    __host__ __device__ GPUEdge() : node(MaxSize), distance(FLT_MAX/10.0), tonode(MaxSize) {}
+};
+
+
+struct GPU_EdgeCompare {
+    bool operator()(const GPUEdge& a, int b) const
+    {
+        return a.node < b;
+    };
+
+    bool operator()(int a, const GPUEdge& b) const
+    {
+        return a < b.node;
+    };
+
+    __host__ __device__ bool operator()(const GPUEdge& a, const GPUEdge& b) {
+        if (a.node == b.node)
+        {
+            if (a.distance == b.distance)
+            {
+                return a.tonode < b.tonode;
+            }
+
+            return a.distance < b.distance;
+        }
+        return a.node < b.node;
+    }
+} gpu_edgeComparer;
+
+void GPU_SortSelections(std::vector<Edge>* selections) {
+
+  size_t N = selections->size();
+
+  size_t freeMem, totalMem;
+  CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+
+// Maximum number of elements that can be sorted on GPU
+  size_t sortBatchSize = (size_t)(freeMem*0.9 / sizeof(GPUEdge))/2; 
+
+  std::vector<GPUEdge>* new_selections = reinterpret_cast<std::vector<GPUEdge>*>(selections);
+
+  int num_batches = (N + (sortBatchSize-1)) / sortBatchSize;
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Sorting final results. Size of result:%ld elements = %0.2lf GB, Available GPU memory:%0.2lf, sorting in %d batches\n", N, ((double)(N*sizeof(GPUEdge))/1000000000.0), ((double)freeMem)/1000000000.0, num_batches);
+
+  int batchNum=0;
+
+  GPUEdge* merge_mem;
+  if(num_batches > 1) {
+    merge_mem = new GPUEdge[N];
+  }
+
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating %ld bytes on GPU for sorting\n", sortBatchSize*sizeof(GPUEdge));
+  GPUEdge* d_selections;
+  CUDA_CHECK(cudaMalloc(&d_selections, sortBatchSize*sizeof(GPUEdge)));
+
+  for(size_t startIdx = 0; startIdx < N; startIdx += sortBatchSize) {
+    
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    size_t batchSize = sortBatchSize;
+    if(startIdx + batchSize > N) {
+      batchSize = N - startIdx;
+    }
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Sorting batch id:%ld, size:%ld\n", startIdx, batchSize);
+
+    GPUEdge* batchPtr = &(new_selections->data()[startIdx]);
+    
+    CUDA_CHECK(cudaMemcpy(d_selections, batchPtr, batchSize*sizeof(GPUEdge), cudaMemcpyHostToDevice));
+    try {
+      thrust::sort(thrust::device, d_selections, d_selections+batchSize, gpu_edgeComparer);
+    }
+    catch (thrust::system_error &e){
+      LOG(SPTAG::Helper::LogLevel::LL_Info, "Error: %s \n",e.what());
+    }
+
+    CUDA_CHECK(cudaMemcpy(batchPtr, d_selections, batchSize*sizeof(GPUEdge), cudaMemcpyDeviceToHost));
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    // For all batches after the first, merge into the final output
+    if(startIdx > 0) {
+      std::merge(new_selections->data(), batchPtr, batchPtr, &batchPtr[batchSize], merge_mem, gpu_edgeComparer);
+
+// For faster merging on Linux systems, can use below instead of std::merge (above)
+//      __gnu_parallel::merge(new_selections->data(), batchPtr, batchPtr, &batchPtr[batchSize], merge_mem, gpu_edgeComparer);
+ 
+      memcpy(new_selections->data(), merge_mem, (startIdx+batchSize)*sizeof(GPUEdge));
+    }
+    
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Sort batch %d - GPU transfer/sort time:%0.2lf, CPU merge time:%.2lf\n", batchNum, ((double)std::chrono::duration_cast<std::chrono::seconds>(t2-t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(t3-t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count())/1000);
+    batchNum++;
+  }
+  if(num_batches > 1) {
+    delete merge_mem;
+  }
+}
+
+
 
 /*************************************************************************************************
  * Deprecated code from Hybrid CPU/GPU SSD Index builder

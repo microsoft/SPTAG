@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/SSDServing/SelectHead_BKT/AnalyzeTree.h"
 
 namespace SPTAG {

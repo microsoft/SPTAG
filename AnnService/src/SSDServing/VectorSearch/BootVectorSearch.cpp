@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/SSDServing/VectorSearch/BootVectorSearch.h"
 #include "inc/SSDServing/VectorSearch/BuildSsdIndex.h"
 #include "inc/SSDServing/VectorSearch/SearchSsdIndex.h"

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #pragma once
 #include <unordered_set>
 #include <string>
@@ -12,6 +15,8 @@
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/SSDServing/VectorSearch/TimeUtils.h"
+
+#include <chrono>
 
 namespace SPTAG {
     namespace SSDServing {
@@ -230,6 +235,8 @@ namespace SPTAG {
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start output...\n");
 
+                    auto t1 = std::chrono::high_resolution_clock::now();
+
                     auto ptr = SPTAG::f_createIO();
                     int retry = 3;
                     while (retry > 0 && (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out)))
@@ -413,6 +420,8 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Padded Size: %llu, final total size: %llu.\n", paddedSize, listOffset);
 
                     LOG(Helper::LogLevel::LL_Info, "Output done...\n");
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    LOG(Helper::LogLevel::LL_Info, "Time to write results:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
                 }
             }
 
@@ -577,8 +586,17 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", rngElapsedMinutes);
                 }
 
+                auto t1 = std::chrono::high_resolution_clock::now();
+
                 if (p_opts.m_batches > 1) selections.LoadBatch(0, static_cast<size_t>(fullCount)* p_opts.m_replicaCount);
-                std::sort(selections.m_selections.begin(), selections.m_selections.end(), g_edgeComparer);
+
+                // Sort results either in CPU or GPU
+                VectorIndex::SortSelections(&selections.m_selections);
+
+                auto t2 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
+
+                t1 = std::chrono::high_resolution_clock::now();
                 
                 int postingSizeLimit = INT_MAX;
                 if (p_opts.m_postingPageLimit > 0)
@@ -606,7 +624,7 @@ namespace SPTAG {
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
-                
+
 #pragma omp parallel for schedule(dynamic)
                 for (int i = 0; i < postingListSize.size(); ++i)
                 {
@@ -684,6 +702,9 @@ namespace SPTAG {
                         LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
+
+                t2 = std::chrono::high_resolution_clock::now();
+                LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
 
                 size_t postingFileSize = (postingListSize.size() + COMMON_OPTS.m_ssdIndexFileNum - 1) / COMMON_OPTS.m_ssdIndexFileNum;
 
