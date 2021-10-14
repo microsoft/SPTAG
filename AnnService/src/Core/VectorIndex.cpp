@@ -785,7 +785,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     void* reconstructed_vector = nullptr;
                     if (SPTAG::COMMON::DistanceUtils::Quantizer)
                     {
-                        reconstructed_vector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                        reconstructed_vector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                         SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
                         resultSet.SetTarget(reconstructed_vector);
                     }

@@ -330,7 +330,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 if (quantizer_exists)
                 {
                     cols = COMMON::DistanceUtils::Quantizer->ReconstructDim();
-                    v_holder = (R*)_mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                    v_holder = (R*)_mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                 }
                 std::vector<float> meanValues(cols, 0);
                 std::vector<float> varianceValues(cols, 0);
@@ -427,7 +427,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 R* v_holder = nullptr;
                 if (quantizer_exists)
                 {
-                    v_holder = (R*)_mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                    v_holder = (R*)_mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                 }
                 // decide which child one point belongs
                 while (i <= j)

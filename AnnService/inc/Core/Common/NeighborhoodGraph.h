@@ -158,7 +158,7 @@ break;
                     R* v_holder = nullptr;
                     if (quantizer_exists) {
                         cols = COMMON::DistanceUtils::Quantizer->ReconstructDim();
-                        v_holder = (R*) _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                        v_holder = (R*) _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                     }
                     std::vector<float> Mean(cols, 0);
 
@@ -501,7 +501,7 @@ break;
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
                 void* rec_query = nullptr;
                 if (COMMON::DistanceUtils::Quantizer) {
-                    rec_query = _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN);
+                    rec_query = _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
                     COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
                     query.SetTarget((T*)rec_query);
                 }
