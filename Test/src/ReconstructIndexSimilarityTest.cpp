@@ -346,6 +346,12 @@ void ReconstructTest(IndexAlgoType algo, DistCalcMethod distMethod)
     Search<R>(rec_idx, queryset, 10, truth);
     COMMON::DistanceUtils::Quantizer = quantizer;
     auto quan_idx = PerfBuild<std::uint8_t>(algo, Helper::Convert::ConvertToString<DistCalcMethod>(distMethod), quan_vecset, metaset, queryset, 10, truth, "quan_idx");
+
+    LOG(Helper::LogLevel::LL_Info, "Test search with SDC");
+    Search<R>(quan_idx, queryset, 10, truth);
+    
+    LOG(Helper::LogLevel::LL_Info, "Test search with ADC");
+    SPTAG::COMMON::DistanceUtils::Quantizer->SetEnableADC(true);
     Search<R>(quan_idx, queryset, 10, truth);
 }
 

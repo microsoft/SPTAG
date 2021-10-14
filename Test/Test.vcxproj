@@ -145,7 +145,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\ADCTest.cpp" />
     <ClCompile Include="src\AlgoTest.cpp" />
     <ClCompile Include="src\Base64HelperTest.cpp" />
     <ClCompile Include="src\CommonHelperTest.cpp" />
