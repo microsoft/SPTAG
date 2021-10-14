@@ -83,7 +83,7 @@ inline bool fileexists(const TCHAR* path) {
 
 namespace SPTAG
 {
-#define ALIGN 32
+#define ALIGN_SPTAG 32
 
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;

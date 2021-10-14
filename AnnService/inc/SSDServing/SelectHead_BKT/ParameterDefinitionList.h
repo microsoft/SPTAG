@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
+
 #ifdef DefineSelectHeadParameter
 
 // DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr)

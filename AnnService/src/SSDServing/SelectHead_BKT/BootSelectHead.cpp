@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/SSDServing/SelectHead_BKT/BootSelectHead.h"

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
 #pragma once
 
 #include "inc/SSDServing/VectorSearch/IExtraSearcher.h"
@@ -105,7 +108,10 @@ namespace SPTAG {
 							SPTAG::Helper::Convert::ConvertToString(v1).c_str(),
 							SPTAG::Helper::Convert::ConvertToString(v2).c_str()
 						);
-						//exit(1);
+						if (!SPTAG::COMMON::DistanceUtils::Quantizer)
+						{
+							exit(1);
+						}
 					}
 				}
 
