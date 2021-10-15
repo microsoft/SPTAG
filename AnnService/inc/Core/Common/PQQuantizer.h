@@ -80,8 +80,8 @@ namespace SPTAG
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
             std::unique_ptr<T[]> m_codebooks;
-            std::unique_ptr<float[]> m_CosineDistanceTables;
-            std::unique_ptr<float[]> m_L2DistanceTables;
+            std::unique_ptr<const float[]> m_CosineDistanceTables;
+            std::unique_ptr<const float[]> m_L2DistanceTables;
         };
 
         template <typename T>
@@ -90,17 +90,13 @@ namespace SPTAG
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks)
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector)
         {
-            m_NumSubvectors = NumSubvectors;
-            m_KsPerSubvector = KsPerSubvector;
-            m_DimPerSubvector = DimPerSubvector;
             m_codebooks.reset(Codebooks);
             m_EnableADC = EnableADC;
 
-            m_BlockSize = (m_KsPerSubvector * (m_KsPerSubvector + 1)) / 2;
-            m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
-            m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+            auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+            auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
 
             auto cosineDist = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
             auto L2Dist = DistanceCalcSelector<T>(DistCalcMethod::L2);
@@ -108,12 +104,14 @@ namespace SPTAG
             for (int i = 0; i < m_NumSubvectors; i++) {
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
-                    for (int k = 0; k <= j; k++) {
-                        m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
-                        m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                    for (int k = 0; k < m_KsPerSubvector; k++) {
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
             }
+            m_CosineDistanceTables = std::move(temp_m_CosineDistanceTables);
+            m_L2DistanceTables = std::move(temp_m_L2DistanceTables);
         }
 
         template <typename T>
@@ -271,9 +269,9 @@ namespace SPTAG
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
-            m_BlockSize = (m_KsPerSubvector * (m_KsPerSubvector + 1)) / 2;
-            m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
-            m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+            auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+            auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
 
             auto cosineDist = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
             auto L2Dist = DistanceCalcSelector<T>(DistCalcMethod::L2);
@@ -281,12 +279,14 @@ namespace SPTAG
             for (int i = 0; i < m_NumSubvectors; i++) {
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
-                    for (int k = 0; k <= j; k++) {
-                        m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
-                        m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                    for (int k = 0; k < m_KsPerSubvector; k++) {
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
             }
+            m_CosineDistanceTables = std::move(temp_m_CosineDistanceTables);
+            m_L2DistanceTables = std::move(temp_m_L2DistanceTables);
             LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
@@ -329,10 +329,7 @@ namespace SPTAG
 
         template <typename T>
         inline SizeType PQQuantizer<T>::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) {
-            if (k > j) {
-                return (m_BlockSize * i) + ((k * (k + 1)) / 2) + j; // exploit symmetry by swapping
-            }
-            return (m_BlockSize * i) + ((j * (j + 1)) / 2) + k;
+            return m_BlockSize * i + j * m_KsPerSubvector + k;
         }
     }
 }
