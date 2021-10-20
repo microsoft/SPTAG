@@ -111,7 +111,7 @@ void LoadReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::shared_pt
 
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr->Initialize("gist_codebooks.bin", std::ios::binary | std::ios::in));
-    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<R>());
+    SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<R>());
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer != nullptr);
 
     ByteArray PQvec = ByteArray::Alloc(sizeof(std::uint8_t) * n * M);
