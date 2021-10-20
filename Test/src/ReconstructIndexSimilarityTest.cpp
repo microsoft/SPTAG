@@ -268,7 +268,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     ptr->ShutDown();
 
     BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
-    SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<R>());
+    SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, SPTAG::QuantizerType::PQQuantizer, GetEnumValueType<R>());
     SPTAG::COMMON::DistanceUtils::Quantizer = baseQuantizer;
     BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
 

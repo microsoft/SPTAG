@@ -15,7 +15,7 @@ using namespace SPTAG::COMMON;
 #define DIFF256 diff256.m256_f32
 #endif
 
-std::shared_ptr<Quantizer> DistanceUtils::Quantizer(nullptr);
+std::shared_ptr<IQuantizer> DistanceUtils::Quantizer(nullptr);
 
 inline __m128 _mm_mul_epi8(__m128i X, __m128i Y)
 {

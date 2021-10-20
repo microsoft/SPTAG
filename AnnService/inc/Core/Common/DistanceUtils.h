@@ -10,7 +10,7 @@
 
 #include "CommonUtils.h"
 #include "InstructionUtils.h"
-#include "Quantizer.h"
+#include "IQuantizer.h"
 
 namespace SPTAG
 {
@@ -24,7 +24,7 @@ namespace SPTAG
         class DistanceUtils
         {
         public:
-            static std::shared_ptr<Quantizer> Quantizer;
+            static std::shared_ptr<IQuantizer> Quantizer;
             
             template <typename T>
             static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)

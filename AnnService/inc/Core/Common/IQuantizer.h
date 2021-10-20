@@ -10,7 +10,7 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        class Quantizer
+        class IQuantizer
         {
         public:
             virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) = 0;

@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
             LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
             exit(1);
         }
-        auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
+        auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_reconstructType);
         if (code != ErrorCode::Success)
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");

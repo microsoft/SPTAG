@@ -1,12 +1,12 @@
-#include <inc/Core/Common/Quantizer.h>
+#include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
 
 namespace SPTAG
 {
     namespace COMMON
     {
-        ErrorCode Quantizer::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType, VectorValueType reconstructType) {
-            std::shared_ptr<Quantizer> ptr;
+        ErrorCode IQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType, VectorValueType reconstructType) {
+            std::shared_ptr<IQuantizer> ptr;
             switch (quantizerType) {
             case QuantizerType::None:
                 break;

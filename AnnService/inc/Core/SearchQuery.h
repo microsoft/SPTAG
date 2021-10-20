@@ -21,12 +21,13 @@ public:
     QueryResult()
         : m_target(nullptr),
           m_resultNum(0),
-          m_withMeta(false)
+          m_withMeta(false),
+          m_quantizedTarget(nullptr)
     {
     }
 
 
-    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta)
+    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta) : m_quantizedTarget(nullptr)
     {
         Init(p_target, p_resultNum, p_withMeta);
     }
@@ -35,7 +36,8 @@ public:
     QueryResult(const void* p_target, int p_resultNum, bool p_withMeta, BasicResult* p_results)
         : m_target(p_target),
           m_resultNum(p_resultNum),
-          m_withMeta(p_withMeta)
+          m_withMeta(p_withMeta),
+          m_quantizedTarget(nullptr)
     {
         m_results.Set(p_results, p_resultNum, false);
     }

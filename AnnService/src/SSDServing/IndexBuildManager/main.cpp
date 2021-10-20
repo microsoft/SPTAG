@@ -132,7 +132,7 @@ namespace SPTAG {
 					LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
 					exit(1);
 				}
-				auto code = SPTAG::COMMON::Quantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, COMMON_OPTS.m_valueType);
+				auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, COMMON_OPTS.m_valueType);
 				if (code != ErrorCode::Success)
 				{
 					LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");

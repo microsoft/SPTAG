@@ -23,6 +23,7 @@ add_library (DistanceUtils STATIC
     inc/Core/Common/DistanceUtils.h 
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
+    inc/Core/Common/IQuantizer.h
     src/Core/Common/DistanceUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )

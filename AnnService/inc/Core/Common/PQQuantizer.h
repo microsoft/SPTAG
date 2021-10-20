@@ -6,7 +6,7 @@
 
 #include "CommonUtils.h"
 #include "DistanceUtils.h"
-#include "Quantizer.h"
+#include "IQuantizer.h"
 #include <iostream>
 #include <fstream>
 #include <limits>
@@ -19,7 +19,7 @@ namespace SPTAG
     namespace COMMON
     {
         template <typename T>
-        class PQQuantizer : public Quantizer
+        class PQQuantizer : public IQuantizer
         {
         public:
             PQQuantizer();
