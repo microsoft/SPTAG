@@ -631,6 +631,14 @@ namespace SPTAG {
                     },
                     "%4d");
 
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Posting Distribution:\n");
+                PrintPercentiles<int, SearchStats>(stats,
+                    [](const SearchStats& ss) -> int
+                    {
+                        return ss.m_postingElementCount;
+                    },
+                    "%4d");
+
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Async Latency 0 Distribution:\n");
                 PrintPercentiles<double, SearchStats>(stats,
                     [](const SearchStats& ss) -> double

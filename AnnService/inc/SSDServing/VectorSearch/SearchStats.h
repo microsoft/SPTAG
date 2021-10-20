@@ -16,6 +16,7 @@ namespace SPTAG {
                     m_filteredCount(0),
                     m_distCheckFilterCount(0),
                     m_diskAccessCount(0),
+                    m_postingElementCount(0),
                     m_totalSearchLatency(0),
                     m_totalLatency(0),
                     m_exLatency(0),
@@ -38,6 +39,8 @@ namespace SPTAG {
                 int m_distCheckFilterCount;
 
                 int m_diskAccessCount;
+
+                int m_postingElementCount;
 
                 double m_totalSearchLatency;
 

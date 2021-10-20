@@ -61,6 +61,7 @@ namespace SPTAG {
 
                     std::atomic<int> unprocessed(0);
                     std::atomic<int> diskRead(0);
+                    std::atomic<int> postingElementCount(0);
                     int curCheck = 0;
                     bool oneContext = (m_indexContexts.size() == 1);
                     for (uint32_t pi = 0; pi < postingListCount; ++pi)
@@ -83,6 +84,7 @@ namespace SPTAG {
                             continue;
                         }
 
+                        postingElementCount += listInfo->listEleCount;
                         diskRead += listInfo->listPageCount;
 
                         size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << c_pageSizeEx);
@@ -157,6 +159,7 @@ namespace SPTAG {
 #endif
                     p_stats.m_exCheck = curCheck;
                     p_stats.m_diskAccessCount = diskRead;
+                    p_stats.m_postingElementCount = postingElementCount;
 
                     p_queryResults.SortResult();
                 }
