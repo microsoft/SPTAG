@@ -98,6 +98,12 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
         m_sMetadataIndexFile = p_reader.GetParameter(metadataSection, "MetaDataIndexPath", std::string());
     }
 
+    std::string quantizerSection("Quantizer");
+    if (p_reader.DoesSectionExist(quantizerSection))
+    {
+        m_sQuantizerFile = p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
+    }
+
     if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
     {
         LOG(Helper::LogLevel::LL_Error, "Error: Failed to load parameter DistCalcMethod.\n");
@@ -123,6 +129,15 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
     IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
     IOSTRING(p_configOut, WriteString, "\n");
+
+    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    {
+        IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
+        IOSTRING(p_configOut, WriteString, ("QuantizerType=" + Helper::Convert::ConvertToString(SPTAG::COMMON::DistanceUtils::Quantizer->GetQuantizerType()) + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, ("QuantizerReconstructValueType=" + Helper::Convert::ConvertToString(SPTAG::COMMON::DistanceUtils::Quantizer->GetReconstructType()) + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
+        IOSTRING(p_configOut, WriteString, "\n");
+    }
 
     return SaveConfig(p_configOut);
 }
@@ -221,6 +236,12 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         auto configFile = SPTAG::f_createIO();
         if (configFile == nullptr || !configFile->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
         if ((ret = SaveIndexConfig(configFile)) != ErrorCode::Success) return ret;
+    }
+
+    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+        auto quantizerFile = SPTAG::f_createIO();
+        if (quantizerFile == nullptr || !quantizerFile->Initialize((folderPath + m_sQuantizerFile).c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
+        if ((ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(quantizerFile)) != ErrorCode::Success) return ret;
     }
 
     std::shared_ptr<std::vector<std::string>> indexfiles = GetIndexFiles();
@@ -450,6 +471,28 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         auto fp = SPTAG::f_createIO();
         if (fp == nullptr || !fp->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
         if (ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
+    }
+
+
+    std::string quantizerSection("Quantizer");
+    if (iniReader.DoesSectionExist(quantizerSection))
+    {
+        std::string quantizerFile = iniReader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
+        QuantizerType qType = iniReader.GetParameter(quantizerSection, "QuantizerType", QuantizerType::None);
+        VectorValueType reconstructType = iniReader.GetParameter(quantizerSection, "QuantizerReconstructValueType", VectorValueType::Undefined);
+
+        auto ptr = SPTAG::f_createIO();
+        if (!ptr->Initialize((folderPath + quantizerFile).c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+            return ErrorCode::FailedOpenFile;
+        }
+        auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, qType, reconstructType);
+        if (code != ErrorCode::Success)
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+            return code;
+        }
     }
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
