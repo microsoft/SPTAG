@@ -14,15 +14,6 @@
 namespace SPTAG
 {
 
-struct Edge
-{
-    SizeType node;
-    float distance;
-    SizeType tonode;
-    Edge() : node(MaxSize), distance(MaxDist), tonode(MaxSize) {}
-};
-
-
 class IAbortOperation
 {
 public:

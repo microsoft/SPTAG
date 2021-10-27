@@ -83,33 +83,7 @@ public:
     std::string m_syncscript = "";
 } options;
 
-struct EdgeCompare
-{
-    bool operator()(const Edge& a, int b) const
-    {
-        return a.node < b;
-    };
-
-    bool operator()(int a, const Edge& b) const
-    {
-        return a < b.node;
-    };
-
-    bool operator()(const Edge& a, const Edge& b) const
-    {
-        if (a.node == b.node)
-        {
-            if (a.distance == b.distance)
-            {
-                return a.tonode < b.tonode;
-            }
-
-            return a.distance < b.distance;
-        }
-
-        return a.node < b.node;
-    };
-} g_edgeComparer;
+EdgeCompare g_edgeComparer;
 
 template <typename T>
 bool LoadCenters(T* centers, SizeType row, DimensionType col, const std::string& centerpath, float* lambda = nullptr, float* diff = nullptr, float* mindist = nullptr, int* noimprovement = nullptr) {
@@ -494,7 +468,7 @@ void Process(MPI_Datatype type) {
     }
 	d = 0;
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
-	std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0) ? (SizeType)totalCount : (SizeType)(options.m_hardcut * totalCount / size));
+	std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0) ? data.R() : (SizeType)(options.m_hardcut * totalCount / size));
 	std::memset(args.counts, 0, sizeof(SizeType)*args._K);
     args.ClearCounts();
     args.ClearDists(0);
@@ -865,7 +839,7 @@ void ProcessWithoutMPI() {
     totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
     unsigned long long tmpTotalCount;
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
-    std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0)? (SizeType)totalCount * args._K: (SizeType)(options.m_hardcut * totalCount / options.m_totalparts));
+    std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0)? data.R() : (SizeType)(options.m_hardcut * totalCount / options.m_totalparts));
     std::memset(args.counts, 0, sizeof(SizeType) * args._K);
     args.ClearCounts();
     args.ClearDists(0);

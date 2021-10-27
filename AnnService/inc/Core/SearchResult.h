@@ -26,6 +26,42 @@ namespace SPTAG
         }
     };
 
+    struct Edge
+    {
+        SizeType node;
+        float distance;
+        SizeType tonode;
+        Edge() : node(MaxSize), distance(MaxDist), tonode(MaxSize) {}
+    };
+
+    struct EdgeCompare
+    {
+        inline bool operator()(const Edge& a, int b) const
+        {
+            return a.node < b;
+        };
+
+        inline bool operator()(int a, const Edge& b) const
+        {
+            return a < b.node;
+        };
+
+        inline bool operator()(const Edge& a, const Edge& b) const
+        {
+            if (a.node == b.node)
+            {
+                if (a.distance == b.distance)
+                {
+                    return a.tonode < b.tonode;
+                }
+
+                return a.distance < b.distance;
+            }
+
+            return a.node < b.node;
+        };
+    };
+
     struct BasicResult
     {
         SizeType VID;

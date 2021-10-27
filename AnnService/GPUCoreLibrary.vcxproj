@@ -128,6 +128,7 @@
     <ClInclude Include="inc\Core\Common\cuda\params.h" />
     <ClInclude Include="inc\Core\Common\cuda\Distance.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\Refine.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\TailNeighbors.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
