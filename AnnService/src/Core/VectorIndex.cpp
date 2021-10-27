@@ -125,11 +125,6 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
         IOSTRING(p_configOut, WriteString, "\n");
     }
 
-    IOSTRING(p_configOut, WriteString, "[Index]\n");
-    IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
-    IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
-    IOSTRING(p_configOut, WriteString, "\n");
-
     if (SPTAG::COMMON::DistanceUtils::Quantizer)
     {
         IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
@@ -138,6 +133,11 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
         IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
         IOSTRING(p_configOut, WriteString, "\n");
     }
+
+    IOSTRING(p_configOut, WriteString, "[Index]\n");
+    IOSTRING(p_configOut, WriteString, ("IndexAlgoType=" + Helper::Convert::ConvertToString(GetIndexAlgoType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, ("ValueType=" + Helper::Convert::ConvertToString(GetVectorValueType()) + "\n").c_str());
+    IOSTRING(p_configOut, WriteString, "\n");
 
     return SaveConfig(p_configOut);
 }
@@ -472,7 +472,6 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         if (fp == nullptr || !fp->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
         if (ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
     }
-
 
     std::string quantizerSection("Quantizer");
     if (iniReader.DoesSectionExist(quantizerSection))
