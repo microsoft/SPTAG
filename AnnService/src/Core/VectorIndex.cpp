@@ -128,8 +128,6 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
     if (SPTAG::COMMON::DistanceUtils::Quantizer)
     {
         IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
-        IOSTRING(p_configOut, WriteString, ("QuantizerType=" + Helper::Convert::ConvertToString(SPTAG::COMMON::DistanceUtils::Quantizer->GetQuantizerType()) + "\n").c_str());
-        IOSTRING(p_configOut, WriteString, ("QuantizerReconstructValueType=" + Helper::Convert::ConvertToString(SPTAG::COMMON::DistanceUtils::Quantizer->GetReconstructType()) + "\n").c_str());
         IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
         IOSTRING(p_configOut, WriteString, "\n");
     }
@@ -477,8 +475,6 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     if (iniReader.DoesSectionExist(quantizerSection))
     {
         std::string quantizerFile = iniReader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
-        QuantizerType qType = iniReader.GetParameter(quantizerSection, "QuantizerType", QuantizerType::None);
-        VectorValueType reconstructType = iniReader.GetParameter(quantizerSection, "QuantizerReconstructValueType", VectorValueType::Undefined);
 
         auto ptr = SPTAG::f_createIO();
         if (!ptr->Initialize((folderPath + quantizerFile).c_str(), std::ios::binary | std::ios::in))
@@ -486,7 +482,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
             LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
             return ErrorCode::FailedOpenFile;
         }
-        auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, qType, reconstructType);
+        auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
         if (code != ErrorCode::Success)
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");

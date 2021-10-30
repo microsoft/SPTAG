@@ -246,6 +246,10 @@ namespace SPTAG
         template <typename T>
         ErrorCode PQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
         {
+            QuantizerType qtype = QuantizerType::PQQuantizer;
+            VectorValueType rtype = GetEnumValueType<T>();
+            IOBINARY(p_out, WriteBinary, sizeof(QuantizerType), (char*)&qtype);
+            IOBINARY(p_out, WriteBinary, sizeof(VectorValueType), (char*)&rtype);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
             IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);

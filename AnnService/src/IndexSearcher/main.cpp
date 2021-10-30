@@ -426,7 +426,7 @@ int main(int argc, char** argv)
             LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
             exit(1);
         }
-        auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, options->m_inputValueType);
+        auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
         if (code != ErrorCode::Success)
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");

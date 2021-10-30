@@ -5,8 +5,11 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        ErrorCode IQuantizer::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in, QuantizerType quantizerType, VectorValueType reconstructType) {
-            std::shared_ptr<IQuantizer> ptr;
+        ErrorCode IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
+            QuantizerType quantizerType = QuantizerType::Undefined;
+            VectorValueType reconstructType = VectorValueType::Undefined;
+            IOBINARY(p_in, ReadBinary, sizeof(QuantizerType), (char*)&quantizerType);
+            IOBINARY(p_in, ReadBinary, sizeof(VectorValueType), (char*)&reconstructType);
             switch (quantizerType) {
             case QuantizerType::None:
                 break;

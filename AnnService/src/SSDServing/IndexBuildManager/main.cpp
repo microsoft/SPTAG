@@ -77,7 +77,8 @@ namespace SPTAG {
 			SPTAG::VectorValueType valueType,
 			SPTAG::DistCalcMethod distCalcMethod,
 			const char* dataFilePath, 
-			const char* indexFilePath) {
+			const char* indexFilePath,
+			const char* quantizerFilePath = nullptr) {
 
 			COMMON_OPTS = BaseOptions();
 			SSDServing::SelectHead_BKT::Options slOpts;
@@ -90,6 +91,7 @@ namespace SPTAG {
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = SPTAG::Helper::Convert::ConvertToString(distCalcMethod);
 				(*config_map)[SEC_BASE]["VectorPath"] = dataFilePath;
 				(*config_map)[SEC_BASE]["IndexDirectory"] = indexFilePath;
+				(*config_map)[SEC_BASE]["QuantizerFilePath"] = quantizerFilePath;
 
 				(*config_map)[SEC_BUILD_HEAD]["KDTNumber"] = "2";
 				(*config_map)[SEC_BUILD_HEAD]["NeighborhoodSize"] = "32";
@@ -132,7 +134,7 @@ namespace SPTAG {
 					LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
 					exit(1);
 				}
-				auto code = SPTAG::COMMON::IQuantizer::LoadQuantizer(ptr, QuantizerType::PQQuantizer, COMMON_OPTS.m_valueType);
+				auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
 				if (code != ErrorCode::Success)
 				{
 					LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
