@@ -77,8 +77,7 @@ namespace SPTAG {
 			SPTAG::VectorValueType valueType,
 			SPTAG::DistCalcMethod distCalcMethod,
 			const char* dataFilePath, 
-			const char* indexFilePath,
-			const char* quantizerFilePath = nullptr) {
+			const char* indexFilePath) {
 
 			COMMON_OPTS = BaseOptions();
 			SSDServing::SelectHead_BKT::Options slOpts;
@@ -91,7 +90,6 @@ namespace SPTAG {
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = SPTAG::Helper::Convert::ConvertToString(distCalcMethod);
 				(*config_map)[SEC_BASE]["VectorPath"] = dataFilePath;
 				(*config_map)[SEC_BASE]["IndexDirectory"] = indexFilePath;
-				(*config_map)[SEC_BASE]["QuantizerFilePath"] = quantizerFilePath;
 
 				(*config_map)[SEC_BUILD_HEAD]["KDTNumber"] = "2";
 				(*config_map)[SEC_BUILD_HEAD]["NeighborhoodSize"] = "32";
