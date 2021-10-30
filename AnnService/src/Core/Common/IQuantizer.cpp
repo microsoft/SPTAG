@@ -1,5 +1,6 @@
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Helper/StringConvert.h>
 
 namespace SPTAG
 {
@@ -10,6 +11,7 @@ namespace SPTAG
             VectorValueType reconstructType = VectorValueType::Undefined;
             IOBINARY(p_in, ReadBinary, sizeof(QuantizerType), (char*)&quantizerType);
             IOBINARY(p_in, ReadBinary, sizeof(VectorValueType), (char*)&reconstructType);
+            LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
             switch (quantizerType) {
             case QuantizerType::None:
                 break;
