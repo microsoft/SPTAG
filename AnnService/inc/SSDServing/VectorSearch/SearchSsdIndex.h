@@ -527,7 +527,7 @@ namespace SPTAG {
                 std::shared_ptr<SPTAG::VectorSet> vectorSet;
                 if (!SPTAG::COMMON::DistanceUtils::Quantizer && p_opts.m_rerankFilePath.empty())
                 {
-                    p_opts.m_rerankFilePath(COMMON_OPTS.m_vectorPath);
+                    p_opts.m_rerankFilePath = COMMON_OPTS.m_vectorPath;
                 }
 
                 if (!p_opts.m_rerankFilePath.empty() && fileexists(p_opts.m_rerankFilePath.c_str())) {
