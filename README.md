@@ -49,6 +49,11 @@ The searches in the trees and the graph are iteratively conducted.
 ```
 set GIT_LFS_SKIP_SMUDGE=1
 git clone https://github.com/microsoft/SPTAG
+
+OR
+
+git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+git config --global filter.lfs.process "git-lfs filter-process --skip"
 ```
 
 ### **Install**
@@ -78,7 +83,7 @@ Will build a docker container with binaries in `/app/Release/`.
 
 ### **Verify** 
 
-Run the test (or Test.exe) in the Release folder to verify all the tests have passed.
+Run the SPTAGTest (or Test.exe) in the Release folder to verify all the tests have passed.
 
 ### **Usage**
 
@@ -88,6 +93,20 @@ The detailed parameters tunning can be found in [Parameters](docs/Parameters.md)
 ## **References**
 Please cite SPTAG in your publications if it helps your research:
 ```
+@inproceedings{ChenW21,
+  author = {Qi Chen and 
+            Bing Zhao and 
+            Haidong Wang and 
+            Mingqin Li and 
+            Chuanjie Liu and 
+            Zengzhong Li and 
+            Mao Yang and 
+            Jingdong Wang},
+  title = {SPANN: Highly-efficient Billion-scale Approximate Nearest Neighbor Search},
+  booktitle = {35th Conference on Neural Information Processing Systems (NeurIPS 2021)},
+  year = {2021}
+}
+
 @manual{ChenW18,
   author    = {Qi Chen and
                Haidong Wang and

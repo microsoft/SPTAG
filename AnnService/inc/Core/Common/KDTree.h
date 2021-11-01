@@ -134,6 +134,37 @@ namespace SPTAG
 
             ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
             {
+                if (m_bOldVersion) {
+                    struct KdtreeNode
+                    {
+                        int left;
+                        int right;
+                        short split_dim;
+                        float split_value;
+                    } tmpNode;
+
+                    IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
+
+                    int treeNodeSize = 0;
+                    for (int i = 0; i < m_iTreeNumber; i++)
+                    {
+                        m_pTreeStart.push_back(treeNodeSize);
+
+                        int iNodeSize;
+                        IOBINARY(p_input, ReadBinary, sizeof(iNodeSize), (char*)&iNodeSize);
+                        m_pTreeRoots.resize(treeNodeSize + iNodeSize);
+                        for (int j = treeNodeSize; j < treeNodeSize + iNodeSize; j++) {
+                            IOBINARY(p_input, ReadBinary, sizeof(KdtreeNode), (char*)(&tmpNode));
+                            m_pTreeRoots[j].left = tmpNode.left + treeNodeSize;
+                            m_pTreeRoots[j].right = tmpNode.right + treeNodeSize;
+                            m_pTreeRoots[j].split_dim = tmpNode.split_dim;
+                            m_pTreeRoots[j].split_value = tmpNode.split_value;
+                        }
+                        treeNodeSize += iNodeSize;
+                    }
+                    LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                    return ErrorCode::Success;
+                }
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 m_pTreeStart.resize(m_iTreeNumber);
                 IOBINARY(p_input, ReadBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
@@ -348,6 +379,7 @@ namespace SPTAG
         public:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
+            bool m_bOldVersion;
         };
     }
 }

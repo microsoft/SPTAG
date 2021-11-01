@@ -7,17 +7,34 @@
 
 #include <cub/cub.cuh>
 #include <chrono>
-
+#include<thrust/execution_policy.h>
+#include<thrust/sort.h>
+#include <parallel/algorithm>
 
 using namespace SPTAG;
 using namespace std;
+
+// Structure used to re-order queries to improve thread divergence and access locality
+class QueryGroup {
+  public:
+    int* sizes;
+    int* offsets;
+    int* query_ids;
+
+  // Expects mem to already be allocated with N + 2*num_groups integers
+  __device__ void init_mem(size_t N, int num_groups, int* mem) {
+    sizes = mem;
+    offsets = &mem[num_groups];
+    query_ids = &mem[2*num_groups];
+  }
+};
 
 /***********************************************************************************
  * Kernel to update the RNG list for each tail vector in the batch.  Assumes TPT 
  * is already created and populated based on the head vectors.
 ***********************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Dim>* tailPoints, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads) {
+__global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Dim>* tailPoints, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups) {
 
   extern __shared__ char sharememory[];
 
@@ -37,9 +54,20 @@ __global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Di
   int leafId;
   bool good;
 
+// If the queries were re-ordered, use the QueryGroup object to determine order to perform queries
+// NOTE: Greatly improves locality and thread divergence
+#if REORDER
+  size_t tailId;
+  for(size_t orderIdx = blockIdx.x*blockDim.x + threadIdx.x; orderIdx < numTails; orderIdx += gridDim.x*blockDim.x) {
+    tailId = groups->query_ids[orderIdx];  
+    query = tailPoints[tailId];
+    leafId = searchForLeaf<T,KEY_T,SUMTYPE,Dim,Dim>(tptree, &query);
+#else
   for(size_t tailId = blockIdx.x*blockDim.x + threadIdx.x; tailId < numTails; tailId += gridDim.x*blockDim.x) {
     query = tailPoints[tailId];
     leafId = searchForLeaf<T,KEY_T,SUMTYPE,Dim,Dim>(tptree, &query);
+#endif
+
     size_t leaf_offset = tptree->leafs[leafId].offset;
 
     // Load results from previous iterations into shared memory heap
@@ -107,6 +135,70 @@ __global__ void debug_warm_up_gpu() {
   ib += ia + tid; 
 }
 
+
+// Search each query into the TPTree to get the number of queries for each leaf node. This just generates a histogram
+// for each leaf node so that we can compute offsets
+template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
+__global__ void compute_group_sizes(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree, Point<T,SUMTYPE,MAX_DIM>* queries, int N, int num_groups, int* queryMem) {
+  groups->init_mem(N, num_groups, queryMem);
+
+  Point<T,SUMTYPE,MAX_DIM> query;
+  int leafId;
+  
+  for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
+    query = queries[qidx];
+    leafId = searchForLeaf<T,KEY_T,SUMTYPE,MAX_DIM,MAX_DIM>(tptree, &query);
+    atomicAdd(&(groups->sizes[leafId]), 1);   
+  }
+}
+
+// Given the offsets and sizes of queries assigned to each leaf node, writes the list of queries assigned
+// to each leaf.  The list of query_ids can then be used during neighborhood search to improve locality
+template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
+__global__ void assign_queries_to_group(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree, Point<T,SUMTYPE,MAX_DIM>* queries, int N, int num_groups) {
+  Point<T,SUMTYPE,MAX_DIM> query;
+  int leafId;
+  int idx_in_leaf;
+  
+  for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
+    query = queries[qidx];
+    leafId = searchForLeaf<T,KEY_T,SUMTYPE,MAX_DIM,MAX_DIM>(tptree, &query);
+    idx_in_leaf = atomicAdd(&(groups->sizes[leafId]), 1);   
+    groups->query_ids[groups->offsets[leafId]+idx_in_leaf] = qidx;
+  }
+  
+}
+
+// Gets the list of queries that are to be searched into each leaf.  The QueryGroup structure uses the memory
+// provided with queryMem, which is required to be allocated with size N + 2*num_groups.  
+template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
+__host__ void get_query_groups(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree, Point<T,SUMTYPE,MAX_DIM>* queries, int N, int num_groups, int* queryMem, int NUM_BLOCKS, int NUM_THREADS) {
+
+  CUDA_CHECK(cudaMemset(queryMem, 0, (N+2*num_groups)*sizeof(int)));
+
+  compute_group_sizes<T,KEY_T,SUMTYPE,MAX_DIM><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups, queryMem);
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Compute offsets based on sizes
+  int* h_sizes = new int[num_groups];
+  CUDA_CHECK(cudaMemcpy(h_sizes, queryMem, num_groups*sizeof(int), cudaMemcpyDeviceToHost));
+  int* h_offsets = new int[num_groups];
+  h_offsets[0]=0;
+  for(int i=1; i<num_groups; ++i) h_offsets[i] = h_offsets[i-1] + h_sizes[i-1];
+
+  CUDA_CHECK(cudaMemcpy(&queryMem[num_groups], h_offsets, num_groups*sizeof(int), cudaMemcpyHostToDevice));
+
+  // Reset group sizes to use while assigning queires
+  CUDA_CHECK(cudaMemset(queryMem, 0, num_groups*sizeof(int)));
+
+  assign_queries_to_group<T,KEY_T,SUMTYPE,MAX_DIM><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups);
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  delete[] h_sizes;
+  delete[] h_offsets;
+}
+    
+
 template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
 void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* headIndex, std::unordered_set<int>& headVectorIDS, int dim, DistPair<SUMTYPE>* results, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric, int NUM_GPUS) {
 
@@ -134,7 +226,6 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
     int TPTlevels = (int)std::log2(headRows/LEAF_SIZE);
 
-
     Point<T,SUMTYPE,MAX_DIM>* headPoints;
     Point<T,SUMTYPE,MAX_DIM>* tailPoints; 
     headPoints = new Point<T,SUMTYPE,MAX_DIM>[headRows];
@@ -158,6 +249,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     }
     GPUOffset[0] = 0;
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU 0: tails:%lu, offset:%lu\n", tailsPerGPU[0], GPUOffset[0]);
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU 0: tails:%lu, offset:%lu\n", tailsPerGPU[0], GPUOffset[0]);
     for(int gpuNum=1; gpuNum < NUM_GPUS; ++gpuNum) {
         GPUOffset[gpuNum] = GPUOffset[gpuNum-1] + tailsPerGPU[gpuNum-1];
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU %d: tails:%lu, offset:%lu\n", gpuNum, tailsPerGPU[gpuNum], GPUOffset[gpuNum]);
@@ -172,6 +264,10 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     DistPair<SUMTYPE>** d_results = new DistPair<SUMTYPE>*[NUM_GPUS];
     TPtree<T,KEY_T,SUMTYPE,MAX_DIM>** tptree = new TPtree<T,KEY_T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
     TPtree<T,KEY_T,SUMTYPE,MAX_DIM>** d_tptree = new TPtree<T,KEY_T,SUMTYPE,MAX_DIM>*[NUM_GPUS];
+
+    // memory on each GPU for QuerySet reordering structures
+    std::vector<int*> d_queryMem(NUM_GPUS);
+    std::vector<QueryGroup*> d_queryGroups(NUM_GPUS);
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Setting up each of the %d GPUs...\n", NUM_GPUS);
 
@@ -195,11 +291,16 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
       
         // Auto-compute batch size based on available memory on the GPU
         size_t headVecSize = headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>);
-        size_t treeSize = 20*headRows;
+        size_t randSize = (size_t)(min((int)headRows, (int)1024))*48; // Memory used for GPU random number generator
+        size_t treeSize = 20*headRows + randSize;
+
         size_t tailMemAvail = (freeMem*0.9) - (headVecSize+treeSize); // Only use 90% of total memory to be safe
-        int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>));
+
+        // memory needed for points, results, and query reorder mem
+        int maxEltsPerBatch = tailMemAvail / (sizeof(Point<T,SUMTYPE,MAX_DIM>) + RNG_SIZE*sizeof(DistPair<SUMTYPE>) + 2*sizeof(int));
+
         BATCH_SIZE[gpuNum] = min(maxEltsPerBatch, (int)(tailsPerGPU[gpuNum]));
-  
+
        // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
         if(BATCH_SIZE[gpuNum] == 0 || ((int)tailsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum] > 10000) {
             LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient GPU memory to build SSD index on GPU %d.  Available GPU memory:%lu MB, Head index requires:%lu MB, leaving a maximum batch size of %d elements, which is too small to run efficiently.\n", gpuNum, (freeMem)/1000000, (headVecSize+treeSize)/1000000, maxEltsPerBatch);
@@ -221,6 +322,10 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         tptree[gpuNum]->initialize(headRows, TPTlevels);
 
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "tpt structure initialized for %lu head vectors, %d levels, leaf size:%d\n", headRows, TPTlevels, LEAF_SIZE);
+
+        // Alloc memory for QuerySet structure
+        CUDA_CHECK(cudaMalloc(&d_queryMem[gpuNum], BATCH_SIZE[gpuNum]*sizeof(int) + 2*tptree[gpuNum]->num_leaves*sizeof(int)));
+        CUDA_CHECK(cudaMalloc(&d_queryGroups[gpuNum], sizeof(QueryGroup)));
 
         // Copy head points to GPU
         CUDA_CHECK(cudaMemcpy(d_headPoints[gpuNum], headPoints, headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
@@ -272,10 +377,11 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
         // For each tree, create a new TPT and use it to refine tail neighbor list of batch
         for(int tree_id=0; tree_id < NUM_TREES; ++tree_id) {
+            NUM_BLOCKS = min((int)(BATCH_SIZE[0]/NUM_THREADS), 10240);
 
 auto t1 = std::chrono::high_resolution_clock::now();
             // Create TPT on each GPU
-            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams.data());
+            create_tptree_multigpu<T, KEY_T, SUMTYPE, MAX_DIM>(tptree, d_headPoints, headRows, TPTlevels, NUM_GPUS, streams.data(), 2);
             CUDA_CHECK(cudaDeviceSynchronize());
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT %d created on all GPUs\n", tree_id);
 
@@ -285,12 +391,20 @@ auto t1 = std::chrono::high_resolution_clock::now();
                 CUDA_CHECK(cudaMemcpy(d_tptree[gpuNum], tptree[gpuNum], sizeof(TPtree<T,KEY_T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
             }
 
+#if REORDER
+            // Compute QuerySet lists based on TPT, which can then be used to improve locality/divergence during RNG search
+            for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+                CUDA_CHECK(cudaSetDevice(gpuNum));
+                get_query_groups<T,KEY_T,SUMTYPE,MAX_DIM>(d_queryGroups[gpuNum], d_tptree[gpuNum], d_tailPoints[gpuNum], (int)(curr_batch_size[gpuNum]), (int)tptree[gpuNum]->num_leaves, d_queryMem[gpuNum], NUM_BLOCKS, NUM_THREADS);
+            }
+#endif
+
 auto t2 = std::chrono::high_resolution_clock::now();
 
             // Call main kernel on each GPU
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
                 CUDA_CHECK(cudaSetDevice(gpuNum));
-                findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPoints[gpuNum], d_tailPoints[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, (size_t)curr_batch_size[gpuNum], headRows);
+                findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPoints[gpuNum], d_tailPoints[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, (size_t)curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum]);
             }
 
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -345,6 +459,113 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "Tree %d complete, time to build tree:%.2
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Mam alloc time:%0.2lf, GPU time to build index:%.2lf, Memory free time:%.2lf\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t1-premem_t).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t1-premem_t).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t2-ssd_t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t2-ssd_t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(ssd_t3-ssd_t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(ssd_t3-ssd_t2).count())/1000);
 
 }
+
+__host__ __device__ struct GPUEdge
+{
+    SizeType node;
+    float distance;
+    SizeType tonode;
+    __host__ __device__ GPUEdge() : node(MaxSize), distance(FLT_MAX/10.0), tonode(MaxSize) {}
+};
+
+
+struct GPU_EdgeCompare {
+    bool operator()(const GPUEdge& a, int b) const
+    {
+        return a.node < b;
+    };
+
+    bool operator()(int a, const GPUEdge& b) const
+    {
+        return a < b.node;
+    };
+
+    __host__ __device__ bool operator()(const GPUEdge& a, const GPUEdge& b) {
+        if (a.node == b.node)
+        {
+            if (a.distance == b.distance)
+            {
+                return a.tonode < b.tonode;
+            }
+
+            return a.distance < b.distance;
+        }
+        return a.node < b.node;
+    }
+} gpu_edgeComparer;
+
+void GPU_SortSelections(std::vector<Edge>* selections) {
+
+  size_t N = selections->size();
+
+  size_t freeMem, totalMem;
+  CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+
+// Maximum number of elements that can be sorted on GPU
+  size_t sortBatchSize = (size_t)(freeMem*0.9 / sizeof(GPUEdge))/2; 
+
+  std::vector<GPUEdge>* new_selections = reinterpret_cast<std::vector<GPUEdge>*>(selections);
+
+  int num_batches = (N + (sortBatchSize-1)) / sortBatchSize;
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Sorting final results. Size of result:%ld elements = %0.2lf GB, Available GPU memory:%0.2lf, sorting in %d batches\n", N, ((double)(N*sizeof(GPUEdge))/1000000000.0), ((double)freeMem)/1000000000.0, num_batches);
+
+  int batchNum=0;
+
+  GPUEdge* merge_mem;
+  if(num_batches > 1) {
+    merge_mem = new GPUEdge[N];
+  }
+
+  LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating %ld bytes on GPU for sorting\n", sortBatchSize*sizeof(GPUEdge));
+  GPUEdge* d_selections;
+  CUDA_CHECK(cudaMalloc(&d_selections, sortBatchSize*sizeof(GPUEdge)));
+
+  for(size_t startIdx = 0; startIdx < N; startIdx += sortBatchSize) {
+    
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    size_t batchSize = sortBatchSize;
+    if(startIdx + batchSize > N) {
+      batchSize = N - startIdx;
+    }
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Sorting batch id:%ld, size:%ld\n", startIdx, batchSize);
+
+    GPUEdge* batchPtr = &(new_selections->data()[startIdx]);
+    
+    CUDA_CHECK(cudaMemcpy(d_selections, batchPtr, batchSize*sizeof(GPUEdge), cudaMemcpyHostToDevice));
+    try {
+      thrust::sort(thrust::device, d_selections, d_selections+batchSize, gpu_edgeComparer);
+    }
+    catch (thrust::system_error &e){
+      LOG(SPTAG::Helper::LogLevel::LL_Info, "Error: %s \n",e.what());
+    }
+
+    CUDA_CHECK(cudaMemcpy(batchPtr, d_selections, batchSize*sizeof(GPUEdge), cudaMemcpyDeviceToHost));
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    // For all batches after the first, merge into the final output
+    if(startIdx > 0) {
+      std::merge(new_selections->data(), batchPtr, batchPtr, &batchPtr[batchSize], merge_mem, gpu_edgeComparer);
+
+// For faster merging on Linux systems, can use below instead of std::merge (above)
+//      __gnu_parallel::merge(new_selections->data(), batchPtr, batchPtr, &batchPtr[batchSize], merge_mem, gpu_edgeComparer);
+ 
+      memcpy(new_selections->data(), merge_mem, (startIdx+batchSize)*sizeof(GPUEdge));
+    }
+    
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Sort batch %d - GPU transfer/sort time:%0.2lf, CPU merge time:%.2lf\n", batchNum, ((double)std::chrono::duration_cast<std::chrono::seconds>(t2-t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count())/1000, ((double)std::chrono::duration_cast<std::chrono::seconds>(t3-t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count())/1000);
+    batchNum++;
+  }
+  if(num_batches > 1) {
+    delete merge_mem;
+  }
+}
+
+
 
 /*************************************************************************************************
  * Deprecated code from Hybrid CPU/GPU SSD Index builder

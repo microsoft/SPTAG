@@ -12,6 +12,7 @@ DefineKDTParameter(m_sDeleteDataPointsFilename, std::string, std::string("delete
 DefineKDTParameter(m_pTrees.m_iTreeNumber, int, 1L, "KDTNumber")
 DefineKDTParameter(m_pTrees.m_numTopDimensionKDTSplit, int, 5L, "NumTopDimensionKDTSplit")
 DefineKDTParameter(m_pTrees.m_iSamples, int, 100L, "Samples")
+DefineKDTParameter(m_pTrees.m_bOldVersion, bool, false, "IsOldVersion")
 
 DefineKDTParameter(m_pGraph.m_iTPTNumber, int, 32L, "TPTNumber")
 DefineKDTParameter(m_pGraph.m_iTPTLeafSize, int, 2000L, "TPTLeafSize")
@@ -31,6 +32,7 @@ DefineKDTParameter(m_pGraph.m_iGPURefineSteps, int, 0, "GPURefineSteps") // Step
 DefineKDTParameter(m_pGraph.m_iGPURefineDepth, int, 30, "GPURefineDepth") // Depth of graph search for refinement
 DefineKDTParameter(m_pGraph.m_iGPULeafSize, int, 500, "GPULeafSize")
 DefineKDTParameter(m_pGraph.m_iheadNumGPUs, int, 1, "HeadNumGPUs")
+DefineKDTParameter(m_pGraph.m_iTPTBalanceFactor, int, 2, "TPTBalanceFactor")
 
 DefineKDTParameter(m_iNumberOfThreads, int, 1L, "NumberOfThreads")
 DefineKDTParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")

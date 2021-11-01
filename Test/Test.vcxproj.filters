@@ -36,6 +36,9 @@
     <ClCompile Include="src\CommonHelperTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\SSDServingTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\ConcurrentTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

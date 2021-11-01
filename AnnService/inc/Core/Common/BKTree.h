@@ -51,8 +51,8 @@ namespace SPTAG
             float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length);
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod) : _K(k), _DK(k), _D(dim), _T(threadnum), _M(distMethod) {
-                centers = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN);
-                newTCenters = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN);
+                centers = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
+                newTCenters = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
                 counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
                 newCounts = new SizeType[threadnum * k];
@@ -175,6 +175,7 @@ namespace SPTAG
                 float *inewCenters = args.newCenters + tid * args._K * args._D;
                 SizeType * iclusterIdx = args.clusterIdx + tid * args._K;
                 float * iclusterDist = args.clusterDist + tid * args._K;
+                float * iweightedCounts = args.newWeightedCounts + tid * args._K;
                 float idist = 0;
                 for (SizeType i = istart; i < iend; i++) {
                     int clusterid = 0;
@@ -187,6 +188,7 @@ namespace SPTAG
                     }
                     args.label[i] = clusterid;
                     inewCounts[clusterid]++;
+                    iweightedCounts[clusterid] += smallestDist;
                     idist += smallestDist;
                     if (updateCenters) {
                         const T* v = (const T*)data[indices[i]];
@@ -208,8 +210,10 @@ namespace SPTAG
             }
 
             for (int i = 1; i < args._T; i++) {
-                for (int k = 0; k < args._DK; k++)
-                    args.newCounts[k] += args.newCounts[i*args._K + k];
+                for (int k = 0; k < args._DK; k++) {
+                    args.newCounts[k] += args.newCounts[i * args._K + k];
+                    args.newWeightedCounts[k] += args.newWeightedCounts[i * args._K + k];
+                }
             }
 
             if (updateCenters) {
@@ -239,11 +243,11 @@ namespace SPTAG
         }
 
         template <typename T>
-        inline void InitCenters(const Dataset<T>& data, 
+        inline float InitCenters(const Dataset<T>& data, 
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples, int tryIters) {
             SizeType batchEnd = min(first + samples, last);
-            float currDist, minClusterDist = MaxDist;
+            float lambda, currDist, minClusterDist = MaxDist;
             for (int numKmeans = 0; numKmeans < tryIters; numKmeans++) {
                 for (int k = 0; k < args._DK; k++) {
                     SizeType randid = COMMON::Utils::rand(last, first);
@@ -256,8 +260,16 @@ namespace SPTAG
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
                     memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
+
+                    SizeType maxCluster = 0;
+                    for (int k = 1; k < args._DK; k++) if (args.counts[k] > args.counts[maxCluster]) maxCluster = k;
+
+                    float avgDist = args.newWeightedCounts[maxCluster] / args.counts[maxCluster];
+                    lambda = (avgDist - args.clusterDist[maxCluster]) / args.counts[maxCluster];
+                    if (lambda < 0) lambda = 0;
                 }
             }
+            return lambda;
         }
 
         template <typename T>
@@ -265,12 +277,13 @@ namespace SPTAG
             std::vector<SizeType>& indices, const SizeType first, const SizeType last,
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
 
-            InitCenters(data, indices, first, last, args, samples, 3);
+            float adjustedLambda = InitCenters(data, indices, first, last, args, samples, 3);
             if (abort && abort->ShouldAbort()) return 0;
 
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
+            float originalLambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
                 std::random_shuffle(indices.begin() + first, indices.begin() + last);
@@ -278,8 +291,7 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true,
-                    COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, min(adjustedLambda, originalLambda));
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
                 if (currDist < minClusterDist) {
@@ -301,15 +313,16 @@ namespace SPTAG
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
-            SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)();
+            SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)(), availableClusters = 0;
             float CountStd = 0.0, CountAvg = (last - first) * 1.0f / args._DK;
             for (int i = 0; i < args._DK; i++) {
                 if (args.counts[i] > maxCount) maxCount = args.counts[i];
                 if (args.counts[i] < minCount) minCount = args.counts[i];
                 CountStd += (args.counts[i] - CountAvg) * (args.counts[i] - CountAvg);
+                if (args.counts[i] > 0) availableClusters++;
             }
             CountStd = sqrt(CountStd / args._DK) / CountAvg;
-            if (debug) LOG(Helper::LogLevel::LL_Info, "LambdaFactor:%f Max:%d Min:%d Avg:%f Std/Avg:%f\n", lambdaFactor, maxCount, minCount, CountAvg, CountStd);
+            if (debug) LOG(Helper::LogLevel::LL_Info, "Lambda:min(%g,%g) Max:%d Min:%d Avg:%f Std/Avg:%f Dist:%f NonZero/Total:%d/%d\n", originalLambda, adjustedLambda, maxCount, minCount, CountAvg, CountStd, currDist, availableClusters, args._DK);
 
             return CountStd;
         }
@@ -406,7 +419,8 @@ namespace SPTAG
             {
                 struct  BKTStackItem {
                     SizeType index, first, last;
-                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_) : index(index_), first(first_), last(last_) {}
+                    bool debug;
+                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_, bool debug_ = false) : index(index_), first(first_), last(last_), debug(debug_) {}
                 };
                 std::stack<BKTStackItem> ss;
 
@@ -431,7 +445,7 @@ namespace SPTAG
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());
                     LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
 
-                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size()));
+                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size(), true));
                     while (!ss.empty()) {
                         if (abort && abort->ShouldAbort()) return;
 
@@ -450,7 +464,7 @@ namespace SPTAG
                                 args._DK = std::max<int>(args._DK, 2);
                             }
 
-                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, ss.empty(), abort);
+                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1) {
                                 SizeType end = min(item.last + 1, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
@@ -464,11 +478,13 @@ namespace SPTAG
                                 m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
                             }
                             else {
+                                SizeType maxCount = 0;
+                                for (int k = 0; k < m_iBKTKmeansK; k++) if (args.counts[k] > maxCount) maxCount = args.counts[k];
                                 for (int k = 0; k < m_iBKTKmeansK; k++) {
                                     if (args.counts[k] == 0) continue;
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
                                     m_pTreeRoots.emplace_back(cid);
-                                    if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1));
+                                    if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1, item.debug && (args.counts[k] == maxCount)));
                                     item.first += args.counts[k];
                                 }
                             }

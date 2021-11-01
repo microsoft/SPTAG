@@ -58,19 +58,23 @@ inline T max(T a, T b) {
 #define strtok_s(a, b, c) strtok_r(a, b, c)
 
 #else
+
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif // !WIN32_LEAN_AND_MEAN
+
 #include <Windows.h>
 #include <Psapi.h>
 #include <malloc.h>
 
 #define FolderSep '\\'
 
-inline bool direxists(const char* path) {
-    auto dwAttr = GetFileAttributes((LPCSTR)path);
+inline bool direxists(const TCHAR* path) {
+    auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY);
 }
-inline bool fileexists(const char* path) {
-    auto dwAttr = GetFileAttributes((LPCSTR)path);
+inline bool fileexists(const TCHAR* path) {
+    auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
@@ -79,7 +83,7 @@ inline bool fileexists(const char* path) {
 
 namespace SPTAG
 {
-#define ALIGN 32
+#define ALIGN_SPTAG 32
 
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;
@@ -94,7 +98,7 @@ extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 
-extern std::unique_ptr<Helper::Logger> g_pLogger;
+extern std::shared_ptr<Helper::Logger> g_pLogger;
 
 #define LOG(l, ...) g_pLogger->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 

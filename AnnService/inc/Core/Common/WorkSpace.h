@@ -44,7 +44,7 @@ namespace SPTAG
             }
 
         public:
-            OptHashPosVector() {}
+            OptHashPosVector(): m_secondHash(false), m_exp(2), m_poolSize(8191) {}
 
             ~OptHashPosVector() {}
 
@@ -141,7 +141,7 @@ namespace SPTAG
             int m_count;
             
         public:
-            DistPriorityQueue() {}
+            DistPriorityQueue(): m_size(0), m_length(0), m_count(0) {}
 
             void Resize(int size_) {
                 m_size = size_;

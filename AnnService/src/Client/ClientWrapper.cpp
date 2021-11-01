@@ -25,7 +25,7 @@ ClientWrapper::ClientWrapper(const ClientOptions& p_options)
         conn.first = m_client->ConnectToServer(p_options.m_serverAddr, p_options.m_serverPort, errCode);
         if (SPTAG::ErrorCode::Socket_FailedResolveEndPoint == errCode)
         {
-            fprintf(stderr, "Unable to resolve remote address.\n");
+            LOG(Helper::LogLevel::LL_Error, "Unable to resolve remote address.\n");
             return;
         }
 
