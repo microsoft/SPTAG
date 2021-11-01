@@ -238,7 +238,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
 
     if (SPTAG::COMMON::DistanceUtils::Quantizer) {
         auto quantizerFile = SPTAG::f_createIO();
-        if (quantizerFile == nullptr || !quantizerFile->Initialize((folderPath + m_sQuantizerFile).c_str(), std::ios::out)) return ErrorCode::FailedCreateFile;
+        if (quantizerFile == nullptr || !quantizerFile->Initialize((folderPath + m_sQuantizerFile).c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
         if ((ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(quantizerFile)) != ErrorCode::Success) return ret;
     }
 
@@ -488,6 +488,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
             LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
             return code;
         }
+        
     }
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
