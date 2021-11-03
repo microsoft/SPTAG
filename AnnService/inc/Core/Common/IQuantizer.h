@@ -45,7 +45,7 @@ namespace SPTAG
 
             virtual DimensionType GetNumSubvectors() const = 0;
 
-            virtual float GetBase() = 0;
+            virtual int GetBase() = 0;
         };
     }
 }

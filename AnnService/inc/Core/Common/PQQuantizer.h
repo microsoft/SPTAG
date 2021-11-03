@@ -50,7 +50,7 @@ namespace SPTAG
 
             virtual DimensionType GetNumSubvectors() const;
 
-            virtual float GetBase();
+            virtual int GetBase();
 
             SizeType GetKsPerSubvector() const;
 
@@ -296,7 +296,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        float PQQuantizer<T>::GetBase()
+        int PQQuantizer<T>::GetBase()
         {
             return COMMON::Utils::GetBase<T>();
         }

@@ -28,7 +28,7 @@ namespace SPTAG {
             for (size_t i = 0; i < size; i++)
             {
 				float temp = nums[i] - mean;
-                var += pow(temp, 2.0);
+                var += (float) pow(temp, 2.0);
             }
             var /= static_cast<float>(size);
 

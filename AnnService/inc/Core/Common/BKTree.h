@@ -262,7 +262,7 @@ namespace SPTAG
                 }
                 args.ClearCounts();
                 args.ClearDists(MaxDist);
-                float base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
+                int base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
                 float baseSquare = (base*base) / (100.0f * (batchEnd - first));
                 currDist = KmeansAssign(data, indices, first, batchEnd, args, true, baseSquare);
                 if (currDist < minClusterDist) {
@@ -292,7 +292,7 @@ namespace SPTAG
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
-            float base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
+            int base = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>();
             float originalLambda = (base*base) / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
