@@ -29,4 +29,7 @@ DefineSelectHeadParameter(m_recursiveCheckSmallCluster, bool, true, "RecursiveCh
 DefineSelectHeadParameter(m_printSizeCount, bool, true, "PrintSizeCount")
 DefineSelectHeadParameter(m_selectType, std::string, "BKT", "SelectHeadType")
 
+DefineSelectHeadParameter(m_datasetRowsInBlock, int, 1024 * 1024, "DataBlockSize")
+DefineSelectHeadParameter(m_datasetCapacity, int, SPTAG::MaxSize, "DataCapacity")
+
 #endif

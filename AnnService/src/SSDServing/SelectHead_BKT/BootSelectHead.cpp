@@ -139,7 +139,7 @@ namespace SPTAG {
 						if (SelectHead(vectorSet, bkt, opts, counter, selected) != ErrorCode::Success)
 						{
 							LOG(Helper::LogLevel::LL_Error, "Failed to select head.\n");
-							exit(1);
+							return ErrorCode::Fail;
 						}
 					}
 				}

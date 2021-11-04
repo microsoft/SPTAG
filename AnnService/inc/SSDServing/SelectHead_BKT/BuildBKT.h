@@ -41,7 +41,9 @@ namespace SPTAG {
 				LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
 					bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, opts.m_iNumberOfThreads);
 				VectorSearch::TimeUtils::StopW sw;
-				COMMON::Dataset<T> data(p_vectorSet->Count(), p_vectorSet->Dimension(), 1024 * 1024, p_vectorSet->Count() + 1, (T*)(p_vectorSet->GetData()));
+				int dataRowsInBlock = opts.m_datasetRowsInBlock;
+				int dataCapacity = opts.m_datasetCapacity;
+				COMMON::Dataset<T> data(p_vectorSet->Count(), p_vectorSet->Dimension(), dataRowsInBlock, dataCapacity, (T*)(p_vectorSet->GetData()));
 				bkt->BuildTrees<T>(data, COMMON_OPTS.m_distCalcMethod, opts.m_iNumberOfThreads, nullptr, nullptr, true);
 				double elapsedMinutes = sw.getElapsedMin();
 

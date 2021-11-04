@@ -35,6 +35,9 @@ namespace SPTAG {
 				bool m_recursiveCheckSmallCluster;
 				bool m_printSizeCount;
 				std::string m_selectType;
+				// Dataset constructor args
+				int m_datasetRowsInBlock;
+				int m_datasetCapacity;
 
 				Options() {
 #define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
