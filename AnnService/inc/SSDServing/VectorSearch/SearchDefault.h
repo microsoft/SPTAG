@@ -137,9 +137,13 @@ namespace SPTAG {
 						return false;
 					}
 					CheckHeadIndexType();
+
+					int maxInt = (std::numeric_limits<int>::max)();
+					int defaultThreadsPerHandler = 4;
+
 					LoadVectorIdsSSDIndex(vectorTranslateMap, extraFullGraphFile, 
-						GetParameter(p_config, "SearchPostingPageLimit", (std::numeric_limits<int>::max)()),
-						GetParameter(p_config, "IOThreadsPerHandler", 4));
+						GetParameter(p_config, "SearchPostingPageLimit", maxInt),
+						GetParameter(p_config, "IOThreadsPerHandler", defaultThreadsPerHandler));
 					return true;
 				}
 
