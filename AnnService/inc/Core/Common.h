@@ -69,11 +69,11 @@ inline T max(T a, T b) {
 
 #define FolderSep '\\'
 
-inline bool direxists(const char* path) {
+inline bool direxists(const TCHAR* path) {
     auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY);
 }
-inline bool fileexists(const char* path) {
+inline bool fileexists(const TCHAR* path) {
     auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
