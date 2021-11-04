@@ -127,19 +127,20 @@ namespace SPTAG {
 					return Helper::Convert::ConvertStringTo<DataType>(value.c_str(), p_defaultVal);
 				}
 
-				void LoadIndex4ANNIndexTestTool(const std::string& p_config,
+				bool LoadIndex4ANNIndexTestTool(const std::string& p_config,
 					const std::vector<ByteArray>& p_indexBlobs,
 					long long* vectorTranslateMap,
 					std::string& extraFullGraphFile)
 				{
 					if (VectorIndex::LoadIndex(p_config, p_indexBlobs, m_index) != SPTAG::ErrorCode::Success) {
 						LOG(Helper::LogLevel::LL_Error, "LoadIndex error in LoadIndex4ANNIndexTestTool.\n");
-						exit(1);
+						return false;
 					}
 					CheckHeadIndexType();
 					LoadVectorIdsSSDIndex(vectorTranslateMap, extraFullGraphFile, 
 						GetParameter(p_config, "SearchPostingPageLimit", (std::numeric_limits<int>::max)()),
 						GetParameter(p_config, "IOThreadsPerHandler", 4));
+					return true;
 				}
 
 				void Setup(Options& p_config, ByteArray& p_myArray)
