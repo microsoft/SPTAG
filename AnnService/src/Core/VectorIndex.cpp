@@ -721,36 +721,9 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 }
 #else
 
-struct EdgeCompare
-{
-    bool operator()(const Edge& a, int b) const
-    {
-        return a.node < b;
-    };
-
-    bool operator()(int a, const Edge& b) const
-    {
-        return a < b.node;
-    };
-
-    bool operator()(const Edge& a, const Edge& b) const
-    {
-        if (a.node == b.node)
-        {
-            if (a.distance == b.distance)
-            {
-                return a.tonode < b.tonode;
-            }
-
-            return a.distance < b.distance;
-        }
-
-        return a.node < b.node;
-    };
-} g_edgeComparer;
-
 void VectorIndex::SortSelections(std::vector<Edge>* selections) {
-  std::sort(selections->begin(), selections->end(), g_edgeComparer);
+    EdgeCompare edgeComparer;
+    std::sort(selections->begin(), selections->end(), edgeComparer);
 }
 
 void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
