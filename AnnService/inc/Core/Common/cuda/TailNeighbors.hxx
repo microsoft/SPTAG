@@ -302,8 +302,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
 
 //    Point<T,SUMTYPE,MAX_DIM>* headPoints;
 //    headPoints = new Point<T,SUMTYPE,MAX_DIM>[headRows];
-    Point<T,SUMTYPE,MAX_DIM>* tailPoints; 
-    tailPoints = new Point<T,SUMTYPE,MAX_DIM>[tailRows];
+//    Point<T,SUMTYPE,MAX_DIM>* tailPoints; 
+//    tailPoints = new Point<T,SUMTYPE,MAX_DIM>[tailRows];
 
     // If headVectors not given, extract from headIndex and use all vectors as tails
 //    extractHeadPointsFromIndex<T,SUMTYPE,MAX_DIM>(vectors, headIndex, headPoints, dim);
@@ -571,7 +571,7 @@ printf("\n");
         delete tptree[gpuNum];
     }
     delete[] pointBuffer;
-    delete[] tailPoints;
+//    delete[] tailPoints;
 
     delete[] d_headPoints;
     delete[] d_tailPoints;
