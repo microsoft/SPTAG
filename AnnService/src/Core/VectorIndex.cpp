@@ -682,10 +682,10 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
                     selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
-                resIdx++;
+//                resIdx++;
             }
+            resIdx++;
         }
-
         delete[] results;
     }
     else {
@@ -713,8 +713,9 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
                     selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                 }
-                resIdx++;
+//                resIdx++;
             }
+                resIdx++;
         }
         delete[] results;
     }
