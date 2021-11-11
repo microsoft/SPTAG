@@ -36,12 +36,14 @@ class QueryGroup {
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 __global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Dim>* tailPoints, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, bool print) {
 
+/*
   if(threadIdx.x==0 && blockIdx.x==0 && print) {
 printf("headPoint 0: id:%d, coords:%f, %f, %f, %f\n", headPoints[0].id, headPoints[0].coords[0], headPoints[0].coords[1], headPoints[0].coords[2], headPoints[0].coords[3]);
 printf("headPoint %d: id:%d, coords:%f, %f, %f, %f\n", numHeads-1, headPoints[numHeads-1].id, headPoints[numHeads-1].coords[0], headPoints[numHeads-1].coords[1], headPoints[numHeads-1].coords[2], headPoints[0].coords[3]);
 printf("tailPoint 0: id:%d, coords:%f, %f, %f, %f\n", tailPoints[0].id, tailPoints[0].coords[0], tailPoints[0].coords[1], tailPoints[0].coords[2], tailPoints[0].coords[3]);
 printf("tailPoint %ld: id:%d, coords:%f, %f, %f, %f\n", numTails-1, tailPoints[numTails-1].id, tailPoints[numTails-1].coords[0], tailPoints[numTails-1].coords[1], tailPoints[numTails-1].coords[2], tailPoints[numTails-1].coords[3]);
   }
+*/
 
   extern __shared__ char sharememory[];
 
@@ -229,11 +231,13 @@ void extractAndCopyHeadPoints(Point<T,SUMTYPE,MAX_DIM>* headPointBuffer, T* vect
 template<typename T, typename SUMTYPE, int MAX_DIM>
 size_t extractAndCopyTailPoints(Point<T,SUMTYPE,MAX_DIM>* pointBuffer, T* vectors, Point<T,SUMTYPE,MAX_DIM>* d_tailPoints, size_t size, std::unordered_set<int>& headVectorIDS, int dim, size_t batch_offset) {
 
+//  printf("extracting tail points. size:%ld, dim:%d, batch_offset:%ld\n", size, dim, batch_offset);
+
   size_t copy_size = COPY_BUFF_SIZE;
   size_t write_idx=0;
   int tailIdx;
 
-  for(int i=0; i<size; i+=COPY_BUFF_SIZE) {
+  for(size_t i=0; i<size; i+=COPY_BUFF_SIZE) {
     if(size-i < COPY_BUFF_SIZE) copy_size = size-i; // Last copy may be smaller
      
     // If given head IDS, need to filter out head vectors and copy only tails
@@ -254,12 +258,15 @@ printf("A - Copying %d tail vectors!\n", copy_size);
     }
     else {
 */
-      for(int j=0; j<copy_size; ++j) {
+//printf("i:%ld, copy_size:%ld\n", i, copy_size); 
+      for(size_t j=0; j<copy_size; ++j) {
         pointBuffer[j].loadChunk(&vectors[(i+j)*dim], dim);
         pointBuffer[j].id = i+j+batch_offset;
 //if(headVectorIDS.count(i+j) != 0) pointBuffer[j].id = -1;
       }
+//printf("copying to d_tailPoints at idx:%ld\n", i);
       CUDA_CHECK(cudaMemcpy(d_tailPoints+i, pointBuffer, copy_size*sizeof(Point<T,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
+//printf("copy successful!\n");
       write_idx+=copy_size;
 //    }
   }
