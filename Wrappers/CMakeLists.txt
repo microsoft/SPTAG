@@ -16,7 +16,7 @@ else()
     message (STATUS "Could not find cuda.")
 endif()
 
-if (Python2_FOUND)    
+if (Python2_FOUND)
     include_directories (${Python2_INCLUDE_DIRS})
     link_directories (${Python2_LIBRARY_DIRS})
     set (Python_INCLUDE_DIRS ${Python2_INCLUDE_DIRS})
@@ -71,7 +71,7 @@ if (Python_FOUND)
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib)
-    install(FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/SPTAG.py ${PROJECT_SOURCE_DIR}/Wrappers/inc/SPTAGClient.py DESTINATION bin)
+    install(FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/SPTAG.py ${PROJECT_SOURCE_DIR}/Wrappers/inc/SPTAGClient.py DESTINATION bin)
 else()
     message (STATUS "Could not find Python.")
 endif()
@@ -117,7 +117,7 @@ if (JNI_FOUND)
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib)
-    install(FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/*.java DESTINATION bin)
+    install(FILES ${JAVA_FILES} DESTINATION bin)
 else()
     message (STATUS "Could not find JNI.")
 endif()
@@ -136,7 +136,7 @@ if (WIN32)
         if (NOT DEFINED DOTNET_FOUND)
             string(REPLACE "${csharp_dotnet_framework_hints}/" "" csharp_dotnet_version_temp ${csharp_dotnet_executable})
             string(REPLACE "/csc.exe" "" csharp_dotnet_version_temp ${csharp_dotnet_version_temp})
-        
+
             set (DOTNET_EXECUTABLE_VERSION "${csharp_dotnet_version_temp}" CACHE STRING "C# .NET compiler version" FORCE)
             set (DOTNET_FOUND ${csharp_dotnet_executable})
         endif()
@@ -182,7 +182,7 @@ if (DOTNET_FOUND)
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib)
-    install(FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/*.cs DESTINATION bin)
+    install(FILES ${CSHARP_FILES} DESTINATION bin)
 else()
     message (STATUS "Could not find C#.")
 endif()

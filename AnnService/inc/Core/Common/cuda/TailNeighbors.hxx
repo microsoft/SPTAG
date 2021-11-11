@@ -9,7 +9,7 @@
 #include <chrono>
 #include<thrust/execution_policy.h>
 #include<thrust/sort.h>
-#include <parallel/algorithm>
+//#include <parallel/algorithm>
 
 using namespace SPTAG;
 using namespace std;
