@@ -650,16 +650,15 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
     if(GetVectorValueType() != VectorValueType::Float) {
         typedef int32_t SUMTYPE;
-        DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)replicaCount)];
 
         switch (GetVectorValueType())
         {
 #define DefineVectorValueType(Name, Type) \
         case VectorValueType::Name: \
             if(fullVectors->Dimension() <= 64) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
             } else if (fullVectors->Dimension() <= 100) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
             } else { \
                 LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n"); \
                 exit(1); \
@@ -671,52 +670,20 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
         default: break;
         }
-
-        SizeType resIdx = 0;
-        //#pragma omp parallel for
-        for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
-            if (exceptIDS.count(vecIdx) == 0) {
-                size_t vecOffset = vecIdx * (size_t)replicaCount;
-                size_t resOffset = resIdx * (size_t)replicaCount;
-                for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
-                    selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
-                    selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
-                }
-                resIdx++;
-            }
-        }
-
-        delete[] results;
     }
     else {
         typedef float SUMTYPE;
-        DistPair<SUMTYPE>* results = new DistPair<SUMTYPE>[((size_t)fullVectors->Count())*((size_t)replicaCount)];
 
         if (fullVectors->Dimension() <= 64) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs);
+            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
         }
         else if (fullVectors->Dimension() <= 100) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, (DistPair<SUMTYPE>*)results, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs);
+            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
         }
         else {
             LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n");
             exit(1);
         }
-
-        SizeType resIdx = 0;
-        //#pragma omp parallel for
-        for (SizeType vecIdx = 0; vecIdx < fullVectors->Count(); vecIdx++) {
-            if (exceptIDS.count(vecIdx) == 0) {
-                size_t vecOffset = vecIdx * (size_t)replicaCount;
-                size_t resOffset = resIdx * (size_t)replicaCount;
-                for (int resNum = 0; resNum < replicaCount && results[resOffset + resNum].idx != -1; resNum++) {
-                    selections[vecOffset + resNum].node = results[resOffset + resNum].idx;
-                    selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
-                }
-                resIdx++;
-            }
-        }
-        delete[] results;
     }
 }
 #else
