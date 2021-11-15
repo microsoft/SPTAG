@@ -22,7 +22,7 @@ wget https://github.com/Kitware/CMake/releases/download/v3.14.7/cmake-3.14.7-Lin
 5. Install boost
 - Download boost 1.67 version:
 ```bash
-wget https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.gz
+wget https://netix.dl.sourceforge.net/project/boost/boost/1.67.0/boost_1_67_0.tar.gz
 ```
 (There are some [version mis-matching issues](https://github.com/microsoft/SPTAG/issues/26) and reported on github issue)
 
