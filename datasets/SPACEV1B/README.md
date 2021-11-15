@@ -10,7 +10,7 @@ This dataset contains:
  * [vectors.bin](vectors.bin): It contains 1,402,020,720 100-dimensional int8-type document descriptors.
  * [query.bin](query.bin):  It contains 29,316 100-dimensional int8-type query descriptors.
  * [truth.bin](truth.bin): It contains 100 nearest ground truth（include vector ids and distances) of 29,316 queries according to L2 distance.
-
+ * [query_log.bin](query_log.bin): It contains 94,162 100-dimensional int8-type history query descriptors.
 
 ## How to read the vectors, queries, and truth
 
@@ -44,7 +44,7 @@ ftruth = open('truth.bin', 'rb')
 t_count = struct.unpack('i', ftruth.read(4))[0]
 topk = struct.unpack('i', ftruth.read(4))[0]
 truth_vids = np.frombuffer(ftruth.read(t_count * topk * 4), dtype=np.int32).reshape((t_count, topk))
-truth_distances = np.frombuffer(ftruth.read(t_count * topk * 4), dtype=np.float).reshape((t_count, topk))
+truth_distances = np.frombuffer(ftruth.read(t_count * topk * 4), dtype=np.float32).reshape((t_count, topk))
 ```
 
 ## License
