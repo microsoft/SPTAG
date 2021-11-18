@@ -107,7 +107,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
         meanrecall += thisrecall[i];
         if (thisrecall[i] < minrecall) minrecall = thisrecall[i];
         if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
-
+        /*
         if (debug) {
             std::string ll("recall:" + std::to_string(thisrecall[i]) + "\ngroundtruth:");
             std::vector<NodeDistPair> truthvec;
@@ -127,6 +127,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                 ll += std::to_string(results[i].GetResult(j)->VID) + "@" + std::to_string(results[i].GetResult(j)->Dist) + ",";
             LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
         }
+        */
     }
     meanrecall /= NumQuerys;
     for (SizeType i = 0; i < NumQuerys; i++)
