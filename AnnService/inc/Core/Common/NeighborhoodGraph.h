@@ -12,9 +12,6 @@
 #include "QueryResultSet.h"
 
 #include <chrono>
-#include <vector>
-#include <utility>
-#include <queue>
 
 #if defined(GPU)
 #include <cuda.h>
@@ -326,9 +323,9 @@ namespace SPTAG
             {
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
-                m_iGraphSize = index->GetNumSamples(); 
-                m_iNeighborhoodSize = m_iNeighborhoodSize * 2;
+                m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale));
+                m_iNeighborhoodSize = m_iNeighborhoodSize * 2;
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
@@ -354,11 +351,10 @@ namespace SPTAG
 
                 auto t3 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
-                
                 RebuildGraph<T>(index, 16, idmap);
                 m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
-                auto t4 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "RebuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                auto t4 = std::chrono::high_resolution_clock::now(); 
+                LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
             }
 
             template <typename T>
@@ -412,6 +408,7 @@ namespace SPTAG
                     now++;
                 }
             }
+
             template <typename T>
             void RefineGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {

@@ -564,20 +564,88 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
             {
+                // int node_bfschecked = 0;
+                bool EnableBFS = false;
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
                         p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
-                    } 
+                    }
+                    else if (EnableBFS == true) {
+
+                        //LOG(Helper::LogLevel::LL_Info, "BFS start!");
+
+                        int BFS_level = 1;
+                        std::vector<float> FactorQ;
+                        FactorQ.push_back(1.1);
+                        FactorQ.push_back(1.05);
+                        p_space.m_BSPTQueue[0].Resize(40);
+                        p_space.m_BSPTQueue[0].clear();
+                        p_space.m_BSPTQueue[1].Resize(100);
+                        p_space.m_BSPTQueue[1].clear();
+                        //p_space.m_BSPTQueue[2].Resize(100);
+                        //p_space.m_BSPTQueue[2].clear();
+                        //p_space.m_BSPTQueue[3].Resize(100000);
+                        //p_space.m_BSPTQueue[3].clear();
+                        float now_min = 1e9;
+                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                            //node_bfschecked++;
+                            //std::cout << begin << std::endl;
+                            SizeType index = m_pTreeRoots[begin].centerid;
+                            float now_dis = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                            if (now_dis < now_min * FactorQ[0]) {
+                                if (now_dis < now_min) now_min = now_dis;
+                                p_space.m_BSPTQueue[0].insert(NodeDistPair(begin, now_dis));
+                                p_space.m_SPTQueue.insert(NodeDistPair(begin, now_dis));
+                            }
+                        }
+                        //LOG(Helper::LogLevel::LL_Info, "Queue 0 size is %d\n", (int)p_space.m_BSPTQueue[0].size());
+
+                        int BFS_size = 100;
+                        for (int i = 1; i <= BFS_level; i++) {
+                            int now_size = 0;
+                            while (!p_space.m_BSPTQueue[i - 1].empty() && now_size < BFS_size) {
+                                NodeDistPair tmp = p_space.m_BSPTQueue[i - 1].pop();
+                                if (i > 1 && tmp.distance > now_min * FactorQ[i]) continue;
+                                now_size++;
+                                if (now_size > BFS_size) break;
+                                const BKTNode& tnode = m_pTreeRoots[tmp.node];
+                                for (SizeType now = tnode.childStart; now < tnode.childEnd; now++) {
+                                    //node_bfschecked++;
+                                    SizeType index = m_pTreeRoots[now].centerid;
+                                    float now_dis = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                                    if (now_dis < now_min * FactorQ[i]) {
+                                        if (now_dis < now_min) now_min = now_dis;
+                                        p_space.m_BSPTQueue[i].insert(NodeDistPair(now, now_dis));
+                                        p_space.m_SPTQueue.insert(NodeDistPair(now, now_dis));
+                                    }
+                                }
+                            }
+                        }
+
+                        //LOG(Helper::LogLevel::LL_Info, "Queue %d size is %d\n", BFS_level, (int)p_space.m_BSPTQueue[BFS_level].size());
+                        //LOG(Helper::LogLevel::LL_Info, "Queue size is %d\n", (int)p_space.m_BSPTQueue[BFS_level].size());
+                        int pivot_size = 20, now_pivot = 0;
+                        while (!p_space.m_BSPTQueue[BFS_level].empty() && now_pivot < pivot_size) {
+                            now_pivot++;
+                            NodeDistPair tmp = p_space.m_BSPTQueue[BFS_level].pop();
+                            SizeType index = m_pTreeRoots[tmp.node].centerid;
+                            p_space.m_SPTQueue.insert(NodeDistPair(tmp.node, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                        }
+                        /*
+
+                        */
+                    }
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
                             p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
                         }
-                    } 
+                    }
                 }
+                //LOG(Helper::LogLevel::LL_Info, "%d nodes checked by BFS!", node_bfschecked);
             }
 
             template <typename T>

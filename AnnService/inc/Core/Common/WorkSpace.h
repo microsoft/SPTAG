@@ -249,6 +249,10 @@ namespace SPTAG
 
             // Priority queue Used for Tree
             Heap<NodeDistPair> m_SPTQueue;
+            // Priority queue Used for Tree BFS
+            Heap<NodeDistPair> m_BSPTQueue[10];
+            // Priority queue Used for Rebuild Gtaph
+            Heap<NodeDistPair> m_RGQueue;
 
             DistPriorityQueue m_Results;
         };

@@ -187,10 +187,11 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
                     KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
+                    //KDTBFSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0, 3);
                 }
             }
 
@@ -246,6 +247,48 @@ namespace SPTAG
                 KDTSearch(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 
+            template <typename T>
+            void KDTBFSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T>& p_query,
+                COMMON::WorkSpace& p_space, const SizeType node, const float distBound, int level) const {
+                if (level == 0) return;
+                if (node < 0)
+                {
+                    SizeType index = -node - 1;
+                    if (index >= p_data.R()) return;
+#ifdef PREFETCH
+                    const T* data = p_data[index];
+                    _mm_prefetch((const char*)data, _MM_HINT_T0);
+                    _mm_prefetch((const char*)(data + 64), _MM_HINT_T0);
+#endif
+                    if (p_space.CheckAndSet(index)) return;
+
+                    ++p_space.m_iNumberOfTreeCheckedLeaves;
+                    ++p_space.m_iNumberOfCheckedLeaves;
+                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetTarget(), data, p_data.C())));
+                    return;
+                }
+
+                auto& tnode = m_pTreeRoots[node];
+
+                float diff = (p_query.GetTarget())[tnode.split_dim] - tnode.split_value;
+                float distanceBound = distBound + diff * diff;
+                SizeType otherChild, bestChild;
+                if (diff < 0)
+                {
+                    bestChild = tnode.left;
+                    otherChild = tnode.right;
+                }
+                else
+                {
+                    otherChild = tnode.left;
+                    bestChild = tnode.right;
+                }
+
+                p_space.m_SPTQueue.insert(NodeDistPair(bestChild, distanceBound));
+                p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
+                KDTBFSearch(p_data, fComputeDistance, p_query, p_space, bestChild, distBound, level - 1); 
+                KDTBFSearch(p_data, fComputeDistance, p_query, p_space, otherChild, distBound, level - 1);
+            }
 
             template <typename T>
             void DivideTree(const Dataset<T>& data, std::vector<SizeType>& indices, SizeType first, SizeType last,
