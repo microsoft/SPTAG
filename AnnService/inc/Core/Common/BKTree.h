@@ -262,9 +262,7 @@ namespace SPTAG
                 }
                 args.ClearCounts();
                 args.ClearDists(MaxDist);
-                float base = (float) (SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>());
-                float baseSquare = (base*base) / (100.0f * (batchEnd - first));
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, baseSquare);
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, false, 0);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
