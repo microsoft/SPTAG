@@ -311,6 +311,12 @@ namespace SPTAG
             args.ClearCounts();
             args.ClearDists(MaxDist);
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
+            for (int k = 0; k < args._DK; k++) {
+                if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
+            }
+            args.ClearCounts();
+            args.ClearDists(MaxDist);
+            currDist = KmeansAssign(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
             SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)(), availableClusters = 0;
