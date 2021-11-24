@@ -30,6 +30,8 @@ public:
     SPTAG::IndexAlgoType m_indexAlgoType;
 
     std::string m_builderConfigFile;
+
+    int m_rebuild = 0;
 };
 
 int main(int argc, char* argv[])
@@ -66,7 +68,6 @@ int main(int argc, char* argv[])
         iniReader.SetParameter(sectionName, paramName, paramVal);
         LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
-
     if (!iniReader.DoesParameterExist("Index", "NumberOfThreads")) {
         iniReader.SetParameter("Index", "NumberOfThreads", std::to_string(options->m_threadNum));
     }
@@ -81,7 +82,7 @@ int main(int argc, char* argv[])
         LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
         exit(1);
     }
-    ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
+    ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_rebuild);
     indexBuilder->SaveIndex(options->m_outputFolder);
 
     if (ErrorCode::Success != code)

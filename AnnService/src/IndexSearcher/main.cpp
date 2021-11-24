@@ -63,6 +63,8 @@ public:
     int m_genTruth = 0;
 
     int m_debugQuery = -1;
+
+    int m_bfs = 0;
 };
 
 template <typename T>

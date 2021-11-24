@@ -159,6 +159,7 @@ namespace SPTAG
             ErrorCode DeleteIndex(const SizeType& p_id);
 
             ErrorCode SetParameter(const char* p_param, const char* p_value);
+            ErrorCode SetParameterRebuild(const bool EnableRebuild);
             std::string GetParameter(const char* p_param) const;
             ErrorCode UpdateIndex();
 

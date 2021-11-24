@@ -49,7 +49,8 @@ namespace SPTAG
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
                                  m_iheadNumGPUs(1),
-                                 m_iTPTBalanceFactor(2)
+                                 m_iTPTBalanceFactor(2),
+                                 m_rebuild(0)
             {}
 
             ~NeighborhoodGraph() {}
@@ -325,7 +326,9 @@ namespace SPTAG
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale));
-                m_iNeighborhoodSize = m_iNeighborhoodSize * 2;
+                if (m_rebuild) {
+                    m_iNeighborhoodSize = m_iNeighborhoodSize * 2;
+                }
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
@@ -351,10 +354,12 @@ namespace SPTAG
 
                 auto t3 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
-                RebuildGraph<T>(index, 16, idmap);
-                m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
-                auto t4 = std::chrono::high_resolution_clock::now(); 
-                LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                if (m_rebuild) {
+                    RebuildGraph<T>(index, 16, idmap);
+                    m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
+                    auto t4 = std::chrono::high_resolution_clock::now();
+                    LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                }
             }
 
             template <typename T>
@@ -595,7 +600,7 @@ namespace SPTAG
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
             float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
-            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor, m_rebuild;
         };
     }
 }
