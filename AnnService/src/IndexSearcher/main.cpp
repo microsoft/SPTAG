@@ -34,7 +34,6 @@ public:
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
         AddOptionalOption(m_genTruth, "-g", "--gentruth", "Generate truth file.");
         AddOptionalOption(m_debugQuery, "-q", "--debugquery", "Debug query number.");
-        AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
         AddOptionalOption(m_enableADC, "-adc", "--adc", "Enable ADC Distance computation");
     }
 
@@ -65,8 +64,6 @@ public:
     int m_genTruth = 0;
 
     int m_debugQuery = -1;
-
-    std::string m_quantizerFile;
 
     bool m_enableADC = false;
 };
@@ -418,29 +415,16 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    if (!options->m_quantizerFile.empty())
-    {
-        auto ptr = SPTAG::f_createIO();
-        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-            exit(1);
-        }
-        auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        if (code != ErrorCode::Success)
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-            exit(1);
-        }
-        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
-    }
-
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
     auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
     {
         LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
+    }
+    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    {
+        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
     }
 
     Helper::IniReader iniReader;
