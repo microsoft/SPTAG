@@ -717,7 +717,7 @@ namespace SPTAG {
                 if (COMMON_OPTS.m_ssdIndexFileNum > 1) selections.SaveBatch();
 
                 auto fullVectors = vectorReader->GetVectorSet();
-                if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine && !SPTAG::COMMON::DistanceUtils::Quantizer) fullVectors->Normalize(p_opts.m_iNumberOfThreads);
+                if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine) fullVectors->Normalize(p_opts.m_iNumberOfThreads);
      
                 for (int i = 0; i < COMMON_OPTS.m_ssdIndexFileNum; i++) {
                     size_t curPostingListOffSet = i * postingFileSize;

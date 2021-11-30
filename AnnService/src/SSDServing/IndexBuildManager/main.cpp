@@ -205,7 +205,7 @@ namespace SPTAG {
 				}
 				auto vectorSet = vectorReader->GetVectorSet();
 				auto querySet = queryReader->GetVectorSet();
-				if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine && !SPTAG::COMMON::DistanceUtils::Quantizer) vectorSet->Normalize(search_ssd_opts.m_iNumberOfThreads);
+				if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(search_ssd_opts.m_iNumberOfThreads);
 
 				omp_set_num_threads(search_ssd_opts.m_iNumberOfThreads);
 #define DefineVectorValueType(Name, Type) \
