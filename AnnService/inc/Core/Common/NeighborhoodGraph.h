@@ -12,6 +12,7 @@
 #include "QueryResultSet.h"
 
 #include <chrono>
+#include <queue>
 
 #if defined(GPU)
 #include <cuda.h>

@@ -113,6 +113,25 @@ namespace SPTAG
                 delete[] pos;
             }
         };
+        template<typename T>
+        void RefineLambda(KmeansArgs<T>& args, float& lambda, int size)
+        {
+            int maxcluster = -1;
+            SizeType maxCount = 0;
+            for (int k = 0; k < args._DK; k++) {
+                if (args.counts[k] > maxCount && args.newCounts[k] > 0)
+                {
+                    maxcluster = k;
+                    maxCount = args.counts[k];
+                }
+            }
+
+            float avgDist = args.newWeightedCounts[maxcluster] / args.newCounts[maxcluster];
+            //lambda = avgDist / 10 / args.counts[maxcluster];
+            //lambda = (args.clusterDist[maxcluster] - avgDist) / args.newCounts[maxcluster];
+            lambda = (args.clusterDist[maxcluster] - avgDist) / size;
+            if (lambda < 0) lambda = 0;
+        }
 
         template <typename T>
         float RefineCenters(const Dataset<T>& data, KmeansArgs<T>& args)
@@ -247,26 +266,21 @@ namespace SPTAG
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples, int tryIters) {
             SizeType batchEnd = min(first + samples, last);
-            float lambda, currDist, minClusterDist = MaxDist;
+            float lambda = 0, currDist, minClusterDist = MaxDist;
             for (int numKmeans = 0; numKmeans < tryIters; numKmeans++) {
                 for (int k = 0; k < args._DK; k++) {
                     SizeType randid = COMMON::Utils::rand(last, first);
                     std::memcpy(args.centers + k*args._D, data[indices[randid]], sizeof(T)*args._D);
                 }
                 args.ClearCounts();
-                args.ClearDists(MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, false, 0);
+                args.ClearDists(-MaxDist);
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, 0);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
                     memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
-                    SizeType maxCluster = 0;
-                    for (int k = 1; k < args._DK; k++) if (args.counts[k] > args.counts[maxCluster]) maxCluster = k;
-
-                    float avgDist = args.newWeightedCounts[maxCluster] / args.counts[maxCluster];
-                    lambda = (avgDist - args.clusterDist[maxCluster]) / args.counts[maxCluster];
-                    if (lambda < 0) lambda = 0;
+                    RefineLambda(args, lambda, batchEnd - first);
                 }
             }
             return lambda;
@@ -291,7 +305,7 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, min(adjustedLambda, originalLambda));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, adjustedLambda);
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
                 if (currDist < minClusterDist) {
@@ -301,6 +315,15 @@ namespace SPTAG
                 else {
                     noImprovement++;
                 }
+
+                if (debug) {
+                    std::string log = "";
+                    for (int k = 0; k < args._DK; k++) {
+                        log += std::to_string(args.counts[k]) + " ";
+                    }
+                    LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
+                }
+
                 currDiff = RefineCenters(data, args);
                 //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
 
@@ -314,6 +337,7 @@ namespace SPTAG
             for (int k = 0; k < args._DK; k++) {
                 if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
             }
+
             args.ClearCounts();
             args.ClearDists(MaxDist);
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
@@ -573,7 +597,6 @@ namespace SPTAG
             void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
             {
                 // int node_bfschecked = 0;
-                bool EnableBFS = false;
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {

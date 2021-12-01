@@ -7,7 +7,7 @@ if (NOT LIBRARYONLY)
       message (STATUS "BOOST_TEST_DYN_LINK")
     endif()
 
-    find_package(Boost 1.67 COMPONENTS system thread serialization wserialization regex filesystem unit_test_framework)
+    find_package(Boost 1.66 COMPONENTS system thread serialization wserialization regex filesystem unit_test_framework)
     if (Boost_FOUND)
         include_directories (${Boost_INCLUDE_DIR})
         link_directories (${Boost_LIBRARY_DIR})
