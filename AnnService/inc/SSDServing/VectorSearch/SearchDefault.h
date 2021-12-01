@@ -163,7 +163,7 @@ namespace SPTAG {
 					}
 				}
 
-				void Search(COMMON::QueryResultSet<ValueType>& p_queryResults, SearchStats& p_stats)
+				void Search(COMMON::QueryResultSet<ValueType>& p_queryResults, int p_internalResultNum, SearchStats& p_stats)
 				{
 					//LARGE_INTEGER qpcStartTime;
 					//LARGE_INTEGER qpcEndTime;
@@ -180,11 +180,11 @@ namespace SPTAG {
 					ExtraWorkSpace* auto_ws = nullptr;
 					if (nullptr != m_extraSearcher)
 					{
-						auto_ws = GetWs(p_queryResults.GetResultNum());
+						auto_ws = GetWs(p_internalResultNum);
 						auto_ws->m_postingIDs.clear();
 
 						float limitDist = p_queryResults.GetResult(0)->Dist * m_maxDistRatio;
-						for (int i = 0; i < p_queryResults.GetResultNum(); ++i)
+						for (int i = 0; i < p_internalResultNum; ++i)
 						{
 							auto res = p_queryResults.GetResult(i);
 							if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
@@ -213,22 +213,67 @@ namespace SPTAG {
 					//p_stats.m_totalLatency = latency * 1.0;
 				}
 
-				void Search4ANNIndexTestTool(COMMON::QueryResultSet<ValueType>& p_queryResults)
+				void BruteForceSearch(COMMON::QueryResultSet<ValueType>& p_queryResults, int p_subInternalResultNum, int p_internalResultNum, std::set<int>& truth, std::map<int, std::set<int>>& found)
+				{
+					
+					if (nullptr == m_extraSearcher) return;
+					
+					COMMON::QueryResultSet<ValueType> newResults(p_queryResults);
+					for (int i = 0; i < newResults.GetResultNum(); ++i)
+					{
+						auto res = newResults.GetResult(i);
+						if (res->VID == -1) break;
+
+						auto global_VID = static_cast<int>(m_vectorTranslateMap[res->VID]);
+						if (truth.count(global_VID)) found[res->VID].insert(global_VID);
+						res->VID = global_VID;
+					}
+					newResults.Reverse();
+
+					int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
+					float limitDist = p_queryResults.GetResult(0)->Dist * m_maxDistRatio;
+					for (SizeType p = 0; p < partitions; p++) {
+						int subInternalResultNum = min(p_subInternalResultNum, p_internalResultNum - p_subInternalResultNum * p);
+
+						ExtraWorkSpace* auto_ws = GetWs(subInternalResultNum);
+						auto_ws->m_postingIDs.clear();
+
+						for (int i = p * p_subInternalResultNum; i < p * p_subInternalResultNum + subInternalResultNum; i++)
+						{
+							auto res = p_queryResults.GetResult(i);
+							if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+							auto_ws->m_postingIDs.emplace_back(res->VID);
+						}
+
+						m_extraSearcher->Search(auto_ws, newResults, m_index, truth, found);
+						RetWs(auto_ws);
+					}
+
+					newResults.SortResult();
+					std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_queryResults.GetResults());
+				}
+
+				void Search4ANNIndexTestTool(COMMON::QueryResultSet<ValueType>& p_queryResults, int p_internalResultNum)
 				{
 					m_index->SearchIndex(p_queryResults);
 
 					ExtraWorkSpace* auto_ws = nullptr;
-					auto_ws = GetWs(p_queryResults.GetResultNum());
+					auto_ws = GetWs(p_internalResultNum);
 					auto_ws->m_postingIDs.clear();
+
+					float limitDist = p_queryResults.GetResult(0)->Dist * m_maxDistRatio;
+					for (int i = 0; i < p_internalResultNum; ++i)
+					{
+						auto res = p_queryResults.GetResult(i);
+						if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+						auto_ws->m_postingIDs.emplace_back(res->VID);
+					}
 
 					for (int i = 0; i < p_queryResults.GetResultNum(); ++i)
 					{
 						auto res = p_queryResults.GetResult(i);
-						if (res->VID != -1)
-						{
-							auto_ws->m_postingIDs.emplace_back(res->VID);
-							res->VID = static_cast<int>(m_vectorTranslateMap[res->VID]);
-						}
+						if (res->VID == -1) break;
+						res->VID = static_cast<int>(m_vectorTranslateMap[res->VID]);
 					}
 
 					p_queryResults.Reverse();
@@ -244,26 +289,27 @@ namespace SPTAG {
 				private:
 					SearchDefault* m_processor;
 					COMMON::QueryResultSet<ValueType>& m_queryResults;
+					int m_internalResultNum;
 					SearchStats& m_stats;
 					std::function<void()> m_callback;
 				public:
 					SearchAsyncJob(SearchDefault* p_processor,
-						COMMON::QueryResultSet<ValueType>& p_queryResults, SearchStats& p_stats, std::function<void()> p_callback)
+						COMMON::QueryResultSet<ValueType>& p_queryResults, int p_internalResultNum, SearchStats& p_stats, std::function<void()> p_callback)
 						: m_processor(p_processor),
-						m_queryResults(p_queryResults), m_stats(p_stats), m_callback(p_callback) {}
+						m_queryResults(p_queryResults), m_stats(p_stats), m_internalResultNum(p_internalResultNum), m_callback(p_callback) {}
 
 					~SearchAsyncJob() {}
 
 					void exec(IAbortOperation* p_abort) {
-						m_processor->ProcessAsyncSearch(m_queryResults, m_stats, std::move(m_callback));
+						m_processor->ProcessAsyncSearch(m_queryResults, m_internalResultNum, m_stats, std::move(m_callback));
 					}
 				};
 
-				void SearchAsync(COMMON::QueryResultSet<ValueType>& p_queryResults, SearchStats& p_stats, std::function<void()> p_callback)
+				void SearchAsync(COMMON::QueryResultSet<ValueType>& p_queryResults, int p_internalResultNum, SearchStats& p_stats, std::function<void()> p_callback)
 				{
 					p_stats.m_searchRequestTime = std::chrono::steady_clock::now();
 
-					SearchAsyncJob* curJob = new SearchAsyncJob(this, p_queryResults, p_stats, p_callback);
+					SearchAsyncJob* curJob = new SearchAsyncJob(this, p_queryResults, p_internalResultNum, p_stats, p_callback);
 
 					m_threadPool->add(curJob);
 				}
@@ -312,7 +358,7 @@ namespace SPTAG {
 				}
 
 			protected:
-				void ProcessAsyncSearch(COMMON::QueryResultSet<ValueType>& p_queryResults, SearchStats& p_stats, std::function<void()> p_callback)
+				void ProcessAsyncSearch(COMMON::QueryResultSet<ValueType>& p_queryResults, int p_internalResultNum, SearchStats& p_stats, std::function<void()> p_callback)
 				{
 					static thread_local int tid = m_tids.fetch_add(1);
 
@@ -324,7 +370,7 @@ namespace SPTAG {
 					static thread_local std::chrono::steady_clock::time_point m_lastQuit = startPoint;
 					p_stats.m_sleepLatency = TimeUtils::getMsInterval(m_lastQuit, startPoint);
 
-					Search(p_queryResults, p_stats);
+					Search(p_queryResults, p_internalResultNum, p_stats);
 
 					p_stats.m_totalLatency = TimeUtils::getMsInterval(p_stats.m_searchRequestTime, std::chrono::steady_clock::now());
 

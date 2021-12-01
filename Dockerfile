@@ -16,7 +16,7 @@ RUN wget "https://github.com/Kitware/CMake/releases/download/v3.14.4/cmake-3.14.
         | tar -xz --strip-components=1 -C /usr/local
 
 # specific version of boost
-RUN wget "https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.gz" -q -O - \
+RUN wget "https://netix.dl.sourceforge.net/project/boost/boost/1.67.0/boost_1_67_0.tar.gz" -q -O - \
         | tar -xz && \
         cd boost_1_67_0 && \
         ./bootstrap.sh && \
