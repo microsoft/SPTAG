@@ -298,7 +298,7 @@ namespace SPTAG
         template <typename T>
         int PQQuantizer<T>::GetBase()
         {
-            return COMMON::Utils::GetBase<T>();
+            return COMMON::Utils::GetBaseCore<T>();
         }
 
         template <typename T>
