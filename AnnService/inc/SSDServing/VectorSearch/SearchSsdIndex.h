@@ -591,6 +591,14 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
+                LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
+                PrintPercentiles<double, SearchStats>(stats,
+                    [](const SearchStats& ss) -> double
+                    {
+                        return ss.m_totalSearchLatency - ss.m_exLatency;
+                    },
+                    "%.3lf");
+
                 LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
                 PrintPercentiles<double, SearchStats>(stats,
                     [](const SearchStats& ss) -> double
@@ -615,11 +623,19 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Acess Distribution:\n");
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution:\n");
                 PrintPercentiles<int, SearchStats>(stats,
                     [](const SearchStats& ss) -> int
                     {
                         return ss.m_diskAccessCount;
+                    },
+                    "%4d");
+
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
+                PrintPercentiles<int, SearchStats>(stats,
+                    [](const SearchStats& ss) -> int
+                    {
+                        return ss.m_diskIOCount;
                     },
                     "%4d");
 

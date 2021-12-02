@@ -187,7 +187,7 @@ namespace SPTAG
             } else { \
                 CheckDeleted \
                 { \
-                    if (gnode.distance > p_space.m_Results.worst()) { \
+                    if (gnode.distance > p_space.m_Results.worst() && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
                         p_query.SortResult(); return; \
                     } \
                 } \
