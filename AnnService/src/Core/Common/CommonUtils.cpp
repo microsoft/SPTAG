@@ -16,3 +16,7 @@ static inline int Utils::GetBase()
 		return Utils::GetBaseCore<T>();
 	}
 }
+
+#define DefineVectorValueType(Name, Type) template int Utils::GetBase<Type>();
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
