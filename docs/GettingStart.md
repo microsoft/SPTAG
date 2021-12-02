@@ -43,7 +43,6 @@
   -b, --batchsize <value>       Batch query size.
   -g, --gentruth <value>        Generate truth file.
   -q, --debugquery <value>      Debug query number.
-  -pq, --quantizer <value>      Quantizer File
   -adc, --adc <value>           Enable ADC Distance computation (true/false)
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
