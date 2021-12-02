@@ -20,7 +20,6 @@ namespace SPTAG {
                 float eps = 1e-6f;
                 float recall = 0;
                 std::unique_ptr<bool[]> visited(new bool[K]);
-                auto distCalc = SPTAG::COMMON::DistanceCalcSelector<T>(COMMON_OPTS.m_distCalcMethod);
                 for (int i = 0; i < results.size(); i++)
                 {
                     memset(visited.get(), 0, K*sizeof(bool));
@@ -38,7 +37,7 @@ namespace SPTAG {
                             }
                             else if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = distCalc((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension());
+                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                                     recall++;
                                     visited[j] = true;
@@ -61,7 +60,6 @@ namespace SPTAG {
             {
                 float eps = 1e-6f;
                 float recall = 0;
-                auto distCalc = SPTAG::COMMON::DistanceCalcSelector<T>(COMMON_OPTS.m_distCalcMethod);
                 for (int i = 0; i < results.size(); i++)
                 {
                     for (int j = 0; j < K; j++)
@@ -75,7 +73,7 @@ namespace SPTAG {
                             }
                             else if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = distCalc((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension());
+                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                                     recall++;
                                     break;

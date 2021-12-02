@@ -91,9 +91,8 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                     break;
                 }
                 else if (vectorSet != nullptr) {
-                    auto distCalc = COMMON::DistanceCalcSelector<T>(index->GetDistCalcMethod());
-                    float dist = distCalc((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension());
-                    float truthDist = distCalc((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension());
+                    float dist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), index->GetDistCalcMethod());
+                    float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod);
                     if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                         thisrecall[i] += 1;
                         visited[j] = true;
