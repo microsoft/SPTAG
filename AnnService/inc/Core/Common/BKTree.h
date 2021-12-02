@@ -149,13 +149,7 @@ namespace SPTAG
                     for (DimensionType j = 0; j < args._D; j++) currCenters[j] /= args.counts[k];
 
                     if (args._M == DistCalcMethod::Cosine) {
-                        if (SPTAG::COMMON::DistanceUtils::Quantizer) {
-                            COMMON::Utils::Normalize(currCenters, args._D, SPTAG::COMMON::DistanceUtils::Quantizer->GetBase());
-                        }
-                        else
-                        {
-                            COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
-                        }
+                        COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
                     }
 
                     for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
@@ -290,7 +284,7 @@ namespace SPTAG
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
-            float base = (float) (SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() : COMMON::Utils::GetBase<T>());
+            float base = (float) COMMON::Utils::GetBase<T>();
             float originalLambda = (base*base) / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);

@@ -488,13 +488,7 @@ namespace SPTAG
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 if (m_iDistCalcMethod == DistCalcMethod::Cosine) {
-                    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
-                        m_iBaseSquare = SPTAG::COMMON::DistanceUtils::Quantizer->GetBase() * SPTAG::COMMON::DistanceUtils::Quantizer->GetBase();
-                    }
-                    else
-                    {
-                        m_iBaseSquare = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
-                    }
+                    m_iBaseSquare = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>();
                 }
                 else
                 {
