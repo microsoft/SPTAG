@@ -537,6 +537,7 @@ namespace SPTAG {
 
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
                     LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
+                    COMMON::DistanceUtils::Quantizer.reset();
                     auto distCalc = SPTAG::COMMON::DistanceCalcSelector<ValueType>(COMMON_OPTS.m_distCalcMethod);
                     for (int i = 0; i < results.size(); i++)
                     {

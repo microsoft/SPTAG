@@ -71,6 +71,7 @@ public:
 template <typename T>
 float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, std::ofstream& log, bool debug = false)
 {
+    COMMON::DistanceUtils::Quantizer.reset();
     float eps = 1e-6f;
     float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
     std::vector<float> thisrecall(NumQuerys, 0);
