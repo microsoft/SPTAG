@@ -142,7 +142,6 @@ MaxCheck=2048
 MaxDistRatio=8.0
 SearchPostingPageLimit=3
 rerank=10
-rerankFilePath=base.1B.u8bin
    ```
 Then run ./SSDServing searchconfig.ini to do the query search.
 
