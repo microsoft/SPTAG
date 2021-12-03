@@ -118,8 +118,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
             for (SizeType id : truth[i]) {
                 float truthDist = 0.0;
                 if (vectorSet != nullptr) {
-                    auto distCalc = COMMON::DistanceCalcSelector<T>(index->GetDistCalcMethod());
-                    truthDist = distCalc((const T*) querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension());
+                    truthDist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                 }
                 truthvec.emplace_back(id, truthDist);
             }

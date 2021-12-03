@@ -538,14 +538,13 @@ namespace SPTAG {
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
                     LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
                     COMMON::DistanceUtils::Quantizer.reset();
-                    auto distCalc = SPTAG::COMMON::DistanceCalcSelector<ValueType>(COMMON_OPTS.m_distCalcMethod);
                     for (int i = 0; i < results.size(); i++)
                     {
                         for (int j = 0; j < K; j++)
                         {
                             if (results[i].GetResult(j)->VID < 0) continue;
-                            results[i].GetResult(j)->Dist = (distCalc((const ValueType*)querySet->GetVector(i),
-                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension()));
+                            results[i].GetResult(j)->Dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(i),
+                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), COMMON_OPTS.m_distCalcMethod);
                         }
                         BasicResult* re = results[i].GetResults();
                         std::sort(re, re + K, SPTAG::COMMON::Compare);
