@@ -284,8 +284,7 @@ namespace SPTAG
             SizeType batchEnd = min(first + samples, last);
             float currDiff, currDist, minClusterDist = MaxDist;
             int noImprovement = 0;
-            float base = (float) COMMON::Utils::GetBase<T>();
-            float originalLambda = (base*base) / lambdaFactor / (batchEnd - first);
+            float originalLambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
                 std::random_shuffle(indices.begin() + first, indices.begin() + last);
