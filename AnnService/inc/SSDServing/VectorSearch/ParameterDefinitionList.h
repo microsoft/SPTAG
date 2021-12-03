@@ -38,6 +38,5 @@ DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler")
 DefineSSDParameter(m_searchPostingPageLimit, int, (std::numeric_limits<int>::max)(), "SearchPostingPageLimit")
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
-DefineSSDParameter(m_rerankFilePath, std::string, std::string(), "RerankFilePath")
 
 #endif

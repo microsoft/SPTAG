@@ -47,7 +47,6 @@ namespace SPTAG {
 				int m_searchPostingPageLimit;
 				int m_rerank;
 				bool m_enableADC;
-				std::string m_rerankFilePath;
 
 				Options() {
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \

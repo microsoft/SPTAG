@@ -523,12 +523,8 @@ namespace SPTAG {
                 LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
                 std::shared_ptr<SPTAG::VectorSet> vectorSet;
-                if (!SPTAG::COMMON::DistanceUtils::Quantizer && p_opts.m_rerankFilePath.empty())
-                {
-                    p_opts.m_rerankFilePath = COMMON_OPTS.m_vectorPath;
-                }
 
-                if (!p_opts.m_rerankFilePath.empty() && fileexists(p_opts.m_rerankFilePath.c_str())) {
+                if (!p_opts.m_vectorPath.empty() && fileexists(COMMON_OPTS.m_vectorPath.c_str())) {
                     std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
                     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                     if (ErrorCode::Success == vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
