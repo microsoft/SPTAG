@@ -57,7 +57,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            static inline int GetBase();
+            static int GetBase();
 
             template <typename T>
             static void Normalize(T* arr, DimensionType col, int base) {
