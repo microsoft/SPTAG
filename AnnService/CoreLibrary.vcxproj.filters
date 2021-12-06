@@ -243,6 +243,9 @@
     <ClCompile Include="src\Core\Common\IQuantizer.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\CommonUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
