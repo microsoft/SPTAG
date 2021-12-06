@@ -5,7 +5,7 @@ using namespace SPTAG;
 using namespace SPTAG::COMMON;
 
 template<typename T>
-static int Utils::GetBase()
+int Utils::GetBase()
 {
 	if (DistanceUtils::Quantizer)
 	{
