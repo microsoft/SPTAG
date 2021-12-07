@@ -97,6 +97,11 @@ namespace SPTAG {
                     COMMON::QueryResultSet<ValueType>& p_queryResults,
                     std::shared_ptr<VectorIndex> p_index,
                     SearchStats& p_stats) = 0;
+
+                virtual void Search(ExtraWorkSpace* p_exWorkSpace,
+                    COMMON::QueryResultSet<ValueType>& p_queryResults,
+                    std::shared_ptr<VectorIndex> p_index,
+                    std::set<int>& truth, std::map<int, std::set<int>>& found) = 0;
             };
         }
     }

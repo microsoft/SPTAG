@@ -50,7 +50,7 @@ public:
 
     std::string m_maxCheck = "8192";
 
-    VectorFileType m_dataFileType = VectorFileType::DEFAULT;
+    VectorFileType m_dataFileType = VectorFileType::DEFAULT; 
 
     int m_withMeta = 0;
 
@@ -74,7 +74,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
     std::unique_ptr<bool[]> visited(new bool[K]);
     for (SizeType i = 0; i < NumQuerys; i++)
     {
-        memset(visited.get(), 0, K * sizeof(bool));
+        memset(visited.get(), 0, K*sizeof(bool));
         for (SizeType id : truth[i])
         {
             for (int j = 0; j < K; j++)
@@ -175,6 +175,8 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         exit(-1);
     }
 
+    LOG(Helper::LogLevel::LL_Info, "Begin load query file ...\n");
+
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_queryFile))
     {
@@ -183,6 +185,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     }
     auto queryVectors = vectorReader->GetVectorSet(0, options->m_debugQuery);
     auto queryMetas = vectorReader->GetMetadataSet();
+    LOG(Helper::LogLevel::LL_Info, "Load query file (%d, %d)...\n", queryVectors->Count(), queryVectors->Dimension());
 
     std::shared_ptr<Helper::ReaderOptions> dataOptions(new Helper::ReaderOptions(queryVectors->GetValueType(), queryVectors->Dimension(), options->m_dataFileType));
     auto dataReader = Helper::VectorSetReader::CreateInstance(dataOptions);
@@ -195,6 +198,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             exit(1);
         }
         dataVectors = dataReader->GetVectorSet();
+        LOG(Helper::LogLevel::LL_Info, "Load vector file (%d, %d)...\n", dataVectors->Count(), dataVectors->Dimension());
     }
 
     std::ifstream ftruth;
@@ -311,20 +315,20 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             for (int qid = 0; qid < numQuerys; qid++)
             {
                 auto t1 = std::chrono::high_resolution_clock::now();
-                index.SearchIndex(results[qid]);
+		index.SearchIndex(results[qid]);
                 auto t2 = std::chrono::high_resolution_clock::now();
-                latencies[qid] = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0;
+		latencies[qid] = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0;
             }
             auto batchend = std::chrono::high_resolution_clock::now();
             float batchLatency = std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() / 1000000.0;
 
             float timeMean = 0, timeMin = MaxDist, timeMax = 0, timeStd = 0;
-            for (int qid = 0; qid < numQuerys; qid++)
-            {
-                timeMean += latencies[qid];
-                if (latencies[qid] > timeMax) timeMax = latencies[qid];
-                if (latencies[qid] < timeMin) timeMin = latencies[qid];
-            }
+	    for (int qid = 0; qid < numQuerys; qid++)
+	    {
+                    timeMean += latencies[qid];
+                    if (latencies[qid] > timeMax) timeMax = latencies[qid];
+                    if (latencies[qid] < timeMin) timeMin = latencies[qid];
+	    }
             timeMean /= numQuerys;
             for (int qid = 0; qid < numQuerys; qid++) timeStd += ((float)latencies[qid] - timeMean) * ((float)latencies[qid] - timeMean);
             timeStd = std::sqrt(timeStd / numQuerys);

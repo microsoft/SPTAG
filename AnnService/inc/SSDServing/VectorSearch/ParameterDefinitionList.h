@@ -37,5 +37,7 @@ DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler")
 DefineSSDParameter(m_searchPostingPageLimit, int, (std::numeric_limits<int>::max)(), "SearchPostingPageLimit")
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
+DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
+DefineSSDParameter(m_debugBuildInternalResultNum, int, 64, "DebugBuildInternalResultNum")
 
 #endif

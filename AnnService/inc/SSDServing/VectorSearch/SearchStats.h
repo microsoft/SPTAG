@@ -13,8 +13,7 @@ namespace SPTAG {
                     : m_check(0),
                     m_exCheck(0),
                     m_totalListElementsCount(0),
-                    m_filteredCount(0),
-                    m_distCheckFilterCount(0),
+                    m_diskIOCount(0),
                     m_diskAccessCount(0),
                     m_totalSearchLatency(0),
                     m_totalLatency(0),
@@ -33,9 +32,7 @@ namespace SPTAG {
 
                 int m_totalListElementsCount;
 
-                int m_filteredCount;
-
-                int m_distCheckFilterCount;
+                int m_diskIOCount;
 
                 int m_diskAccessCount;
 

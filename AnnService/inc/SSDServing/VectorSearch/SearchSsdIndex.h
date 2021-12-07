@@ -294,7 +294,7 @@ namespace SPTAG {
                 int p_numThreads,
                 std::vector<COMMON::QueryResultSet<ValueType>>& p_results,
                 std::vector<SearchStats>& p_stats,
-                int p_maxQueryCount)
+                int p_maxQueryCount, int p_internalResultNum)
             {
                 int numQueries = min(static_cast<int>(p_results.size()), p_maxQueryCount);
                 
@@ -318,7 +318,7 @@ namespace SPTAG {
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
                             }
-                            p_searcher.Search(p_results[index], p_stats[index]);
+                            p_searcher.Search(p_results[index], p_internalResultNum, p_stats[index]);
                         }
                         else
                         {
@@ -345,7 +345,7 @@ namespace SPTAG {
                 uint32_t p_qps,
                 std::vector<COMMON::QueryResultSet<ValueType>>& p_results,
                 std::vector<SearchStats>& p_stats,
-                int p_maxQueryCount)
+                int p_maxQueryCount, int p_internalResultNum)
             {
                 size_t numQueries = std::min<size_t>(p_results.size(), p_maxQueryCount);
 
@@ -381,7 +381,7 @@ namespace SPTAG {
 
                             if (index < numQueries)
                             {
-                                p_searcher.SearchAsync(p_results[index], p_stats[index], callback);
+                                p_searcher.SearchAsync(p_results[index], p_internalResultNum, p_stats[index], callback);
 
                                 if ((index & ((1 << 14) - 1)) == 0)
                                 {
@@ -463,7 +463,7 @@ namespace SPTAG {
                     auto warmupQuerySet = queryReader->GetVectorSet();
                     int warmupNumQueries = warmupQuerySet->Count();
 
-                    std::vector<COMMON::QueryResultSet<ValueType>> warmupResults(warmupNumQueries, COMMON::QueryResultSet<ValueType>(NULL, internalResultNum));
+                    std::vector<COMMON::QueryResultSet<ValueType>> warmupResults(warmupNumQueries, COMMON::QueryResultSet<ValueType>(NULL, max(K, internalResultNum)));
                     std::vector<SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
@@ -474,11 +474,11 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Start warmup...\n");
                     if (asyncCallQPS == 0)
                     {
-                        SearchSequential(searcher, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit);
+                        SearchSequential(searcher, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
                     }
                     else
                     {
-                        SearchAsync(searcher, asyncCallQPS, warmupResults, warmpUpStats, p_opts.m_queryCountLimit);
+                        SearchAsync(searcher, asyncCallQPS, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
                     }
 
                     LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
@@ -495,7 +495,7 @@ namespace SPTAG {
                 auto querySet = queryReader->GetVectorSet();
                 int numQueries = querySet->Count();
 
-                std::vector<COMMON::QueryResultSet<ValueType>> results(numQueries, COMMON::QueryResultSet<ValueType>(NULL, internalResultNum));
+                std::vector<COMMON::QueryResultSet<ValueType>> results(numQueries, COMMON::QueryResultSet<ValueType>(NULL, max(K, internalResultNum)));
                 std::vector<SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
@@ -508,11 +508,11 @@ namespace SPTAG {
 
                 if (asyncCallQPS == 0)
                 {
-                    SearchSequential(searcher, numThreads, results, stats, p_opts.m_queryCountLimit);
+                    SearchSequential(searcher, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
                 }
                 else
                 {
-                    SearchAsync(searcher, asyncCallQPS, results, stats, p_opts.m_queryCountLimit);
+                    SearchAsync(searcher, asyncCallQPS, results, stats, p_opts.m_queryCountLimit, internalResultNum);
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
@@ -547,9 +547,9 @@ namespace SPTAG {
 
                 float recall = 0;
                 float oldrecall = 0;
+                std::vector<std::set<int>> truth;
                 if (!truthFile.empty())
                 {
-                    std::vector<std::set<int>> truth;
                     LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
                     LoadTruth(truthFile, truth, numQueries, truthK);
 
@@ -591,6 +591,14 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
+                LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
+                PrintPercentiles<double, SearchStats>(stats,
+                    [](const SearchStats& ss) -> double
+                    {
+                        return ss.m_totalSearchLatency - ss.m_exLatency;
+                    },
+                    "%.3lf");
+
                 LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
                 PrintPercentiles<double, SearchStats>(stats,
                     [](const SearchStats& ss) -> double
@@ -615,11 +623,19 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Acess Distribution:\n");
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution:\n");
                 PrintPercentiles<int, SearchStats>(stats,
                     [](const SearchStats& ss) -> int
                     {
                         return ss.m_diskAccessCount;
+                    },
+                    "%4d");
+
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
+                PrintPercentiles<int, SearchStats>(stats,
+                    [](const SearchStats& ss) -> int
+                    {
+                        return ss.m_diskIOCount;
                     },
                     "%4d");
 
@@ -664,6 +680,177 @@ namespace SPTAG {
                     static_cast<double>(exListSum) / numQueries);
 
                 LOG(Helper::LogLevel::LL_Info, "\n");
+
+                if (p_opts.m_recall_analysis) {
+                    LOG(Helper::LogLevel::LL_Info, "Start recall analysis...\n");
+
+                    SizeType sampleSize = numQueries < 100 ? numQueries : 100;
+                    SizeType sampleK = searcher.HeadIndex()->GetNumSamples() < 1000 ? searcher.HeadIndex()->GetNumSamples() : 1000;
+                    float sampleE = 1e-6f;
+
+                    std::vector<SizeType> samples(sampleSize, 0);
+                    std::vector<float> queryHeadRecalls(sampleSize, 0);
+                    std::vector<float> truthRecalls(sampleSize, 0);
+                    std::vector<int> shouldSelect(sampleSize, 0);
+                    std::vector<int> shouldSelectLong(sampleSize, 0);
+                    std::vector<int> nearQueryHeads(sampleSize, 0);
+                    std::vector<int> annNotFound(sampleSize, 0);
+                    std::vector<int> rngRule(sampleSize, 0);
+                    std::vector<int> postingCut(sampleSize, 0);
+                    for (int i = 0; i < sampleSize; i++) samples[i] = COMMON::Utils::rand(numQueries);
+
+#pragma omp parallel for schedule(dynamic)
+                    for (int i = 0; i < sampleSize; i++)
+                    {
+                        COMMON::QueryResultSet<ValueType> queryANNHeads((const ValueType*)(querySet->GetVector(samples[i])), max(K, internalResultNum));
+                        searcher.HeadIndex()->SearchIndex(queryANNHeads);
+                        float queryANNHeadsLongestDist = queryANNHeads.GetResult(internalResultNum - 1)->Dist;
+
+                        COMMON::QueryResultSet<ValueType> queryBFHeads((const ValueType*)(querySet->GetVector(samples[i])), max(sampleK, internalResultNum));
+                        for (SizeType y = 0; y < searcher.HeadIndex()->GetNumSamples(); y++)
+                        {
+                            float dist = searcher.HeadIndex()->ComputeDistance(queryBFHeads.GetTarget(), searcher.HeadIndex()->GetSample(y));
+                            queryBFHeads.AddPoint(y, dist);
+                        }
+                        queryBFHeads.SortResult();
+
+                        {
+                            std::vector<bool> visited(internalResultNum, false);
+                            for (SizeType y = 0; y < internalResultNum; y++)
+                            {
+                                for (SizeType z = 0; z < internalResultNum; z++)
+                                {
+                                    if (visited[z]) continue;
+
+                                    if (fabs(queryANNHeads.GetResult(z)->Dist - queryBFHeads.GetResult(y)->Dist) < sampleE)
+                                    {
+                                        queryHeadRecalls[i] += 1;
+                                        visited[z] = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        std::map<int, std::set<int>> tmpFound; // headID->truths
+                        searcher.BruteForceSearch(queryBFHeads, internalResultNum, sampleK, truth[samples[i]], tmpFound);
+
+                        for (SizeType z = 0; z < K; z++) {
+                            truthRecalls[i] += truth[samples[i]].count(queryBFHeads.GetResult(z)->VID);
+                        }
+
+                        for (SizeType z = 0; z < K; z++) {
+                            truth[samples[i]].erase(results[samples[i]].GetResult(z)->VID);
+                        }
+
+                        for (std::map<int, std::set<int>>::iterator it = tmpFound.begin(); it != tmpFound.end(); it++) {
+                            float q2truthposting = searcher.HeadIndex()->ComputeDistance(querySet->GetVector(samples[i]), searcher.HeadIndex()->GetSample(it->first));
+                            for (auto vid : it->second) {
+                                if (!truth[samples[i]].count(vid)) continue;
+
+                                if (q2truthposting < queryANNHeadsLongestDist) shouldSelect[i] += 1;
+                                else {
+                                    shouldSelectLong[i] += 1;
+
+                                    std::set<int> nearQuerySelectedHeads;
+                                    float v2vhead = searcher.HeadIndex()->ComputeDistance(vectorSet->GetVector(vid), searcher.HeadIndex()->GetSample(it->first));
+                                    for (SizeType z = 0; z < internalResultNum; z++) {
+                                        if (queryANNHeads.GetResult(z)->VID < 0) break;
+                                        float v2qhead = searcher.HeadIndex()->ComputeDistance(vectorSet->GetVector(vid), searcher.HeadIndex()->GetSample(queryANNHeads.GetResult(z)->VID));
+                                        if (v2qhead < v2vhead) {
+                                            nearQuerySelectedHeads.insert(queryANNHeads.GetResult(z)->VID);
+                                        }
+                                    }
+                                    if (nearQuerySelectedHeads.size() == 0) continue;
+
+                                    nearQueryHeads[i] += 1;
+
+                                    COMMON::QueryResultSet<ValueType> annTruthHead((const ValueType*)(vectorSet->GetVector(vid)), p_opts.m_debugBuildInternalResultNum);
+                                    searcher.HeadIndex()->SearchIndex(annTruthHead);
+
+                                    bool found = false;
+                                    for (SizeType z = 0; z < annTruthHead.GetResultNum(); z++) {
+                                        if (nearQuerySelectedHeads.count(annTruthHead.GetResult(z)->VID)) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (!found) {
+                                        annNotFound[i] += 1;
+                                        continue;
+                                    }
+
+                                    // RNG rule and posting cut
+                                    std::set<int> replicas;
+                                    for (SizeType z = 0; z < annTruthHead.GetResultNum() && replicas.size() < p_opts.m_replicaCount; z++) {
+                                        BasicResult* item = annTruthHead.GetResult(z);
+                                        if (item->VID < 0) break;
+
+                                        bool good = true;
+                                        for (auto r : replicas) {
+                                            if (p_opts.m_rngFactor * searcher.HeadIndex()->ComputeDistance(searcher.HeadIndex()->GetSample(r), searcher.HeadIndex()->GetSample(item->VID)) < item->Dist) {
+                                                good = false;
+                                                break;
+                                            }
+                                        }
+                                        if (good) replicas.insert(item->VID);
+                                    }
+                                    
+                                    found = false;
+                                    for (auto r : nearQuerySelectedHeads) {
+                                        if (replicas.count(r)) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (found) postingCut[i] += 1;
+                                    else rngRule[i] += 1;
+                                }
+                            }
+                        }
+                    }
+                    float headacc = 0, truthacc = 0, shorter = 0, longer = 0, lost = 0, buildNearQueryHeads = 0, buildAnnNotFound = 0, buildRNGRule = 0, buildPostingCut = 0;
+                    for (int i = 0; i < sampleSize; i++) {
+                        headacc += queryHeadRecalls[i];
+                        truthacc += truthRecalls[i];
+
+                        lost += shouldSelect[i] + shouldSelectLong[i];
+                        shorter += shouldSelect[i];
+                        longer += shouldSelectLong[i];
+
+                        buildNearQueryHeads += nearQueryHeads[i];
+                        buildAnnNotFound += annNotFound[i];
+                        buildRNGRule += rngRule[i];
+                        buildPostingCut += postingCut[i];
+                    }
+
+                    LOG(Helper::LogLevel::LL_Info, "Query head recall @%d:%f.\n", internalResultNum, headacc / sampleSize / internalResultNum);
+                    LOG(Helper::LogLevel::LL_Info, "BF top %d postings truth recall @%d:%f.\n", sampleK, truthK, truthacc / sampleSize / truthK);
+
+                    LOG(Helper::LogLevel::LL_Info,
+                        "Percent of truths in postings have shorter distance than query selected heads: %f percent\n",
+                        shorter / lost * 100);
+                    LOG(Helper::LogLevel::LL_Info,
+                        "Percent of truths in postings have longer distance than query selected heads: %f percent\n",
+                        longer / lost * 100);
+
+
+                    LOG(Helper::LogLevel::LL_Info,
+                        "\tPercent of truths no shorter distance in query selected heads: %f percent\n",
+                        (longer - buildNearQueryHeads) / lost * 100);
+                    LOG(Helper::LogLevel::LL_Info,
+                        "\tPercent of truths exists shorter distance in query selected heads: %f percent\n",
+                        buildNearQueryHeads / lost * 100);
+
+                    LOG(Helper::LogLevel::LL_Info,
+                        "\t\tRNG rule ANN search loss: %f percent\n", buildAnnNotFound / lost * 100);
+                    LOG(Helper::LogLevel::LL_Info,
+                        "\t\tPosting cut loss: %f percent\n", buildPostingCut/ lost * 100);
+                    LOG(Helper::LogLevel::LL_Info,
+                        "\t\tRNG rule loss: %f percent\n", buildRNGRule / lost * 100);
+                }
             }
 		}
 	}

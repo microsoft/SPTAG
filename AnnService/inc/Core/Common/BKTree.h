@@ -113,6 +113,25 @@ namespace SPTAG
                 delete[] pos;
             }
         };
+        template<typename T>
+        void RefineLambda(KmeansArgs<T>& args, float& lambda, int size)
+        {
+            int maxcluster = -1;
+            SizeType maxCount = 0;
+            for (int k = 0; k < args._DK; k++) {
+                if (args.counts[k] > maxCount && args.newCounts[k] > 0)
+                {
+                    maxcluster = k;
+                    maxCount = args.counts[k];
+                }
+            }
+
+            float avgDist = args.newWeightedCounts[maxcluster] / args.newCounts[maxcluster];
+            //lambda = avgDist / 10 / args.counts[maxcluster];
+            //lambda = (args.clusterDist[maxcluster] - avgDist) / args.newCounts[maxcluster];
+            lambda = (args.clusterDist[maxcluster] - avgDist) / size;
+            if (lambda < 0) lambda = 0;
+        }
 
         template <typename T>
         float RefineCenters(const Dataset<T>& data, KmeansArgs<T>& args)
@@ -247,26 +266,21 @@ namespace SPTAG
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples, int tryIters) {
             SizeType batchEnd = min(first + samples, last);
-            float lambda, currDist, minClusterDist = MaxDist;
+            float lambda = 0, currDist, minClusterDist = MaxDist;
             for (int numKmeans = 0; numKmeans < tryIters; numKmeans++) {
                 for (int k = 0; k < args._DK; k++) {
                     SizeType randid = COMMON::Utils::rand(last, first);
                     std::memcpy(args.centers + k*args._D, data[indices[randid]], sizeof(T)*args._D);
                 }
                 args.ClearCounts();
-                args.ClearDists(MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, false, 0);
+                args.ClearDists(-MaxDist);
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, 0);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
                     memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
-                    SizeType maxCluster = 0;
-                    for (int k = 1; k < args._DK; k++) if (args.counts[k] > args.counts[maxCluster]) maxCluster = k;
-
-                    float avgDist = args.newWeightedCounts[maxCluster] / args.counts[maxCluster];
-                    lambda = (avgDist - args.clusterDist[maxCluster]) / args.counts[maxCluster];
-                    if (lambda < 0) lambda = 0;
+                    RefineLambda(args, lambda, batchEnd - first);
                 }
             }
             return lambda;
@@ -291,7 +305,7 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, min(adjustedLambda, originalLambda));
+                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, adjustedLambda);
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
                 if (currDist < minClusterDist) {
@@ -301,11 +315,27 @@ namespace SPTAG
                 else {
                     noImprovement++;
                 }
+
+                if (debug) {
+                    std::string log = "";
+                    for (int k = 0; k < args._DK; k++) {
+                        log += std::to_string(args.counts[k]) + " ";
+                    }
+                    LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
+                }
+
                 currDiff = RefineCenters(data, args);
                 //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
 
                 if (abort && abort->ShouldAbort()) return 0;
                 if (currDiff < 1e-3 || noImprovement >= 5) break;
+            }
+
+            args.ClearCounts();
+            args.ClearDists(MaxDist);
+            currDist = KmeansAssign(data, indices, first, last, args, false, 0);
+            for (int k = 0; k < args._DK; k++) {
+                if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
             }
 
             args.ClearCounts();
@@ -378,7 +408,7 @@ namespace SPTAG
         class BKTree
         {
         public:
-            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_fBalanceFactor(-1.0f), m_lock(new std::shared_timed_mutex) {}
+            BKTree(): m_iTreeNumber(1), m_iBKTKmeansK(32), m_iBKTLeafSize(8), m_iSamples(1000), m_fBalanceFactor(-1.0f), m_bfs(0), m_lock(new std::shared_timed_mutex) {}
             
             BKTree(const BKTree& other): m_iTreeNumber(other.m_iTreeNumber), 
                                    m_iBKTKmeansK(other.m_iBKTKmeansK), 
@@ -564,20 +594,87 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
             {
+                // int node_bfschecked = 0;
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
                         p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
-                    } 
+                    }
+                    else if (m_bfs) {
+
+                        //LOG(Helper::LogLevel::LL_Info, "BFS start!");
+
+                        int BFS_level = 1;
+                        std::vector<float> FactorQ;
+                        FactorQ.push_back(1.1);
+                        FactorQ.push_back(1.05);
+                        p_space.m_BSPTQueue[0].Resize(40);
+                        p_space.m_BSPTQueue[0].clear();
+                        p_space.m_BSPTQueue[1].Resize(100);
+                        p_space.m_BSPTQueue[1].clear();
+                        //p_space.m_BSPTQueue[2].Resize(100);
+                        //p_space.m_BSPTQueue[2].clear();
+                        //p_space.m_BSPTQueue[3].Resize(100000);
+                        //p_space.m_BSPTQueue[3].clear();
+                        float now_min = 1e9;
+                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                            //node_bfschecked++;
+                            //std::cout << begin << std::endl;
+                            SizeType index = m_pTreeRoots[begin].centerid;
+                            float now_dis = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                            if (now_dis < now_min * FactorQ[0]) {
+                                if (now_dis < now_min) now_min = now_dis;
+                                p_space.m_BSPTQueue[0].insert(NodeDistPair(begin, now_dis));
+                                p_space.m_SPTQueue.insert(NodeDistPair(begin, now_dis));
+                            }
+                        }
+                        //LOG(Helper::LogLevel::LL_Info, "Queue 0 size is %d\n", (int)p_space.m_BSPTQueue[0].size());
+
+                        int BFS_size = 100;
+                        for (int i = 1; i <= BFS_level; i++) {
+                            int now_size = 0;
+                            while (!p_space.m_BSPTQueue[i - 1].empty() && now_size < BFS_size) {
+                                NodeDistPair tmp = p_space.m_BSPTQueue[i - 1].pop();
+                                if (i > 1 && tmp.distance > now_min * FactorQ[i]) continue;
+                                now_size++;
+                                if (now_size > BFS_size) break;
+                                const BKTNode& tnode = m_pTreeRoots[tmp.node];
+                                for (SizeType now = tnode.childStart; now < tnode.childEnd; now++) {
+                                    //node_bfschecked++;
+                                    SizeType index = m_pTreeRoots[now].centerid;
+                                    float now_dis = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                                    if (now_dis < now_min * FactorQ[i]) {
+                                        if (now_dis < now_min) now_min = now_dis;
+                                        p_space.m_BSPTQueue[i].insert(NodeDistPair(now, now_dis));
+                                        p_space.m_SPTQueue.insert(NodeDistPair(now, now_dis));
+                                    }
+                                }
+                            }
+                        }
+
+                        //LOG(Helper::LogLevel::LL_Info, "Queue %d size is %d\n", BFS_level, (int)p_space.m_BSPTQueue[BFS_level].size());
+                        //LOG(Helper::LogLevel::LL_Info, "Queue size is %d\n", (int)p_space.m_BSPTQueue[BFS_level].size());
+                        int pivot_size = 20, now_pivot = 0;
+                        while (!p_space.m_BSPTQueue[BFS_level].empty() && now_pivot < pivot_size) {
+                            now_pivot++;
+                            NodeDistPair tmp = p_space.m_BSPTQueue[BFS_level].pop();
+                            SizeType index = m_pTreeRoots[tmp.node].centerid;
+                            p_space.m_SPTQueue.insert(NodeDistPair(tmp.node, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                        }
+                        /*
+
+                        */
+                    }
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
                             p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
                         }
-                    } 
+                    }
                 }
+                //LOG(Helper::LogLevel::LL_Info, "%d nodes checked by BFS!", node_bfschecked);
             }
 
             template <typename T>
@@ -614,7 +711,7 @@ namespace SPTAG
 
         public:
             std::unique_ptr<std::shared_timed_mutex> m_lock;
-            int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples;
+            int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples, m_bfs;
             float m_fBalanceFactor;
         };
     }
