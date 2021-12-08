@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include <mpi.h>
+#include <thread>
 #include <cstdlib>
 #include <algorithm>
 #include "inc/Core/Common/DistanceUtils.h"
