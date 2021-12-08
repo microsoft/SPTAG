@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <queue>
+#include <atomic>
 
 #if defined(GPU)
 #include <cuda.h>
