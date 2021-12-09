@@ -50,7 +50,7 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
 }
 
 template <typename T>
-void PerfAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth,  std::string out)
+void PerfAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out)
 {
     std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
@@ -105,8 +105,10 @@ void PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<V
 template <typename T>
 void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, std::string distCalcMethod, int k)
 {
-    SizeType n = 200000, q = 2000;
-    DimensionType m = 64;
+
+    SizeType n = 2000, q = 2000;
+    DimensionType m = 128;
+    /*
     if (fileexists("test_vector.bin") && fileexists("test_meta.bin") && fileexists("test_metaidx.bin") && fileexists("test_query.bin")) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
@@ -126,39 +128,41 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         }
         queryset = vectorReader->GetVectorSet();
     }
-    else {
-        ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
-        for (SizeType i = 0; i < n; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
-        }
-        vecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
-        vecset->Save("test_vector.bin");
 
-        ByteArray meta = ByteArray::Alloc(n * 6);
-        ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
-        std::uint64_t offset = 0;
-        for (SizeType i = 0; i < n; i++) {
-            ((std::uint64_t*)metaoffset.Data())[i] = offset;
-            std::string a = std::to_string(i);
-            memcpy(meta.Data() + offset, a.c_str(), a.length());
-            offset += a.length();
+    else { */
+    ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
+    for (SizeType i = 0; i < n; i++) {
+        for (DimensionType j = 0; j < m; j++) {
+            ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
         }
-        ((std::uint64_t*)metaoffset.Data())[n] = offset;
-        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
-        metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
-
-        ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);
-        for (SizeType i = 0; i < q; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)query.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
-        }
-        queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
-        queryset->Save("test_query.bin");
     }
+    vecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
+    vecset->Save("test_vector.bin");
 
+    ByteArray meta = ByteArray::Alloc(n * 6);
+    ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
+    std::uint64_t offset = 0;
+    for (SizeType i = 0; i < n; i++) {
+        ((std::uint64_t*)metaoffset.Data())[i] = offset;
+        std::string a = std::to_string(i);
+        memcpy(meta.Data() + offset, a.c_str(), a.length());
+        offset += a.length();
+    }
+    ((std::uint64_t*)metaoffset.Data())[n] = offset;
+    metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
+    metaset->SaveMetadata("test_meta.bin", "test_metaidx.bin");
+
+    ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);
+    for (SizeType i = 0; i < q; i++) {
+        for (DimensionType j = 0; j < m; j++) {
+            ((T*)query.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
+        }
+    }
+    queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
+    queryset->Save("test_query.bin");
+
+    //}
+    /*
     if (fileexists(("test_truth." + distCalcMethod).c_str())) {
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), k, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
@@ -169,35 +173,36 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         }
         truth = vectorReader->GetVectorSet();
     }
-    else {
-        omp_set_num_threads(5);
 
-        DistCalcMethod distMethod;
-        Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
-        if (distMethod == DistCalcMethod::Cosine) {
-            std::cout << "Normalize vecset!" << std::endl;
-            COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
-        }
+    else { */
+    omp_set_num_threads(5);
 
-        ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
+    DistCalcMethod distMethod;
+    Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
+    if (distMethod == DistCalcMethod::Cosine) {
+        std::cout << "Normalize vecset!" << std::endl;
+        COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
+    }
+
+    ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
 
 #pragma omp parallel for
-        for (SizeType i = 0; i < queryset->Count(); ++i)
-        {
-            SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
+    for (SizeType i = 0; i < queryset->Count(); ++i)
+    {
+        SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
 
-            COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
-            for (SizeType j = 0; j < vecset->Count(); j++)
-            {
-                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
-                res.AddPoint(j, dist);
-            }
-            res.SortResult();
-            for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
+        COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
+        for (SizeType j = 0; j < vecset->Count(); j++)
+        {
+            float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
+            res.AddPoint(j, dist);
         }
-        truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
-        truth->Save("test_truth." + distCalcMethod);
+        res.SortResult();
+        for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
     }
+    truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
+    truth->Save("test_truth." + distCalcMethod);
+    //}
 }
 
 template <typename T>
@@ -206,7 +211,6 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
     std::shared_ptr<VectorSet> vecset, queryset, truth;
     std::shared_ptr<MetadataSet> metaset;
     GenerateData<T>(vecset, metaset, queryset, truth, distCalcMethod, 10);
-
     PerfAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     PerfBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     std::shared_ptr<VectorIndex> vecIndex;

@@ -37,7 +37,7 @@ namespace SPTAG {
                             }
                             else if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                                     recall++;
                                     visited[j] = true;
@@ -73,7 +73,7 @@ namespace SPTAG {
                             }
                             else if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                                     recall++;
                                     break;
@@ -431,6 +431,11 @@ namespace SPTAG {
                 std::string truthFile = COMMON_OPTS.m_truthPath;
                 std::string warmupFile = COMMON_OPTS.m_warmupPath;
 
+                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                {
+                    SPTAG::COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
+                }
+
                 if (!p_opts.m_logFile.empty())
                 {
                     SPTAG::g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
@@ -518,6 +523,7 @@ namespace SPTAG {
                 LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
                 std::shared_ptr<SPTAG::VectorSet> vectorSet;
+
                 if (!COMMON_OPTS.m_vectorPath.empty() && fileexists(COMMON_OPTS.m_vectorPath.c_str())) {
                     std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
                     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
@@ -531,13 +537,14 @@ namespace SPTAG {
 
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
                     LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
+                    COMMON::DistanceUtils::Quantizer.reset();
                     for (int i = 0; i < results.size(); i++)
                     {
                         for (int j = 0; j < K; j++)
                         {
                             if (results[i].GetResult(j)->VID < 0) continue;
-                            results[i].GetResult(j)->Dist = (searcher.HeadIndex())->ComputeDistance(querySet->GetVector(i),
-                                vectorSet->GetVector(results[i].GetResult(j)->VID));
+                            results[i].GetResult(j)->Dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(i),
+                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), COMMON_OPTS.m_distCalcMethod);
                         }
                         BasicResult* re = results[i].GetResults();
                         std::sort(re, re + K, SPTAG::COMMON::Compare);
@@ -620,6 +627,14 @@ namespace SPTAG {
                     [](const SearchStats& ss) -> int
                     {
                         return ss.m_diskAccessCount;
+                    },
+                    "%4d");
+
+                LOG(Helper::LogLevel::LL_Info, "\nTotal Posting Distribution:\n");
+                PrintPercentiles<int, SearchStats>(stats,
+                    [](const SearchStats& ss) -> int
+                    {
+                        return ss.m_postingElementCount;
                     },
                     "%4d");
 

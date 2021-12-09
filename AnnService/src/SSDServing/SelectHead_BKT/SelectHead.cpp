@@ -613,7 +613,7 @@ namespace SPTAG {
                 if (selected.empty())
                 {
                     LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
-                    exit(1);
+                    return ErrorCode::Fail;
                 }
 
                 if (opts.m_calcStd) {

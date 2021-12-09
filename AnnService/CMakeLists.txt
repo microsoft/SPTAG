@@ -23,6 +23,7 @@ add_library (DistanceUtils STATIC
     inc/Core/Common/DistanceUtils.h 
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
+    inc/Core/Common/IQuantizer.h
     src/Core/Common/DistanceUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )
@@ -67,7 +68,7 @@ if (NOT LIBRARYONLY)
     file(GLOB SEARCHER_FILES ${AnnService}/src/IndexSearcher/*.cpp)
     add_executable (indexsearcher ${SEARCHER_FILES})
     target_link_libraries(indexsearcher ${Boost_LIBRARIES} SPTAGLibStatic)
-
+    
     install(TARGETS server client aggregator indexbuilder indexsearcher
       RUNTIME DESTINATION bin
       ARCHIVE DESTINATION lib

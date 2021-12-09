@@ -137,6 +137,8 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
+    <ClInclude Include="inc\Core\Common\PQQuantizer.h" />
+    <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />
@@ -178,8 +180,10 @@
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Core\Common\CommonUtils.cpp" />
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
+    <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
