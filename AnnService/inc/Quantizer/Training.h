@@ -17,14 +17,14 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
-        AddRequiredOption(m_outputMetadataFile, "-om", "--outputmetadata", "Output metadata.");
-        AddRequiredOption(m_outputMetadataIndexFile, "-omi", "--outputmetadataindex", "Output metadata index.");
+        AddRequiredOption(m_outputMetadataFile, "-om", "--outputmeta", "Output metadata.");
+        AddRequiredOption(m_outputMetadataIndexFile, "-omi", "--outputmetaindex", "Output metadata index.");
         AddRequiredOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
         AddRequiredOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
         AddRequiredOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
-        AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information");
-        AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter");
+        AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
+        AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
     }
 
     ~QuantizerOptions() {}
