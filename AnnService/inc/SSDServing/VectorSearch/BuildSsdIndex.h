@@ -446,7 +446,8 @@ namespace SPTAG {
                 std::unordered_set<int> headVectorIDS;
                 LoadHeadVectorIDSet(COMMON_OPTS.m_headIDFile, headVectorIDS);
 
-                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
+                SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : COMMON_OPTS.m_valueType;
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (ErrorCode::Success != vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
                 {
@@ -513,13 +514,26 @@ namespace SPTAG {
 #pragma omp parallel for schedule(dynamic)
                         for (int j = 0; j < sampleNum; j++)
                         {
-                            COMMON::QueryResultSet<void> sampleANN(fullVectors->GetVector(samples[j]), sampleK);
+                            COMMON::QueryResultSet<void> sampleANN(nullptr, sampleK);
+                            COMMON::QueryResultSet<void> sampleTruth(nullptr, sampleK);
+                            void* reconstructVector = nullptr;
+                            if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                            {
+                                reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+                                SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*) fullVectors->GetVector(samples[j]), reconstructVector);
+                                sampleANN.SetTarget(reconstructVector);
+                                sampleTruth.SetTarget(reconstructVector);
+                            }
+                            else 
+                            {
+                                sampleANN.SetTarget(fullVectors->GetVector(samples[j]));
+                                sampleTruth.SetTarget(fullVectors->GetVector(samples[j]));
+                            }
+
                             searcher.HeadIndex()->SearchIndex(sampleANN);
-                            
-                            COMMON::QueryResultSet<void> sampleTruth(fullVectors->GetVector(samples[j]), sampleK);
                             for (SizeType y = 0; y < searcher.HeadIndex()->GetNumSamples(); y++)
                             {
-                                float dist = searcher.HeadIndex()->ComputeDistance(sampleTruth.GetTarget(), searcher.HeadIndex()->GetSample(y));
+                                float dist = searcher.HeadIndex()->ComputeDistance(sampleTruth.GetQuantizedTarget(), searcher.HeadIndex()->GetSample(y));
                                 sampleTruth.AddPoint(y, dist);
                             }
                             sampleTruth.SortResult();
@@ -539,6 +553,10 @@ namespace SPTAG {
                                         break;
                                     }
                                }
+                            }
+                            if (reconstructVector)
+                            {
+                                _mm_free(reconstructVector);
                             }
                         }
                         float acc = 0;

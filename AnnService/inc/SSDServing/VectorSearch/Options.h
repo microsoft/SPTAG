@@ -46,6 +46,7 @@ namespace SPTAG {
 				int m_ioThreads;
 				int m_searchPostingPageLimit;
 				int m_rerank;
+				bool m_enableADC;
 
 				Options() {
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \

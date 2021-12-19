@@ -6,20 +6,26 @@
 
 #include <xmmintrin.h>
 #include <functional>
+#include <iostream>
 
 #include "CommonUtils.h"
 #include "InstructionUtils.h"
+#include "IQuantizer.h"
 
 namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename T>
+        using DistanceCalcReturn = float(*)(const T*, const T*, DimensionType);
         template<typename T>
-        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType);
+        inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
 
         class DistanceUtils
         {
         public:
+            static std::shared_ptr<IQuantizer> Quantizer;
+            
             template <typename T>
             static float ComputeL2Distance(const T* pX, const T* pY, DimensionType length)
             {
@@ -105,9 +111,8 @@ namespace SPTAG
                 return 1 - d;
             }
         };
-
         template<typename T>
-        float (*DistanceCalcSelector(SPTAG::DistCalcMethod p_method)) (const T*, const T*, DimensionType)
+        inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
         {
             bool isSize4 = (sizeof(T) == 4);
             switch (p_method)
@@ -137,7 +142,49 @@ namespace SPTAG
                 else {
                     return &(DistanceUtils::ComputeL2Distance);
                 }
-  
+
+            default:
+                break;
+            }
+            return nullptr;
+        }
+
+        template<>
+        inline DistanceCalcReturn<std::uint8_t> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
+        {
+            switch (p_method)
+            {
+            case SPTAG::DistCalcMethod::Cosine:
+                if (DistanceUtils::Quantizer) {
+                    return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });
+                }
+                else if (InstructionSet::AVX2())
+                {
+                    return &(DistanceUtils::ComputeCosineDistance_AVX);
+                }
+                else if (InstructionSet::SSE2())
+                {
+                    return &(DistanceUtils::ComputeCosineDistance_SSE);
+                }
+                else {
+                    return &(DistanceUtils::ComputeCosineDistance<std::uint8_t>);
+                }
+
+            case SPTAG::DistCalcMethod::L2:
+                if (DistanceUtils::Quantizer) {
+                    return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->L2Distance(pX, pY); });
+                }
+                else if (InstructionSet::AVX2())
+                {
+                    return &(DistanceUtils::ComputeL2Distance_AVX);
+                }
+                else if (InstructionSet::SSE2())
+                {
+                    return &(DistanceUtils::ComputeL2Distance_SSE);
+                }
+                else {
+                    return &(DistanceUtils::ComputeL2Distance<std::uint8_t>);
+                }
             default:
                 break;
             }

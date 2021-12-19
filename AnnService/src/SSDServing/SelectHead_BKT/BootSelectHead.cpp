@@ -58,7 +58,8 @@ namespace SPTAG {
 				VectorSearch::TimeUtils::StopW sw;
 
 				LOG(Helper::LogLevel::LL_Info, "Start loading vector file.\n");
-				std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
+				auto valueType = COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : COMMON_OPTS.m_valueType;
+				std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
 				if (ErrorCode::Success != vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
 				{
@@ -86,7 +87,7 @@ namespace SPTAG {
 					LOG(Helper::LogLevel::LL_Info, "Start generating Clustering head.\n");
 					int headCnt = CalcHeadCnt(opts.m_ratio, vectorSet->Count());
 					
-					switch (COMMON_OPTS.m_valueType)
+					switch (valueType)
 					{
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
@@ -102,7 +103,7 @@ namespace SPTAG {
 				} else if (Helper::StrUtils::StrEqualIgnoreCase(opts.m_selectType.c_str(), "BKT")) {
 					LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
 					std::shared_ptr<COMMON::BKTree> bkt;
-					switch (COMMON_OPTS.m_valueType)
+					switch (valueType)
 					{
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
@@ -138,7 +139,7 @@ namespace SPTAG {
 						if (SelectHead(vectorSet, bkt, opts, counter, selected) != ErrorCode::Success)
 						{
 							LOG(Helper::LogLevel::LL_Error, "Failed to select head.\n");
-							exit(1);
+							return ErrorCode::Fail;
 						}
 					}
 				}

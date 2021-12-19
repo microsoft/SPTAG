@@ -34,6 +34,7 @@ public:
         AddOptionalOption(m_batch, "-b", "--batchsize", "Batch query size.");
         AddOptionalOption(m_genTruth, "-g", "--gentruth", "Generate truth file.");
         AddOptionalOption(m_debugQuery, "-q", "--debugquery", "Debug query number.");
+        AddOptionalOption(m_enableADC, "-adc", "--adc", "Enable ADC Distance computation");
     }
 
     ~SearcherOptions() {}
@@ -63,11 +64,14 @@ public:
     int m_genTruth = 0;
 
     int m_debugQuery = -1;
+
+    bool m_enableADC = false;
 };
 
 template <typename T>
 float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, std::ofstream& log, bool debug = false)
 {
+    COMMON::DistanceUtils::Quantizer.reset();
     float eps = 1e-6f;
     float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
     std::vector<float> thisrecall(NumQuerys, 0);
@@ -88,8 +92,8 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                     break;
                 }
                 else if (vectorSet != nullptr) {
-                    float dist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(results[i].GetResult(j)->VID));
-                    float truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                    float dist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), index->GetDistCalcMethod());
+                    float truthDist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                     if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                         thisrecall[i] += 1;
                         visited[j] = true;
@@ -114,7 +118,7 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
             for (SizeType id : truth[i]) {
                 float truthDist = 0.0;
                 if (vectorSet != nullptr) {
-                    truthDist = index->ComputeDistance(querySet->GetVector(i), vectorSet->GetVector(id));
+                    truthDist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
                 }
                 truthvec.emplace_back(id, truthDist);
             }
@@ -417,6 +421,10 @@ int main(int argc, char** argv)
         LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
+    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    {
+        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
+    }
 
     Helper::IniReader iniReader;
     for (int i = 1; i < argc; i++)
@@ -447,7 +455,7 @@ int main(int argc, char** argv)
 
     vecIndex->UpdateIndex();
 
-    switch (vecIndex->GetVectorValueType())
+    switch (options->m_inputValueType)
     {
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \

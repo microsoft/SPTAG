@@ -49,12 +49,15 @@ namespace SPTAG
             }
 
             template<typename T>
-            static inline int GetBase() {
+            static inline int GetBaseCore() {
                 if (GetEnumValueType<T>() != VectorValueType::Float) {
                     return (int)(std::numeric_limits<T>::max)();
                 }
                 return 1;
             }
+
+            template <typename T>
+            static int GetBase();
 
             template <typename T>
             static void Normalize(T* arr, DimensionType col, int base) {

@@ -39,6 +39,7 @@ namespace SPTAG {
                 std::string m_ssdIndex;
                 bool m_deleteHeadVectors;
                 int m_ssdIndexFileNum;
+                std::string m_quantizerFilePath; //Optional
 
                 BaseOptions() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

@@ -662,7 +662,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
 
   int KNN_blocks; // number of threadblocks used
 
-  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
+  Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(index, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
