@@ -24,7 +24,7 @@ namespace SPTAG
         public:
             PQQuantizer();
 
-            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks);
+            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks);
 
             ~PQQuantizer();
 
@@ -90,9 +90,9 @@ namespace SPTAG
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector)
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks))
         {
-            m_codebooks.reset(Codebooks);
+            //m_codebooks.reset(std::move(Codebooks));
             m_EnableADC = EnableADC;
 
             auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
@@ -116,8 +116,7 @@ namespace SPTAG
 
         template <typename T>
         PQQuantizer<T>::~PQQuantizer()
-        {
-        }
+        {}
 
         template <typename T>
         float PQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)

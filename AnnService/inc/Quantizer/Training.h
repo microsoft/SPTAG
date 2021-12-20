@@ -51,7 +51,7 @@ public:
 };
 
 template <typename T>
-T* TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<VectorSet> raw_vectors, std::shared_ptr<VectorSet> quantized_vectors)
+std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<VectorSet> raw_vectors, std::shared_ptr<VectorSet> quantized_vectors)
 {
     SizeType numCentroids = 256;
     if (raw_vectors->Dimension() % options->m_quantizedDim != 0) {
@@ -59,9 +59,7 @@ T* TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<V
         exit(1);
     }
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
-    ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * raw_vectors->Count());
-    quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, raw_vectors->Count()));
-    T* codebooks = (T*)_mm_malloc(sizeof(T) * 256 * raw_vectors->Dimension(), ALIGN_SPTAG);
+    auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
     for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
         auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2);
@@ -102,7 +100,7 @@ T* TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<V
         }
         std::cout << std::endl;
 
-        T* cb = codebooks + (numCentroids * subdim * codebookIdx);
+        T* cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
         for (int i = 0; i < numCentroids; i++)
         {
             for (int j = 0; j < subdim; j++)

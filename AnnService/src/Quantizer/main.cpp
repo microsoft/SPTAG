@@ -30,13 +30,24 @@ int main(int argc, char* argv[])
     case QuantizerType::None:
     {
         vectorReader->GetVectorSet()->Save(options->m_outputFile);
-        vectorReader->GetMetadataSet()->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        auto metadataSet = vectorReader->GetMetadataSet();
+        if (metadataSet)
+        {
+            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        }
         break;
     }
     case QuantizerType::PQQuantizer:
     {
-        vectorReader->GetMetadataSet()->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        auto metadataSet = vectorReader->GetMetadataSet();
+        if (metadataSet)
+        {
+            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        }
+        
         std::shared_ptr<VectorSet> quantized_vectors;
+        ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * vectorReader->GetVectorSet()->Count());
+        quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, vectorReader->GetVectorSet()->Count()));
         switch (options->m_inputValueType)
         {
 #define DefineVectorValueType(Name, Type) \
@@ -47,6 +58,12 @@ int main(int argc, char* argv[])
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
         }
+        if (ErrorCode::Success != quantized_vectors->Save(options->m_outputFile))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to save quantized vectors.\n");
+            exit(1);
+        }
+
         auto ptr = SPTAG::f_createIO();
         if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
         {
@@ -59,12 +76,6 @@ int main(int argc, char* argv[])
         else
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to open quantizer file.\n");
-            exit(1);
-        }
-
-        if (ErrorCode::Success != quantized_vectors->Save(options->m_outputQuantizerFile))
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to save quantized vectors.\n");
             exit(1);
         }
         
