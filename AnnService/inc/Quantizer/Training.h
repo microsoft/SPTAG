@@ -13,15 +13,15 @@ using namespace SPTAG;
 class QuantizerOptions : public Helper::ReaderOptions
 {
 public:
-    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda)
+    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda, SPTAG::QuantizerType qtype, std::string qfile, DimensionType qdim) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda), m_quantizerType(qtype), m_outputQuantizerFile(qfile), m_quantizedDim(qdim)
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
         AddRequiredOption(m_outputMetadataFile, "-om", "--outputmeta", "Output metadata.");
         AddRequiredOption(m_outputMetadataIndexFile, "-omi", "--outputmetaindex", "Output metadata index.");
-        AddRequiredOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
-        AddRequiredOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
-        AddRequiredOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
+        AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
+        AddOptionalOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
+        AddOptionalOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
         AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
