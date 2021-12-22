@@ -92,8 +92,8 @@ float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const st
                     break;
                 }
                 else if (vectorSet != nullptr) {
-                    float dist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), index->GetDistCalcMethod());
-                    float truthDist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
+                    float dist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), vectorSet->Dimension(), index->GetDistCalcMethod());
+                    float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), vectorSet->Dimension(), index->GetDistCalcMethod());
                     if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
                         thisrecall[i] += 1;
                         visited[j] = true;
@@ -232,7 +232,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     results[qid].SetTarget((T*)queryVectors->GetVector(qid + startQuery));
                     for (SizeType y = 0; y < index.GetNumSamples(); y++)
                     {
-                        float dist = index.ComputeDistance(results[qid].GetTarget(), index.GetSample(y));
+                        float dist = index.ComputeDistance(results[qid].GetQuantizedTarget(), index.GetSample(y));
                         results[qid].AddPoint(y, dist);
                     }
                     results[qid].SortResult();

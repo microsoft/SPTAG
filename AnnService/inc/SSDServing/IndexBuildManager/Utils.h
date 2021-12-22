@@ -66,7 +66,7 @@ namespace SPTAG {
 				SPTAG::COMMON::QueryResultSet<T> query((const T*)(querySet->GetVector(i)), K);
 				for (SPTAG::SizeType j = 0; j < vectorSet->Count(); j++)
 				{
-					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance<T>(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension(), distMethod);
+					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension(), distMethod);
 					query.AddPoint(j, dist);
 				}
 				query.SortResult();

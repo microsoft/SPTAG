@@ -46,6 +46,8 @@ namespace SPTAG {
 				int m_ioThreads;
 				int m_searchPostingPageLimit;
 				int m_rerank;
+				bool m_recall_analysis;
+				int m_debugBuildInternalResultNum;
 				bool m_enableADC;
 
 				Options() {

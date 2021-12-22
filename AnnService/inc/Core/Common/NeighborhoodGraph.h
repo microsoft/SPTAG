@@ -12,6 +12,8 @@
 #include "QueryResultSet.h"
 
 #include <chrono>
+#include <queue>
+#include <atomic>
 
 #if defined(GPU)
 #include <cuda.h>
@@ -49,7 +51,8 @@ namespace SPTAG
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
                                  m_iheadNumGPUs(1),
-                                 m_iTPTBalanceFactor(2)
+                                 m_iTPTBalanceFactor(2),
+                                 m_rebuild(0)
             {}
 
             ~NeighborhoodGraph() {}
@@ -393,7 +396,7 @@ break;
                 LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
-                m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale));
+                m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale) * (m_rebuild + 1));
                 m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
@@ -409,6 +412,16 @@ break;
 
                 RefineGraph<T>(index, idmap);
 
+                auto t3 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
+
+                if (m_rebuild) {
+                    m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
+                    RebuildGraph<T>(index, idmap);
+                    auto t4 = std::chrono::high_resolution_clock::now();
+                    LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                }                
+                
                 if (idmap != nullptr) {
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
                         if (iter->first < 0)
@@ -416,9 +429,59 @@ break;
                             m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
                         }
                 }
+            }
 
-                auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
+            template <typename T>
+            void RebuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+            {
+                std::vector<std::atomic_int> indegree(m_iGraphSize);
+
+#pragma omp parallel for schedule(dynamic)
+                for (SizeType i = 0; i < m_iGraphSize; i++) indegree[i] = 0;
+
+                auto t0 = std::chrono::high_resolution_clock::now();
+#pragma omp parallel for schedule(dynamic)
+                for (SizeType i = 0; i < m_iGraphSize; i++)
+                {
+                    SizeType* outnodes = m_pNeighborhoodGraph[i];
+                    for (SizeType j = 0; j < m_iNeighborhoodSize; j++)
+                    {
+                        int node = outnodes[j];
+                        if (node >= 0) {
+                            indegree[node]++;
+                        }
+                    }
+                }
+                auto t1 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
+
+                int rebuildstart = m_iNeighborhoodSize / 2;
+#pragma omp parallel for schedule(dynamic)
+                for (SizeType i = 0; i < m_iGraphSize; i++)
+                {
+                    SizeType* outnodes = m_pNeighborhoodGraph[i];
+                    std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
+                    int total = 0;
+                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
+                        if (indegree[outnodes[j]] < 5) {
+                            reserve[j] = true;
+                            total++;
+                        }
+                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
+                        if (!reserve[j]) {
+                            reserve[j] = true;
+                            total++;
+                        }
+                    }
+                    for (SizeType j = rebuildstart, z = rebuildstart; j < m_iNeighborhoodSize; j++) {
+                        while (!reserve[z]) z++;
+                        outnodes[j] = outnodes[z];
+                        z++;
+                    }
+                    if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                }
+                auto t2 = std::chrono::high_resolution_clock::now();
+                LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
             }
 
             template <typename T>
@@ -616,7 +679,7 @@ break;
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
             float m_fNeighborhoodScale, m_fCEFScale, m_fRNGFactor;
-            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor;
+            int m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iheadNumGPUs, m_iTPTBalanceFactor, m_rebuild;
         };
     }
 }

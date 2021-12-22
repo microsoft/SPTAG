@@ -316,7 +316,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
 
         for (SizeType j = 0; j < real_vecset->Count(); j++)
         {
-            float dist = COMMON::DistanceUtils::ComputeDistance<R>(res.GetTarget(), reinterpret_cast<R*>(real_vecset->GetVector(j)), queryset->Dimension(), distCalcMethod);
+            float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<R*>(real_vecset->GetVector(j)), queryset->Dimension(), distCalcMethod);
             res.AddPoint(j, dist);
         }
 
