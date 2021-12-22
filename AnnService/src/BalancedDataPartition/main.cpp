@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-
+#ifdef __linux__
+#include <thread>
+#endif
 #include <mpi.h>
 #include <cstdlib>
 #include <algorithm>
