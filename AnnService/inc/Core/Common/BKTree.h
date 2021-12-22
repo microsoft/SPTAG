@@ -170,6 +170,7 @@ namespace SPTAG
                     if (args._M == DistCalcMethod::Cosine) {
                         COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
                     }
+
                     for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
                 }
                 diff += args.fComputeDistance(args.centers + k*args._D, TCenter, args._D);
@@ -596,12 +597,12 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
-                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetTarget(), data[node.centerid], data.C())));
+                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data[node.centerid], data.C())));
                     } else if (m_bfs) {
                         float FactorQ = 1.1f;
                         int MaxBFSNodes = 100;
@@ -611,7 +612,7 @@ namespace SPTAG
                         p_curr->Top().distance = 1e9;
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            float dist = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                            float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
                             if (dist <= FactorQ * p_curr->Top().distance && p_curr->size() < MaxBFSNodes) {
                                 p_curr->insert(NodeDistPair(begin, dist));
                             }
@@ -634,7 +635,7 @@ namespace SPTAG
                                     }
                                     for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                                         SizeType index = m_pTreeRoots[begin].centerid;
-                                        float dist = fComputeDistance(p_query.GetTarget(), data[index], data.C());
+                                        float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
                                         if (dist <= FactorQ * p_next->Top().distance && p_next->size() < MaxBFSNodes) {
                                             p_next->insert(NodeDistPair(begin, dist));
                                         }
@@ -654,14 +655,14 @@ namespace SPTAG
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                         }
                     }
                 }
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), const COMMON::QueryResultSet<T> &p_query,
+            void SearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
                 COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty())
@@ -681,7 +682,7 @@ namespace SPTAG
                         }
                         for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                         } 
                     }
                 }

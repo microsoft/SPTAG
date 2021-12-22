@@ -118,7 +118,7 @@ namespace SPTAG
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
-                float distance2leaf = m_fComputeDistance(p_query.GetTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
                 p_space.m_iNumberOfCheckedLeaves++; \
                 p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
@@ -234,10 +234,11 @@ namespace SPTAG
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
+
             m_pTrees.BuildTrees<T>(m_pSamples, m_iNumberOfThreads);
+
             auto t2 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
-            
             m_pGraph.BuildGraph<T>(this);
             auto t3 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
@@ -292,6 +293,7 @@ namespace SPTAG
 
             ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
+
             (*newtree).BuildTrees<T>(ptr->m_pSamples, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph));
             if (HasMetaMapping()) ptr->BuildMetaMapping(false);

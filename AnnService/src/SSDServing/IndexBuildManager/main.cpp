@@ -123,6 +123,23 @@ namespace SPTAG {
 					search_ssd_opts
 				);
 			}
+
+			if (!COMMON_OPTS.m_quantizerFilePath.empty())
+			{
+				auto ptr = SPTAG::f_createIO();
+				if (!ptr->Initialize(COMMON_OPTS.m_quantizerFilePath.c_str(), std::ios::binary | std::ios::in))
+				{
+					LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+					exit(1);
+				}
+				auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+				if (code != ErrorCode::Success)
+				{
+					LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+					exit(1);
+				}
+			}
+
 			//Make directory if necessary
 			std::string folderPath(COMMON_OPTS.m_indexDirectory);
 			if (!folderPath.empty()) {
@@ -171,7 +188,8 @@ namespace SPTAG {
 			if (COMMON_OPTS.m_generateTruth)
 			{
 				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
-				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
+				SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : COMMON_OPTS.m_valueType;
+				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
 				if (ErrorCode::Success != vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
 				{

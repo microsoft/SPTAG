@@ -120,7 +120,7 @@ namespace SPTAG {
                             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
                             if (truth.count(vectorID)) found[curPostingID].insert(vectorID);
 
-                            auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetTarget(), vectorInfo);
+                            auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
                             p_queryResults.AddPoint(vectorID, distance2leaf);
                         }
 #endif
@@ -149,7 +149,7 @@ namespace SPTAG {
                                 int curPostingID = p_exWorkSpace->m_postingIDs[request - p_exWorkSpace->m_diskRequests.data()];
                                 if (truth.count(vectorID)) found[curPostingID].insert(vectorID);
 
-                                auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetTarget(), vectorInfo);
+                                auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
                                 p_queryResults.AddPoint(vectorID, distance2leaf);
                             }
                         }
@@ -171,7 +171,7 @@ namespace SPTAG {
                     std::atomic<int> listElements(0);
                     std::atomic<int> diskIO(0);
                     std::atomic<int> diskRead(0);
-                    
+                    int curCheck = 0;
                     bool oneContext = (m_indexContexts.size() == 1);
                     for (uint32_t pi = 0; pi < postingListCount; ++pi)
                     {
@@ -233,7 +233,7 @@ namespace SPTAG {
 
                             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
 
-                             auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetTarget(), vectorInfo);
+                            auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
                             p_queryResults.AddPoint(vectorID, distance2leaf);
                             curCheck += 1;
                         }
@@ -262,7 +262,7 @@ namespace SPTAG {
 
                                 if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
 
-                                auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetTarget(), vectorInfo);
+                                auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
                                 p_queryResults.AddPoint(vectorID, distance2leaf);
                                 curCheck += 1;
                             }
@@ -274,7 +274,7 @@ namespace SPTAG {
                     p_stats.m_totalListElementsCount = listElements;
                     p_stats.m_diskIOCount = diskIO;
                     p_stats.m_diskAccessCount = diskRead;
-                    
+
                     p_queryResults.SortResult();
                 }
 

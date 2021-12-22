@@ -14,6 +14,8 @@
 
   -t, --thread <value>          Thread Number, default is 32.
   --delimiter <value>           Vector delimiter, default is |.
+  -pq, --quantizer <value>      Quantizer File
+  -rt, --reconstructtype <value>Reconstruction value type for quantized vectors. Default is float. 
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
@@ -40,6 +42,8 @@
   -dft, --dataFileType <value>  original data file type. (TXT, or DEFAULT)
   -b, --batchsize <value>       Batch query size.
   -g, --gentruth <value>        Generate truth file.
+  -q, --debugquery <value>      Debug query number.
+  -adc, --adc <value>           Enable ADC Distance computation (true/false)
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
@@ -66,6 +70,7 @@ WarmupDelimiter=
 TruthPath=public_query_gt100.bin
 TruthType=DEFAULT
 IndexDirectory=sift1b
+QuantizerFilePath=quantizer.bin
 
 [SelectHead]
 isExecute=true
@@ -125,6 +130,7 @@ WarmupDelimiter=
 TruthPath=public_query_gt100.bin
 TruthType=DEFAULT
 IndexDirectory=sift1b
+QuantizerFilePath=quantizer.bin
 
 [SearchSSDIndex]
 isExecute=true
@@ -135,6 +141,7 @@ ResultNum=10
 MaxCheck=2048
 MaxDistRatio=8.0
 SearchPostingPageLimit=3
+rerank=10
    ```
 Then run ./SSDServing searchconfig.ini to do the query search.
 
@@ -172,6 +179,15 @@ where each line represents a vector with its metadata and its value separated by
 ...
 ```
 where each line represents the K nearest neighbors of a query separated by a blank space. Each neighbor is given by its vector id.
+
+### **Quantizer File Format**
+> Data for using PQ quantizer in index build and index search
+```
+<4 bytes int representing num_codebooks><4 bytes int representing entries_per_codebook><4 bytes int representing codebook_dim>
+<sizeof(ReconstructType)*num_codebooks*entries_per_codebook*codebook_dim representing codebook entries>
+```
+
+Note that `num_codebooks*codebook_dim=full_dim`. The current PQ implementation only supports `entries_per_codebook <= 256` (i.e. quantizing to `byte`).
 
 ### **Server**
 ```bash

@@ -48,6 +48,7 @@ namespace SPTAG {
 				int m_rerank;
 				bool m_recall_analysis;
 				int m_debugBuildInternalResultNum;
+				bool m_enableADC;
 
 				Options() {
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \

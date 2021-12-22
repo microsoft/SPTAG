@@ -28,7 +28,7 @@ namespace SPTAG {
             for (size_t i = 0; i < size; i++)
             {
 				float temp = nums[i] - mean;
-                var += pow(temp, 2.0);
+                var += (float) pow(temp, 2.0);
             }
             var /= static_cast<float>(size);
 
@@ -52,7 +52,7 @@ namespace SPTAG {
 		template<typename T>
 		void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
 			const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType) {
-			if (querySet->Dimension() != vectorSet->Dimension())
+			if (querySet->Dimension() != vectorSet->Dimension() && !SPTAG::COMMON::DistanceUtils::Quantizer)
 			{
 				LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
 				exit(-1);
@@ -66,7 +66,7 @@ namespace SPTAG {
 				SPTAG::COMMON::QueryResultSet<T> query((const T*)(querySet->GetVector(i)), K);
 				for (SPTAG::SizeType j = 0; j < vectorSet->Count(); j++)
 				{
-					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance<T>(query.GetTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), querySet->Dimension(), distMethod);
+					float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension(), distMethod);
 					query.AddPoint(j, dist);
 				}
 				query.SortResult();
