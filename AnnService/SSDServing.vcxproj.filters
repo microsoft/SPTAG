@@ -1,15 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Common">
-      <UniqueIdentifier>{fa15db3c-a8a3-49c2-99da-e0fab6fe53a4}</UniqueIdentifier>
-    </Filter>
     <Filter Include="SelectHead_BKT">
       <UniqueIdentifier>{faacd599-8de2-4e17-b8ef-550bb465bce5}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Common\Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
     <Filter Include="SelectHead_BKT\Header Files">
       <UniqueIdentifier>{fb8f8586-b4ee-4634-b042-ac290d448a9d}</UniqueIdentifier>
@@ -39,10 +32,6 @@
     </Filter>
     <Filter Include="VectorSearch">
       <UniqueIdentifier>{4d32979e-5535-477d-9f12-f79b282db426}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Common\Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
     <Filter Include="VectorSearch\Header Files">
       <UniqueIdentifier>{81dd1aa5-a598-4e10-80e7-9ddb8eaf8d91}</UniqueIdentifier>
@@ -82,9 +71,6 @@
     <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h">
       <Filter>BuildHead\Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\SSDServing\Common\Utils.h">
-      <Filter>Common\Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h">
       <Filter>IndexBuildManager\Header Files</Filter>
     </ClInclude>
@@ -98,9 +84,6 @@
       <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\SSDServing\VectorSearch\ExtraFullGraphSearcher.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchProcessor.h">
       <Filter>VectorSearch\Header Files</Filter>
     </ClInclude>
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h">

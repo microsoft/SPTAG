@@ -42,7 +42,7 @@ public:
 
     bool Add(ByteArray p_data, SizeType p_num);
 
-    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num);
+    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex);
 
     bool Delete(ByteArray p_data, SizeType p_num);
 

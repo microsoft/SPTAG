@@ -210,7 +210,7 @@ namespace SPTAG {
 				omp_set_num_threads(search_ssd_opts.m_iNumberOfThreads);
 #define DefineVectorValueType(Name, Type) \
 	if (COMMON_OPTS.m_valueType == SPTAG::VectorValueType::Name) { \
-		GenerateTruth<Type>(querySet, vectorSet, COMMON_OPTS.m_truthPath, \
+		COMMON::Utils::GenerateTruth<Type>(querySet, vectorSet, COMMON_OPTS.m_truthPath, \
 			COMMON_OPTS.m_distCalcMethod, search_ssd_opts.m_resultNum, COMMON_OPTS.m_truthType); \
 	} \
 

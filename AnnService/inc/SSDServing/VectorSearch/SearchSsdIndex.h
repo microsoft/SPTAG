@@ -14,203 +14,9 @@
 namespace SPTAG {
 	namespace SSDServing {
 		namespace VectorSearch {
-            template <typename T>
-            float CalcRecall(std::vector<COMMON::QueryResultSet<T>>& results, const std::vector<std::set<int>>& truth, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, std::shared_ptr<VectorIndex> index, int truthK, int K)
-            {
-                float eps = 1e-6f;
-                float recall = 0;
-                std::unique_ptr<bool[]> visited(new bool[K]);
-                for (int i = 0; i < results.size(); i++)
-                {
-                    memset(visited.get(), 0, K*sizeof(bool));
-                    for (int id : truth[i])
-                    {
-                        for (int j = 0; j < K; j++)
-                        {
-                            if (visited[j]) continue;
-
-                            if (results[i].GetResult(j)->VID == id)
-                            {
-                                recall++;
-                                visited[j] = true;
-                                break;
-                            }
-                            else if (vectorSet != nullptr) {
-                                float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
-                                if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
-                                    recall++;
-                                    visited[j] = true;
-                                    break;
-                                }
-                                else if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::L2 && fabs(dist - truthDist) < eps * (dist + eps)) {
-                                    recall++;
-                                    visited[j] = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                return static_cast<float>(recall)/static_cast<float>(results.size() * truthK);
-            }
-
-            template <typename T>
-            float CalcRecallOld(std::vector<COMMON::QueryResultSet<T>>& results, const std::vector<std::set<int>>& truth, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, std::shared_ptr<VectorIndex> index, int truthK, int K)
-            {
-                float eps = 1e-6f;
-                float recall = 0;
-                for (int i = 0; i < results.size(); i++)
-                {
-                    for (int j = 0; j < K; j++)
-                    {
-                        for (int id : truth[i])
-                        {
-                            if (results[i].GetResult(j)->VID == id)
-                            {
-                                recall++;
-                                break;
-                            }
-                            else if (vectorSet != nullptr) {
-                                float dist = results[i].GetResult(j)->Dist;
-                                float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
-                                if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
-                                    recall++;
-                                    break;
-                                }
-                                else if (dist != 0 && index->GetDistCalcMethod() == SPTAG::DistCalcMethod::L2 && fabs(1 - truthDist / dist) < eps) {
-                                    recall++;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                return static_cast<float>(recall) / static_cast<float>(results.size() * truthK);
-            }
-
-            void LoadTruthTXT(std::string truthPath, std::vector<std::set<int>>& truth, int K, SizeType p_iTruthNumber)
-            {
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(truthPath.c_str(), std::ios::in)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthPath.c_str());
-                    exit(1);
-                }
-                std::size_t lineBufferSize = 20;
-                std::unique_ptr<char[]> currentLine(new char[lineBufferSize]);
-                truth.clear();
-                truth.resize(p_iTruthNumber);
-                for (int i = 0; i < p_iTruthNumber; ++i)
-                {
-                    truth[i].clear();
-                    for (int j = 0; j < K; ++j)
-                    {
-                        if (ptr->ReadString(lineBufferSize, currentLine, ' ') == 0) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
-                            exit(1);
-                        }
-                        truth[i].insert(std::atoi(currentLine.get()));
-                    }
-                    if (ptr->ReadString(lineBufferSize, currentLine, '\n') == 0) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
-                        exit(1);
-                    }
-                }
-
-                int remainlines = 0;
-                while (ptr->ReadString(lineBufferSize, currentLine, '\n') > 0) { remainlines++; }
-                if (remainlines > 0) {
-                    LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", p_iTruthNumber + remainlines, p_iTruthNumber);
-                }
-            }
-
-            void LoadTruthXVEC(std::string truthPath, std::vector<std::set<int>>& truth, int K, SizeType p_iTruthNumber)
-            {
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(truthPath.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthPath.c_str());
-                    exit(1);
-                }
-
-                DimensionType dim = K;
-                std::vector<int> temp_vec(K);
-                truth.clear();
-                truth.resize(p_iTruthNumber);
-                for (size_t i = 0; i < p_iTruthNumber; i++) {
-                    if (ptr->ReadBinary(4, (char*)&dim) != 4 || dim < K) {
-                        LOG(Helper::LogLevel::LL_Error, "Error: Xvec file %s has No.%" PRId64 " vector whose dims are fewer than expected. Expected: %" PRId32 ", Fact: %" PRId32 "\n", truthPath.c_str(), i, K, dim);
-                        exit(1);
-                    }
-                    if (dim > K) temp_vec.resize(dim);
-                    if (ptr->ReadBinary(dim * 4, (char*)temp_vec.data()) != dim * 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
-                        exit(1);
-                    }
-                    truth[i].insert(temp_vec.begin(), temp_vec.begin() + K);
-                }
-                int remainlines = 0;
-                while (true) { 
-                    if (ptr->ReadBinary(4, (char*)&dim) < 4) break;
-                    if (dim > K) temp_vec.resize(dim);
-                    if (ptr->ReadBinary(dim * 4, (char*)temp_vec.data()) != dim * 4) break;
-                    remainlines++;
-                }
-                if (remainlines > 0) {
-                    LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", p_iTruthNumber + remainlines, p_iTruthNumber);
-                }
-            }
-
-            void LoadTruthDefault(std::string truthPath, std::vector<std::set<int>>& truth, int K, SizeType p_iTruthNumber) {
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(truthPath.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthPath.c_str());
-                    exit(1);
-                }
-
-                int row, column;
-                if (ptr->ReadBinary(4, (char*)&row) != 4 || ptr->ReadBinary(4, (char*)&column) != 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
-                    exit(1);
-                }
-                truth.clear();
-                truth.resize(row);
-                std::vector<int> vec(column);
-                for (size_t i = 0; i < row; i++)
-                {
-                    if (ptr->ReadBinary(4 * column, (char*)vec.data()) != 4 * column) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to read truth file!\n");
-                        exit(1);
-                    }
-                    truth[i].insert(vec.begin(), vec.begin() + K);
-                }
-
-                if (row != p_iTruthNumber) {
-                    LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", row, p_iTruthNumber);
-                }
-            }
-
-            void LoadTruth(std::string truthPath, std::vector<std::set<int>>& truth, int NumQuerys, int K)
-            {
-                if (COMMON_OPTS.m_truthType == TruthFileType::TXT)
-                {
-                    LoadTruthTXT(truthPath, truth, K, NumQuerys);
-                } 
-                else if (COMMON_OPTS.m_truthType == TruthFileType::XVEC)
-                {
-                    LoadTruthXVEC(truthPath, truth, K, NumQuerys);
-                }
-                else if (COMMON_OPTS.m_truthType == TruthFileType::DEFAULT) {
-                    LoadTruthDefault(truthPath, truth, K, NumQuerys);
-                }
-                else
-                {
-                    LOG(Helper::LogLevel::LL_Error, "TruthFileType Unsupported.\n");
-                    exit(1);
-                }
-            }
 
             template <typename ValueType>
-            void OutputResult(const std::string& p_output, std::vector<COMMON::QueryResultSet<ValueType>>& p_results, int p_resultNum)
+            void OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
             {
                 if (!p_output.empty())
                 {
@@ -292,7 +98,7 @@ namespace SPTAG {
             template <typename ValueType>
             void SearchSequential(SearchDefault<ValueType>& p_searcher,
                 int p_numThreads,
-                std::vector<COMMON::QueryResultSet<ValueType>>& p_results,
+                std::vector<QueryResult>& p_results,
                 std::vector<SearchStats>& p_stats,
                 int p_maxQueryCount, int p_internalResultNum)
             {
@@ -318,7 +124,7 @@ namespace SPTAG {
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
                             }
-                            p_searcher.Search(p_results[index], p_internalResultNum, p_stats[index]);
+                            p_searcher.Search(*((COMMON::QueryResultSet<ValueType>*) & (p_results[index])), p_internalResultNum, p_stats[index]);
                         }
                         else
                         {
@@ -343,7 +149,7 @@ namespace SPTAG {
             template <typename ValueType>
             void SearchAsync(SearchDefault<ValueType>& p_searcher,
                 uint32_t p_qps,
-                std::vector<COMMON::QueryResultSet<ValueType>>& p_results,
+                std::vector<QueryResult>& p_results,
                 std::vector<SearchStats>& p_stats,
                 int p_maxQueryCount, int p_internalResultNum)
             {
@@ -381,7 +187,7 @@ namespace SPTAG {
 
                             if (index < numQueries)
                             {
-                                p_searcher.SearchAsync(p_results[index], p_internalResultNum, p_stats[index], callback);
+                                p_searcher.SearchAsync(*((COMMON::QueryResultSet<ValueType>*) &(p_results[index])), p_internalResultNum, p_stats[index], callback);
 
                                 if ((index & ((1 << 14) - 1)) == 0)
                                 {
@@ -468,7 +274,7 @@ namespace SPTAG {
                     auto warmupQuerySet = queryReader->GetVectorSet();
                     int warmupNumQueries = warmupQuerySet->Count();
 
-                    std::vector<COMMON::QueryResultSet<ValueType>> warmupResults(warmupNumQueries, COMMON::QueryResultSet<ValueType>(NULL, max(K, internalResultNum)));
+                    std::vector<QueryResult> warmupResults(warmupNumQueries, QueryResult(NULL, max(K, internalResultNum), false));
                     std::vector<SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
@@ -500,7 +306,7 @@ namespace SPTAG {
                 auto querySet = queryReader->GetVectorSet();
                 int numQueries = querySet->Count();
 
-                std::vector<COMMON::QueryResultSet<ValueType>> results(numQueries, COMMON::QueryResultSet<ValueType>(NULL, max(K, internalResultNum)));
+                std::vector<QueryResult> results(numQueries, QueryResult(NULL, max(K, internalResultNum), false));
                 std::vector<SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
@@ -553,16 +359,25 @@ namespace SPTAG {
                 }
 
                 float recall = 0;
-                float oldrecall = 0;
-                std::vector<std::set<int>> truth;
+                std::vector<std::set<SizeType>> truth;
                 if (!truthFile.empty())
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
-                    LoadTruth(truthFile, truth, numQueries, truthK);
+                    
+                    auto ptr = SPTAG::f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::in | std::ios::binary)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthFile.c_str());
+                        exit(1);
+                    }
+                    int originalK = truthK;
+                    COMMON::Utils::LoadTruth(ptr, truth, numQueries, originalK, truthK, COMMON_OPTS.m_truthType);
+                    char tmp[4];
+                    if (ptr->ReadBinary(4, tmp) == 4) {
+                        LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                    }
 
-                    recall = CalcRecall(results, truth, querySet, vectorSet, searcher.HeadIndex(), truthK, K);
-                    oldrecall = CalcRecallOld(results, truth, querySet, vectorSet, searcher.HeadIndex(), truthK, K);
-                    LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f Old: %f\n", truthK, K, recall, oldrecall);
+                    recall = COMMON::Utils::CalculateRecall<ValueType>(searcher.HeadIndex().get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
+                    LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", truthK, K, recall);
                 }
 
                 long long exCheckSum = 0;
@@ -675,13 +490,12 @@ namespace SPTAG {
                 if (!outputFile.empty())
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start output to %s\n", outputFile.c_str());
-                    OutputResult(outputFile, results, K);
+                    OutputResult<ValueType>(outputFile, results, K);
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
-                    "Recall: %f, Old: %f, MaxExCheck: %d, AverageExCheck: %.2lf, AverageExElements: %.2lf\n",
+                    "Recall: %f, MaxExCheck: %d, AverageExCheck: %.2lf, AverageExElements: %.2lf\n",
                     recall,
-                    oldrecall,
                     exCheckMax,
                     static_cast<double>(exCheckSum) / numQueries,
                     static_cast<double>(exListSum) / numQueries);

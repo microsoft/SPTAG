@@ -156,6 +156,9 @@
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\SPANN\Index.h" />
+    <ClInclude Include="inc\Core\SPANN\Options.h" />
+    <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
@@ -184,6 +187,7 @@
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
+    <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />

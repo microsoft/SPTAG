@@ -44,6 +44,12 @@
     <Filter Include="Source Files\Helper\VectorSetReaders">
       <UniqueIdentifier>{5c1449e0-38b7-4c82-976e-cbdc488d3fb5}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Core\SPANN">
+      <UniqueIdentifier>{037c5277-2a70-47b9-8551-e2e3afc3d8b5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Core\SPANN">
+      <UniqueIdentifier>{6a6e3f33-cc6d-441c-ae1f-3e0ba91222fd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -181,6 +187,15 @@
     <ClInclude Include="inc\Core\Common\IQuantizer.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\Index.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\Options.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -245,6 +260,9 @@
     </ClCompile>
     <ClCompile Include="src\Core\Common\CommonUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp">
+      <Filter>Source Files\Core\SPANN</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -171,7 +171,7 @@ namespace SPTAG {
                     std::atomic<int> listElements(0);
                     std::atomic<int> diskIO(0);
                     std::atomic<int> diskRead(0);
-                    int curCheck = 0;
+
                     bool oneContext = (m_indexContexts.size() == 1);
                     for (uint32_t pi = 0; pi < postingListCount; ++pi)
                     {

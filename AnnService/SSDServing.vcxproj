@@ -32,7 +32,6 @@
     <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h" />
     <ClInclude Include="inc\SSDServing\BuildHead\Options.h" />
     <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\Common\Utils.h" />
     <ClInclude Include="inc\SSDServing\IndexBuildManager\CommonDefines.h" />
     <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h" />
     <ClInclude Include="inc\SSDServing\IndexBuildManager\Options.h" />
@@ -55,7 +54,6 @@
     <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\Options.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchProcessor.h" />
     <ClInclude Include="inc\SSDServing\VectorSearch\SearchStats.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

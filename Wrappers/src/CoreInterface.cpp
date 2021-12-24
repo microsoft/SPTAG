@@ -73,13 +73,7 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, 
         static_cast<SPTAG::SizeType>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-    SizeType current = 1;
-    for (size_t i = 0; i < p_meta.Length(); i++) {
-        if (((char)p_meta.Data()[i]) == '\n')
-            offsets[current++] = (std::uint64_t)(i + 1);
-    }
-    if (p_meta.Data()[p_meta.Length() - 1] != '\n')
-        offsets[current++] = p_meta.Length();
+    if (!SPTAG::MetadataSet::GetMetadataOffsets(p_data.Data(), p_data.Length(), offsets, p_num + 1, '\n')) return false;
     std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num,
         m_index->m_iDataBlockSize, m_index->m_iDataCapacity, m_index->m_iMetaRecordSize));
     return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta, p_withMetaIndex));
@@ -197,7 +191,7 @@ AnnIndex::Add(ByteArray p_data, SizeType p_num)
 
 
 bool
-AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex)
 {
     if (nullptr == m_index)
     {
@@ -214,15 +208,9 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
         static_cast<SPTAG::SizeType>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-    SizeType current = 1;
-    for (size_t i = 0; i < p_meta.Length(); i++) {
-        if (((char)p_meta.Data()[i]) == '\n')
-            offsets[current++] = (std::uint64_t)(i + 1);
-    }
-    if (p_meta.Data()[p_meta.Length() - 1] != '\n')
-        offsets[current++] = p_meta.Length();
+    if (!SPTAG::MetadataSet::GetMetadataOffsets(p_data.Data(), p_data.Length(), offsets, p_num + 1, '\n')) return false;
     std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num));
-    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta));
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta, p_withMetaIndex));
 }
 
 

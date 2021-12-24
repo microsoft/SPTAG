@@ -55,11 +55,7 @@ namespace Microsoft
 
                 pin_ptr<Byte> metaptr = &p_meta[0];
                 std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-                int current = 0;
-                for (long long i = 0; i < p_meta->LongLength; i++) {
-                    if (((char)metaptr[i]) == '\n')
-                        offsets[++current] = (std::uint64_t)(i + 1);
-                }
+                if (!SPTAG::MetadataSet::GetMetadataOffsets(metaptr, p_meta->LongLength, offsets, p_num + 1, '\n')) return false;
                 std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false), 
                     SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num, 
                     (*m_Instance)->m_iDataBlockSize, (*m_Instance)->m_iDataCapacity, (*m_Instance)->m_iMetaRecordSize));
@@ -136,7 +132,7 @@ namespace Microsoft
                 return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension, nullptr));
             }
 
-            bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num)
+            bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex)
             {
                 if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
                     return false;
@@ -146,13 +142,9 @@ namespace Microsoft
 
                 pin_ptr<Byte> metaptr = &p_meta[0];
                 std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-                int current = 0;
-                for (long long i = 0; i < p_meta->LongLength; i++) {
-                    if (((char)metaptr[i]) == '\n')
-                        offsets[++current] = (std::uint64_t)(i + 1);
-                }
+                if (!SPTAG::MetadataSet::GetMetadataOffsets(metaptr, p_meta->LongLength, offsets, p_num + 1, '\n')) return false;
                 std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false), SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(vectors, meta));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(vectors, meta, p_withMetaIndex));
             }
 
             bool AnnIndex::Delete(array<Byte>^ p_data, int p_num)

@@ -90,7 +90,7 @@ namespace Microsoft
 
                 bool Add(array<Byte>^ p_data, int p_num);
 
-                bool AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num);
+                bool AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
 
                 bool Delete(array<Byte>^ p_data, int p_num);
 
