@@ -5,17 +5,12 @@
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/SimpleIniReader.h"
+#include "inc/Helper/ConcurrentSet.h"
 
 #include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
 
-#ifndef _MSC_VER
-#include "inc/Helper/ConcurrentSet.h"
 typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
-#else
-#include <concurrent_unordered_map.h>
-typedef typename Concurrency::concurrent_unordered_map<std::string, SPTAG::SizeType> MetadataMap;
-#endif
 
 using namespace SPTAG;
 
@@ -40,16 +35,16 @@ VectorIndex::~VectorIndex()
 
 
 std::string 
-VectorIndex::GetParameter(const std::string& p_param) const
+VectorIndex::GetParameter(const std::string& p_param, const std::string& p_section) const
 {
-    return GetParameter(p_param.c_str());
+    return GetParameter(p_param.c_str(), p_section.c_str());
 }
 
 
 ErrorCode
-VectorIndex::SetParameter(const std::string& p_param, const std::string& p_value)
+VectorIndex::SetParameter(const std::string& p_param, const std::string& p_value, const std::string& p_section)
 {
-    return SetParameter(p_param.c_str(), p_value.c_str());
+    return SetParameter(p_param.c_str(), p_value.c_str(), p_section.c_str());
 }
 
 
@@ -311,7 +306,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
-    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
+    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
 {
     if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
     {
@@ -322,7 +317,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     {
         BuildMetaMapping(false);
     }
-    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension());
+    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized);
     return ErrorCode::Success;
 }
 
@@ -340,13 +335,13 @@ VectorIndex::SearchIndex(const void* p_vector, int p_vectorCount, int p_neighbor
 
 
 ErrorCode 
-VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex) {
+VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized) {
     if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
     {
         return ErrorCode::Fail;
     }
 
-    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex);
+    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex, p_normalized);
 }
 
 
@@ -680,7 +675,7 @@ void VectorIndex::SortSelections(std::vector<Edge>* selections) {
 
 
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
 
     LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
@@ -732,7 +727,7 @@ void VectorIndex::SortSelections(std::vector<Edge>* selections) {
     std::sort(selections->begin(), selections->end(), edgeComparer);
 }
 
-void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
+void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);

@@ -156,12 +156,15 @@
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\Index.h" />
     <ClInclude Include="inc\Core\SPANN\Options.h" />
     <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
+    <ClInclude Include="inc\Helper\AsyncFileReader.h" />
     <ClInclude Include="inc\Helper\Base64Encode.h" />
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
@@ -179,6 +182,7 @@
     <ClInclude Include="inc\Helper\ThreadPool.h" />
     <ClInclude Include="inc\Helper\VectorSetReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\MemoryReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
@@ -193,7 +197,6 @@
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
-    <ClCompile Include="src\Core\Common\WorkSpacePool.cpp" />
     <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Helper\ArgumentsParser.cpp" />
     <ClCompile Include="src\Helper\Base64Encode.cpp" />

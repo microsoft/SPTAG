@@ -82,6 +82,8 @@ namespace SPTAG
 
             template <typename T>
             static void BatchNormalize(T* data, SizeType row, DimensionType col, int base, int threads) {
+                if (COMMON::DistanceUtils::Quantizer) return;
+
 #pragma omp parallel for num_threads(threads)
                 for (SizeType i = 0; i < row; i++)
                 {
@@ -316,7 +318,6 @@ namespace SPTAG
             template <typename T>
             static float CalculateRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, SizeType NumQuerys, std::ofstream* log = nullptr, bool debug = false)
             {
-                float eps = 1e-6f;
                 float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
                 std::vector<float> thisrecall(NumQuerys, 0);
                 std::unique_ptr<bool[]> visited(new bool[K]);
@@ -338,12 +339,12 @@ namespace SPTAG
                             else if (vectorSet != nullptr) {
                                 float dist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(results[i].GetResult(j)->VID), vectorSet->Dimension(), index->GetDistCalcMethod());
                                 float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), vectorSet->Dimension(), index->GetDistCalcMethod());
-                                if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
+                                if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < Epsilon) {
                                     thisrecall[i] += 1;
                                     visited[j] = true;
                                     break;
                                 }
-                                else if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::L2 && fabs(dist - truthDist) < eps * (dist + eps)) {
+                                else if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::L2 && fabs(dist - truthDist) < Epsilon * (dist + Epsilon)) {
                                     thisrecall[i] += 1;
                                     visited[j] = true;
                                     break;
@@ -385,6 +386,52 @@ namespace SPTAG
                 if (log) (*log) << meanrecall << " " << stdrecall << " " << minrecall << " " << maxrecall << std::endl;
                 return meanrecall;
             }
+
+            template <typename T>
+            static float CalculateRecall(VectorIndex* index, T* query, int K) {
+                COMMON::QueryResultSet<void> sampleANN(query, K);
+                COMMON::QueryResultSet<void> sampleTruth(query, K);
+                void* reconstructVector = nullptr;
+                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                {
+                    reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+                    SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
+                    sampleANN.SetTarget(reconstructVector);
+                    sampleTruth.SetTarget(reconstructVector);
+                }
+
+                index->SearchIndex(sampleANN);
+                for (SizeType y = 0; y < index->GetNumSamples(); y++)
+                {
+                    float dist = index->ComputeDistance(sampleTruth.GetQuantizedTarget(), index->GetSample(y));
+                    sampleTruth.AddPoint(y, dist);
+                }
+                sampleTruth.SortResult();
+
+                float recalls = 0;
+                std::vector<bool> visited(K, false);
+                for (SizeType y = 0; y < K; y++)
+                {
+                    for (SizeType z = 0; z < K; z++)
+                    {
+                        if (visited[z]) continue;
+
+                        if (fabs(sampleANN.GetResult(z)->Dist - sampleTruth.GetResult(y)->Dist) < Epsilon)
+                        {
+                            recalls += 1;
+                            visited[z] = true;
+                            break;
+                        }
+                    }
+                }
+                if (reconstructVector)
+                {
+                    _mm_free(reconstructVector);
+                }
+
+                return recalls / K;
+            }
+
         };
     }
 }

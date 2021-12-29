@@ -27,9 +27,9 @@ public:
 
     virtual ~VectorIndex();
 
-    virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension) = 0;
+    virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false) = 0;
     
-    virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false) = 0;
+    virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
@@ -55,8 +55,8 @@ public:
     virtual IndexAlgoType GetIndexAlgoType() const = 0;
     virtual VectorValueType GetVectorValueType() const = 0;
 
-    virtual std::string GetParameter(const char* p_param) const = 0;
-    virtual ErrorCode SetParameter(const char* p_param, const char* p_value) = 0;
+    virtual std::string GetParameter(const char* p_param, const char* p_section = nullptr) const = 0;
+    virtual ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr) = 0;
     virtual ErrorCode UpdateIndex() = 0;
 
     virtual bool IsReady() const { return m_bReady; }
@@ -69,9 +69,11 @@ public:
 
     virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
-    virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
+    virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
     
-    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
+    virtual ErrorCode BuildIndex(bool p_normalized = false) { return ErrorCode::Undefined; }
+
+    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 
@@ -81,12 +83,12 @@ public:
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
-    virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<int>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);
+    virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);
 
     static void SortSelections(std::vector<Edge>* selections);
 
-    virtual std::string GetParameter(const std::string& p_param) const;
-    virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value);
+    virtual std::string GetParameter(const std::string& p_param, const std::string& p_section = "Index") const;
+    virtual ErrorCode SetParameter(const std::string& p_param, const std::string& p_value, const std::string& p_section = "Index");
 
     virtual ByteArray GetMetadata(SizeType p_vectorID) const;
     virtual MetadataSet* GetMetadata() const;
@@ -111,7 +113,6 @@ public:
 
     static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
-protected:
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
     virtual std::shared_ptr<std::vector<std::string>> GetIndexFiles() const = 0;
