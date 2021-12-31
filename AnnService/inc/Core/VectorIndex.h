@@ -60,6 +60,7 @@ public:
     virtual ErrorCode UpdateIndex() = 0;
 
     virtual bool IsReady() const { return m_bReady; }
+    virtual void SetReady(bool p_ready) { m_bReady = p_ready; }
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
@@ -100,6 +101,8 @@ public:
         return m_sIndexName; 
     }
     virtual void SetIndexName(std::string p_name) { m_sIndexName = p_name; }
+
+    static ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 

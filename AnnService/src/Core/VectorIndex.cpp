@@ -9,6 +9,7 @@
 
 #include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
+#include "inc/Core/SPANN/Index.h"
 
 typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
 
@@ -20,9 +21,72 @@ std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
 
-
-
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
+
+namespace SPTAG {
+
+    bool copyfile(const char* oldpath, const char* newpath) {
+        auto input = f_createIO(), output = f_createIO();
+        if (input == nullptr || !input->Initialize(oldpath, std::ios::binary | std::ios::in) || 
+            output == nullptr || !output->Initialize(newpath, std::ios::binary | std::ios::out))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Unable to open files: %s %s\n", oldpath, newpath);
+            return false;
+        }
+
+        const std::size_t bufferSize = 1 << 30;
+        std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
+
+        std::uint64_t readSize;
+        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+            if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
+                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
+                return false;
+            }
+        }
+        input->ShutDown(); output->ShutDown();
+        return true;
+    }
+
+#ifndef _MSC_VER
+    void listdir(std::string path, std::vector<std::string>& files) {
+        if (auto dirptr = opendir(path.c_str())) {
+            while (auto f = readdir(dirptr)) {
+                if (!f->d_name || f->d_name[0] == '.') continue;
+                std::string tmp = path.substr(0, path.length() - 1);
+                tmp += std::string(f->d_name);
+                if (f->d_type == DT_DIR) {
+                    listdir(tmp + FolderSep + "*", files);
+                }
+                else {
+                    files.push_back(tmp);
+                }
+            }
+            closedir(dirptr);
+        }
+    }
+#else
+    void listdir(std::string path, std::vector<std::string>& files) {
+        WIN32_FIND_DATA fd;
+        HANDLE hFile = FindFirstFile(path.c_str(), &fd);
+        if (hFile != INVALID_HANDLE_VALUE) {
+             do {
+                 std::string tmp = path.substr(0, path.length() - 1);
+                 tmp += std::string(fd.cFileName);
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    if (fd.cFileName[0] != '.') {
+                        listdir(tmp + FolderSep + "*", files);
+                    }
+                }
+                else {
+                    files.push_back(tmp);
+                }
+            } while (FindNextFile(hFile, &fd));
+            FindClose(hFile);
+        }
+    }
+#endif
+}
 
 VectorIndex::VectorIndex()
 {
@@ -73,11 +137,17 @@ VectorIndex::GetMetadata(SizeType p_vectorID) const {
 std::shared_ptr<std::vector<std::uint64_t>> VectorIndex::CalculateBufferSize() const
 {
     std::shared_ptr<std::vector<std::uint64_t>> ret = BufferSize();
+    
     if (m_pMetadata != nullptr)
     {
         auto metasize = m_pMetadata->BufferSize();
         ret->push_back(metasize.first);
         ret->push_back(metasize.second);
+    }
+
+    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    {
+        ret->push_back(SPTAG::COMMON::DistanceUtils::Quantizer->BufferSize());
     }
     return std::move(ret);
 }
@@ -97,12 +167,6 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
     if (p_reader.DoesSectionExist(quantizerSection))
     {
         m_sQuantizerFile = p_reader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
-    }
-
-    if (DistCalcMethod::Undefined == p_reader.GetParameter("Index", "DistCalcMethod", DistCalcMethod::Undefined))
-    {
-        LOG(Helper::LogLevel::LL_Error, "Error: Failed to load parameter DistCalcMethod.\n");
-        return ErrorCode::Fail;
     }
     return LoadConfig(p_reader);
 }
@@ -192,17 +256,24 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
         p_indexStreams.push_back(std::move(ptr));
     }
 
+    size_t metaStart = BufferSize()->size();
     if (NeedRefine())
     {
         ret = RefineIndex(p_indexStreams, nullptr);
     }
     else 
     {
-        if (m_pMetadata != nullptr && p_indexStreams.size() > 5)
+        if (m_pMetadata != nullptr && p_indexStreams.size() >= metaStart + 2)
         {
-            ret = m_pMetadata->SaveMetadata(p_indexStreams[p_indexStreams.size() - 2], p_indexStreams[p_indexStreams.size() - 1]);
+            
+            ret = m_pMetadata->SaveMetadata(p_indexStreams[metaStart], p_indexStreams[metaStart + 1]);
         }
         if (ErrorCode::Success == ret) ret = SaveIndexData(p_indexStreams);
+    }
+    if (m_pMetadata != nullptr) metaStart += 2;
+    
+    if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer && p_indexStreams.size() > metaStart) {
+        ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(p_indexStreams[metaStart]);
     }
     return ret;
 }
@@ -218,10 +289,25 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     {
         folderPath += FolderSep;
     }
-
     if (!direxists(folderPath.c_str()))
     {
         mkdir(folderPath.c_str());
+    }
+
+    if (GetIndexAlgoType() == IndexAlgoType::SPANN && GetParameter("IndexDirectory", "Base") != p_folderPath) {
+        std::vector<std::string> files;
+        std::string oldFolder = GetParameter("IndexDirectory", "Base");
+        if (!oldFolder.empty() && *(oldFolder.rbegin()) != FolderSep) oldFolder += FolderSep;
+        listdir((oldFolder + "*").c_str(), files);
+        for (auto file : files) {
+            size_t firstSep = oldFolder.length(), lastSep = file.find_last_of(FolderSep);
+            std::string newFolder = folderPath + ((lastSep > firstSep)? file.substr(firstSep, lastSep - firstSep) : ""), filename = file.substr(lastSep + 1);
+            if (!direxists(newFolder.c_str())) mkdir(newFolder.c_str());
+            LOG(Helper::LogLevel::LL_Info, "Copy file %s to %s...\n", file.c_str(), (newFolder + FolderSep + filename).c_str());
+            if (!copyfile(file.c_str(), (newFolder + FolderSep + filename).c_str()))
+                return ErrorCode::DiskIOFail;
+        }
+        SetParameter("IndexDirectory", p_folderPath, "Base");
     }
 
     ErrorCode ret = ErrorCode::Success;
@@ -231,16 +317,13 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         if ((ret = SaveIndexConfig(configFile)) != ErrorCode::Success) return ret;
     }
 
-    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
-        auto quantizerFile = SPTAG::f_createIO();
-        if (quantizerFile == nullptr || !quantizerFile->Initialize((folderPath + m_sQuantizerFile).c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-        if ((ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(quantizerFile)) != ErrorCode::Success) return ret;
-    }
-
     std::shared_ptr<std::vector<std::string>> indexfiles = GetIndexFiles();
     if (nullptr != m_pMetadata) {
         indexfiles->push_back(m_sMetadataFile);
         indexfiles->push_back(m_sMetadataIndexFile);
+    }
+    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+        indexfiles->push_back(m_sQuantizerFile);
     }
     std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
     for (std::string& f : *indexfiles) {
@@ -249,14 +332,20 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         handles.push_back(std::move(ptr));
     }
 
+    size_t metaStart = GetIndexFiles()->size();
     if (NeedRefine()) 
     {
         ret = RefineIndex(handles, nullptr);
     }
     else 
     {
-        if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(handles[handles.size() - 2], handles[handles.size() - 1]);
+        if (m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(handles[metaStart], handles[metaStart + 1]);
         if (ErrorCode::Success == ret) ret = SaveIndexData(handles);
+    }
+    if (m_pMetadata != nullptr) metaStart += 2;
+
+    if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
+        ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(handles[metaStart]);
     }
     return ret;
 }
@@ -295,11 +384,15 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
 
             if (ErrorCode::Success == ret && m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(fp, fp);
         }
+
+        if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
+            ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(fp);
+        }
     }
-    IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
+    if (ErrorCode::Success == ret) IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
     fp->ShutDown();
 
-    if (ret == ErrorCode::ExternalAbort) std::remove(p_file.c_str());
+    if (ret != ErrorCode::Success) std::remove(p_file.c_str());
     return ret;
 }
 
@@ -415,6 +508,25 @@ const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
 }
 
 
+ErrorCode
+VectorIndex::LoadQuantizer(std::string p_quantizerFile)
+{
+    auto ptr = SPTAG::f_createIO();
+    if (!ptr->Initialize(p_quantizerFile.c_str(), std::ios::binary | std::ios::in))
+    {
+        LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+        return ErrorCode::FailedOpenFile;
+    }
+    auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+    if (code != ErrorCode::Success)
+    {
+        LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+        return code;
+    }
+    return ErrorCode::Success;
+}
+
+
 std::shared_ptr<VectorIndex>
 VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 {
@@ -449,6 +561,19 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
         default: break;
         }
     }
+    else if (p_algo == IndexAlgoType::SPANN) {
+        switch (p_valuetype)
+        {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        return std::shared_ptr<VectorIndex>(new SPANN::Index<Type>); \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+        default: break;
+        }
+    }
     return nullptr;
 }
 
@@ -466,26 +591,6 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         if (ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
     }
 
-    std::string quantizerSection("Quantizer");
-    if (iniReader.DoesSectionExist(quantizerSection))
-    {
-        std::string quantizerFile = iniReader.GetParameter(quantizerSection, "QuantizerFilePath", std::string());
-
-        auto ptr = SPTAG::f_createIO();
-        if (!ptr->Initialize((folderPath + quantizerFile).c_str(), std::ios::binary | std::ios::in))
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-            return ErrorCode::FailedOpenFile;
-        }
-        auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        if (code != ErrorCode::Success)
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-            return code;
-        }
-        
-    }
-
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
     if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
@@ -497,6 +602,9 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     if (iniReader.DoesSectionExist("MetaData")) {
         indexfiles->push_back(p_vectorIndex->m_sMetadataFile);
         indexfiles->push_back(p_vectorIndex->m_sMetadataIndexFile);
+    }
+    if (iniReader.DoesSectionExist("Quantizer")) {
+        indexfiles->push_back(p_vectorIndex->m_sQuantizerFile);
     }
     std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
     for (std::string& f : *indexfiles) {
@@ -510,9 +618,10 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
     if ((ret = p_vectorIndex->LoadIndexData(handles)) != ErrorCode::Success) return ret;
 
+    size_t metaStart = p_vectorIndex->GetIndexFiles()->size();
     if (iniReader.DoesSectionExist("MetaData"))
     {
-        p_vectorIndex->SetMetadata(new MemMetadataSet(handles[handles.size() - 2], handles[handles.size() - 1], 
+        p_vectorIndex->SetMetadata(new MemMetadataSet(handles[metaStart], handles[metaStart + 1], 
             p_vectorIndex->m_iDataBlockSize, p_vectorIndex->m_iDataCapacity, p_vectorIndex->m_iMetaRecordSize));
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
@@ -525,6 +634,11 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         {
             p_vectorIndex->BuildMetaMapping();
         }
+        metaStart += 2;
+    }
+    if (iniReader.DoesSectionExist("Quantizer")) {
+        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]);
+        if (ret != ErrorCode::Success) return ret;
     }
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
@@ -577,6 +691,12 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
             p_vectorIndex->BuildMetaMapping();
         }
     }
+
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp);
+        if (ret != ErrorCode::Success) return ret;
+    }
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -599,10 +719,11 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
     if ((ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs)) != ErrorCode::Success) return ret;
 
-    if (iniReader.DoesSectionExist("MetaData") && p_indexBlobs.size() > 4)
+    size_t metaStart = p_vectorIndex->BufferSize()->size();
+    if (iniReader.DoesSectionExist("MetaData") && p_indexBlobs.size() >= metaStart + 2)
     {
-        ByteArray pMetaIndex = p_indexBlobs[p_indexBlobs.size() - 1];
-        p_vectorIndex->SetMetadata(new MemMetadataSet(p_indexBlobs[p_indexBlobs.size() - 2],
+        ByteArray pMetaIndex = p_indexBlobs[metaStart + 1];
+        p_vectorIndex->SetMetadata(new MemMetadataSet(p_indexBlobs[metaStart],
             ByteArray(pMetaIndex.Data() + sizeof(SizeType), pMetaIndex.Length() - sizeof(SizeType), false),
             *((SizeType*)pMetaIndex.Data()), 
             p_vectorIndex->m_iDataBlockSize, p_vectorIndex->m_iDataCapacity, p_vectorIndex->m_iMetaRecordSize));
@@ -617,6 +738,14 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
         {
             p_vectorIndex->BuildMetaMapping();
         }
+        metaStart += 2;
+    }
+    if (iniReader.DoesSectionExist("Quantizer") && p_indexBlobs.size() > metaStart)
+    {
+        std::shared_ptr<Helper::DiskPriorityIO> ptr(new Helper::SimpleBufferIO());
+        if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[metaStart].Data(), std::ios::binary | std::ios::in, p_indexBlobs[metaStart].Length())) return ErrorCode::EmptyDiskIO;
+        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+        if (ret != ErrorCode::Success) return ret;
     }
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;

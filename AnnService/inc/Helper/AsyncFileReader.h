@@ -5,6 +5,7 @@
 #define _SPTAG_HELPER_ASYNCFILEREADER_H_
 
 #include "inc/Helper/DiskIO.h"
+#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common.h"
 
 #include <memory>
@@ -17,7 +18,6 @@
 
 #ifdef _MSC_VER
 #include <tchar.h>
-#include <concurrent_queue.h>
 #include <Windows.h>
 #else
 #include <fcntl.h>
@@ -432,7 +432,7 @@ namespace SPTAG
 
             uint32_t m_diskSectorSize;
 
-            Concurrency::concurrent_queue<ResourceType*> m_resources;
+            Helper::Concurrent::ConcurrentQueue<ResourceType*> m_resources;
         };
 #else
         class RequestQueue

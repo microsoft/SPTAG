@@ -14,6 +14,8 @@ namespace SPTAG
 {
     namespace SPANN
     {
+        EdgeCompare Selection::g_edgeComparer;
+
         std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::AsyncFileIO()); };
 
         template <typename T>
@@ -32,11 +34,15 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
         {
+            IndexAlgoType algoType = p_reader.GetParameter("Base", "IndexAlgoType", IndexAlgoType::Undefined);
+            VectorValueType valueType = p_reader.GetParameter("Base", "ValueType", VectorValueType::Undefined);
+            if ((m_index = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
+
             std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex" };
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 4; i++) {
                 auto parameters = p_reader.GetParameters(sections[i].c_str());
                 for (auto iter = parameters.begin(); iter != parameters.end(); iter++) {
-                    SetParameter(sections[i].c_str(), iter->first.c_str(), iter->second.c_str());
+                    SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
                 }
             }
             return ErrorCode::Success;
@@ -45,58 +51,45 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
         {
-            if (m_index == nullptr) {
-                if ((m_index = CreateInstance(m_options.m_indexAlgoType, GetEnumValueType<T>())) == nullptr) return ErrorCode::Fail;
-                for (auto iter = m_headParameters.begin(); iter != m_headParameters.end(); iter++)
-                    m_index->SetParameter(iter->first.c_str(), iter->second.c_str());
-                if (m_index->LoadIndexDataFromMemory(p_indexBlobs) != ErrorCode::Success) return ErrorCode::Fail;
-            }
+            if (m_index->LoadIndexDataFromMemory(p_indexBlobs) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
             m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
+            m_index->SetReady(true);
 
-            if (m_extraSearcher = nullptr) {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
-                if (!m_extraSearcher->LoadIndex(m_options))
-                    return ErrorCode::Fail;
-            }
+            m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
+
             m_vectorTranslateMap.reset((std::uint64_t*)(p_indexBlobs.back().Data()), [=](std::uint64_t* ptr) {});
            
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, m_options.m_searchPostingPageLimit + 1);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
         {
-            if (m_index == nullptr) {
-                if ((m_index = CreateInstance(m_options.m_indexAlgoType, GetEnumValueType<T>())) == nullptr) return ErrorCode::Fail;
-                for (auto iter = m_headParameters.begin(); iter != m_headParameters.end(); iter++)
-                    m_index->SetParameter(iter->first.c_str(), iter->second.c_str());
-                if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
-            }
+            if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
             m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
+            m_index->SetReady(true);
 
-            if (m_extraSearcher = nullptr) {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
-                if (!m_extraSearcher->LoadIndex(m_options))
-                    return ErrorCode::Fail;
-            }
+            m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
             IOBINARY(p_indexStreams.back(), ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, m_options.m_searchPostingPageLimit + 1);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 
@@ -546,7 +539,7 @@ namespace SPTAG
 
                 std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, VectorFileType::DEFAULT));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
-                if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_headVectorFile))
+                if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile))
                 {
                     LOG(Helper::LogLevel::LL_Error, "Failed to read head vector file.\n");
                     return ErrorCode::Fail;
@@ -581,7 +574,7 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
 
             if (m_options.m_deleteHeadVectors) {
-                if (remove(m_options.m_headVectorFile.c_str()) != 0) {
+                if (remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0) {
                     LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
                 }
             }
@@ -596,29 +589,14 @@ namespace SPTAG
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, m_options.m_searchPostingPageLimit + 1);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
 
             m_bReady = true;
             return ErrorCode::Success;
         }
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(bool p_normalized) {
-            if (!m_options.m_quantizerFilePath.empty())
-            {
-                auto ptr = SPTAG::f_createIO();
-                if (!ptr->Initialize(m_options.m_quantizerFilePath.c_str(), std::ios::binary | std::ios::in))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-                    return ErrorCode::FailedOpenFile;
-                }
-                auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-                if (code != ErrorCode::Success)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-                    return code;
-                }
-            }
-
+        ErrorCode Index<T>::BuildIndex(bool p_normalized) 
+        {
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
@@ -635,29 +613,13 @@ namespace SPTAG
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
-            if (!m_options.m_quantizerFilePath.empty())
-            {
-                auto ptr = SPTAG::f_createIO();
-                if (!ptr->Initialize(m_options.m_quantizerFilePath.c_str(), std::ios::binary | std::ios::in))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-                    return ErrorCode::FailedOpenFile;
-                }
-                auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-                if (code != ErrorCode::Success)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-                    return code;
-                }
-            }
-
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
                 COMMON::Utils::BatchNormalize((T*)p_data, p_vectorNum, p_dimension, COMMON::Utils::GetBase<T>(), m_options.m_iSSDNumberOfThreads);
             }
             std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, p_vectorNum * p_dimension * sizeof(T), false),
                 GetEnumValueType<T>(), p_dimension, p_vectorNum));
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-            std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, true),
+            std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
                 vectorSet));
             
             return BuildIndexInternal(vectorReader);
@@ -670,7 +632,7 @@ namespace SPTAG
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, m_options.m_searchPostingPageLimit + 1);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 
@@ -702,7 +664,7 @@ namespace SPTAG
                 else {
                     auto iter = m_headParameters.find(p_param);
                     if (iter != m_headParameters.end()) return iter->second;
-                    return "";
+                    return "Undefined!";
                 }
             }
             else {

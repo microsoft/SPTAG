@@ -93,8 +93,6 @@ namespace SPTAG
             {
             }
 
-            virtual size_t GetMaxListSize() const { return (static_cast<size_t>(m_maxListPageCount) << PageSizeEx); }
-
             virtual bool LoadIndex(Options& p_opt) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
@@ -106,7 +104,7 @@ namespace SPTAG
                     }
 
                     m_indexContexts.emplace_back(curIndexFile);
-                    m_totalListCount += LoadingHeadInfo(curIndexFile, p_opt.m_searchPostingPageLimit, m_indexContexts.back());
+                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_indexContexts.back());
 
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexContexts.size());
                 } while (fileexists(curFile.c_str()));
@@ -336,7 +334,7 @@ namespace SPTAG
                         {
                             COMMON::Utils::atomic_float_add(&acc, COMMON::Utils::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
                         }
-                        acc = acc / sampleNum / candidateNum;
+                        acc = acc / sampleNum;
                         LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                         p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
@@ -504,8 +502,14 @@ namespace SPTAG
             };
 
         private:
-            int LoadingHeadInfo(std::shared_ptr<Helper::DiskPriorityIO> ptr, int p_postingPageLimit, IndexContext& p_indexContext)
+            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, IndexContext& p_indexContext)
             {
+                auto ptr = SPTAG::f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to open file: %s\n", p_file.c_str());
+                    exit(1);
+                }
+
                 int m_listCount;
                 int m_totalDocumentCount;
                 int m_iDataDimension;
@@ -583,8 +587,6 @@ namespace SPTAG
                     {
                         pageCountDist[pageCount] += 1;
                     }
-
-                    if (pageCount > m_maxListPageCount) m_maxListPageCount = pageCount;
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
@@ -902,8 +904,6 @@ namespace SPTAG
 
             std::string m_extraFullGraphFile;
 
-            const static int PageSizeEx = 12;
-
             std::vector<IndexContext> m_indexContexts;
 
             int m_vectorInfoSize = 0;
@@ -911,8 +911,6 @@ namespace SPTAG
             int m_totalListCount = 0;
 
             int m_listPerFile = 0;
-
-            int m_maxListPageCount = 0;
         };
     } // namespace SPANN
 } // namespace SPTAG

@@ -72,13 +72,17 @@ namespace Microsoft
 
                 AnnIndex(String^ p_algoType, String^ p_valueType, int p_dimension);
 
-                void SetBuildParam(String^ p_name, String^ p_value);
+                void SetBuildParam(String^ p_name, String^ p_value, String^ p_section);
 
-                void SetSearchParam(String^ p_name, String^ p_value);
+                void SetSearchParam(String^ p_name, String^ p_value, String^ p_section);
 
                 bool Build(array<Byte>^ p_data, int p_num);
 
                 bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
+
+                bool Build(array<Byte>^ p_data, int p_num, bool p_normalized);
+
+                bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized);
 
                 array<BasicResult^>^ Search(array<Byte>^ p_data, int p_resultNum);
 
@@ -91,6 +95,10 @@ namespace Microsoft
                 bool Add(array<Byte>^ p_data, int p_num);
 
                 bool AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
+
+                bool Add(array<Byte>^ p_data, int p_num, bool p_normalized);
+
+                bool AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized);
 
                 bool Delete(array<Byte>^ p_data, int p_num);
 

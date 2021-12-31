@@ -97,6 +97,10 @@ namespace SPTAG {
                 return m_pageBuffer.get();
             }
 
+            std::size_t GetPageSize()
+            {
+                return m_pageBufferSize;
+            }
 
         private:
             std::shared_ptr<T> m_pageBuffer;
@@ -111,12 +115,10 @@ namespace SPTAG {
             ~ExtraWorkSpace() {}
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
-                Initialize(other.m_maxCheck, other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), other.m_maxPages);
+                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()));
             }
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages) {
-                m_maxCheck = p_maxCheck;
-                m_maxPages = p_maxPages;
                 m_postingIDs.reserve(p_internalResultNum);
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 m_pageBuffers.resize(p_internalResultNum);
@@ -133,10 +135,6 @@ namespace SPTAG {
                 int maxPages = va_arg(arg, int);
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages);
             }
-
-            int m_maxCheck;
-
-            int m_maxPages;
 
             std::vector<int> m_postingIDs;
 
@@ -162,8 +160,6 @@ namespace SPTAG {
             virtual ~IExtraSearcher()
             {
             }
-
-            virtual size_t GetMaxListSize() const = 0;
 
             virtual bool LoadIndex(Options& p_options) = 0;
 

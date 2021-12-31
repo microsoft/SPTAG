@@ -27,7 +27,7 @@ DefineBasicParameter(m_indexDirectory, std::string, std::string("SPANN"), "Index
 DefineBasicParameter(m_headIDFile, std::string, std::string("SPTAGHeadVectorIDs.bin"), "HeadVectorIDs")
 DefineBasicParameter(m_deleteIDFile, std::string, std::string("DeletedIDs.bin"), "DeletedIDs")
 DefineBasicParameter(m_headVectorFile, std::string, std::string("SPTAGHeadVectors.bin"), "HeadVectors")
-DefineBasicParameter(m_headIndexFolder, std::string, std::string("SPTAGHeadIndex"), "HeadIndexFolder")
+DefineBasicParameter(m_headIndexFolder, std::string, std::string("HeadIndex"), "HeadIndexFolder")
 DefineBasicParameter(m_ssdIndex, std::string, std::string("SPTAGFullList.bin"), "SSDIndex")
 DefineBasicParameter(m_deleteHeadVectors, bool, false, "DeleteHeadVectors")
 DefineBasicParameter(m_ssdIndexFileNum, int, 1, "SSDIndexFileNum")

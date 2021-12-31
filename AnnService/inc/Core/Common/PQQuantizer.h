@@ -240,7 +240,8 @@ namespace SPTAG
         template <typename T>
         std::uint64_t PQQuantizer<T>::BufferSize() const
         {
-            return sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector + sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType);
+            return sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector + 
+                sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + sizeof(VectorValueType) + sizeof(QuantizerType);
         }
 
         template <typename T>

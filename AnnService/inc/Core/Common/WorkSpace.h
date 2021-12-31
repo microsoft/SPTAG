@@ -82,6 +82,8 @@ namespace SPTAG
 
             inline int HashTableExponent() const { return m_exp; }
 
+            inline int MaxCheck() const { return (1 << (int)(log2(m_poolSize + 1) - m_exp)); }
+
             inline bool CheckAndSet(SizeType idx)
             {
                 // Inner Index is begin from 1

@@ -24,6 +24,7 @@ namespace SPTAG
 
             virtual std::shared_ptr<VectorSet> GetVectorSet(SizeType start = 0, SizeType end = -1) const 
             {
+                if (end < 0 || end > m_vectors->Count()) end = m_vectors->Count();
                 return std::shared_ptr<VectorSet>(new BasicVectorSet(ByteArray((std::uint8_t*)(m_vectors->GetVector(start)), (end - start) * m_vectors->PerVectorDataSize(), false),
                     m_vectors->GetValueType(),
                     m_vectors->Dimension(),

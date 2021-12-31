@@ -4,14 +4,15 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/StringConvert.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/VectorIndex.h"
-#include <omp.h>
 #include <algorithm>
 #include <iomanip>
 #include <set>
 #include <ctime>
+#include <thread>
 #include <chrono>
 
 using namespace SPTAG;
@@ -141,7 +142,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     if (options->m_truthK < 0) options->m_truthK = options->m_K;
 
     std::vector<std::set<SizeType>> truth(options->m_batch);
-    std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
+    int internalResultNum = options->m_K;
+    if (index.GetIndexAlgoType() == IndexAlgoType::SPANN) {
+        int SPANNInternalResultNum;
+        if (SPTAG::Helper::Convert::ConvertStringTo<int>(index.GetParameter("SearchInternalResultNum", "BuildSSDIndex").c_str(), SPANNInternalResultNum))
+            internalResultNum = max(internalResultNum, SPANNInternalResultNum);
+    }
+    std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, internalResultNum, options->m_withMeta != 0));
     std::vector<float> latencies(options->m_batch, 0);
     int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
 
@@ -158,18 +165,35 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         {
             index.SetParameter("MaxCheck", maxCheck[mc].c_str());
 
-#pragma omp parallel for
             for (SizeType i = 0; i < numQuerys; i++) results[i].Reset();
 
-            auto batchstart = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for schedule(dynamic)
-            for (int qid = 0; qid < numQuerys; qid++)
+            std::atomic_size_t queriesSent(0);
+            std::vector<std::thread> threads;
+            auto func = [&]()
             {
-                auto t1 = std::chrono::high_resolution_clock::now();
-                index.SearchIndex(results[qid]);
-                auto t2 = std::chrono::high_resolution_clock::now();
-                latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
-            }
+                size_t qid = 0;
+                while (true)
+                {
+                    qid = queriesSent.fetch_add(1);
+                    if (qid < numQuerys)
+                    {
+                        auto t1 = std::chrono::high_resolution_clock::now();
+                        index.SearchIndex(results[qid]);
+                        auto t2 = std::chrono::high_resolution_clock::now();
+                        latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+            };
+
+            auto batchstart = std::chrono::high_resolution_clock::now();
+
+            for (std::uint32_t i = 0; i < options->m_threadNum; i++) { threads.emplace_back(func); }
+            for (auto& thread : threads) { thread.join(); }
+
             auto batchend = std::chrono::high_resolution_clock::now();
             float batchLatency = (float)(std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() / 1000000.0);
 
@@ -204,7 +228,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
-            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\t\t%.2f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
+            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
             totalAvg[mc] += timeMean * numQuerys;
             total95[mc] += l95 * numQuerys;
             total99[mc] += l99 * numQuerys;
@@ -247,7 +271,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
     for (int mc = 0; mc < maxCheck.size(); mc++)
-        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
+        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
 
     LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
@@ -295,12 +319,15 @@ int main(int argc, char** argv)
         LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
-    if (!iniReader.DoesParameterExist("Index", "NumberOfThreads"))
-        iniReader.SetParameter("Index", "NumberOfThreads", std::to_string(options->m_threadNum));
-
-    for (const auto& iter : iniReader.GetParameters("Index"))
-    {
-        vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
+    std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };
+    for (int i = 0; i < 5; i++) {
+        if (!iniReader.DoesParameterExist(sections[i], "NumberOfThreads")) {
+            iniReader.SetParameter(sections[i], "NumberOfThreads", std::to_string(options->m_threadNum));
+        }
+        for (const auto& iter : iniReader.GetParameters(sections[i]))
+        {
+            vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str(), sections[i]);
+        }
     }
 
     vecIndex->UpdateIndex();
