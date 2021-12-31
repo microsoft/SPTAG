@@ -24,10 +24,6 @@ public:
 
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
-    bool Build(ByteArray p_data, SizeType p_num);
-
-    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex);
-
     bool Build(ByteArray p_data, SizeType p_num, bool p_normalized);
 
     bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
@@ -43,10 +39,6 @@ public:
     void UpdateIndex();
 
     bool Save(const char* p_saveFile) const;
-
-    bool Add(ByteArray p_data, SizeType p_num);
-
-    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex);
 
     bool Add(ByteArray p_data, SizeType p_num, bool p_normalized);
 

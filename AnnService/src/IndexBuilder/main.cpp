@@ -21,7 +21,6 @@ public:
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
         AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
-        AddOptionalOption(m_normalized, "-n", "--normalized", "Vectors have already been normalized");
         AddOptionalOption(m_metaMapping, "-m", "--metaindex", "Enable delete vectors through metadata");
     }
 
@@ -36,8 +35,6 @@ public:
     std::string m_builderConfigFile;
 
     std::string m_quantizerFile;
-
-    bool m_normalized = false;
 
     bool m_metaMapping = false;
 };
