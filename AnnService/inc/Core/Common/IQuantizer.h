@@ -4,7 +4,8 @@
 #ifndef _SPTAG_COMMON_QUANTIZER_H_
 #define _SPTAG_COMMON_QUANTIZER_H_
 
-#include "CommonUtils.h"
+#include "../Common.h"
+#include <cstdint>
 
 namespace SPTAG
 {

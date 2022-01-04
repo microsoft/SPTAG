@@ -6,6 +6,7 @@
 #include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
 #include "inc/SSDServing/VectorSearch/Options.h"
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "inc/Helper/Concurrent.h"
 #include "inc/SSDServing/VectorSearch/SearchStats.h"
 #include "inc/SSDServing/VectorSearch/TimeUtils.h"
@@ -370,13 +371,13 @@ namespace SPTAG {
                         exit(1);
                     }
                     int originalK = truthK;
-                    COMMON::Utils::LoadTruth(ptr, truth, numQueries, originalK, truthK, COMMON_OPTS.m_truthType);
+                    COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, COMMON_OPTS.m_truthType);
                     char tmp[4];
                     if (ptr->ReadBinary(4, tmp) == 4) {
                         LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                     }
 
-                    recall = COMMON::Utils::CalculateRecall<ValueType>(searcher.HeadIndex().get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
+                    recall = COMMON::TruthSet::CalculateRecall<ValueType>(searcher.HeadIndex().get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
                     LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", truthK, K, recall);
                 }
 

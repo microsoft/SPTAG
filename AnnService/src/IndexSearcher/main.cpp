@@ -6,6 +6,7 @@
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/VectorIndex.h"
 #include <algorithm>
@@ -111,7 +112,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                 index.GetFeatureDim(),
                 index.GetNumSamples()));
 
-            COMMON::Utils::GenerateTruth<T>(queryVectors, vectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
+            COMMON::TruthSet::GenerateTruth<T>(queryVectors, vectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
                 (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT);
         }
 
@@ -158,7 +159,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
         for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
-        if (ftruth != nullptr) COMMON::Utils::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, (options->m_truthFile.find("bin") != std::string::npos)? TruthFileType::DEFAULT : TruthFileType::TXT);
+        if (ftruth != nullptr) COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, (options->m_truthFile.find("bin") != std::string::npos)? TruthFileType::DEFAULT : TruthFileType::TXT);
 
 
         for (int mc = 0; mc < maxCheck.size(); mc++)
@@ -216,7 +217,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             float recall = 0;
             if (ftruth != nullptr)
             {
-                recall = COMMON::Utils::CalculateRecall<T>(&index, results, truth, options->m_K, options->m_truthK, queryVectors, dataVectors, numQuerys, &log, options->m_debugQuery > 0);
+                recall = COMMON::TruthSet::CalculateRecall<T>(&index, results, truth, options->m_K, options->m_truthK, queryVectors, dataVectors, numQuerys, &log, options->m_debugQuery > 0);
             }
 
 #ifndef _MSC_VER

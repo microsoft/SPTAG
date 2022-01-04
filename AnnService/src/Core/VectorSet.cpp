@@ -3,7 +3,7 @@
 
 #include "inc/Core/VectorSet.h"
 #include "inc/Core/Common/CommonUtils.h"
-#include "inc/Core/Common/DistanceUtils.h"
+
 using namespace SPTAG;
 
 VectorSet::VectorSet()

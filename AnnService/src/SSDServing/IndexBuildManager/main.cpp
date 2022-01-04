@@ -5,6 +5,7 @@
 
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/VectorSetReader.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "inc/SSDServing/IndexBuildManager/main.h"
 #include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
 #include "inc/SSDServing/IndexBuildManager/Utils.h"
@@ -210,7 +211,7 @@ namespace SPTAG {
 				omp_set_num_threads(search_ssd_opts.m_iNumberOfThreads);
 #define DefineVectorValueType(Name, Type) \
 	if (COMMON_OPTS.m_valueType == SPTAG::VectorValueType::Name) { \
-		COMMON::Utils::GenerateTruth<Type>(querySet, vectorSet, COMMON_OPTS.m_truthPath, \
+		COMMON::TruthSet::GenerateTruth<Type>(querySet, vectorSet, COMMON_OPTS.m_truthPath, \
 			COMMON_OPTS.m_distCalcMethod, search_ssd_opts.m_resultNum, COMMON_OPTS.m_truthType); \
 	} \
 

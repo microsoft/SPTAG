@@ -7,6 +7,7 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "IExtraSearcher.h"
+#include "../Common/TruthSet.h"
 
 #include <map>
 #include <cmath>
@@ -332,7 +333,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                         for (int j = 0; j < sampleNum; j++)
                         {
-                            COMMON::Utils::atomic_float_add(&acc, COMMON::Utils::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+                            COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
                         }
                         acc = acc / sampleNum;
                         LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
