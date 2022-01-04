@@ -138,6 +138,8 @@ break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+                    default: break;
                     }
                 }
                 else

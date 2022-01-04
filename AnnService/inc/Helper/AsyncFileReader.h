@@ -443,7 +443,7 @@ namespace SPTAG
 
             ~RequestQueue() {}
 
-            void push(const DiskListRequest* j)
+            void push(DiskListRequest* j)
             {
                 {
                     std::lock_guard<std::mutex> lock(m_lock);

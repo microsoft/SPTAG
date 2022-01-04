@@ -31,7 +31,6 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
 
     float eps = 1e-6f, recall = 0;
-    bool deleted;
 
     int truthDimension = min(k, truth->Dimension());
     for (SizeType i = 0; i < queryset->Count(); i++) {

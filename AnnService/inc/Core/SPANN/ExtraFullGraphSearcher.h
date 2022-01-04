@@ -11,6 +11,7 @@
 
 #include <map>
 #include <cmath>
+#include <climits>
 #include <future>
 
 #ifdef _MSC_VER
@@ -480,6 +481,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
              
                 LoadIndex(p_opt);
+                return true;
             }
 
         private:

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <set>
+#include <atomic>
 #include <ctime>
 #include <thread>
 #include <chrono>

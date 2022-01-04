@@ -84,7 +84,7 @@ AnnIndex::Build(ByteArray p_data, SizeType p_num, bool p_normalized)
     {
         return false;
     }
-    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension), p_normalized);
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension, p_normalized));
 }
 
 

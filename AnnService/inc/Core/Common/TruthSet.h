@@ -39,7 +39,6 @@ namespace SPTAG
 
             static void LoadTruthXVEC(std::shared_ptr<SPTAG::Helper::DiskPriorityIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber)
             {
-                int dim = K;
                 truth.clear();
                 truth.resize(p_iTruthNumber);
                 std::vector<int> vec(K);

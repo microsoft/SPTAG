@@ -21,7 +21,7 @@ namespace SPTAG {
 				int clusters = SPTAG::COMMON::KmeansClustering(data, indices, 0, p_vectorSet->Count(), args, opts.m_iSamples, 1000000.0, true);
 
 				SizeType first = 0;
-				for (int k = 0; k < clusternum; k++) {
+				for (int k = 0; k < clusters; k++) {
 					if (args.counts[k] == 0) continue;
 					SizeType cid = indices[first + args.counts[k] - 1];
 					selected.push_back(cid);
