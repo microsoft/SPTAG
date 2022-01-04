@@ -24,6 +24,10 @@ public:
 
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
+    bool BuildSPANN(bool p_normalized);
+
+    bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
+
     bool Build(ByteArray p_data, SizeType p_num, bool p_normalized);
 
     bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);

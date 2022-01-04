@@ -25,6 +25,7 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        class DistanceUtils;
         class Utils {
         public:
             static SizeType rand(SizeType high = MaxSize, SizeType low = 0)   // Generates a random int value.
