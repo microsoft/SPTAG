@@ -50,7 +50,7 @@ namespace SPTAG {
 
 #ifndef _MSC_VER
     void listdir(std::string path, std::vector<std::string>& files) {
-        if (auto dirptr = opendir(path.c_str())) {
+        if (auto dirptr = opendir(path.substr(0, path.length() - 1).c_str())) {
             while (auto f = readdir(dirptr)) {
                 if (!f->d_name || f->d_name[0] == '.') continue;
                 std::string tmp = path.substr(0, path.length() - 1);
@@ -327,8 +327,11 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     }
     std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
     for (std::string& f : *indexfiles) {
+        std::string newfile = folderPath + f;
+        if (!direxists(newfile.substr(0, newfile.find_last_of(FolderSep)).c_str())) mkdir(newfile.substr(0, newfile.find_last_of(FolderSep)).c_str());
+        
         auto ptr = SPTAG::f_createIO();
-        if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+        if (ptr == nullptr || !ptr->Initialize(newfile.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
         handles.push_back(std::move(ptr));
     }
 

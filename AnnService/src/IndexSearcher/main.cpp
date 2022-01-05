@@ -108,12 +108,11 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     if (options->m_truthFile != "")
     {
         if (options->m_genTruth) {
-            std::shared_ptr<VectorSet> vectors(new BasicVectorSet(ByteArray((std::uint8_t*)index.GetSample(0), index.GetNumSamples() * index.GetFeatureDim() * GetValueTypeSize(index.GetVectorValueType()), false),
-                index.GetVectorValueType(),
-                index.GetFeatureDim(),
-                index.GetNumSamples()));
-
-            COMMON::TruthSet::GenerateTruth<T>(queryVectors, vectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
+            if (dataVectors == nullptr) {
+                LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please speicify data vector file by setting -df option.\n");
+                exit(1);
+            }
+            COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
                 (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT);
         }
 

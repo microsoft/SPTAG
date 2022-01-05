@@ -94,7 +94,6 @@ namespace SPTAG
             {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
                 auto headfiles = m_index->GetIndexFiles();
-                if (!direxists(m_options.m_headIndexFolder.c_str())) mkdir(m_options.m_headIndexFolder.c_str());
                 for (auto file : *headfiles) {
                     files->push_back(m_options.m_headIndexFolder + FolderSep + file);
                 }
