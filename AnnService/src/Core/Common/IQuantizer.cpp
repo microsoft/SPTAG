@@ -32,5 +32,36 @@ namespace SPTAG
             }
             return ErrorCode::Success;
         }
+
+        ErrorCode IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
+        {
+            auto raw_bytes = bytes.Data();
+            QuantizerType quantizerType = *(QuantizerType*) raw_bytes;
+            raw_bytes += sizeof(QuantizerType);
+
+            VectorValueType reconstructType = *(VectorValueType*)raw_bytes;
+            raw_bytes += sizeof(VectorValueType);
+            LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+
+            switch (quantizerType) {
+            case QuantizerType::None:
+                return ErrorCode::FailedParseValue;
+            case QuantizerType::Undefined:
+                return ErrorCode::FailedParseValue;
+            case QuantizerType::PQQuantizer:
+                switch (reconstructType) {
+#define DefineVectorValueType(Name, Type) \
+                    case VectorValueType::Name: \
+                        DistanceUtils::Quantizer.reset(new PQQuantizer<Type>()); \
+                        break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                }
+
+                return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);
+            }
+            return ErrorCode::Fail;
+        }
     }
 }

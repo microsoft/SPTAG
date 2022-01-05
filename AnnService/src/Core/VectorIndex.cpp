@@ -623,6 +623,12 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
             p_vectorIndex->BuildMetaMapping();
         }
     }
+
+    if (iniReader.DoesSectionExist("Quantizer") && p_indexBlobs.size() > 4)
+    {
+        if ((ret = COMMON::IQuantizer::LoadIQuantizer(p_indexBlobs[4])) != ErrorCode::Success) return ret;
+    }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }

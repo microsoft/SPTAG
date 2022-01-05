@@ -48,6 +48,8 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
 
+            virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
+
             virtual DimensionType GetNumSubvectors() const;
 
             virtual int GetBase();
@@ -270,6 +272,46 @@ namespace SPTAG
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
+            LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
+
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+            auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+            auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
+
+            auto cosineDist = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
+            auto L2Dist = DistanceCalcSelector<T>(DistCalcMethod::L2);
+
+            for (int i = 0; i < m_NumSubvectors; i++) {
+                SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
+                for (int j = 0; j < m_KsPerSubvector; j++) {
+                    for (int k = 0; k < m_KsPerSubvector; k++) {
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                    }
+                }
+            }
+            m_CosineDistanceTables = std::move(temp_m_CosineDistanceTables);
+            m_L2DistanceTables = std::move(temp_m_L2DistanceTables);
+            LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
+        {
+            LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
+            m_NumSubvectors = *(DimensionType*)raw_bytes;
+            raw_bytes += sizeof(DimensionType);
+            LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
+            m_KsPerSubvector = *(SizeType*)raw_bytes;
+            raw_bytes += sizeof(SizeType);
+            LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
+            m_DimPerSubvector = *(DimensionType*)raw_bytes;
+            raw_bytes += sizeof(DimensionType);
+            LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
+            m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
+            memcpy_s(m_codebooks.get(), sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;

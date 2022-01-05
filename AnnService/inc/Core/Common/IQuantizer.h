@@ -5,6 +5,7 @@
 #define _SPTAG_COMMON_QUANTIZER_H_
 
 #include "CommonUtils.h"
+#include <inc/Core/CommonDataStructure.h>
 
 namespace SPTAG
 {
@@ -33,7 +34,11 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) = 0;
 
+            virtual ErrorCode LoadQuantizer(uint8_t* raw_bytes) = 0;
+
             static ErrorCode LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
+
+            static ErrorCode LoadIQuantizer(SPTAG::ByteArray bytes);
 
             virtual bool GetEnableADC() = 0;
 
