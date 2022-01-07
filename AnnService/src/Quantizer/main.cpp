@@ -39,20 +39,15 @@ int main(int argc, char* argv[])
     }
     case QuantizerType::PQQuantizer:
     {
-        auto metadataSet = vectorReader->GetMetadataSet();
-        if (metadataSet)
-        {
-            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
-        }
-        
         std::shared_ptr<VectorSet> quantized_vectors;
-        ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * vectorReader->GetVectorSet()->Count());
-        quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, vectorReader->GetVectorSet()->Count()));
+        auto fullvectors = vectorReader->GetVectorSet();
+        ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * fullvectors->Count());
+        quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, fullvectors->Count()));
         switch (options->m_inputValueType)
         {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        COMMON::DistanceUtils::Quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, vectorReader->GetVectorSet(), quantized_vectors))); \
+                        COMMON::DistanceUtils::Quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, fullvectors, quantized_vectors))); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -77,6 +72,12 @@ int main(int argc, char* argv[])
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to open quantizer file.\n");
             exit(1);
+        }
+
+        auto metadataSet = vectorReader->GetMetadataSet();
+        if (metadataSet)
+        {
+            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
         }
         
         break;

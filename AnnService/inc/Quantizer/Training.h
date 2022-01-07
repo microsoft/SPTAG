@@ -61,11 +61,13 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
     auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
+    LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
+#pragma omp parallel for
     for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
+        LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
         auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2);
         auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 
-#pragma omp parallel for
         for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
             auto raw_addr = reinterpret_cast<T*>(raw_vectors->GetVector(vectorIdx)) + (codebookIdx * subdim);
             auto dset_addr = dset[vectorIdx];
@@ -87,7 +89,6 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
             reverselocalindex[localindices[il]] = il;
         }
 
-#pragma omp parallel for
         for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
             auto localidx = reverselocalindex[vectorIdx];
             auto quan_addr = reinterpret_cast<uint8_t*>(quantized_vectors->GetVector(vectorIdx));

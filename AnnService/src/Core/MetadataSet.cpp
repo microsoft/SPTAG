@@ -229,7 +229,7 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
         std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
         std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
         if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-        m_count = Count();
+        m_count = static_cast<SizeType>(m_offsets.size() - 1);
         m_newdata.clear();
     }
     return ErrorCode::Success;
