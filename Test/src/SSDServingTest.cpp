@@ -13,7 +13,7 @@
 
 #include "inc/Core/Common.h"
 #include "inc/Helper/StringConvert.h"
-#include "inc/SSDServing/IndexBuildManager/main.h"
+#include "inc/SSDServing/main.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/CommonUtils.h"
 

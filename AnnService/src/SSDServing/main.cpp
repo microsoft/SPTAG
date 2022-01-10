@@ -92,7 +92,7 @@ namespace SPTAG {
 				exit(1);
 			}
 
-			SPANN::Options* opts;
+			SPANN::Options* opts = nullptr;
 
 #define DefineVectorValueType(Name, Type) \
 	if (index->GetVectorValueType() == VectorValueType::Name) { \
@@ -101,6 +101,11 @@ namespace SPTAG {
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+			if (opts == nullptr) {
+				LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
+				exit(1);
+			}
 
 			if (opts->m_generateTruth)
 			{
