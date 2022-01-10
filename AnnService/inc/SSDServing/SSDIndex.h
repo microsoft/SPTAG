@@ -2,26 +2,27 @@
 // Licensed under the MIT License.
 
 #pragma once
+#include <limits>
 
-#include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
-#include "inc/SSDServing/VectorSearch/Options.h"
+#include "inc/Core/Common.h"
+#include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
-#include "inc/Core/Common/TruthSet.h"
-#include "inc/Helper/Concurrent.h"
-#include "inc/SSDServing/VectorSearch/SearchStats.h"
-#include "inc/SSDServing/VectorSearch/TimeUtils.h"
-#include "inttypes.h"
+#include "inc/Core/SPANN/Index.h"
+#include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
+#include "inc/Helper/VectorSetReader.h"
+#include "inc/Helper/StringConvert.h"
+#include "inc/SSDServing/Utils.h"
 
 namespace SPTAG {
 	namespace SSDServing {
-		namespace VectorSearch {
+		namespace SSDIndex {
 
             template <typename ValueType>
             void OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
             {
                 if (!p_output.empty())
                 {
-                    auto ptr = SPTAG::f_createIO();
+                    auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(p_output.c_str(), std::ios::binary | std::ios::out)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
                         exit(1);
@@ -97,24 +98,25 @@ namespace SPTAG {
 
 
             template <typename ValueType>
-            void SearchSequential(SearchDefault<ValueType>& p_searcher,
+            void SearchSequential(SPANN::Index<ValueType>* p_index,
                 int p_numThreads,
                 std::vector<QueryResult>& p_results,
-                std::vector<SearchStats>& p_stats,
+                std::vector<SPANN::SearchStats>& p_stats,
                 int p_maxQueryCount, int p_internalResultNum)
             {
                 int numQueries = min(static_cast<int>(p_results.size()), p_maxQueryCount);
-                
+
                 std::atomic_size_t queriesSent(0);
 
                 std::vector<std::thread> threads;
 
                 LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
-                
-                TimeUtils::StopW sw;
+
+                Utils::StopW sw;
 
                 auto func = [&]()
                 {
+                    Utils::StopW threadws;
                     size_t index = 0;
                     while (true)
                     {
@@ -125,7 +127,15 @@ namespace SPTAG {
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
                             }
-                            p_searcher.Search(*((COMMON::QueryResultSet<ValueType>*) & (p_results[index])), p_internalResultNum, p_stats[index]);
+
+                            double startTime = threadws.getElapsedMs();
+                            p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
+                            double endTime = threadws.getElapsedMs();
+                            p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
+                            double exEndTime = threadws.getElapsedMs();
+
+                            p_stats[index].m_exLatency = exEndTime - endTime;
+                            p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
                         }
                         else
                         {
@@ -146,128 +156,36 @@ namespace SPTAG {
                     static_cast<uint32_t>(numQueries));
             }
 
-
             template <typename ValueType>
-            void SearchAsync(SearchDefault<ValueType>& p_searcher,
-                uint32_t p_qps,
-                std::vector<QueryResult>& p_results,
-                std::vector<SearchStats>& p_stats,
-                int p_maxQueryCount, int p_internalResultNum)
+            void Search(SPANN::Index<ValueType>* p_index)
             {
-                size_t numQueries = std::min<size_t>(p_results.size(), p_maxQueryCount);
-
-                LOG(Helper::LogLevel::LL_Info, "Using Async sending with QPS setting %u\n", p_qps);
-
-                Helper::Concurrent::WaitSignal waitFinish;
-                waitFinish.Reset(static_cast<uint32_t>(numQueries));
-
-                auto callback = [&waitFinish]()
-                {
-                    waitFinish.FinishOne();
-                };
-
-                std::atomic_size_t queriesSent(0);
-
-                TimeUtils::SteadClock::time_point startTime = TimeUtils::SteadClock::now();
-
-                auto func = [&]()
-                {
-                    size_t index = 0;
-
-                    while (true)
-                    {
-                        TimeUtils::SteadClock::time_point currentTime = TimeUtils::SteadClock::now();
-
-                        double timeElapsedSec = TimeUtils::getMsInterval(startTime, currentTime);
-
-                        size_t targetQueries = std::min<size_t>(static_cast<size_t>(p_qps * timeElapsedSec), numQueries);
-
-                        while (targetQueries > index)
-                        {
-                            index = queriesSent.fetch_add(1);
-
-                            if (index < numQueries)
-                            {
-                                p_searcher.SearchAsync(*((COMMON::QueryResultSet<ValueType>*) &(p_results[index])), p_internalResultNum, p_stats[index], callback);
-
-                                if ((index & ((1 << 14) - 1)) == 0)
-                                {
-                                    LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
-                                }
-                            }
-                            else
-                            {
-                                return;
-                            }
-                        }
-                    }
-                };
-
-                std::thread thread1(func);
-                std::thread thread2(func);
-                std::thread thread3(func);
-
-                thread1.join();
-                thread2.join();
-                thread3.join();
-
-                TimeUtils::SteadClock::time_point finishSending = TimeUtils::SteadClock::now();
-                double sendingCost = TimeUtils::getSecInterval(startTime, finishSending);
-
-                LOG(Helper::LogLevel::LL_Info,
-                    "Finish sending in %.3lf seconds, QPS setting is %u, actuallQPS is %.2lf, query count %u.\n",
-                    sendingCost,
-                    p_qps,
-                    numQueries / sendingCost,
-                    static_cast<uint32_t>(numQueries));
-
-                waitFinish.Wait();
-
-                TimeUtils::SteadClock::time_point finishSearch = TimeUtils::SteadClock::now();
-                double searchCost = TimeUtils::getSecInterval(startTime, finishSearch);
-
-                LOG(Helper::LogLevel::LL_Info,
-                    "Finish searching in %.3lf seconds.\n",
-                    searchCost);
-            }
-
-            template <typename ValueType>
-            void Search(Options& p_opts)
-            {
+                SPANN::Options& p_opts = *(p_index->GetOptions());
                 std::string outputFile = p_opts.m_searchResult;
-                std::string truthFile = COMMON_OPTS.m_truthPath;
-                std::string warmupFile = COMMON_OPTS.m_warmupPath;
+                std::string truthFile = p_opts.m_truthPath;
+                std::string warmupFile = p_opts.m_warmupPath;
 
-                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                if (COMMON::DistanceUtils::Quantizer)
                 {
-                    SPTAG::COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
+                    COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
                 if (!p_opts.m_logFile.empty())
                 {
-                    SPTAG::g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
                 }
-                int numThreads = p_opts.m_iNumberOfThreads;
+                int numThreads = p_opts.m_iSSDNumberOfThreads;
                 int asyncCallQPS = p_opts.m_qpsLimit;
 
                 int internalResultNum = p_opts.m_internalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
 
-                SearchDefault<ValueType> searcher;
-                LOG(Helper::LogLevel::LL_Info, "Start setup index...\n");
-                ByteArray myByteArray;
-                searcher.Setup(p_opts, myByteArray);
-
-                LOG(Helper::LogLevel::LL_Info, "Setup index finish, start setup hint...\n");
-                searcher.SetHint(numThreads, internalResultNum, asyncCallQPS > 0, p_opts);
-
                 if (!warmupFile.empty())
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
-                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_warmupType, COMMON_OPTS.m_warmupDelimiter));
+                    std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_warmupType, p_opts.m_warmupDelimiter));
                     auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
-                    if (ErrorCode::Success != queryReader->LoadFile(COMMON_OPTS.m_warmupPath))
+                    if (ErrorCode::Success != queryReader->LoadFile(p_opts.m_warmupPath))
                     {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
                         exit(1);
@@ -276,7 +194,7 @@ namespace SPTAG {
                     int warmupNumQueries = warmupQuerySet->Count();
 
                     std::vector<QueryResult> warmupResults(warmupNumQueries, QueryResult(NULL, max(K, internalResultNum), false));
-                    std::vector<SearchStats> warmpUpStats(warmupNumQueries);
+                    std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
                         warmupResults[i].SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)));
@@ -284,22 +202,14 @@ namespace SPTAG {
                     }
 
                     LOG(Helper::LogLevel::LL_Info, "Start warmup...\n");
-                    if (asyncCallQPS == 0)
-                    {
-                        SearchSequential(searcher, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
-                    }
-                    else
-                    {
-                        SearchAsync(searcher, asyncCallQPS, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
-                    }
-
+                    SearchSequential(p_index, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
                     LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
-                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_queryType, COMMON_OPTS.m_queryDelimiter));
+                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
                 auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
-                if (ErrorCode::Success != queryReader->LoadFile(COMMON_OPTS.m_queryPath))
+                if (ErrorCode::Success != queryReader->LoadFile(p_opts.m_queryPath))
                 {
                     LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
                     exit(1);
@@ -308,7 +218,7 @@ namespace SPTAG {
                 int numQueries = querySet->Count();
 
                 std::vector<QueryResult> results(numQueries, QueryResult(NULL, max(K, internalResultNum), false));
-                std::vector<SearchStats> stats(numQueries);
+                std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
                     results[i].SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)));
@@ -318,26 +228,19 @@ namespace SPTAG {
 
                 LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
 
-                if (asyncCallQPS == 0)
-                {
-                    SearchSequential(searcher, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
-                }
-                else
-                {
-                    SearchAsync(searcher, asyncCallQPS, results, stats, p_opts.m_queryCountLimit, internalResultNum);
-                }
+                SearchSequential(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
 
                 LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
-                std::shared_ptr<SPTAG::VectorSet> vectorSet;
+                std::shared_ptr<VectorSet> vectorSet;
 
-                if (!COMMON_OPTS.m_vectorPath.empty() && fileexists(COMMON_OPTS.m_vectorPath.c_str())) {
-                    std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
+                if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                    std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
                     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
-                    if (ErrorCode::Success == vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))
+                    if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_vectorPath))
                     {
                         vectorSet = vectorReader->GetVectorSet();
-                        if (COMMON_OPTS.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(p_opts.m_iNumberOfThreads);
+                        if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
                         LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
                     }
                 }
@@ -351,10 +254,10 @@ namespace SPTAG {
                         {
                             if (results[i].GetResult(j)->VID < 0) continue;
                             results[i].GetResult(j)->Dist = COMMON::DistanceUtils::ComputeDistance((const ValueType*)querySet->GetVector(i),
-                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), COMMON_OPTS.m_distCalcMethod);
+                                (const ValueType*)vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), p_opts.m_distCalcMethod);
                         }
                         BasicResult* re = results[i].GetResults();
-                        std::sort(re, re + K, SPTAG::COMMON::Compare);
+                        std::sort(re, re + K, COMMON::Compare);
                     }
                     K = p_opts.m_rerank;
                 }
@@ -364,27 +267,27 @@ namespace SPTAG {
                 if (!truthFile.empty())
                 {
                     LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
-                    
-                    auto ptr = SPTAG::f_createIO();
+
+                    auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::in | std::ios::binary)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthFile.c_str());
                         exit(1);
                     }
                     int originalK = truthK;
-                    COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, COMMON_OPTS.m_truthType);
+                    COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, p_opts.m_truthType);
                     char tmp[4];
                     if (ptr->ReadBinary(4, tmp) == 4) {
                         LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                     }
 
-                    recall = COMMON::TruthSet::CalculateRecall<ValueType>(searcher.HeadIndex().get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
+                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
                     LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", truthK, K, recall);
                 }
 
                 long long exCheckSum = 0;
                 int exCheckMax = 0;
                 long long exListSum = 0;
-                std::for_each(stats.begin(), stats.end(), [&](const SearchStats& p_stat)
+                std::for_each(stats.begin(), stats.end(), [&](const SPANN::SearchStats& p_stat)
                     {
                         exCheckSum += p_stat.m_exCheck;
                         exCheckMax = std::max<int>(exCheckMax, p_stat.m_exCheck);
@@ -398,8 +301,8 @@ namespace SPTAG {
                     static_cast<double>(exListSum) / numQueries);
 
                 LOG(Helper::LogLevel::LL_Info, "\nSleep Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_sleepLatency;
                     },
@@ -407,84 +310,60 @@ namespace SPTAG {
 
 
                 LOG(Helper::LogLevel::LL_Info, "\nIn Queue Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_queueLatency;
                     },
                     "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_totalSearchLatency - ss.m_exLatency;
                     },
                     "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_exLatency;
                     },
                     "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Search Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_totalSearchLatency;
                     },
                     "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
                     {
                         return ss.m_totalLatency;
                     },
                     "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution:\n");
-                PrintPercentiles<int, SearchStats>(stats,
-                    [](const SearchStats& ss) -> int
+                PrintPercentiles<int, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> int
                     {
                         return ss.m_diskAccessCount;
                     },
                     "%4d");
 
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
-                PrintPercentiles<int, SearchStats>(stats,
-                    [](const SearchStats& ss) -> int
+                PrintPercentiles<int, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> int
                     {
                         return ss.m_diskIOCount;
                     },
                     "%4d");
-
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Async Latency 0 Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
-                    {
-                        return ss.m_asyncLatency0;
-                    },
-                    "%.3lf");
-
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Async Latency 1 Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
-                    {
-                        return ss.m_asyncLatency1;
-                    },
-                    "%.3lf");
-
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Async Latency 2 Distribution:\n");
-                PrintPercentiles<double, SearchStats>(stats,
-                    [](const SearchStats& ss) -> double
-                    {
-                        return ss.m_asyncLatency2;
-                    },
-                    "%.3lf");
 
                 LOG(Helper::LogLevel::LL_Info, "\n");
 
@@ -506,8 +385,9 @@ namespace SPTAG {
                 if (p_opts.m_recall_analysis) {
                     LOG(Helper::LogLevel::LL_Info, "Start recall analysis...\n");
 
+                    std::shared_ptr<VectorIndex> headIndex = p_index->GetMemoryIndex();
                     SizeType sampleSize = numQueries < 100 ? numQueries : 100;
-                    SizeType sampleK = searcher.HeadIndex()->GetNumSamples() < 1000 ? searcher.HeadIndex()->GetNumSamples() : 1000;
+                    SizeType sampleK = headIndex->GetNumSamples() < 1000 ? headIndex->GetNumSamples() : 1000;
                     float sampleE = 1e-6f;
 
                     std::vector<SizeType> samples(sampleSize, 0);
@@ -525,13 +405,13 @@ namespace SPTAG {
                     for (int i = 0; i < sampleSize; i++)
                     {
                         COMMON::QueryResultSet<ValueType> queryANNHeads((const ValueType*)(querySet->GetVector(samples[i])), max(K, internalResultNum));
-                        searcher.HeadIndex()->SearchIndex(queryANNHeads);
+                        headIndex->SearchIndex(queryANNHeads);
                         float queryANNHeadsLongestDist = queryANNHeads.GetResult(internalResultNum - 1)->Dist;
 
                         COMMON::QueryResultSet<ValueType> queryBFHeads((const ValueType*)(querySet->GetVector(samples[i])), max(sampleK, internalResultNum));
-                        for (SizeType y = 0; y < searcher.HeadIndex()->GetNumSamples(); y++)
+                        for (SizeType y = 0; y < headIndex->GetNumSamples(); y++)
                         {
-                            float dist = searcher.HeadIndex()->ComputeDistance(queryBFHeads.GetQuantizedTarget(), searcher.HeadIndex()->GetSample(y));
+                            float dist = headIndex->ComputeDistance(queryBFHeads.GetQuantizedTarget(), headIndex->GetSample(y));
                             queryBFHeads.AddPoint(y, dist);
                         }
                         queryBFHeads.SortResult();
@@ -555,7 +435,7 @@ namespace SPTAG {
                         }
 
                         std::map<int, std::set<int>> tmpFound; // headID->truths
-                        searcher.BruteForceSearch(queryBFHeads, internalResultNum, sampleK, truth[samples[i]], tmpFound);
+                        p_index->DebugSearchDiskIndex(queryBFHeads, internalResultNum, sampleK, nullptr, &truth[samples[i]], &tmpFound);
 
                         for (SizeType z = 0; z < K; z++) {
                             truthRecalls[i] += truth[samples[i]].count(queryBFHeads.GetResult(z)->VID);
@@ -566,7 +446,7 @@ namespace SPTAG {
                         }
 
                         for (std::map<int, std::set<int>>::iterator it = tmpFound.begin(); it != tmpFound.end(); it++) {
-                            float q2truthposting = searcher.HeadIndex()->ComputeDistance(querySet->GetVector(samples[i]), searcher.HeadIndex()->GetSample(it->first));
+                            float q2truthposting = headIndex->ComputeDistance(querySet->GetVector(samples[i]), headIndex->GetSample(it->first));
                             for (auto vid : it->second) {
                                 if (!truth[samples[i]].count(vid)) continue;
 
@@ -575,10 +455,10 @@ namespace SPTAG {
                                     shouldSelectLong[i] += 1;
 
                                     std::set<int> nearQuerySelectedHeads;
-                                    float v2vhead = searcher.HeadIndex()->ComputeDistance(vectorSet->GetVector(vid), searcher.HeadIndex()->GetSample(it->first));
+                                    float v2vhead = headIndex->ComputeDistance(vectorSet->GetVector(vid), headIndex->GetSample(it->first));
                                     for (SizeType z = 0; z < internalResultNum; z++) {
                                         if (queryANNHeads.GetResult(z)->VID < 0) break;
-                                        float v2qhead = searcher.HeadIndex()->ComputeDistance(vectorSet->GetVector(vid), searcher.HeadIndex()->GetSample(queryANNHeads.GetResult(z)->VID));
+                                        float v2qhead = headIndex->ComputeDistance(vectorSet->GetVector(vid), headIndex->GetSample(queryANNHeads.GetResult(z)->VID));
                                         if (v2qhead < v2vhead) {
                                             nearQuerySelectedHeads.insert(queryANNHeads.GetResult(z)->VID);
                                         }
@@ -588,7 +468,7 @@ namespace SPTAG {
                                     nearQueryHeads[i] += 1;
 
                                     COMMON::QueryResultSet<ValueType> annTruthHead((const ValueType*)(vectorSet->GetVector(vid)), p_opts.m_debugBuildInternalResultNum);
-                                    searcher.HeadIndex()->SearchIndex(annTruthHead);
+                                    headIndex->SearchIndex(annTruthHead);
 
                                     bool found = false;
                                     for (SizeType z = 0; z < annTruthHead.GetResultNum(); z++) {
@@ -611,14 +491,14 @@ namespace SPTAG {
 
                                         bool good = true;
                                         for (auto r : replicas) {
-                                            if (p_opts.m_rngFactor * searcher.HeadIndex()->ComputeDistance(searcher.HeadIndex()->GetSample(r), searcher.HeadIndex()->GetSample(item->VID)) < item->Dist) {
+                                            if (p_opts.m_rngFactor * headIndex->ComputeDistance(headIndex->GetSample(r), headIndex->GetSample(item->VID)) < item->Dist) {
                                                 good = false;
                                                 break;
                                             }
                                         }
                                         if (good) replicas.insert(item->VID);
                                     }
-                                    
+
                                     found = false;
                                     for (auto r : nearQuerySelectedHeads) {
                                         if (replicas.count(r)) {
@@ -669,7 +549,7 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info,
                         "\t\tRNG rule ANN search loss: %f percent\n", buildAnnNotFound / lost * 100);
                     LOG(Helper::LogLevel::LL_Info,
-                        "\t\tPosting cut loss: %f percent\n", buildPostingCut/ lost * 100);
+                        "\t\tPosting cut loss: %f percent\n", buildPostingCut / lost * 100);
                     LOG(Helper::LogLevel::LL_Info,
                         "\t\tRNG rule loss: %f percent\n", buildRNGRule / lost * 100);
                 }

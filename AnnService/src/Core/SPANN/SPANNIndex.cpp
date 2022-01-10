@@ -191,7 +191,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::DebugSearchIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
+        ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
             SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found)
         {
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
@@ -519,6 +519,7 @@ namespace SPTAG
 
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
+                omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
                 if (!SelectHead(p_reader)) {
                     LOG(Helper::LogLevel::LL_Error, "SelectHead Failed!\n");
                     return ErrorCode::Fail;
@@ -550,47 +551,52 @@ namespace SPTAG
                     return ErrorCode::Fail;
                 }
             }
-            else {
+            auto t3 = std::chrono::high_resolution_clock::now();
+            double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
+            LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs\n", selectHeadTime, buildHeadTime);
+
+            if (m_options.m_enableSSD) {
+                omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
+
                 if (m_index == nullptr && LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_index) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
                     return ErrorCode::Fail;
                 }
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
-            }
 
-            auto t3 = std::chrono::high_resolution_clock::now();
-            double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
-            LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs\n", selectHeadTime, buildHeadTime);
-
-            if (m_options.m_enableSSD && m_options.m_buildSsdIndex) {
                 m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
-                if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
-                    LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
+                if (m_options.m_buildSsdIndex) {
+                    if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
+                        LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
+                        return ErrorCode::Fail;
+                    }
+                }
+                if (!m_extraSearcher->LoadIndex(m_options)) {
+                    LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
                     return ErrorCode::Fail;
                 }
+
+                m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
+                std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
+                if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                    return ErrorCode::Fail;
+                }
+                IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
             }
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();
             LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
 
             if (m_options.m_deleteHeadVectors) {
-                if (remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0) {
+                if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) && 
+                    remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0) {
                     LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
                 }
             }
 
-            m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
-            std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
-            if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
-                LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
-                return ErrorCode::Fail;
-            }
-            IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
-
-            omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
             m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
-
             m_bReady = true;
             return ErrorCode::Success;
         }

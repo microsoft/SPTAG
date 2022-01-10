@@ -8,7 +8,6 @@
 
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/WorkSpace.h"
-#include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Helper/AsyncFileReader.h"
 
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
@@ -147,8 +146,6 @@ namespace SPTAG {
             std::vector<Helper::DiskListRequest> m_diskRequests;
         };
 
-
-        template<typename ValueType>
         class IExtraSearcher
         {
         public:
@@ -164,7 +161,7 @@ namespace SPTAG {
             virtual bool LoadIndex(Options& p_options) = 0;
 
             virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
-                COMMON::QueryResultSet<ValueType>& p_queryResults,
+                QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
                 SearchStats* p_stats, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) = 0;
 

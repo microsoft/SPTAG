@@ -325,6 +325,7 @@ break;
                     indexs.clear();
                     weight.clear();
                     bestweight.clear();
+                    if (v_holder) _mm_free(v_holder);
 
                     PartitionByTptreeCore<T, R>(index, indices, first, i - 1, leaves);
                     PartitionByTptreeCore<T, R>(index, indices, i, last, leaves);

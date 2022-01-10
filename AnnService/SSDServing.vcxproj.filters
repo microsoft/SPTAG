@@ -1,149 +1,30 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="SelectHead_BKT">
-      <UniqueIdentifier>{faacd599-8de2-4e17-b8ef-550bb465bce5}</UniqueIdentifier>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{d5aba8fd-7ec7-458a-b728-ae5eaea04e43}</UniqueIdentifier>
     </Filter>
-    <Filter Include="SelectHead_BKT\Header Files">
-      <UniqueIdentifier>{fb8f8586-b4ee-4634-b042-ac290d448a9d}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="SelectHead_BKT\Source Files">
-      <UniqueIdentifier>{78b3bae9-18a4-4376-abcc-5ef73815b17f}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="IndexBuildManager">
-      <UniqueIdentifier>{62bf0292-8022-4be0-9ccb-cb6aed06a8e3}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="IndexBuildManager\Header Files">
-      <UniqueIdentifier>{016786b0-e2ca-4b12-b811-dc897388d11e}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="IndexBuildManager\Source Files">
-      <UniqueIdentifier>{aebe0558-4157-4517-a35b-05353edc3172}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="BuildHead">
-      <UniqueIdentifier>{64670bba-db52-4898-a46a-3b7e83a4490c}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="BuildHead\Header Files">
-      <UniqueIdentifier>{da061d55-d526-46b4-9fe3-09a05cc3fbae}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
-    <Filter Include="BuildHead\Source Files">
-      <UniqueIdentifier>{f7b4682c-0d87-4083-951a-b5d0128b4136}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="VectorSearch">
-      <UniqueIdentifier>{4d32979e-5535-477d-9f12-f79b282db426}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="VectorSearch\Header Files">
-      <UniqueIdentifier>{81dd1aa5-a598-4e10-80e7-9ddb8eaf8d91}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="VectorSearch\Source Files">
-      <UniqueIdentifier>{9bd14025-bcb2-4c90-afbb-8955f6897e49}</UniqueIdentifier>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{6835b7a3-6818-4a89-89c0-fc6527dbf613}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\SelectHead.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
+    <ClInclude Include="inc\SSDServing\main.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\AnalyzeTree.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
+    <ClInclude Include="inc\SSDServing\SelectHead.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BKTNodeInfo.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
+    <ClInclude Include="inc\SSDServing\Utils.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\ParameterDefinitionList.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\Options.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BuildBKT.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\BuildHead\Options.h">
-      <Filter>BuildHead\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h">
-      <Filter>BuildHead\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h">
-      <Filter>SelectHead_BKT\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h">
-      <Filter>BuildHead\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h">
-      <Filter>IndexBuildManager\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\BootVectorSearch.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\IExtraSearcher.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchStats.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\ExtraFullGraphSearcher.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\Options.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\BuildSsdIndex.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\ParameterDefinitionList.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchSsdIndex.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h">
-      <Filter>VectorSearch\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\CommonDefines.h">
-      <Filter>IndexBuildManager\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Options.h">
-      <Filter>IndexBuildManager\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\ParameterDefinitionList.h">
-      <Filter>IndexBuildManager\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Utils.h">
-      <Filter>IndexBuildManager\Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="inc\SSDServing\VectorSearch\AsyncFileReader.h">
-      <Filter>VectorSearch\Header Files</Filter>
+    <ClInclude Include="inc\SSDServing\SSDIndex.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp">
-      <Filter>SelectHead_BKT\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\AnalyzeTree.cpp">
-      <Filter>SelectHead_BKT\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp">
-      <Filter>SelectHead_BKT\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\BuildHead\BootBuildHead.cpp">
-      <Filter>BuildHead\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\IndexBuildManager\main.cpp">
-      <Filter>IndexBuildManager\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\VectorSearch\BootVectorSearch.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\VectorSearch\TimeUtils.cpp">
-      <Filter>VectorSearch\Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SSDServing\IndexBuildManager\Utils.cpp">
-      <Filter>IndexBuildManager\Source Files</Filter>
+    <ClCompile Include="src\SSDServing\main.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -21,14 +21,14 @@ template<typename T>
 void GenerateVectors(std::string fileName, SPTAG::SizeType rows, SPTAG::DimensionType dims, SPTAG::VectorFileType fileType) {
 	if (boost::filesystem::exists(fileName))
 	{
-		fprintf(stdout, "%s was generated. Skip generation.", fileName.c_str());
+		fprintf(stdout, "%s was generated. Skip generation.\n", fileName.c_str());
 		return;
 	}
 
 	std::ofstream of(fileName, std::ofstream::binary);
 	if (!of.is_open())
 	{
-		fprintf(stderr, "%s can't be opened. ", fileName.c_str());
+		fprintf(stderr, "%s can't be opened.\n", fileName.c_str());
 		BOOST_CHECK(false);
 		return;
 	}
@@ -135,7 +135,7 @@ void TestHead(std::string configName, std::string OutputIDFile, std::string Outp
 	std::ofstream config(configName);
 	if (!config.is_open())
 	{
-		fprintf(stderr, "%s can't be opened. ", configName.c_str());
+		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
 		BOOST_CHECK(false);
 		return;
 	}
@@ -164,8 +164,8 @@ void TestHead(std::string configName, std::string OutputIDFile, std::string Outp
 	config << "PrintSizeCount=" << "true" << std::endl;
 
 	config.close();
-
-	SPTAG::SSDServing::BootProgram(configName.c_str());
+	std::map<std::string, std::map<std::string, std::string>> my_map;
+	SPTAG::SSDServing::BootProgram(false, &my_map, configName.c_str());
 }
 
 void TestBuildHead(
@@ -179,7 +179,7 @@ void TestBuildHead(
 	std::ofstream config(configName);
 	if (!config.is_open())
 	{
-		fprintf(stderr, "%s can't be opened. ", configName.c_str());
+		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
 		BOOST_CHECK(false);
 		return;
 	}
@@ -194,13 +194,13 @@ void TestBuildHead(
 
 		if (boost::filesystem::exists(p_builderFile))
 		{
-			fprintf(stdout, "%s was generated. Skip generation.", p_builderFile.c_str());
+			fprintf(stdout, "%s was generated. Skip generation.\n", p_builderFile.c_str());
 		}
 		else {
 			std::ofstream bf(p_builderFile);
 			if (!bf.is_open())
 			{
-				fprintf(stderr, "%s can't be opened. ", p_builderFile.c_str());
+				fprintf(stderr, "%s can't be opened.\n", p_builderFile.c_str());
 				BOOST_CHECK(false);
 				return;
 			}
@@ -216,7 +216,8 @@ void TestBuildHead(
 
 	config.close();
 
-	SPTAG::SSDServing::BootProgram(configName.c_str());
+	std::map<std::string, std::map<std::string, std::string>> my_map;
+	SPTAG::SSDServing::BootProgram(false, &my_map, configName.c_str());
 }
 
 void TestBuildSSDIndex(std::string configName,
@@ -230,7 +231,7 @@ void TestBuildSSDIndex(std::string configName,
 	std::ofstream config(configName);
 	if (!config.is_open())
 	{
-		fprintf(stderr, "%s can't be opened. ", configName.c_str());
+		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
 		BOOST_CHECK(false);
 		return;
 	}
@@ -239,13 +240,13 @@ void TestBuildSSDIndex(std::string configName,
 	{
 		if (boost::filesystem::exists(p_headConfig))
 		{
-			fprintf(stdout, "%s was generated. Skip generation.", p_headConfig.c_str());
+			fprintf(stdout, "%s was generated. Skip generation.\n", p_headConfig.c_str());
 		}
 		else {
 			std::ofstream bf(p_headConfig);
 			if (!bf.is_open())
 			{
-				fprintf(stderr, "%s can't be opened. ", p_headConfig.c_str());
+				fprintf(stderr, "%s can't be opened.\n", p_headConfig.c_str());
 				BOOST_CHECK(false);
 				return;
 			}
@@ -268,8 +269,8 @@ void TestBuildSSDIndex(std::string configName,
 	config << "OutputEmptyReplicaID=" << p_outputEmptyReplicaID << std::endl;
 
 	config.close();
-
-	SPTAG::SSDServing::BootProgram(configName.c_str());
+	std::map<std::string, std::map<std::string, std::string>> my_map;
+	SPTAG::SSDServing::BootProgram(false, &my_map, configName.c_str());
 }
 
 void TestSearchSSDIndex(
@@ -285,7 +286,7 @@ void TestSearchSSDIndex(
 	std::ofstream config(configName);
 	if (!config.is_open())
 	{
-		fprintf(stderr, "%s can't be opened. ", configName.c_str());
+		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
 		BOOST_CHECK(false);
 		return;
 	}
@@ -294,13 +295,13 @@ void TestSearchSSDIndex(
 	{
 		if (boost::filesystem::exists(p_headConfig))
 		{
-			fprintf(stdout, "%s was generated. Skip generation.", p_headConfig.c_str());
+			fprintf(stdout, "%s was generated. Skip generation.\n", p_headConfig.c_str());
 		}
 		else {
 			std::ofstream bf(p_headConfig);
 			if (!bf.is_open())
 			{
-				fprintf(stderr, "%s can't be opened. ", p_headConfig.c_str());
+				fprintf(stderr, "%s can't be opened.\n", p_headConfig.c_str());
 				BOOST_CHECK(false);
 				return;
 			}
@@ -326,8 +327,8 @@ void TestSearchSSDIndex(
 	config << "QueryCountLimit=" << 10000 << std::endl;
 
 	config.close();
-
-	SPTAG::SSDServing::BootProgram(configName.c_str());
+	std::map<std::string, std::map<std::string, std::string>> my_map;
+	SPTAG::SSDServing::BootProgram(false, &my_map, configName.c_str());
 }
 
 void RunFromMap() {

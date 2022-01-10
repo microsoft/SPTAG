@@ -84,7 +84,7 @@ namespace SPTAG
         };
 
         template <typename ValueType>
-        class ExtraFullGraphSearcher : public IExtraSearcher<ValueType>
+        class ExtraFullGraphSearcher : public IExtraSearcher
         {
         public:
             ExtraFullGraphSearcher()
@@ -115,13 +115,15 @@ namespace SPTAG
             }
 
             virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
-                COMMON::QueryResultSet<ValueType>& p_queryResults,
+                QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
                 SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found)
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
                 p_exWorkSpace->m_deduper.clear();
+
+                COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
 
                 std::atomic<int> unprocessed(0);
                 std::atomic<int> curCheck(0);
@@ -190,8 +192,8 @@ namespace SPTAG
 
                         if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
 
-                        auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
-                        p_queryResults.AddPoint(vectorID, distance2leaf);
+                        auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
+                        queryResults.AddPoint(vectorID, distance2leaf);
                         curCheck += 1;
                     }
 
@@ -227,8 +229,8 @@ namespace SPTAG
 
                             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
 
-                            auto distance2leaf = p_index->ComputeDistance(p_queryResults.GetQuantizedTarget(), vectorInfo);
-                            p_queryResults.AddPoint(vectorID, distance2leaf);
+                            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
+                            queryResults.AddPoint(vectorID, distance2leaf);
                             curCheck += 1;
                         }
                         if (truth) {
@@ -480,7 +482,6 @@ namespace SPTAG
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t5 - t1).count();
                 LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
              
-                LoadIndex(p_opt);
                 return true;
             }
 

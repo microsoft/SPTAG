@@ -44,7 +44,7 @@ namespace SPTAG
             std::shared_ptr<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
 
-            std::unique_ptr<IExtraSearcher<T>> m_extraSearcher;
+            std::shared_ptr<IExtraSearcher> m_extraSearcher;
             std::unique_ptr<COMMON::WorkSpacePool<ExtraWorkSpace>> m_workSpacePool;
 
             Options m_options;
@@ -60,6 +60,10 @@ namespace SPTAG
             }
 
             ~Index() {}
+
+            inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_index; }
+            inline std::shared_ptr<IExtraSearcher> GetDiskIndex() { return m_extraSearcher; }
+            inline Options* GetOptions() { return &m_options; }
 
             inline SizeType GetNumSamples() const { return m_options.m_vectorSize; }
             inline DimensionType GetFeatureDim() const { return m_options.m_dim; }
@@ -111,7 +115,7 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false);
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
-            ErrorCode DebugSearchIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
+            ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr);
             ErrorCode UpdateIndex();
 
