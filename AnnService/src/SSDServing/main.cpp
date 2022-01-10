@@ -74,13 +74,13 @@ namespace SPTAG {
 				for (auto& KV : sectionKV.second) {
 					std::string section = sectionKV.first, param = KV.first, value = KV.second;
 					if (Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), SEC_SEARCH_SSD_INDEX.c_str())) {
-						if (param == "isExecute") {
+						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "isExecute")) {
 							searchSSD = Helper::StrUtils::StrEqualIgnoreCase(value.c_str(), "true");
 							continue;
 						}
-						if (param == "BuildSsdIndex") continue;
-						if (param == "PostingPageLimit") param = "SearchPostingPageLimit";
-						if (param == "InternalResultNum") param = "SearchInternalResultNum";
+						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "BuildSsdIndex")) continue;
+						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "PostingPageLimit")) param = "SearchPostingPageLimit";
+						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "InternalResultNum")) param = "SearchInternalResultNum";
 						section = SEC_BUILD_SSD_INDEX;
 					}
 					index->SetParameter(param, value, section);
