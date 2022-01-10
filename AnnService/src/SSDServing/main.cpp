@@ -69,10 +69,17 @@ namespace SPTAG {
 				return -1;
 			}
 
+			bool searchSSD = false;
 			for (auto& sectionKV : *config_map) {
 				for (auto& KV : sectionKV.second) {
 					std::string section = sectionKV.first, param = KV.first, value = KV.second;
 					if (Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), SEC_SEARCH_SSD_INDEX.c_str())) {
+						if (param == "isExecute") {
+							searchSSD = Helper::StrUtils::StrEqualIgnoreCase(value.c_str(), "true");
+							continue;
+						}
+						if (param == "BuildSsdIndex") continue;
+						if (param == "PostingPageLimit") param = "SearchPostingPageLimit";
 						if (param == "InternalResultNum") param = "SearchInternalResultNum";
 						section = SEC_BUILD_SSD_INDEX;
 					}
@@ -143,7 +150,7 @@ namespace SPTAG {
 				LOG(Helper::LogLevel::LL_Info, "End generating truth.\n");
 			}
 
-			if (opts->m_enableSSD && !opts->m_buildSsdIndex) {
+			if (searchSSD) {
 #define DefineVectorValueType(Name, Type) \
 	if (opts->m_valueType == VectorValueType::Name) { \
         SSDIndex::Search((SPANN::Index<Type>*)(index.get())); \
