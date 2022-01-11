@@ -267,29 +267,27 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         quan_vecset = vectorReader->GetVectorSet();
     }
     else {
+        omp_set_num_threads(16);
+
         std::cout << "Building codebooks!" << std::endl;
         R* vecs = (R*)(real_vecset->GetData());
 
         std::shared_ptr<R> codebooks(new R[M * Ks * QuanDim], std::default_delete<R[]>());
-        std::unique_ptr<R[]> kmeans(new R[Ks * QuanDim]);
         std::unique_ptr<int[]> belong(new int[n]);
         for (int i = 0; i < M; i++) {
+            R* kmeans = codebooks.get() + i * Ks * QuanDim;
             for (int j = 0; j < Ks; j++) {
-                for (int t = 0; t < QuanDim; t++) {
-                    kmeans[j * QuanDim + t] = vecs[j * m + i * QuanDim + t];
-                }
+                std::memcpy(kmeans + j * QuanDim, vecs + j * m + i * QuanDim, sizeof(R) * QuanDim);
             }
             int cnt = 100;
             while (cnt--) {
                 //calculate cluster
+#pragma omp parallel for
                 for (int ii = 0; ii < n; ii++) {
                     double min_dis = 1e9;
                     int min_id = 0;
                     for (int jj = 0; jj < Ks; jj++) {
-                        double now_dis = 0;
-                        for (int kk = 0; kk < QuanDim; kk++) {
-                            now_dis += (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]) * (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]);
-                        }
+                        double now_dis = COMMON::DistanceUtils::ComputeDistance(vecs + ii * m + i * QuanDim, kmeans + jj * QuanDim, QuanDim, DistCalcMethod::L2);
                         if (now_dis < min_dis) {
                             min_dis = now_dis;
                             min_id = jj;
@@ -298,7 +296,8 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
                     belong[ii] = min_id;
                 }
                 //recalculate kmeans
-                std::memset(kmeans.get(), 0, sizeof(R) * Ks * QuanDim);
+                std::memset(kmeans, 0, sizeof(R) * Ks * QuanDim);
+#pragma omp parallel for
                 for (int ii = 0; ii < Ks; ii++) {
                     int num = 0;
                     for (int jj = 0; jj < n; jj++) {
@@ -312,24 +311,6 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
                     for (int jj = 0; jj < QuanDim; jj++) {
                         kmeans[ii * QuanDim + jj] /= num;
                     }
-                }
-            }
-            //use kmeans to calculate codebook
-            for (int j = 0; j < Ks; j++) {
-                double min_dis = 1e9;
-                int min_id = 0;
-                for (int ii = 0; ii < n; ii++) {
-                    double now_dis = 0;
-                    for (int t = 0; t < QuanDim; t++) {
-                        now_dis += (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]) * (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]);
-                    }
-                    if (now_dis < min_dis) {
-                        min_dis = now_dis;
-                        min_id = ii;
-                    }
-                }
-                for (int t = 0; t < QuanDim; t++) {
-                    codebooks.get()[i * Ks * QuanDim + j * QuanDim + t] = vecs[min_id * m + i * QuanDim + t];
                 }
             }
         }
