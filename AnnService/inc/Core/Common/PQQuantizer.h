@@ -75,7 +75,6 @@ namespace SPTAG
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
             bool m_EnableADC;
-            //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
@@ -85,15 +84,15 @@ namespace SPTAG
         };
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer()
+        PQQuantizer<T>::PQQuantizer() : m_NumSubvectors(0), m_KsPerSubvector(0), m_DimPerSubvector(0), m_BlockSize(0), m_EnableADC(false)
         {
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::shared_ptr<T> Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks))
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::shared_ptr<T> Codebooks) : 
+            m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), 
+            m_BlockSize(KsPerSubvector* KsPerSubvector), m_EnableADC(EnableADC), m_codebooks(std::move(Codebooks))
         {
-            m_EnableADC = EnableADC;
-
             auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
             auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
 
@@ -268,12 +267,13 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+
             m_codebooks.reset(new T[m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector], std::default_delete<T[]>());
             LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
-            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
             auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
 

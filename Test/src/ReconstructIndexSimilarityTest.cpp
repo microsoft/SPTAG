@@ -169,7 +169,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<R> dist(-1000, 1000);
-    int n = 10000, q = 2000;
+    int n = 1000, q = 200;
     int m = 256;
     int M = 128;
     int Ks = 256;
@@ -244,7 +244,9 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
 
     if (fileexists(CODEBOOK_FILE.c_str()) && fileexists("quantest_quan_vector.bin") && fileexists("quantest_rec_vector.bin")) {
         auto ptr = SPTAG::f_createIO();
-        BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
+        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+        }
         SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
         BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
 
@@ -318,11 +320,15 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         std::cout << "Building Finish!" << std::endl;
         auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, codebooks);
         auto ptr = SPTAG::f_createIO();
-        BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
+        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
+        }
         baseQuantizer->SaveQuantizer(ptr);
         ptr->ShutDown();
 
-        BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
+        if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+        }
         SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
         BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
 
