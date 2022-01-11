@@ -24,7 +24,7 @@ namespace SPTAG
         public:
             PQQuantizer();
 
-            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks);
+            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::shared_ptr<T> Codebooks);
 
             ~PQQuantizer();
 
@@ -79,7 +79,7 @@ namespace SPTAG
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
-            std::unique_ptr<T[]> m_codebooks;
+            std::shared_ptr<T> m_codebooks;
             std::unique_ptr<const float[]> m_CosineDistanceTables;
             std::unique_ptr<const float[]> m_L2DistanceTables;
         };
@@ -90,9 +90,8 @@ namespace SPTAG
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, T* Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector)
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::shared_ptr<T> Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks))
         {
-            m_codebooks.reset(Codebooks);
             m_EnableADC = EnableADC;
 
             auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
@@ -105,8 +104,8 @@ namespace SPTAG
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
                     for (int k = 0; k < m_KsPerSubvector; k++) {
-                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
-                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&(m_codebooks.get()[baseIdx + j * m_DimPerSubvector]), &(m_codebooks.get()[baseIdx + k * m_DimPerSubvector]), m_DimPerSubvector));
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&(m_codebooks.get()[baseIdx + j * m_DimPerSubvector]), &(m_codebooks.get()[baseIdx + k * m_DimPerSubvector]), m_DimPerSubvector);
                     }
                 }
             }
@@ -172,8 +171,8 @@ namespace SPTAG
                     SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                     for (int j = 0; j < m_KsPerSubvector; j++)
                     {
-                        ADCtable[i * m_KsPerSubvector + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
-                        ADCtable[(m_NumSubvectors * m_KsPerSubvector) + i * m_KsPerSubvector + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        ADCtable[i * m_KsPerSubvector + j] = distCalcL2(subvec, &(m_codebooks.get()[basevecIdx + j * m_DimPerSubvector]), m_DimPerSubvector);
+                        ADCtable[(m_NumSubvectors * m_KsPerSubvector) + i * m_KsPerSubvector + j] = distCalcCosine(subvec, &(m_codebooks.get()[basevecIdx + j * m_DimPerSubvector]), m_DimPerSubvector);
                     }
                 }
             }
@@ -188,7 +187,7 @@ namespace SPTAG
                     const T* subvec = ((T*)vec) + i * m_DimPerSubvector;
                     SizeType basevecIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                     for (int j = 0; j < m_KsPerSubvector; j++) {
-                        float dist = distCalc(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        float dist = distCalc(subvec, &(m_codebooks.get()[basevecIdx + j * m_DimPerSubvector]), m_DimPerSubvector);
                         if (dist < minDist) {
                             bestIndex = j;
                             minDist = dist;
@@ -220,7 +219,7 @@ namespace SPTAG
                 SizeType codebook_idx = (i * m_KsPerSubvector * m_DimPerSubvector) + (qvec[i] * m_DimPerSubvector);
                 T* sub_vecout = &((T*)vecout)[i * m_DimPerSubvector];
                 for (int j = 0; j < m_DimPerSubvector; j++) {
-                    sub_vecout[j] = m_codebooks[codebook_idx + j];
+                    sub_vecout[j] = m_codebooks.get()[codebook_idx + j];
                 }
             }
         }
@@ -269,7 +268,7 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
-            m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            m_codebooks.reset(new T[m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector], std::default_delete<T[]>());
             LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
@@ -285,8 +284,8 @@ namespace SPTAG
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
                     for (int k = 0; k < m_KsPerSubvector; k++) {
-                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector));
-                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = DistanceUtils::ConvertDistanceBackToCosineSimilarity(cosineDist(&(m_codebooks.get()[baseIdx + j * m_DimPerSubvector]), &(m_codebooks.get()[baseIdx + k * m_DimPerSubvector]), m_DimPerSubvector));
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&(m_codebooks.get()[baseIdx + j * m_DimPerSubvector]), &(m_codebooks.get()[baseIdx + k * m_DimPerSubvector]), m_DimPerSubvector);
                     }
                 }
             }

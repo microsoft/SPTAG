@@ -28,6 +28,7 @@ namespace SPTAG {
 			const char* dataFilePath, 
 			const char* indexFilePath) {
 
+			bool searchSSD = false;
 			if (forANNIndexTestTool) {
 				(*config_map)[SEC_BASE]["ValueType"] = Helper::Convert::ConvertToString(valueType);
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = Helper::Convert::ConvertToString(distCalcMethod);
@@ -57,10 +58,20 @@ namespace SPTAG {
 				(*config_map)[SEC_SELECT_HEAD] = iniReader.GetParameters(SEC_SELECT_HEAD);
 				(*config_map)[SEC_BUILD_HEAD] = iniReader.GetParameters(SEC_BUILD_HEAD);
 				(*config_map)[SEC_BUILD_SSD_INDEX] = iniReader.GetParameters(SEC_BUILD_SSD_INDEX);
-				(*config_map)[SEC_SEARCH_SSD_INDEX] = iniReader.GetParameters(SEC_SEARCH_SSD_INDEX);
-				
+
 				valueType = iniReader.GetParameter(SEC_BASE, "ValueType", valueType);
 				distCalcMethod = iniReader.GetParameter(SEC_BASE, "DistCalcMethod", distCalcMethod);
+				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", true);
+				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", true);
+				
+				for (auto& KV : iniReader.GetParameters(SEC_SEARCH_SSD_INDEX)) {
+					std::string param = KV.first, value = KV.second;
+					if (buildSSD && Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "BuildSsdIndex")) continue;
+					if (buildSSD && Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "isExecute")) continue;
+					if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "PostingPageLimit")) param = "SearchPostingPageLimit";
+					if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "InternalResultNum")) param = "SearchInternalResultNum";
+					(*config_map)[SEC_BUILD_SSD_INDEX][param] = value;
+				}
 			}
 			
 			std::shared_ptr<VectorIndex> index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, valueType);
@@ -69,21 +80,9 @@ namespace SPTAG {
 				return -1;
 			}
 
-			bool searchSSD = false;
 			for (auto& sectionKV : *config_map) {
 				for (auto& KV : sectionKV.second) {
-					std::string section = sectionKV.first, param = KV.first, value = KV.second;
-					if (Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), SEC_SEARCH_SSD_INDEX.c_str())) {
-						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "isExecute")) {
-							searchSSD = Helper::StrUtils::StrEqualIgnoreCase(value.c_str(), "true");
-							continue;
-						}
-						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "BuildSsdIndex")) continue;
-						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "PostingPageLimit")) param = "SearchPostingPageLimit";
-						if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "InternalResultNum")) param = "SearchInternalResultNum";
-						section = SEC_BUILD_SSD_INDEX;
-					}
-					index->SetParameter(param, value, section);
+					index->SetParameter(KV.first, KV.second, sectionKV.first);
 				}
 			}
 
