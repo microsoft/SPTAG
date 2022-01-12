@@ -61,8 +61,8 @@ namespace SPTAG {
 
 				valueType = iniReader.GetParameter(SEC_BASE, "ValueType", valueType);
 				distCalcMethod = iniReader.GetParameter(SEC_BASE, "DistCalcMethod", distCalcMethod);
-				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", true);
-				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", true);
+				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", false);
+				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", false);
 				
 				for (auto& KV : iniReader.GetParameters(SEC_SEARCH_SSD_INDEX)) {
 					std::string param = KV.first, value = KV.second;
