@@ -237,7 +237,7 @@ VectorIndex::BuildMetaMapping(bool p_checkDeleted)
 ErrorCode
 VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs)
 {
-    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
     ErrorCode ret = ErrorCode::Success;
     {
@@ -282,7 +282,7 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
 ErrorCode
 VectorIndex::SaveIndex(const std::string& p_folderPath)
 {
-    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
     std::string folderPath(p_folderPath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep)
@@ -357,7 +357,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
 ErrorCode
 VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort)
 {
-    if (GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
+    if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0) return ErrorCode::EmptyIndex;
 
     auto fp = SPTAG::f_createIO();
     if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
