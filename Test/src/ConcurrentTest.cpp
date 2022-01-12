@@ -18,7 +18,8 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
-    vecIndex->SetParameter("DataBlockSize", "100");
+    vecIndex->SetParameter("DataBlockSize", "1024");
+    vecIndex->SetParameter("DataCapacity", "1048576");
 
     bool stop = false;
 
