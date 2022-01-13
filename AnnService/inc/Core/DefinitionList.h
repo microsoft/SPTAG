@@ -35,6 +35,7 @@ DefineVectorValueType2(Float, Float, float, float)
 
 DefineDistCalcMethod(L2)
 DefineDistCalcMethod(Cosine)
+DefineDistCalcMethod(InnerProduct)
 
 #endif // DefineDistCalcMethod
 
