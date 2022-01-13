@@ -17,6 +17,7 @@
 #ifndef _MSC_VER
 #include <stdio.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <cstring>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -38,6 +39,7 @@ inline bool fileexists(const char* path) {
     struct stat info;
     return stat(path, &info) == 0 && (info.st_mode & S_IFDIR) == 0;
 }
+
 template <class T>
 inline T min(T a, T b) {
     return a < b ? a : b;
@@ -77,7 +79,6 @@ inline bool fileexists(const TCHAR* path) {
     auto dwAttr = GetFileAttributes(path);
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
-
 #define mkdir(a) CreateDirectory(a, NULL)
 #endif
 
@@ -91,7 +92,9 @@ typedef std::int32_t DimensionType;
 const SizeType MaxSize = (std::numeric_limits<SizeType>::max)();
 const float MinDist = (std::numeric_limits<float>::min)();
 const float MaxDist = (std::numeric_limits<float>::max)() / 10;
-const float Epsilon = 0.000000001f;
+const float Epsilon = 0.000001f;
+const std::uint16_t PageSize = 4096;
+const int PageSizeEx = 12;
 
 extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
 

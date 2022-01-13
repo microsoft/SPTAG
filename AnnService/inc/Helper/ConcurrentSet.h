@@ -4,16 +4,23 @@
 #ifndef _SPTAG_HELPER_CONCURRENTSET_H_
 #define _SPTAG_HELPER_CONCURRENTSET_H_
 
+#ifndef _MSC_VER
 #include <shared_mutex>
 #include <unordered_set>
 #include <unordered_map>
-
+#include <queue>
+#else
+#include <concurrent_unordered_map.h>
+#include <concurrent_queue.h>
+#include <concurrent_unordered_set.h>
+#endif
 namespace SPTAG
 {
     namespace Helper
     {
         namespace Concurrent
         {
+#ifndef _MSC_VER
             template <typename T>
             class ConcurrentSet
             {
@@ -28,10 +35,10 @@ namespace SPTAG
                     return m_data.size();
                 }
 
-                bool contains(const T& key) const
+                size_t count(const T& key) const
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
-                    return (m_data.find(key) != m_data.end());
+                    return m_data.count(key);
                 }
 
                 void insert(const T& key)
@@ -76,6 +83,46 @@ namespace SPTAG
                 std::unique_ptr<std::shared_timed_mutex> m_lock;
                 std::unordered_map<K, V> m_data;
             };
+
+            template <typename T>
+            class ConcurrentQueue
+            {
+            public:
+
+                ConcurrentQueue() {}
+
+                ~ConcurrentQueue() {}
+
+                void push(const T& j)
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    m_queue.push(j);
+                }
+
+                bool try_pop(T& j)
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    if (m_queue.empty()) return false;
+
+                    j = m_queue.front();
+                    m_queue.pop();
+                    return true;
+                }
+
+            protected:
+                std::mutex m_lock;
+                std::queue<T> m_queue;
+            };
+#else
+            template <typename T>
+            using ConcurrentSet = Concurrency::concurrent_unordered_set<T>;
+
+            template <typename K, typename V>
+            using ConcurrentMap = Concurrency::concurrent_unordered_map<K, V>;
+            
+            template <typename T>
+            using ConcurrentQueue = Concurrency::concurrent_queue<T>;
+#endif
         }
     }
 }

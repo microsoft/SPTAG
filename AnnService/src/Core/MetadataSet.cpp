@@ -79,8 +79,23 @@ MetadataSet::MetadataSet()
 }
 
 
-MetadataSet:: ~MetadataSet()
+MetadataSet::~MetadataSet()
 {
+}
+
+bool MetadataSet::GetMetadataOffsets(const std::uint8_t* p_meta, const std::uint64_t p_metaLength, std::uint64_t* p_offsets, std::uint64_t p_offsetLength, char p_delimiter)
+{
+    std::uint64_t current = 0;
+    p_offsets[current++] = 0;
+    for (std::uint64_t i = 0; i < p_metaLength && current < p_offsetLength; i++) {
+        if ((char)(p_meta[i]) == p_delimiter)
+            p_offsets[current++] = (std::uint64_t)(i + 1);
+    }
+    if ((char)(p_meta[p_metaLength - 1]) != p_delimiter && current < p_offsetLength)
+        p_offsets[current++] = p_metaLength;
+
+    if (current < p_offsetLength) return false;
+    return true;
 }
 
 
@@ -229,7 +244,7 @@ FileMetadataSet::SaveMetadata(const std::string& p_metaFile, const std::string& 
         std::rename((p_metaFile + "_tmp").c_str(), p_metaFile.c_str());
         std::rename((p_metaindexFile + "_tmp").c_str(), p_metaindexFile.c_str());
         if (!m_fp->Initialize(p_metaFile.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-        m_count = Count();
+        m_count = static_cast<SizeType>(m_offsets.size() - 1);
         m_newdata.clear();
     }
     return ErrorCode::Success;

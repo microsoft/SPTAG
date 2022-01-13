@@ -1,23 +1,36 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#pragma once
+#include "inc/Core/Common.h"
+#include "inc/Core/Common/BKTree.h"
+#include "inc/Core/SPANN/Options.h"
+#include "inc/Helper/StringConvert.h"
+#include "inc/Helper/VectorSetReader.h"
+#include "Utils.h"
+
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
 #include <random>
 
-#include "inc/Core/Common/BKTree.h"
-
-#include "inc/SSDServing/SelectHead_BKT/SelectHead.h"
-#include "inc/SSDServing/SelectHead_BKT/BKTNodeInfo.h"
-#include "inc/SSDServing/IndexBuildManager/Utils.h"
-#include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
-
 namespace SPTAG {
 	namespace SSDServing {
-		namespace SelectHead_BKT {
+		namespace SelectHead {
+            struct BKTNodeInfo
+            {
+                BKTNodeInfo() : leafSize(0), minDepth(INT32_MAX), maxDepth(0), parent(-1)
+                {
+                }
 
-            std::mt19937 g_random;
+                int leafSize;
+
+                int minDepth;
+
+                int maxDepth;
+
+                int parent;
+            };
 
             struct HeadCandidate
             {
@@ -31,6 +44,121 @@ namespace SPTAG {
 
                 int depth;
             };
+
+            template<typename T>
+            float Std(T* nums, size_t size) {
+                float var = 0;
+
+                float mean = 0;
+                for (size_t i = 0; i < size; i++)
+                {
+                    mean += nums[i] / static_cast<float>(size);
+                }
+
+                for (size_t i = 0; i < size; i++)
+                {
+                    float temp = nums[i] - mean;
+                    var += (float)pow(temp, 2.0);
+                }
+                var /= static_cast<float>(size);
+
+                return sqrt(var);
+            }
+
+            void CalcLeafSize(int p_nodeID,
+                const std::shared_ptr<COMMON::BKTree> p_tree,
+                std::unordered_map<int, int>& p_counter) {
+
+                SPTAG::COMMON::BKTNode& node = (*p_tree)[p_nodeID];
+
+                p_counter[node.centerid] = 1;
+
+                if (node.childStart < 0)
+                {
+                    return;
+                }
+
+                for (SPTAG::SizeType i = node.childStart; i < node.childEnd; i++)
+                {
+                    CalcLeafSize(i, p_tree, p_counter);
+                    p_counter[node.centerid] += p_counter[(*p_tree)[i].centerid];
+                }
+            }
+
+            void DfsAnalyze(int p_nodeID,
+                const std::shared_ptr<COMMON::BKTree> p_tree,
+                std::shared_ptr<VectorSet> p_vectorSet,
+                const SPANN::Options& p_opts,
+                int p_height,
+                std::vector<BKTNodeInfo>& p_nodeInfos) {
+
+                const auto& node = (*p_tree)[p_nodeID];
+
+                // Leaf.
+                if (node.childStart < 0)
+                {
+                    p_nodeInfos[p_nodeID].leafSize = 1;
+                    p_nodeInfos[p_nodeID].minDepth = 0;
+                    p_nodeInfos[p_nodeID].maxDepth = 0;
+
+                    return;
+                }
+
+                p_nodeInfos[p_nodeID].leafSize = 0;
+
+                int& minDepth = p_nodeInfos[p_nodeID].minDepth;
+                int& maxDepth = p_nodeInfos[p_nodeID].maxDepth;
+
+                int sinlgeCount = 0;
+                for (int nodeId = node.childStart; nodeId < node.childEnd; ++nodeId)
+                {
+                    DfsAnalyze(nodeId, p_tree, p_vectorSet, p_opts, p_height + 1, p_nodeInfos);
+                    if (minDepth > p_nodeInfos[nodeId].minDepth)
+                    {
+                        minDepth = p_nodeInfos[nodeId].minDepth;
+                    }
+
+                    if (maxDepth < p_nodeInfos[nodeId].maxDepth)
+                    {
+                        maxDepth = p_nodeInfos[nodeId].maxDepth;
+                    }
+
+                    if (p_nodeInfos[nodeId].maxDepth == 1 && p_nodeInfos[nodeId].leafSize == 1)
+                    {
+                        ++sinlgeCount;
+                    }
+
+                    p_nodeInfos[p_nodeID].leafSize += p_nodeInfos[nodeId].leafSize;
+                }
+
+                ++minDepth;
+                ++maxDepth;
+
+                if (p_height > 5 || sinlgeCount == 0)
+                {
+                    return;
+                }
+
+                LOG(Helper::LogLevel::LL_Info,
+                    "CheckNode: %8d, Height: %3d, MinDepth: %3d, MaxDepth: %3d, Children: %3d, Single: %3d\n",
+                    p_nodeID,
+                    p_height,
+                    minDepth,
+                    maxDepth,
+                    node.childEnd - node.childStart,
+                    sinlgeCount);
+
+                for (int nodeId = node.childStart; nodeId < node.childEnd; ++nodeId)
+                {
+                    LOG(Helper::LogLevel::LL_Info,
+                        "    ChildNode: %8d, MinDepth: %3d, MaxDepth: %3d, ChildrenCount: %3d, LeafCount: %3d\n",
+                        nodeId,
+                        p_nodeInfos[nodeId].minDepth,
+                        p_nodeInfos[nodeId].maxDepth,
+                        (*p_tree)[nodeId].childEnd - (*p_tree)[nodeId].childStart,
+                        p_nodeInfos[nodeId].leafSize);
+                }
+            }
 
             // Return height of current Node.
             void DfsSelect(int p_nodeID,
@@ -108,7 +236,7 @@ namespace SPTAG {
             }
 
 
-            void SelectHeadStatically(const std::shared_ptr<COMMON::BKTree> p_tree, const int p_vectorCount, const Options& p_opts, std::vector<int>& p_selected)
+            void SelectHeadStatically(const std::shared_ptr<COMMON::BKTree> p_tree, const int p_vectorCount, const SPANN::Options& p_opts, std::vector<int>& p_selected)
             {
                 std::vector<HeadCandidate> candidates;
                 candidates.reserve(p_tree->size());
@@ -291,7 +419,7 @@ namespace SPTAG {
 
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree,
                 int p_nodeID,
-                const Options& p_opts,
+                const SPANN::Options& p_opts,
                 std::vector<int>& p_selected)
             {
                 typedef std::pair<int, int> CSPair;
@@ -342,13 +470,13 @@ namespace SPTAG {
 
             void SelectHeadDynamically_Old(const std::shared_ptr<COMMON::BKTree> p_tree,
                 int p_vectorCount,
-                const Options& p_opts,
-                std::vector<int>& p_selected) 
+                const SPANN::Options& p_opts,
+                std::vector<int>& p_selected)
             {
                 p_selected.clear();
                 p_selected.reserve(p_vectorCount);
 
-                if (CalcHeadCnt(p_opts.m_ratio, p_vectorCount) >= p_vectorCount)
+                if (static_cast<int>(std::round(p_opts.m_ratio * p_vectorCount)) >= p_vectorCount)
                 {
                     for (int i = 0; i < p_vectorCount; ++i)
                     {
@@ -357,7 +485,7 @@ namespace SPTAG {
 
                     return;
                 }
-                Options opts = p_opts;
+                SPANN::Options opts = p_opts;
 
                 int selectThreshold = p_opts.m_selectThreshold;
                 int splitThreshold = p_opts.m_splitThreshold;
@@ -423,13 +551,14 @@ namespace SPTAG {
 
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree,
                 int p_vectorCount,
-                const Options& p_opts,
+                const SPANN::Options& p_opts,
                 std::vector<int>& p_selected)
             {
+                std::mt19937 random;
                 p_selected.clear();
                 p_selected.reserve(p_vectorCount);
 
-                if (CalcHeadCnt(p_opts.m_ratio, p_vectorCount) >= p_vectorCount)
+                if (static_cast<int>(std::round(p_opts.m_ratio * p_vectorCount)) >= p_vectorCount)
                 {
                     for (int i = 0; i < p_vectorCount; ++i)
                     {
@@ -442,7 +571,7 @@ namespace SPTAG {
                 const double c_minSSRatio = 1.8;
                 const double c_maxSSRatio = 2.2;
 
-                Options opts = p_opts;
+                SPANN::Options opts = p_opts;
 
                 int selectThreshold = p_opts.m_selectThreshold;
                 int splitThreshold = p_opts.m_splitThreshold;
@@ -557,7 +686,7 @@ namespace SPTAG {
                         std::uniform_int_distribution<> distrib(-8, 8);
                         do
                         {
-                            tryStep = distrib(g_random);
+                            tryStep = distrib(random);
                         } while (tryStep == 0);
 
                         trySelect += tryStep;
@@ -588,7 +717,7 @@ namespace SPTAG {
                 p_selected.erase(std::unique(p_selected.begin(), p_selected.end()), p_selected.end());
             }
 
-			ErrorCode SelectHead(std::shared_ptr<VectorSet> vectorSet, std::shared_ptr<COMMON::BKTree> bkt, Options& opts, std::unordered_map<int, int>& counter, std::vector<int>& selected) {
+            ErrorCode SelectHead(std::shared_ptr<VectorSet> vectorSet, std::shared_ptr<COMMON::BKTree> bkt, SPANN::Options& opts, std::unordered_map<int, int>& counter, std::vector<int>& selected) {
                 selected.reserve(vectorSet->Count());
 
                 if (vectorSet->Count() == 1)
@@ -618,7 +747,7 @@ namespace SPTAG {
 
                 if (opts.m_calcStd) {
                     std::vector<int> leafSizes;
-                    for (SizeType& item: selected)
+                    for (SizeType& item : selected)
                     {
                         if (counter.count(item) <= 0)
                         {
@@ -652,8 +781,225 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "standard deviation is %.3f.\n", std);
                 }
 
-				return ErrorCode::Success;
-			}
+                return ErrorCode::Success;
+            }
+
+            template<typename T>
+            std::shared_ptr<COMMON::BKTree> BuildBKT(std::shared_ptr<VectorSet> p_vectorSet, const SPANN::Options& opts) {
+                std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
+                bkt->m_iBKTKmeansK = opts.m_iBKTKmeansK;
+                bkt->m_iBKTLeafSize = opts.m_iBKTLeafSize;
+                bkt->m_iSamples = opts.m_iSamples;
+                bkt->m_iTreeNumber = opts.m_iTreeNumber;
+                bkt->m_fBalanceFactor = opts.m_fBalanceFactor;
+                LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
+                LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
+                    bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, opts.m_iNumberOfThreads);
+                VectorSearch::TimeUtils::StopW sw;
+                int dataRowsInBlock = opts.m_datasetRowsInBlock;
+                int dataCapacity = opts.m_datasetCapacity;
+                COMMON::Dataset<T> data(p_vectorSet->Count(), p_vectorSet->Dimension(), dataRowsInBlock, dataCapacity, (T*)(p_vectorSet->GetData()));
+                bkt->BuildTrees<T>(data, opts.m_distCalcMethod, opts.m_iNumberOfThreads, nullptr, nullptr, true);
+                double elapsedMinutes = sw.getElapsedMin();
+
+                LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
+                LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n", elapsedMinutes, elapsedMinutes / 60.0);
+
+                std::stringstream bktFileNameBuilder;
+                bktFileNameBuilder << opts.m_vectorPath << ".bkt."
+                    << opts.m_iBKTKmeansK << "_"
+                    << opts.m_iBKTLeafSize << "_"
+                    << opts.m_iTreeNumber << "_"
+                    << opts.m_iSamples << "_"
+                    << static_cast<int>(opts.m_distCalcMethod) << ".bin";
+
+                std::string bktFileName = bktFileNameBuilder.str();
+                if (opts.m_saveBKT) {
+                    bkt->SaveTrees(bktFileName);
+                }
+
+                return bkt;
+            }
+
+            void AdjustOptions(SPANN::Options& p_opts, int p_vectorCount)
+            {
+                if (p_opts.m_headVectorCount != 0) p_opts.m_ratio = p_opts.m_headVectorCount * 1.0 / p_vectorCount;
+                int headCnt = static_cast<int>(std::round(p_opts.m_ratio * p_vectorCount));
+                if (headCnt == 0)
+                {
+                    for (double minCnt = 1; headCnt == 0; minCnt += 0.2)
+                    {
+                        p_opts.m_ratio = minCnt / p_vectorCount;
+                        headCnt = static_cast<int>(std::round(p_opts.m_ratio * p_vectorCount));
+                    }
+
+                    LOG(Helper::LogLevel::LL_Info, "Setting requires to select none vectors as head, adjusted it to %d vectors\n", headCnt);
+                }
+
+                if (p_opts.m_iBKTKmeansK > headCnt)
+                {
+                    p_opts.m_iBKTKmeansK = headCnt;
+                    LOG(Helper::LogLevel::LL_Info, "Setting of cluster number is less than head count, adjust it to %d\n", headCnt);
+                }
+
+                if (p_opts.m_selectThreshold == 0)
+                {
+                    p_opts.m_selectThreshold = min(p_vectorCount - 1, static_cast<int>(1 / p_opts.m_ratio));
+                    LOG(Helper::LogLevel::LL_Info, "Set SelectThreshold to %d\n", p_opts.m_selectThreshold);
+                }
+
+                if (p_opts.m_splitThreshold == 0)
+                {
+                    p_opts.m_splitThreshold = min(p_vectorCount - 1, static_cast<int>(p_opts.m_selectThreshold * 2));
+                    LOG(Helper::LogLevel::LL_Info, "Set SplitThreshold to %d\n", p_opts.m_splitThreshold);
+                }
+
+                if (p_opts.m_splitFactor == 0)
+                {
+                    p_opts.m_splitFactor = min(p_vectorCount - 1, static_cast<int>(std::round(1 / p_opts.m_ratio) + 0.5));
+                    LOG(Helper::LogLevel::LL_Info, "Set SplitFactor to %d\n", p_opts.m_splitFactor);
+                }
+            }
+
+            ErrorCode Bootstrap(SPANN::Options& opts) {
+
+                Utils::StopW sw;
+
+                LOG(Helper::LogLevel::LL_Info, "Start loading vector file.\n");
+                auto valueType = COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : opts.m_valueType;
+                std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(valueType, opts.m_dim, opts.m_vectorType, opts.m_vectorDelimiter));
+                auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+                if (ErrorCode::Success != vectorReader->LoadFile(opts.m_vectorPath))
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                    exit(1);
+                }
+                auto vectorSet = vectorReader->GetVectorSet();
+                if (opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(opts.m_iSelectHeadNumberOfThreads);
+                LOG(Helper::LogLevel::LL_Info, "Finish loading vector file.\n");
+
+                AdjustOptions(opts, vectorSet->Count());
+
+                std::vector<int> selected;
+
+                if (Helper::StrUtils::StrEqualIgnoreCase(opts.m_selectType.c_str(), "Random")) {
+                    LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
+                    selected.resize(vectorSet->Count());
+                    for (int i = 0; i < vectorSet->Count(); i++) selected[i] = i;
+                    std::random_shuffle(selected.begin(), selected.end());
+
+                    int headCnt = static_cast<int>(std::round(opts.m_ratio * vectorSet->Count()));
+                    selected.resize(headCnt);
+
+                }
+                else if (Helper::StrUtils::StrEqualIgnoreCase(opts.m_selectType.c_str(), "Clustering")) {
+                    LOG(Helper::LogLevel::LL_Info, "Start generating Clustering head.\n");
+                    int headCnt = static_cast<int>(std::round(opts.m_ratio * vectorSet->Count()));
+
+                    switch (valueType)
+                    {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        Clustering<Type>(vectorSet, opts, selected, headCnt); \
+		break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                    default: break;
+                    }
+
+                }
+                else if (Helper::StrUtils::StrEqualIgnoreCase(opts.m_selectType.c_str(), "BKT")) {
+                    LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
+                    std::shared_ptr<COMMON::BKTree> bkt;
+                    switch (valueType)
+                    {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        bkt = BuildBKT<Type>(vectorSet, opts); \
+		break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                    default: break;
+                    }
+                    LOG(Helper::LogLevel::LL_Info, "Finish generating BKT.\n");
+
+                    std::unordered_map<int, int> counter;
+
+                    if (opts.m_calcStd)
+                    {
+                        CalcLeafSize(0, bkt, counter);
+                    }
+
+                    if (opts.m_analyzeOnly)
+                    {
+                        LOG(Helper::LogLevel::LL_Info, "Analyze Only.\n");
+
+                        std::vector<BKTNodeInfo> bktNodeInfos(bkt->size());
+
+                        // Always use the first tree
+                        DfsAnalyze(0, bkt, vectorSet, opts, 0, bktNodeInfos);
+
+                        LOG(Helper::LogLevel::LL_Info, "Analyze Finish.\n");
+                    }
+                    else {
+                        if (SelectHead(vectorSet, bkt, opts, counter, selected) != ErrorCode::Success)
+                        {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to select head.\n");
+                            return ErrorCode::Fail;
+                        }
+                    }
+                }
+
+                LOG(Helper::LogLevel::LL_Info,
+                    "Seleted Nodes: %u, about %.2lf%% of total.\n",
+                    static_cast<unsigned int>(selected.size()),
+                    selected.size() * 100.0 / vectorSet->Count());
+
+                if (!opts.m_noOutput)
+                {
+                    std::sort(selected.begin(), selected.end());
+
+                    std::shared_ptr<Helper::DiskPriorityIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
+                    if (output == nullptr || outputIDs == nullptr ||
+                        !output->Initialize(opts.m_headVectorFile.c_str(), std::ios::binary | std::ios::out) ||
+                        !outputIDs->Initialize(opts.m_headIDFile.c_str(), std::ios::binary | std::ios::out)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n", opts.m_headVectorFile.c_str(), opts.m_headIDFile.c_str());
+                        exit(1);
+                    }
+
+                    SizeType val = static_cast<SizeType>(selected.size());
+                    if (output->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                        exit(1);
+                    }
+                    DimensionType dt = vectorSet->Dimension();
+                    if (output->WriteBinary(sizeof(dt), reinterpret_cast<char*>(&dt)) != sizeof(dt)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                        exit(1);
+                    }
+                    for (auto& ele : selected)
+                    {
+                        uint64_t vid = static_cast<uint64_t>(ele);
+                        if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                            exit(1);
+                        }
+                        if (output->WriteBinary(vectorSet->PerVectorDataSize(), (char*)(vectorSet->GetVector((SizeType)vid))) != vectorSet->PerVectorDataSize()) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                            exit(1);
+                        }
+                    }
+                }
+
+                double elapsedMinutes = sw.getElapsedMin();
+                LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedMinutes, elapsedMinutes / 60.0);
+
+                return ErrorCode::Success;
+            }
 		}
 	}
 }

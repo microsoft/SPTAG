@@ -20,13 +20,17 @@ public:
 
     ~AnnIndex();
 
-    void SetBuildParam(const char* p_name, const char* p_value);
+    void SetBuildParam(const char* p_name, const char* p_value, const char* p_section);
 
-    void SetSearchParam(const char* p_name, const char* p_value);
+    void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
-    bool Build(ByteArray p_data, SizeType p_num);
+    bool BuildSPANN(bool p_normalized);
 
-    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex);
+    bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
+
+    bool Build(ByteArray p_data, SizeType p_num, bool p_normalized);
+
+    bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
     std::shared_ptr<QueryResult> Search(ByteArray p_data, int p_resultNum);
 
@@ -40,9 +44,9 @@ public:
 
     bool Save(const char* p_saveFile) const;
 
-    bool Add(ByteArray p_data, SizeType p_num);
+    bool Add(ByteArray p_data, SizeType p_num, bool p_normalized);
 
-    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num);
+    bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
     bool Delete(ByteArray p_data, SizeType p_num);
 

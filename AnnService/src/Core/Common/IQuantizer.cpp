@@ -26,9 +26,13 @@ namespace SPTAG
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+                default: break;
                 }
                 
                 return DistanceUtils::Quantizer->LoadQuantizer(p_in);
+
+            default: break;
             }
             return ErrorCode::Success;
         }

@@ -19,7 +19,7 @@ namespace Helper
 class ReaderOptions : public ArgumentsParser
 {
 public:
-    ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32);
+    ReaderOptions(VectorValueType p_valueType, DimensionType p_dimension, VectorFileType p_fileType, std::string p_vectorDelimiter = "|", std::uint32_t p_threadNum = 32, bool p_normalized = false);
 
     ~ReaderOptions();
 
@@ -32,6 +32,8 @@ public:
     std::string m_vectorDelimiter;    
     
     std::uint32_t m_threadNum;
+
+    bool m_normalized;
 };
 
 class VectorSetReader
@@ -46,6 +48,8 @@ public:
     virtual std::shared_ptr<VectorSet> GetVectorSet(SizeType start = 0, SizeType end = -1) const = 0;
 
     virtual std::shared_ptr<MetadataSet> GetMetadataSet() const = 0;
+
+    virtual bool IsNormalized() const { return m_options->m_normalized; }
 
     static std::shared_ptr<VectorSetReader> CreateInstance(std::shared_ptr<ReaderOptions> p_options);
 

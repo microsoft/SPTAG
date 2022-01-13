@@ -19,44 +19,13 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\SSDServing\BuildHead\BootBuildHead.cpp" />
-    <ClCompile Include="src\SSDServing\IndexBuildManager\main.cpp" />
-    <ClCompile Include="src\SSDServing\IndexBuildManager\Utils.cpp" />
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\AnalyzeTree.cpp" />
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp" />
-    <ClCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\BootVectorSearch.cpp" />
-    <ClCompile Include="src\SSDServing\VectorSearch\TimeUtils.cpp" />
+    <ClCompile Include="src\SSDServing\main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h" />
-    <ClInclude Include="inc\SSDServing\BuildHead\Options.h" />
-    <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\Common\Utils.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\CommonDefines.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Options.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Utils.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\AnalyzeTree.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BKTNodeInfo.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BuildBKT.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\Options.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\SelectHead.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\BootVectorSearch.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\BuildSsdIndex.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\ExtraFullGraphSearcher.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\IExtraSearcher.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\AsyncFileReader.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchSsdIndex.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\Options.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchProcessor.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchStats.h" />
+    <ClInclude Include="inc\SSDServing\main.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead.h" />
+    <ClInclude Include="inc\SSDServing\SSDIndex.h" />
+    <ClInclude Include="inc\SSDServing\Utils.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
