@@ -36,6 +36,7 @@ namespace SPTAG {
                     std::shared_ptr<SPTAG::VectorSet> p_vectorSet = vectorReader->GetVectorSet();
                     std::shared_ptr<SPTAG::MetadataSet> p_metaSet = vectorReader->GetMetadataSet();
                     code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
+                    indexBuilder->SetQuantizerFileName(COMMON_OPTS.m_quantizerFilePath);
                     if (SPTAG::ErrorCode::Success == code) {
                         code = indexBuilder->SaveIndex(COMMON_OPTS.m_headIndexFolder);
                     }

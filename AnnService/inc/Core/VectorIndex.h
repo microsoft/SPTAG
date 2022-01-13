@@ -99,6 +99,8 @@ public:
     }
     virtual void SetIndexName(std::string p_name) { m_sIndexName = p_name; }
 
+    virtual void SetQuantizerFileName(std::string p_QuantizerFileName) { m_sQuantizerFile = p_QuantizerFileName; }
+
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
