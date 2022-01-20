@@ -14,7 +14,7 @@ using namespace SPTAG;
 
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<QuantizerOptions> options(new QuantizerOptions(10000, true, 1.0, SPTAG::QuantizerType::None, std::string(), -1));
+    std::shared_ptr<QuantizerOptions> options(new QuantizerOptions(10000, true, 1.0, SPTAG::QuantizerType::None, std::string(), -1, std::string()));
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
@@ -39,12 +39,17 @@ int main(int argc, char* argv[])
     }
     case QuantizerType::PQQuantizer:
     {
+        auto fp_load = SPTAG::f_createIO();
         std::shared_ptr<VectorSet> quantized_vectors;
         auto fullvectors = vectorReader->GetVectorSet();
         ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * fullvectors->Count());
         quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, fullvectors->Count()));
-        switch (options->m_inputValueType)
+        if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
         {
+            LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Training a new one.\n");
+
+            switch (options->m_inputValueType)
+            {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
                         COMMON::DistanceUtils::Quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, fullvectors, quantized_vectors))); \
@@ -52,27 +57,53 @@ int main(int argc, char* argv[])
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+            }
+
+            auto ptr = SPTAG::f_createIO();
+            if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
+            {
+                if (ErrorCode::Success != COMMON::DistanceUtils::Quantizer->SaveQuantizer(ptr))
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
+                    exit(1);
+                }
+            }
+            else
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to open quantizer file.\n");
+                exit(1);
+            }
+        }
+        else
+        {
+            if (ErrorCode::Success != SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load))
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
+                exit(1);
+            }
+            COMMON::DistanceUtils::Quantizer->SetEnableADC(false);
+
+            for (int i = 0; i < fullvectors->Count(); i++)
+            {
+                COMMON::DistanceUtils::Quantizer->QuantizeVector(fullvectors->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
+            }
+            
+            
         }
         if (ErrorCode::Success != quantized_vectors->Save(options->m_outputFile))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to save quantized vectors.\n");
             exit(1);
         }
-
-        auto ptr = SPTAG::f_createIO();
-        if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
+        if (!options->m_outputFullVecFile.empty())
         {
-            if (ErrorCode::Success != COMMON::DistanceUtils::Quantizer->SaveQuantizer(ptr))
+            if (ErrorCode::Success != fullvectors->Save(options->m_outputFullVecFile))
             {
-                LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
+                LOG(Helper::LogLevel::LL_Error, "Failed to save uncompressed vectors.\n");
                 exit(1);
             }
         }
-        else
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to open quantizer file.\n");
-            exit(1);
-        }
+        
 
         auto metadataSet = vectorReader->GetMetadataSet();
         if (metadataSet)

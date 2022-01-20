@@ -7,7 +7,7 @@
 #include "inc/SSDServing/BuildHead/BootBuildHead.h"
 #include "inc/SSDServing/IndexBuildManager/CommonDefines.h"
 #include <inc/Core/Common/DistanceUtils.h>
-
+#include <boost/filesystem.hpp>
 
 namespace SPTAG {
 	namespace SSDServing {
@@ -36,7 +36,8 @@ namespace SPTAG {
                     std::shared_ptr<SPTAG::VectorSet> p_vectorSet = vectorReader->GetVectorSet();
                     std::shared_ptr<SPTAG::MetadataSet> p_metaSet = vectorReader->GetMetadataSet();
                     code = indexBuilder->BuildIndex(p_vectorSet, p_metaSet);
-                    indexBuilder->SetQuantizerFileName(COMMON_OPTS.m_quantizerFilePath);
+
+                    indexBuilder->SetQuantizerFileName(boost::filesystem::path(COMMON_OPTS.m_quantizerFilePath).filename().string());
                     if (SPTAG::ErrorCode::Success == code) {
                         code = indexBuilder->SaveIndex(COMMON_OPTS.m_headIndexFolder);
                     }
