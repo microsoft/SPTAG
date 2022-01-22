@@ -25,6 +25,7 @@
 #ifndef _SPTAG_COMMON_CUDA_DISTANCE_H_
 #define _SPTAG_COMMON_CUDA_DISTANCE_H_
 
+#include<cuda.h>
 #include<cstdint>
 #include<vector>
 #include<climits>
