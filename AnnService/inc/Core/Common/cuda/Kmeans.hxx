@@ -90,8 +90,6 @@ template <typename T, typename SUMTYPE, int MAX_DIM>
 __global__ void KmeansKernel(Point<T,SUMTYPE,MAX_DIM>* points, T* centers, size_t workSize, int* label, SizeType* counts, float lambda, float* clusterDist, SizeType* clusterIdx, SizeType* newCounts, float* weightedCounts, float* newCenters, int* clusterLocks, float* currDist, int _D, int _DK, int metric, const bool updateCenters)
 {
 
-// If perf is bad, try moving conversion from raw data to Point structure outside of Kernel
-
     Point<T,float,MAX_DIM> centroid;
     Point<T,float,MAX_DIM> target;
 

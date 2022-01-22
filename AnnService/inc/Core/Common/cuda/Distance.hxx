@@ -72,17 +72,6 @@ class Point {
     }
   }
 
-/*
-  __device__ void loadChunkDev(const T* data, int exact_dim) {
-    for(int i=0; i<exact_dim; i++) {
-      coords[i] = data[i];
-    }
-    for(int i=exact_dim; i<Dim; i++) {
-      coords[i] = 0;
-    }
-  }
-*/
-
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim; i++) {
       coords[i] = other.coords[i];
