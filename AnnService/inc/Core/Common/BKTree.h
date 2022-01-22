@@ -178,6 +178,26 @@ namespace SPTAG
             return diff;
         }
 
+#if defined(GPU)
+
+#include "inc/Core/Common/cuda/Kmeans.hxx"
+
+        template <typename T>
+        inline float KmeansAssign(const Dataset<T>& data,
+            std::vector<SizeType>& indices,
+            const SizeType first, const SizeType last, KmeansArgs<T>& args,
+            const bool updateCenters, float lambda) {
+            float currDist = 0;
+            SizeType totalSize = last - first;
+
+// TODO - compile-time options for MAX_DIM and metric
+            computeKmeansGPU<T, float, 100>(data, indices, first, last, args._K, args._D,
+                                args._DK, lambda, args.centers, args.label, args.counts, args.newCounts, args.newCenters, 
+                                args.clusterIdx, args.clusterDist, args.weightedCounts, args.newWeightedCounts, 0, updateCenters);
+        }                               
+
+#else
+
         template <typename T>
         inline float KmeansAssign(const Dataset<T>& data,
             std::vector<SizeType>& indices,
@@ -261,6 +281,9 @@ namespace SPTAG
             }
             return currDist;
         }
+
+#endif
+
 
         template <typename T>
         inline float InitCenters(const Dataset<T>& data, 
