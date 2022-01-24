@@ -503,7 +503,7 @@ const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
 
     std::string meta((char*)p_meta.Data(), p_meta.Length());
     SizeType vid = GetMetaMapping(meta);
-    if (vid >= 0) {
+    if (vid >= 0 && vid < GetNumSamples()) {
         deleteFlag = !ContainSample(vid);
         return GetSample(vid);
     }
