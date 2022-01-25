@@ -143,7 +143,7 @@ namespace SPTAG {
 
             std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
 
-            std::vector<Helper::DiskListRequest> m_diskRequests;
+            std::vector<Helper::AsyncReadRequest> m_diskRequests;
         };
 
         class IExtraSearcher

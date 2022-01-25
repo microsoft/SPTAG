@@ -14,8 +14,9 @@
 #include <climits>
 #include <future>
 
-//#ifdef _MSC_VER
 #define ASYNC_READ 1
+//#ifndef _MSC_VER
+#define BATCH_READ 1
 //#endif
 
 namespace SPTAG
@@ -159,25 +160,26 @@ namespace SPTAG
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
                     char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
 
-#ifdef ASYNC_READ
-                    ++unprocessed;
+#ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_buffer = buffer;
-                    request.m_payload = &(rid);
                     request.m_callback = [&p_exWorkSpace, &request](bool success)
                     {
                         p_exWorkSpace->m_processIocp.push(&request);
                     };
+                    request.m_ioChannel = rid;
+                    request.m_payload = (void*)listInfo;
                     request.m_success = false;
-                    request.m_pListInfo = (void*)listInfo;
-
+#ifndef BATCH_READ
+                    ++unprocessed;
                     if (!((indexContext->m_indexFile)->ReadFileAsync(request)))
                     {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
                         unprocessed--;
                     }
+#endif
 #else
                     auto numRead = (indexContext->m_indexFile)->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
@@ -209,14 +211,17 @@ namespace SPTAG
                 }
 
 #ifdef ASYNC_READ
+#ifdef BATCH_READ
+                unprocessed = (m_indexContexts[0].m_indexFile)->BatchReadFileAsync((p_exWorkSpace->m_diskRequests).data(), postingListCount);
+#endif
                 while (unprocessed > 0)
                 {
-                    Helper::DiskListRequest* request;
+                    Helper::AsyncReadRequest* request;
                     if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
 
                     --unprocessed;
 
-                    ListInfo* listInfo = (ListInfo*)(request->m_pListInfo);
+                    ListInfo* listInfo = (ListInfo*)(request->m_payload);
                     char* buffer = request->m_buffer;
 
                     for (int i = 0; i < listInfo->listEleCount; ++i)

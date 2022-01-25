@@ -28,10 +28,11 @@ namespace SPTAG
             std::function<void(bool)> m_callback;
             
             // Carry items like counter for callback to process.
+            int m_ioChannel;
             void* m_payload;
             bool m_success;
 
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_payload(nullptr), m_success(false) {}
+            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_payload(nullptr), m_ioChannel(0), m_success(false) {}
         };
 
         class DiskPriorityIO
@@ -56,7 +57,9 @@ namespace SPTAG
 
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest) = 0;
+            virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
+
+            virtual int BatchReadFileAsync(AsyncReadRequest* readRequests, int num) { return 0; }
 
             virtual std::uint64_t TellP() = 0;
 
@@ -133,11 +136,6 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 return WriteBinary(strlen(buffer), (const char*)buffer, offset);
-            }
-
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
-            {
-                return false;
             }
 
             virtual std::uint64_t TellP()
@@ -244,11 +242,6 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 return WriteBinary(strlen(buffer), (const char*)buffer, offset);
-            }
-
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
-            {
-                return false;
             }
 
             virtual std::uint64_t TellP()
