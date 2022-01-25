@@ -445,17 +445,12 @@ namespace SPTAG
 
             void push(DiskListRequest* j)
             {
-                {
-                    std::lock_guard<std::mutex> lock(m_lock);
-                    m_queue.push(j);
-                }
-                m_cond.notify_one();
+                 m_queue.push(j);
             }
 
             bool pop(DiskListRequest*& j)
             {
-                std::unique_lock<std::mutex> lock(m_lock);
-                while (m_queue.empty()) m_cond.wait(lock);
+                while (m_queue.empty()) continue;
                 j = m_queue.front();
                 m_queue.pop();
                 return true;
@@ -463,8 +458,6 @@ namespace SPTAG
 
         protected:
             std::queue<DiskListRequest*> m_queue;
-            std::mutex m_lock;
-            std::condition_variable m_cond;
         };
 
         class AsyncFileIO : public SPTAG::Helper::DiskPriorityIO
@@ -480,22 +473,25 @@ namespace SPTAG
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_fileHandle = open(filePath, O_RDONLY | O_NOATIME);
-                if (m_fileHandle == -1) {
+                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT);
+                if (m_fileHandle <= 0) {
                     LOG(SPTAG::Helper::LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
-                memset(&m_iocp, 0, sizeof(m_iocp));
-                auto ret = syscall(__NR_io_setup, 64, &m_iocp);
-                if (ret < 0) {
-                    LOG(SPTAG::Helper::LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
-                    return false;
-                }
 
-                int iocpThreads = threadPoolSize;
-                for (int i = 0; i < iocpThreads; ++i)
+                m_iocps.resize(threadPoolSize);
+                memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
+                for (int i = 0; i < threadPoolSize; i++) {
+                    auto ret = syscall(__NR_io_setup, 1023, &(m_iocps[i]));
+                    if (ret < 0) {
+                        LOG(SPTAG::Helper::LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
+                        return false;
+                    }
+                }
+                
+                for (int i = 0; i < threadPoolSize; ++i)
                 {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
                 return true;
             }
@@ -531,10 +527,10 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                int res = syscall(__NR_io_submit, m_iocp, 1, iocbs);
+                int res = syscall(__NR_io_submit, m_iocps[*((int*)(reqRequest.m_payload))], 1, iocbs);
                 if (res != 1)
                 {
-                    //LOG(Helper::LogLevel::LL_Error, "ReadFileAsync Failed! res = %d\n", (int)res);
+                    LOG(Helper::LogLevel::LL_Error, "ReadFileAsync Failed! res = %d\n", (int)res);
                     return false;
                 }
                 return true;
@@ -544,7 +540,7 @@ namespace SPTAG
 
             virtual void ShutDown()
             {
-                syscall(__NR_io_destroy, m_iocp);
+                for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
                 close(m_fileHandle);
                 for (auto& th : m_fileIocpThreads)
                 {
@@ -556,18 +552,16 @@ namespace SPTAG
             }
 
         private:
-            void ListionIOCP() {
+            void ListionIOCP(int i) {
                 struct timespec timeout;
                 timeout.tv_sec = 1;
                 timeout.tv_nsec = 500000000;
                 struct io_event events[1];
                 while (true)
                 {
-                    int numEvents = syscall(__NR_io_getevents, m_iocp, 1, 1, events, &timeout);
-                    if (numEvents != 1)
-                    {
-                        break;
-                    }
+                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], 1, 1, events, &timeout);
+                    if (numEvents != 1) break;
+
                     SPTAG::Helper::AsyncReadRequest* req = reinterpret_cast<SPTAG::Helper::AsyncReadRequest*>((events[0].data));
                     auto callback = &(req->m_callback);
                     if (nullptr != callback && (*callback))
@@ -579,7 +573,7 @@ namespace SPTAG
         private:
             int m_fileHandle;
 
-            aio_context_t m_iocp;
+            std::vector<aio_context_t> m_iocps;
 
             std::vector<std::thread> m_fileIocpThreads;
         };
