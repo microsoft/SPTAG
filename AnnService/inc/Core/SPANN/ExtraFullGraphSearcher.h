@@ -14,9 +14,9 @@
 #include <climits>
 #include <future>
 
-#ifdef _MSC_VER
+//#ifdef _MSC_VER
 #define ASYNC_READ 1
-#endif
+//#endif
 
 namespace SPTAG
 {
@@ -125,12 +125,11 @@ namespace SPTAG
                 p_exWorkSpace->m_deduper.clear();
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
-
-                std::atomic<int> unprocessed(0);
-                std::atomic<int> curCheck(0);
-                std::atomic<int> listElements(0);
-                std::atomic<int> diskIO(0);
-                std::atomic<int> diskRead(0);
+ 
+                int diskRead = 0;
+                int diskIO = 0;
+                int unprocessed = 0;
+                int listElements = 0;
 
                 int rid = rand() % m_ioThreads;
                 bool oneContext = (m_indexContexts.size() == 1);
@@ -196,7 +195,6 @@ namespace SPTAG
 
                         auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
                         queryResults.AddPoint(vectorID, distance2leaf);
-                        curCheck += 1;
                     }
 
                     if (truth) {
@@ -231,7 +229,6 @@ namespace SPTAG
 
                         auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
                         queryResults.AddPoint(vectorID, distance2leaf);
-                        curCheck += 1;
                     }
                     if (truth) {
                         for (int i = 0; i < listInfo->listEleCount; ++i) {
@@ -246,7 +243,6 @@ namespace SPTAG
 #endif
                 if (p_stats) 
                 {
-                    p_stats->m_exCheck = curCheck;
                     p_stats->m_totalListElementsCount = listElements;
                     p_stats->m_diskIOCount = diskIO;
                     p_stats->m_diskAccessCount = diskRead;

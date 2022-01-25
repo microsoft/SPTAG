@@ -450,7 +450,7 @@ namespace SPTAG
 
             bool pop(DiskListRequest*& j)
             {
-                while (m_queue.empty()) continue;
+                while (m_queue.empty()) usleep(30);
                 j = m_queue.front();
                 m_queue.pop();
                 return true;
@@ -527,7 +527,7 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                int res = syscall(__NR_io_submit, m_iocps[*((int*)(reqRequest.m_payload))], 1, iocbs);
+                int res = syscall(__NR_io_submit, m_iocps[*((int*)(readRequest.m_payload))], 1, iocbs);
                 if (res != 1)
                 {
                     LOG(Helper::LogLevel::LL_Error, "ReadFileAsync Failed! res = %d\n", (int)res);

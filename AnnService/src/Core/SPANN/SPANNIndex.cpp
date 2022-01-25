@@ -208,12 +208,13 @@ namespace SPTAG
             }
             newResults.Reverse();
 
+            auto auto_ws = m_workSpacePool->Rent();
+
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
             float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;
             for (SizeType p = 0; p < partitions; p++) {
                 int subInternalResultNum = min(p_subInternalResultNum, p_internalResultNum - p_subInternalResultNum * p);
 
-                auto auto_ws = m_workSpacePool->Rent();
                 auto_ws->m_postingIDs.clear();
 
                 for (int i = p * p_subInternalResultNum; i < p * p_subInternalResultNum + subInternalResultNum; i++)
@@ -223,9 +224,10 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
-                m_workSpacePool->Return(auto_ws);
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);    
             }
+            
+            m_workSpacePool->Return(auto_ws);
 
             newResults.SortResult();
             std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_query.GetResults());
