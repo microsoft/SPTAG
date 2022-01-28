@@ -524,7 +524,7 @@ namespace SPTAG {
 
                 std::shared_ptr<SPTAG::VectorSet> vectorSet;
 
-                if (!COMMON_OPTS.m_vectorPath.empty() && fileexists(COMMON_OPTS.m_vectorPath.c_str())) {
+                if (!COMMON_OPTS.m_vectorPath.empty() && fileexists(COMMON_OPTS.m_vectorPath.c_str()) && p_opts.m_rerank > 0) {
                     std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(COMMON_OPTS.m_valueType, COMMON_OPTS.m_dim, COMMON_OPTS.m_vectorType, COMMON_OPTS.m_vectorDelimiter));
                     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                     if (ErrorCode::Success == vectorReader->LoadFile(COMMON_OPTS.m_vectorPath))

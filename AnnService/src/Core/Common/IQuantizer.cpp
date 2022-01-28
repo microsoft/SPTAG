@@ -29,6 +29,18 @@ namespace SPTAG
                 }
                 
                 return DistanceUtils::Quantizer->LoadQuantizer(p_in);
+            case QuantizerType::OPQQuantizer:
+                switch (reconstructType) {
+#define DefineVectorValueType(Name, Type) \
+                    case VectorValueType::Name: \
+                        DistanceUtils::Quantizer.reset(new OPQQuantizer<Type>()); \
+                        break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                }
+
+                return DistanceUtils::Quantizer->LoadQuantizer(p_in);
             }
             return ErrorCode::Success;
         }
@@ -53,6 +65,18 @@ namespace SPTAG
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
                         DistanceUtils::Quantizer.reset(new PQQuantizer<Type>()); \
+                        break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                }
+
+                return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);
+            case QuantizerType::OPQQuantizer:
+                switch (reconstructType) {
+#define DefineVectorValueType(Name, Type) \
+                    case VectorValueType::Name: \
+                        DistanceUtils::Quantizer.reset(new OPQQuantizer<Type>()); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
