@@ -366,8 +366,6 @@ namespace SPTAG {
 #pragma omp parallel for schedule(dynamic)
                     for (int i = 0; i < sampleSize; i++)
                     {
-                        if (i % (sampleSize / 10) == 0) LOG(Helper::LogLevel::LL_Info, "Sent... %f%%\n", i * 100.0 / sampleSize);
-
                         COMMON::QueryResultSet<ValueType> queryANNHeads((const ValueType*)(querySet->GetVector(samples[i])), max(K, internalResultNum));
                         headIndex->SearchIndex(queryANNHeads);
                         float queryANNHeadsLongestDist = queryANNHeads.GetResult(internalResultNum - 1)->Dist;

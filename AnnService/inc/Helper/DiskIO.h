@@ -28,8 +28,8 @@ namespace SPTAG
             std::function<void(bool)> m_callback;
             
             // Carry items like counter for callback to process.
-            int m_ioChannel;
             void* m_payload;
+            int m_ioChannel;
             bool m_success;
 
             AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_payload(nullptr), m_ioChannel(0), m_success(false) {}

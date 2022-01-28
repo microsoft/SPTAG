@@ -16,18 +16,16 @@
 #include <thread>
 #include <stdint.h>
 
+#define ASYNC_READ 1
+
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
 #else
+#define BATCH_READ 1
 #include <fcntl.h>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 #include <sys/syscall.h>
 #include <linux/aio_abi.h>
-
-#include "ConcurrentSet.h"
 #endif
 
 namespace SPTAG
@@ -107,6 +105,8 @@ namespace SPTAG
             RequestQueue() {
                 m_handle.Reset(::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, 0));
             }
+
+            void reset(int capacity) {}
 
             void push(AsyncReadRequest* j) {
                 ::PostQueuedCompletionStatus(m_handle.GetHandle(),
@@ -449,25 +449,34 @@ namespace SPTAG
         {
         public:
 
-            RequestQueue() {}
+            RequestQueue() :m_front(0), m_end(0), m_capacity(0) {}
 
             ~RequestQueue() {}
 
+            void reset(int capacity) {
+                if (capacity > m_capacity) {
+                    m_capacity = capacity + 1;
+                    m_queue.reset(new AsyncReadRequest*[m_capacity]);
+                }
+            }
+
             void push(AsyncReadRequest* j)
             {
-                 m_queue.push(j);
+                m_queue[m_end++] = j;
+                if (m_end == m_capacity) m_end = 0;
             }
 
             bool pop(AsyncReadRequest*& j)
             {
-                while (m_queue.empty()) usleep(30);
-                j = m_queue.front();
-                m_queue.pop();
+                while (m_front == m_end) usleep(30);
+                j = m_queue[m_front++];
+                if (m_front == m_capacity) m_front = 0;
                 return true;
             }
 
         protected:
-            std::queue<AsyncReadRequest*> m_queue;
+            int m_front, m_end, m_capacity;
+            std::unique_ptr<AsyncReadRequest* []> m_queue;
         };
 
         class AsyncFileIO : public DiskPriorityIO
@@ -478,31 +487,33 @@ namespace SPTAG
             virtual ~AsyncFileIO() { ShutDown(); }
 
             virtual bool Initialize(const char* filePath, int openMode,
-                std::uint64_t maxIOSize = 2,
+                std::uint64_t maxIOSize = (1 << 20),
                 std::uint32_t maxReadRetries = 2,
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT);
+                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT | O_LARGEFILE);
                 if (m_fileHandle <= 0) {
                     LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
-
+                m_shutdown = false;
                 m_iocps.resize(threadPoolSize);
                 memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
                 for (int i = 0; i < threadPoolSize; i++) {
-                    auto ret = syscall(__NR_io_setup, 1023, &(m_iocps[i]));
+                    auto ret = syscall(__NR_io_setup, 1024, &(m_iocps[i]));
                     if (ret < 0) {
                         LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
                         return false;
                     }
                 }
                 
+#ifndef BATCH_READ 
                 for (int i = 0; i < threadPoolSize; ++i)
                 {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i, maxIOSize)));
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
+#endif
                 return true;
             }
 
@@ -537,32 +548,65 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                int res = syscall(__NR_io_submit, m_iocps[readRequest.m_ioChannel], 1, iocbs);
-                if (res != 1) return false;
+                while (syscall(__NR_io_submit, m_iocps[readRequest.m_ioChannel], 1, iocbs) < 1) {
+                    usleep(10);
+                }
                 return true;
             }
 
             virtual int BatchReadFileAsync(AsyncReadRequest* readRequests, int num)
             {
-                std::vector<struct iocb> myiocbs(num, 0);
+                std::vector<struct iocb> myiocbs(num);
                 std::vector<struct iocb*> iocbs(num);
+                int toSubmit = 0, channel = 0;
                 for (int i = 0; i < num; i++) {
-                    auto& myiocb = myiocbs[i];
                     auto& readRequest = readRequests[i];
+                    if (readRequest.m_readSize == 0) continue;
+                    auto& myiocb = myiocbs[i];
+                    memset(&myiocb, 0, sizeof(myiocb));
                     myiocb.aio_data = reinterpret_cast<uintptr_t>(&readRequest);
                     myiocb.aio_lio_opcode = IOCB_CMD_PREAD;
                     myiocb.aio_fildes = m_fileHandle;
                     myiocb.aio_buf = (std::uint64_t)(readRequest.m_buffer);
                     myiocb.aio_nbytes = readRequest.m_readSize;
                     myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
-                    iocbs[i] = myiocbs.data() + i;
+                    channel = readRequest.m_ioChannel;
+                    iocbs[toSubmit] = myiocbs.data() + toSubmit;
+                    toSubmit++;
+                }
+                std::vector<struct io_event> events(toSubmit);
+                int totalDone = 0, totalSubmitted = 0, totalQueued = 0;
+                while (totalDone < toSubmit) {
+                    if (totalSubmitted < toSubmit) {
+                        int submitted = syscall(__NR_io_submit, m_iocps[channel], toSubmit - totalSubmitted, iocbs.data() + totalSubmitted);
+                        totalSubmitted += submitted;
+                    }
+                                 
+                    for (int i = totalQueued; i < totalDone; i++) {
+                        AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
+                        auto callback = &(req->m_callback);
+                        if (nullptr != callback && (*callback))
+                        {
+                            (*callback)(true);
+                        }
+                    }
+                    totalQueued = totalDone;
+
+                    int wait = totalSubmitted - totalDone;   
+                    auto done = syscall(__NR_io_getevents, m_iocps[channel], wait, wait, events.data() + totalDone, nullptr);
+                    if (done < wait) {
+                        LOG(Helper::LogLevel::LL_Error, "io_getevents fail to get %d events, it only get %d events!", wait, done);
+                    }
+                    totalDone += done;
                 }
 
-                int totalSubmitted = 0;
-                while (totalSubmitted < num) {
-                    int submitted = syscall(__NR_io_submit, m_iocps[readRequests[0].m_ioChannel], num - totalSubmitted, iocbs.data() + totalSubmitted);
-                    totalSubmitted += submitted;
-                    //usleep(10);
+                for (int i = totalQueued; i < totalDone; i++) {
+                    AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
+                    auto callback = &(req->m_callback);
+                    if (nullptr != callback && (*callback))
+                    {
+                        (*callback)(true);
+                    }
                 }
                 return totalSubmitted;
             }
@@ -573,6 +617,7 @@ namespace SPTAG
             {
                 for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
                 close(m_fileHandle);
+                m_shutdown = true;
                 for (auto& th : m_fileIocpThreads)
                 {
                     if (th.joinable())
@@ -583,18 +628,18 @@ namespace SPTAG
             }
 
         private:
-            void ListionIOCP(int i, int b) {
+            void ListionIOCP(int i) {
                 struct timespec timeout;
-                timeout.tv_sec = 1;
-                timeout.tv_nsec = 500000000;
+                timeout.tv_sec = 0;
+                timeout.tv_nsec = 30000;
+                int b = 10;
                 std::vector<struct io_event> events(b);
-                while (true)
+                while (!m_shutdown)
                 {
-                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], b, b, events.data(), &timeout);
-                    if (numEvents != b) break;
+                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], 2, b, events.data(), &timeout);
 
-                    for (int r = 0; r < b; r++) {
-                        AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
+                    for (int r = 0; r < numEvents; r++) {
+                        AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[r].data));
                         auto callback = &(req->m_callback);
                         if (nullptr != callback && (*callback))
                         {
@@ -605,6 +650,8 @@ namespace SPTAG
             }
         private:
             int m_fileHandle;
+
+            bool m_shutdown;
 
             std::vector<aio_context_t> m_iocps;
 
