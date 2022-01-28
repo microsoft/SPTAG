@@ -18,8 +18,6 @@ namespace SPTAG
 {
     namespace SPANN
     {
-        std::atomic_int ExtraWorkSpace::g_spaceCount = 0;
-
         extern std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO;
 
         struct Selection {
@@ -117,7 +115,7 @@ namespace SPTAG
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
-                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, (1 << 20), 2, 2, p_opt.m_ioThreads)) {
+                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, (1 << 20), 2, 2, p_opt.m_iSSDNumberOfThreads/*p_opt.m_ioThreads*/)) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
                         return false;
                     }
@@ -179,23 +177,41 @@ namespace SPTAG
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_buffer = buffer;
-                    request.m_payload = (void*)listInfo;
-                    request.m_ioChannel = p_exWorkSpace->m_spaceID;
-                    request.m_success = false;
+                    request.m_status = p_exWorkSpace->m_spaceID;
+
+                    request.m_payloads.clear();
+                    request.m_payloads.push_back((void*)p_exWorkSpace);
+                    request.m_payloads.push_back((void*)listInfo);
 #ifdef BATCH_READ
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &truth, &found,  &request, &listElements, this](bool success)
+                    request.m_payloads.push_back((void*)&queryResults);
+                    request.m_payloads.push_back((void*)p_index.get());
+                    request.m_payloads.push_back((void*)truth);
+                    request.m_payloads.push_back((void*)found);
+                    request.m_payloads.push_back((void*)&listElements);
+                    request.m_payloads.push_back((void*)&m_vectorInfoSize);
+
+                    request.m_callback = [](Helper::AsyncReadRequest* request)
                     {
-                        request.m_readSize = 0;
-                        char* buffer = request.m_buffer;
-                        ListInfo* listInfo = (ListInfo*)(request.m_payload);
-                        int curPostingID = p_exWorkSpace->m_postingIDs[&request - p_exWorkSpace->m_diskRequests.data()];
-                        ProcessPosting(this->m_vectorInfoSize)
+                        request->m_readSize = 0;
+                        char* buffer = request->m_buffer;
+                        ExtraWorkSpace* p_exWorkSpace = (ExtraWorkSpace*)(request->m_payloads[0]);
+                        ListInfo* listInfo = (ListInfo*)(request->m_payloads[1]);
+                        COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)(request->m_payloads[2]));
+                        VectorIndex* p_index = (VectorIndex*)(request->m_payloads[3]);
+                        std::set<int>* truth = (std::set<int>*)(request->m_payloads[4]);
+                        std::map<int, std::set<int>>* found = (std::map<int, std::set<int>>*)(request->m_payloads[5]);
+                        int& listElements = *((int*)(request->m_payloads[6]));
+                        int vectorInfoSize = *((int*)(request->m_payloads[7]));
+                        int curPostingID = p_exWorkSpace->m_postingIDs[request - p_exWorkSpace->m_diskRequests.data()];
+                   
+                        ProcessPosting(vectorInfoSize)
                     };
 #else
-                    request.m_callback = [&p_exWorkSpace, &request](bool success)
+                    request.m_callback = [](Helper::AsyncReadRequest* request)
                     {
-                        p_exWorkSpace->m_processIocp.push(&request);
+                        static_cast<ExtraWorkSpace*>(request->m_payloads[0])->m_processIocp.push(request);
                     };
+
                     ++unprocessed;
                     if (!((indexContext->m_indexFile)->ReadFileAsync(request)))
                     {
@@ -223,10 +239,9 @@ namespace SPTAG
                     if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
 
                     --unprocessed;
-
                     request->m_readSize = 0;
                     char* buffer = request->m_buffer;
-                    ListInfo* listInfo = (ListInfo*)(request->m_payload);
+                    ListInfo* listInfo = static_cast<ListInfo*>(request->m_payloads[1]);
                     int curPostingID = p_exWorkSpace->m_postingIDs[request - p_exWorkSpace->m_diskRequests.data()];
                     ProcessPosting(m_vectorInfoSize)
                 }

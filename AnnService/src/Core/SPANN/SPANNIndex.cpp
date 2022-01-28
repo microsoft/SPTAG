@@ -14,6 +14,7 @@ namespace SPTAG
 {
     namespace SPANN
     {
+        std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
 
         std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::AsyncFileIO()); };

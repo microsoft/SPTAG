@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 #define ASYNC_READ 1
-
+#define BATCH_READ 1
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
@@ -43,12 +43,11 @@ namespace SPTAG
             {
                 PrioritizedDiskFileReaderResource* const c_registeredResource;
 
-                const std::function<void(bool)>* m_callback;
-
+                void* m_data;
 
                 CallbackOverLapped(PrioritizedDiskFileReaderResource* p_registeredResource)
                     : c_registeredResource(p_registeredResource),
-                    m_callback(nullptr)
+                    m_data(nullptr)
                 {
                 }
             };
@@ -219,7 +218,7 @@ namespace SPTAG
                 memset(&col, 0, sizeof(col));
                 col.Offset = (readRequest.m_offset & 0xffffffff);
                 col.OffsetHigh = (readRequest.m_offset >> 32);
-                col.m_callback = &(readRequest.m_callback);
+                col.m_data = (void*)&readRequest;
 
                 if (!::ReadFile(m_fileHandle.GetHandle(),
                     readRequest.m_buffer,
@@ -237,6 +236,7 @@ namespace SPTAG
             {
                 int submitted = 0;
                 for (int i = 0; i < num; i++) {
+                    if (readRequests[i].m_readSize == 0) continue;
                     if (!ReadFileAsync(readRequests[i])) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
                     }
@@ -379,12 +379,12 @@ namespace SPTAG
                     }
 
                     col = (DiskUtils::CallbackOverLapped*)ol;
-                    auto callback = col->m_callback;
+                    auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
                     ReturnResource(col->c_registeredResource);
 
-                    if (nullptr != callback && (*callback))
+                    if (nullptr != req)
                     {
-                        (*callback)(true);
+                        req->m_callback(req);
                     }
                 }
             }
@@ -492,12 +492,15 @@ namespace SPTAG
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT | O_LARGEFILE);
+                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT);
                 if (m_fileHandle <= 0) {
                     LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
                 m_shutdown = false;
+                m_timeout.tv_sec = 0;
+                m_timeout.tv_nsec = 30000;
+
                 m_iocps.resize(threadPoolSize);
                 memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
                 for (int i = 0; i < threadPoolSize; i++) {
@@ -548,7 +551,7 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                while (syscall(__NR_io_submit, m_iocps[readRequest.m_ioChannel], 1, iocbs) < 1) {
+                while (syscall(__NR_io_submit, m_iocps[readRequest.m_status], 1, iocbs) < 1) {
                     usleep(10);
                 }
                 return true;
@@ -570,7 +573,7 @@ namespace SPTAG
                     myiocb.aio_buf = (std::uint64_t)(readRequest.m_buffer);
                     myiocb.aio_nbytes = readRequest.m_readSize;
                     myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
-                    channel = readRequest.m_ioChannel;
+                    channel = readRequest.m_status;
                     iocbs[toSubmit] = myiocbs.data() + toSubmit;
                     toSubmit++;
                 }
@@ -584,28 +587,23 @@ namespace SPTAG
                                  
                     for (int i = totalQueued; i < totalDone; i++) {
                         AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
-                        auto callback = &(req->m_callback);
-                        if (nullptr != callback && (*callback))
+                        if (nullptr != req)
                         {
-                            (*callback)(true);
+                            req->m_callback(req);
                         }
                     }
                     totalQueued = totalDone;
 
                     int wait = totalSubmitted - totalDone;   
-                    auto done = syscall(__NR_io_getevents, m_iocps[channel], wait, wait, events.data() + totalDone, nullptr);
-                    if (done < wait) {
-                        LOG(Helper::LogLevel::LL_Error, "io_getevents fail to get %d events, it only get %d events!", wait, done);
-                    }
+                    auto done = syscall(__NR_io_getevents, m_iocps[channel], wait, wait, events.data() + totalDone, &m_timeout);
                     totalDone += done;
                 }
 
                 for (int i = totalQueued; i < totalDone; i++) {
                     AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
-                    auto callback = &(req->m_callback);
-                    if (nullptr != callback && (*callback))
+                    if (nullptr != req)
                     {
-                        (*callback)(true);
+                        req->m_callback(req);
                     }
                 }
                 return totalSubmitted;
@@ -640,10 +638,9 @@ namespace SPTAG
 
                     for (int r = 0; r < numEvents; r++) {
                         AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[r].data));
-                        auto callback = &(req->m_callback);
-                        if (nullptr != callback && (*callback))
+                        if (nullptr != req)
                         {
-                            (*callback)(true);
+                            req->m_callback(req);
                         }
                     }
                 }
@@ -652,6 +649,8 @@ namespace SPTAG
             int m_fileHandle;
 
             bool m_shutdown;
+
+            struct timespec m_timeout;
 
             std::vector<aio_context_t> m_iocps;
 

@@ -25,14 +25,13 @@ namespace SPTAG
             std::uint64_t m_offset;
             std::uint64_t m_readSize;
             char* m_buffer;
-            std::function<void(bool)> m_callback;
-            
-            // Carry items like counter for callback to process.
-            void* m_payload;
-            int m_ioChannel;
-            bool m_success;
+            std::function<void(AsyncReadRequest*)> m_callback;
+            int m_status;
 
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_payload(nullptr), m_ioChannel(0), m_success(false) {}
+            // Carry items like counter for callback to process.
+            std::vector<void*> m_payloads;
+            
+            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0) {}
         };
 
         class DiskPriorityIO
