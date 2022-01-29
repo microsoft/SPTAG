@@ -8,7 +8,6 @@
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common.h"
 
-#include <memory>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -534,7 +533,7 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                while (syscall(__NR_io_submit, m_iocps[readRequest.m_status & 0xffff], 1, iocbs) < 1) {
+                while (syscall(__NR_io_submit, m_iocps[(readRequest.m_status & 0xffff) % m_iocps.size()], 1, iocbs) < 1) {
                     usleep(10);
                 }
                 return true;

@@ -7,6 +7,7 @@
 #include <functional>
 #include <fstream>
 #include <string.h>
+#include <memory>
 
 namespace SPTAG
 {
