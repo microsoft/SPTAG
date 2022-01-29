@@ -1,5 +1,6 @@
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Core/Common/OPQQuantizer.h>
 #include <inc/Helper/StringConvert.h>
 
 namespace SPTAG
