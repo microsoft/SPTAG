@@ -7,7 +7,6 @@
 #include "Options.h"
 
 #include "inc/Core/VectorIndex.h"
-#include "inc/Core/Common/WorkSpace.h"
 #include "inc/Helper/AsyncFileReader.h"
 
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
