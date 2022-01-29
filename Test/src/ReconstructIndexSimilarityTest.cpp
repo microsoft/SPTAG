@@ -192,7 +192,8 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     quan_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<std::uint8_t>(), M, n));
     std::cout << "Building codebooks!" << std::endl;
     std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
-    R* codebooks = new R[M * Ks * QuanDim];
+    auto codebooks_uniq = std::make_unique<R[]>(M * Ks * QuanDim);
+    auto codebooks = codebooks_uniq.get();
 
     R* kmeans = new R[Ks * QuanDim];
     for (int i = 0; i < M; i++) {
@@ -261,7 +262,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     }
     delete[] kmeans;
     std::cout << "Building Finish!" << std::endl;
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, codebooks);
+    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, codebooks_uniq);
     auto ptr = SPTAG::f_createIO();
     BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
     baseQuantizer->SaveQuantizer(ptr);

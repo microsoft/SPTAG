@@ -35,7 +35,7 @@ namespace SPTAG
 				return QuantizerType::OPQQuantizer;
 			}
 
-		private:
+		protected:
 			inline SizeType m_MatrixIndexCalc(SizeType i, SizeType j);
 
 			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec);
@@ -52,17 +52,17 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, Codebooks)
+		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks))
 		{
-			m_InverseOPQMAtrix = std::make_unique<OPQMatrixType>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InvertMatrix(m_OPQMatrix, m_InverseOPQMatrix);
+			m_InverseOPQMAtrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
+			m_InvertMatrix(m_OPQMatrix.get(), m_InverseOPQMatrix.get());
 		}
 
 		template <typename T>
 		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout)
 		{
 			void* mat_vec = _mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
-			m_MatrixVectorMultiply(m_OPQMatrix, vec, mat_vec);
+			m_MatrixVectorMultiply(m_OPQMatrix.get(), vec, mat_vec);
 			PQQuantizer<T>::QuantizeVector(mat_vec, vecout);
 			_mm_free(mat_vec);
 		}
@@ -72,7 +72,7 @@ namespace SPTAG
 		{
 			void* pre_mat_vec = _mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			PQQuantizer<T>::ReconstructVector(qvec, pre_mat_vec);
-			m_MatrixVectorMultiply(m_InverseOPQMatrix, pre_mat_vec, vecout);
+			m_MatrixVectorMultiply(m_InverseOPQMatrix.get(), pre_mat_vec, vecout);
 			_mm_free(pre_mat_vec);
 		}
 
@@ -102,8 +102,8 @@ namespace SPTAG
 				return code;
 			}
 			
-			m_OPQMatrix = std::make_unique<OPQMatrixType>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InverseOPQMatrix = std::make_unique<OPQMatrixType>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
+			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
+			m_InverseOPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_OPQMatrix.get());
 			LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
 			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_InverseOPQMatrix.get());
@@ -117,8 +117,8 @@ namespace SPTAG
 		{
 			PQQuantizer<T>::LoadQuantizer(raw_bytes);
 			raw_bytes += sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + (sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
-			m_OPQMatrix = std::make_unique<OPQMatrixType>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InverseOPQMatrix = std::make_unique<OPQMatrixType>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
+			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
+			m_InverseOPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			memcpy_s(m_OPQMatrix.get(), sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector), raw_bytes, sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			raw_bytes += sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector);
 			memcpy_s(m_InverseOPQMatrix.get(), sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector), raw_bytes, sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
@@ -128,7 +128,7 @@ namespace SPTAG
 		template <typename T>
 		inline SizeType OPQQuantizer<T>::m_MatrixIndexCalc(SizeType i, SizeType j)
 		{
-			return (i*m_NumSubvectors*m_DimPerSubvector) + j
+			return (i * m_NumSubvectors * m_DimPerSubvector) + j;
 		}
 
 		template <typename T>

@@ -71,7 +71,7 @@ namespace SPTAG
                 return QuantizerType::PQQuantizer;
             }
 
-        private:
+        protected:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;
             DimensionType m_DimPerSubvector;
