@@ -40,7 +40,7 @@ namespace SPTAG
 
 			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec);
 
-			inline void m_InvertMatrix(const OPQMatrixType* InMatrix, OPQMatrixType* OutMatrix);
+			inline ErrorCode m_InvertMatrix(const OPQMatrixType* InMatrix, OPQMatrixType* OutMatrix);
 
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
 			std::unique_ptr<OPQMatrixType[]> m_InverseOPQMatrix;
@@ -144,6 +144,39 @@ namespace SPTAG
 					mat_vec_T[i] += mat[m_MatrixIndexCalc(i,j)] * vec_T[j];
 				}
 			}
+		}
+
+		template <typename T>
+		ErrorCode OPQQuantizer<T>::m_InvertMatrix(const OPQMatrixType* InMatrix, OPQMatrixType* OutMatrix)
+		{
+			using namespace boost::numeric::ublas;
+			auto mat_dim = m_NumSubvectors * m_DimPerSubvector;
+			matrix<OPQMatrixType> in_m (mat_dim, mat_dim);
+			for (int i = 0; i < mat_dim; i++)
+			{
+				for (int j = 0; j < mat_dim; j++)
+				{
+					in_m(i, j) = InMatrix[m_MatrixIndexCalc(i, j)];
+				}
+			}
+			auto out_m = identity_matrix<OPQMatrixType>(mat_dim);
+			permutation_matrix<OPQMatrixType> perm(mat_dim);
+
+			if (lu_factorize(in_m, perm) != 0)
+			{
+				// Matrix is not invertible
+				return ErrorCode::Fail;
+			}
+
+			lu_substitute(in_m, perm, out_m);
+			for (int i = 0; i < mat_dim; i++)
+			{
+				for (int j = 0; j < mat_dim; j++)
+				{
+					OutMatrix[m_MatrixIndexCalc(i, j)] = out_m (i, j);
+				}
+			}
+			return ErrorCode::Success;
 		}
 	}
 }
