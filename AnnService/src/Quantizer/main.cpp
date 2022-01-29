@@ -83,6 +83,7 @@ int main(int argc, char* argv[])
             }
             COMMON::DistanceUtils::Quantizer->SetEnableADC(false);
 
+#pragma omp parallel for
             for (int i = 0; i < fullvectors->Count(); i++)
             {
                 COMMON::DistanceUtils::Quantizer->QuantizeVector(fullvectors->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
