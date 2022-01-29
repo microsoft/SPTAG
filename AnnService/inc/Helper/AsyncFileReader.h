@@ -453,7 +453,7 @@ namespace SPTAG
 
             bool pop(AsyncReadRequest*& j)
             {
-                while (m_front == m_end) usleep(30);
+                while (m_front == m_end) usleep(AIOTimeout.tv_nsec / 1000);
                 j = m_queue[m_front++];
                 if (m_front == m_capacity) m_front = 0;
                 return true;
@@ -482,9 +482,6 @@ namespace SPTAG
                     LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
-                
-                m_timeout.tv_sec = 0;
-                m_timeout.tv_nsec = 30000;
 
                 m_iocps.resize(threadPoolSize);
                 memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
@@ -563,6 +560,8 @@ namespace SPTAG
 
             aio_context_t& GetIOCP(int i) { return m_iocps[i]; }
 
+            int GetFileHandler() { return m_fileHandle; }
+
         private:
 #ifndef BATCH_READ
             void ListionIOCP(int i) {
@@ -570,7 +569,7 @@ namespace SPTAG
                 std::vector<struct io_event> events(b);
                 while (!m_shutdown)
                 {
-                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], b, b, events.data(), &m_timeout);
+                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], b, b, events.data(), &AIOTimeout);
 
                     for (int r = 0; r < numEvents; r++) {
                         AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[r].data));
@@ -587,8 +586,6 @@ namespace SPTAG
             std::vector<std::thread> m_fileIocpThreads;
 #endif
             int m_fileHandle;
-
-            struct timespec m_timeout;
 
             std::vector<aio_context_t> m_iocps;
         };
@@ -608,23 +605,24 @@ namespace SPTAG
                 AsyncReadRequest* readRequest = &(readRequests[i]);
                 if (readRequest->m_readSize == 0) continue;
 
+                channel = readRequest->m_status & 0xffff;
+                int fileid = (readRequest->m_status >> 16);
+
                 struct iocb* myiocb = &(myiocbs[totalToSubmit++]);
                 myiocb->aio_data = reinterpret_cast<uintptr_t>(readRequest);
                 myiocb->aio_lio_opcode = IOCB_CMD_PREAD;
-                myiocb->aio_fildes = m_fileHandle;
+                myiocb->aio_fildes = ((AsyncFileIO*)(handlers[fileid].get()))->GetFileHandler();
                 myiocb->aio_buf = (std::uint64_t)(readRequest->m_buffer);
                 myiocb->aio_nbytes = readRequest->m_readSize;
                 myiocb->aio_offset = static_cast<std::int64_t>(readRequest->m_offset);
 
-                channel = readRequest->m_status &0xffff;
-                int fileid = (readRequest->m_status >> 16);
                 iocbs[fileid].emplace_back(myiocb);
             }
             std::vector<struct io_event> events(totalToSubmit);
             int totalDone = 0, totalSubmitted = 0, totalQueued = 0;
             while (totalDone < totalToSubmit) {
                 if (totalSubmitted < totalToSubmit) {
-                    for (int i = 0; i < m_handlers.size(); i++) {
+                    for (int i = 0; i < handlers.size(); i++) {
                         if (submitted[i] < iocbs[i].size()) {
                             AsyncFileIO* handler = (AsyncFileIO*)(handlers[i].get());
                             int s = syscall(__NR_io_submit, handler->GetIOCP(channel), toSubmit[i] - submitted[i], iocbs[i].data() + submitted[i]);
@@ -645,11 +643,11 @@ namespace SPTAG
                 }
                 totalQueued = totalDone;
 
-                for (int i = 0; i < m_handlers.size(); i++) {
+                for (int i = 0; i < handlers.size(); i++) {
                     if (done[i] < submitted[i]) {
                         int wait = submitted[i] - done[i];
                         AsyncFileIO* handler = (AsyncFileIO*)(handlers[i].get());
-                        auto d = syscall(__NR_io_getevents, handler->GetIOCP(channel), wait, wait, events.data() + totalDone, &m_timeout);
+                        auto d = syscall(__NR_io_getevents, handler->GetIOCP(channel), wait, wait, events.data() + totalDone, &AIOTimeout);
                         done[i] += d;
                         totalDone += d;
                     }
