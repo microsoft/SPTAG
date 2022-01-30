@@ -457,7 +457,7 @@ break;
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
-                int rebuild_threshold = 16;
+                int rebuild_threshold = m_iNeighborhoodSize / 2;
                 int rebuildstart = m_iNeighborhoodSize / 2;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
@@ -466,10 +466,18 @@ break;
                     std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
                     int total = 0;
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
-                        if (indegree[outnodes[j]] < rebuild_threshold) {
+                        if ( outnodes[j] >= 0 && indegree[outnodes[j]] < rebuild_threshold) {
                             reserve[j] = true;
                             total++;
                         }
+                    
+                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
+                        if (!reserve[j] && outnodes[j] >= 0) {
+                            reserve[j] = true;
+                            total++;
+                        }
+                    }
+
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
                         if (!reserve[j]) {
                             reserve[j] = true;
@@ -478,13 +486,15 @@ break;
                     }
                     for (SizeType j = rebuildstart, z = rebuildstart; j < m_iNeighborhoodSize; j++) {
                         while (!reserve[z]) z++;
-                        indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
-                        indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
+                        if(outnodes[j] >= 0) indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
+                        if(outnodes[z] >= 0) indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
                         outnodes[j] = outnodes[z];
                         z++;
                     }
                     if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                 }
+                //LOG(Helper::LogLevel::LL_Info, "Rebuild\n");
+                //indegree.clear();
                 auto t2 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
             }
