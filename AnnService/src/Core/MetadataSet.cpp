@@ -79,8 +79,23 @@ MetadataSet::MetadataSet()
 }
 
 
-MetadataSet:: ~MetadataSet()
+MetadataSet::~MetadataSet()
 {
+}
+
+bool MetadataSet::GetMetadataOffsets(const std::uint8_t* p_meta, const std::uint64_t p_metaLength, std::uint64_t* p_offsets, std::uint64_t p_offsetLength, char p_delimiter)
+{
+    std::uint64_t current = 0;
+    p_offsets[current++] = 0;
+    for (std::uint64_t i = 0; i < p_metaLength && current < p_offsetLength; i++) {
+        if ((char)(p_meta[i]) == p_delimiter)
+            p_offsets[current++] = (std::uint64_t)(i + 1);
+    }
+    if ((char)(p_meta[p_metaLength - 1]) != p_delimiter && current < p_offsetLength)
+        p_offsets[current++] = p_metaLength;
+
+    if (current < p_offsetLength) return false;
+    return true;
 }
 
 

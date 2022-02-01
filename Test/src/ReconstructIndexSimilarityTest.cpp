@@ -31,12 +31,11 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
     std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
 
     float eps = 1e-6f, recall = 0;
-    bool deleted;
 
     int truthDimension = min(k, truth->Dimension());
     for (SizeType i = 0; i < queryset->Count(); i++) {
         SizeType* nn = (SizeType*)(truth->GetVector(i));
-        std::vector<bool> visited(k, false);
+        std::vector<bool> visited(2 * k, false);
         for (int j = 0; j < truthDimension; j++) {
             float truthdist = vecIndex->ComputeDistance(res[i].GetQuantizedTarget(), vecIndex->GetSample(nn[j]));
             for (int l = 0; l < k*2; l++) {
@@ -170,164 +169,179 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<R> dist(-1000, 1000);
-    int n = 10000, q = 2000;
+    int n = 1000, q = 200;
     int m = 256;
     int M = 128;
     int Ks = 256;
-
     int QuanDim = m / M;
-    ByteArray PQvec = ByteArray::Alloc(sizeof(std::uint8_t) * n * M);
-    ByteArray real_vec = ByteArray::Alloc(sizeof(R) * n * m);
-    ByteArray rec_vec = ByteArray::Alloc(sizeof(R) * n * m);
-    std::vector< std::vector<std::uint8_t> > baseQ(n, std::vector<std::uint8_t>(M));
+    std::string CODEBOOK_FILE = "quantest_quantizer.bin";
 
-    R* vecs = new R[n * m];
-    for (int i = 0; i < n * m; i++) {
-        vecs[i] = dist(gen);
-        ((R*)real_vec.Data())[i] = (R)vecs[i];
+    if (fileexists("quantest_vector.bin") && fileexists("quantest_query.bin")) {
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile("quantest_vector.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            exit(1);
+        }
+        real_vecset = vectorReader->GetVectorSet();
+
+        if (ErrorCode::Success != vectorReader->LoadFile("quantest_query.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+            exit(1);
+        }
+        queryset = vectorReader->GetVectorSet();
+    }
+    else {
+        ByteArray real_vec = ByteArray::Alloc(sizeof(R) * n * m);
+        for (int i = 0; i < n * m; i++) {
+            ((R*)real_vec.Data())[i] = (R)(dist(gen));
+        }
+        real_vecset.reset(new BasicVectorSet(real_vec, GetEnumValueType<R>(), m, n));
+        real_vecset->Save("quantest_vector.bin");
+
+        ByteArray real_query = ByteArray::Alloc(sizeof(R) * q * m);
+        for (int i = 0; i < q * m; i++) {
+            ((R*)real_query.Data())[i] = (R)(dist(gen));
+        }
+        queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<R>(), m, q));
+        queryset->Save("quantest_query.bin");
     }
 
-    real_vecset.reset(new BasicVectorSet(real_vec, GetEnumValueType<R>(), m, n));
-    rec_vecset.reset(new BasicVectorSet(rec_vec, GetEnumValueType<R>(), m, n));
-    quan_vecset.reset(new BasicVectorSet(PQvec, GetEnumValueType<std::uint8_t>(), M, n));
-    std::cout << "Building codebooks!" << std::endl;
-    std::string CODEBOOK_FILE = "test-quantizer-tree.bin";
-    auto codebooks_uniq = std::make_unique<R[]>(M * Ks * QuanDim);
-    auto codebooks = codebooks_uniq.get();
-
-    R* kmeans = new R[Ks * QuanDim];
-    for (int i = 0; i < M; i++) {
-        for (int j = 0; j < Ks; j++) {
-            for (int t = 0; t < QuanDim; t++) {
-                kmeans[j * QuanDim + t] = vecs[j * m + i * QuanDim + t];
-            }
+    if (fileexists(("quantest_truth." + SPTAG::Helper::Convert::ConvertToString(distCalcMethod)).c_str())) {
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), k, VectorFileType::DEFAULT));
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile("quantest_truth." + SPTAG::Helper::Convert::ConvertToString(distCalcMethod)))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
+            exit(1);
         }
-        int cnt = 100;
-        int* belong = new int[n];
-        while (cnt--) {
-            //calculate cluster
-            for (int ii = 0; ii < n; ii++) {
-                double min_dis = 1e9;
-                int min_id = 0;
-                for (int jj = 0; jj < Ks; jj++) {
-                    double now_dis = 0;
-                    for (int kk = 0; kk < QuanDim; kk++) {
-                        now_dis += (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]) * (1.0 * vecs[ii * m + i * QuanDim + kk] - kmeans[jj * QuanDim + kk]);
-                    }
-                    if (now_dis < min_dis) {
-                        min_dis = now_dis;
-                        min_id = jj;
-                    }
-                }
-                belong[ii] = min_id;
+        truth = vectorReader->GetVectorSet();
+    }
+    else {
+        omp_set_num_threads(5);
+
+        ByteArray tru = ByteArray::Alloc(sizeof(SizeType) * queryset->Count() * k);
+
+#pragma omp parallel for
+        for (SizeType i = 0; i < queryset->Count(); ++i)
+        {
+            SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
+
+            COMMON::QueryResultSet<R> res((const R*)queryset->GetVector(i), k);
+            for (SizeType j = 0; j < real_vecset->Count(); j++)
+            {
+                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<R*>(real_vecset->GetVector(j)), queryset->Dimension(), distCalcMethod);
+                res.AddPoint(j, dist);
             }
-            //recalculate kmeans
-            for (int ii = 0; ii < Ks; ii++) {
-                int num = 0;
-                R* newmeans = new R[QuanDim]();
-                for (int jj = 0; jj < n; jj++) {
-                    if (belong[jj] == ii) {
-                        num++;
-                        for (int kk = 0; kk < QuanDim; kk++) {
-                            newmeans[kk] += vecs[jj * m + i * QuanDim + kk];
+            res.SortResult();
+            for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
+        }
+        truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
+        truth->Save("quantest_truth." + SPTAG::Helper::Convert::ConvertToString(distCalcMethod));
+    }
+
+    if (fileexists(CODEBOOK_FILE.c_str()) && fileexists("quantest_quan_vector.bin") && fileexists("quantest_rec_vector.bin")) {
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+        }
+        SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+        BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
+
+        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile("quantest_rec_vector.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            exit(1);
+        }
+        rec_vecset = vectorReader->GetVectorSet();
+
+        std::shared_ptr<Helper::ReaderOptions> quanOptions(new Helper::ReaderOptions(GetEnumValueType<std::uint8_t>(), M, VectorFileType::DEFAULT));
+        vectorReader = Helper::VectorSetReader::CreateInstance(quanOptions);
+        if (ErrorCode::Success != vectorReader->LoadFile("quantest_quan_vector.bin"))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            exit(1);
+        }
+        quan_vecset = vectorReader->GetVectorSet();
+    }
+    else {
+        omp_set_num_threads(16);
+
+        std::cout << "Building codebooks!" << std::endl;
+        R* vecs = (R*)(real_vecset->GetData());
+
+        std::unique_ptr<R[]> codebooks = std::make_unique<R[]>(M * Ks * QuanDim);
+        std::unique_ptr<int[]> belong(new int[n]);
+        for (int i = 0; i < M; i++) {
+            R* kmeans = codebooks.get() + i * Ks * QuanDim;
+            for (int j = 0; j < Ks; j++) {
+                std::memcpy(kmeans + j * QuanDim, vecs + j * m + i * QuanDim, sizeof(R) * QuanDim);
+            }
+            int cnt = 100;
+            while (cnt--) {
+                //calculate cluster
+#pragma omp parallel for
+                for (int ii = 0; ii < n; ii++) {
+                    double min_dis = 1e9;
+                    int min_id = 0;
+                    for (int jj = 0; jj < Ks; jj++) {
+                        double now_dis = COMMON::DistanceUtils::ComputeDistance(vecs + ii * m + i * QuanDim, kmeans + jj * QuanDim, QuanDim, DistCalcMethod::L2);
+                        if (now_dis < min_dis) {
+                            min_dis = now_dis;
+                            min_id = jj;
                         }
                     }
+                    belong[ii] = min_id;
                 }
-                for (int jj = 0; jj < QuanDim; jj++) {
-                    newmeans[jj] /= num;
-                    kmeans[ii * QuanDim + jj] = newmeans[jj];
-                }
-                delete[] newmeans;
-            }
-        }
-        //use kmeans to calculate codebook
-        for (int j = 0; j < Ks; j++) {
-            double min_dis = 1e9;
-            int min_id = 0;
-            for (int ii = 0; ii < n; ii++) {
-                double now_dis = 0;
-                for (int t = 0; t < QuanDim; t++) {
-                    now_dis += (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]) * (vecs[ii * m + i * QuanDim + t] - kmeans[j * QuanDim + t]);
-                }
-                if (now_dis < min_dis) {
-                    min_dis = now_dis;
-                    min_id = ii;
+                //recalculate kmeans
+                std::memset(kmeans, 0, sizeof(R) * Ks * QuanDim);
+#pragma omp parallel for
+                for (int ii = 0; ii < Ks; ii++) {
+                    int num = 0;
+                    for (int jj = 0; jj < n; jj++) {
+                        if (belong[jj] == ii) {
+                            num++;
+                            for (int kk = 0; kk < QuanDim; kk++) {
+                                kmeans[ii * QuanDim + kk] += vecs[jj * m + i * QuanDim + kk];
+                            }
+                        }
+                    }
+                    for (int jj = 0; jj < QuanDim; jj++) {
+                        kmeans[ii * QuanDim + jj] /= num;
+                    }
                 }
             }
-            for (int t = 0; t < QuanDim; t++) {
-                codebooks[i * Ks * QuanDim + j * QuanDim + t] = vecs[min_id * m + i * QuanDim + t];
-            }
-        }
-        delete[] belong;
-    }
-    delete[] kmeans;
-    std::cout << "Building Finish!" << std::endl;
-    auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, codebooks_uniq);
-    auto ptr = SPTAG::f_createIO();
-    BOOST_ASSERT(ptr != nullptr && ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out));
-    baseQuantizer->SaveQuantizer(ptr);
-    ptr->ShutDown();
-
-    BOOST_ASSERT(ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in));
-    SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-    SPTAG::COMMON::DistanceUtils::Quantizer = baseQuantizer;
-    BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
-
-    for (int i = 0; i < n; i++) {
-        auto nvec = &vecs[i * m];
-        COMMON::DistanceUtils::Quantizer->QuantizeVector(nvec, (uint8_t*)quan_vecset->GetVector(i));
-    }
-    for (int i = 0; i < n; i++) {
-        
-        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)quan_vecset->GetVector(i), rec_vecset->GetVector(i));
-    }
-    quan_vecset->Save("quan_vector.bin");
-    rec_vecset->Save("rec_vector.bin");
-    ByteArray real_query = ByteArray::Alloc(sizeof(R) * q * m);
-    ByteArray pq_query = ByteArray::Alloc(sizeof(uint8_t) * q * M);
-    ByteArray rec_query = ByteArray::Alloc(sizeof(R) * q * m);
-    std::shared_ptr<VectorSet> real_queryset;
-    std::shared_ptr<VectorSet> pq_queryset;
-    std::shared_ptr<VectorSet> rec_queryset;
-    real_queryset.reset(new BasicVectorSet(real_query, GetEnumValueType<R>(), m, q));
-    pq_queryset.reset(new BasicVectorSet(pq_query, GetEnumValueType<std::uint8_t>(), M, q));
-    rec_queryset.reset(new BasicVectorSet(rec_query, GetEnumValueType<R>(), m, q));
-    R* queries = new R[q * m];
-    for (int i = 0; i < q * m; i++) {
-        queries[i] = dist(gen);
-        ((R*)real_query.Data())[i] = (R)queries[i];
-    }
-    for (int i = 0; i < q; i++) {
-        COMMON::DistanceUtils::Quantizer->QuantizeVector(real_queryset->GetVector(i), (uint8_t*)pq_queryset->GetVector(i));
-        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)pq_queryset->GetVector(i), rec_queryset->GetVector(i));
-    }
-    
-
-    queryset = real_queryset;
-    ByteArray tru = ByteArray::Alloc(sizeof(SizeType) * queryset->Count() * k);
-    //ByteArray quan_tru = ByteArray::Alloc(sizeof(SizeType) * queryset->Count() * 2 * k);
-    auto quan_holder = COMMON::DistanceUtils::Quantizer;
-    COMMON::DistanceUtils::Quantizer.reset();
-
-    for (SizeType i = 0; i < queryset->Count(); ++i)
-    {
-        SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
-
-        COMMON::QueryResultSet<R> res((const R*)queryset->GetVector(i), k);
-
-        for (SizeType j = 0; j < real_vecset->Count(); j++)
-        {
-            float dist = COMMON::DistanceUtils::ComputeDistance<R>(res.GetTarget(), reinterpret_cast<R*>(real_vecset->GetVector(j)), queryset->Dimension(), distCalcMethod);
-            res.AddPoint(j, dist);
         }
 
-        res.SortResult();
-        for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
-    }
-    COMMON::DistanceUtils::Quantizer = quan_holder;
-    truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
-//    truth->Save("rec_truth.");
+        std::cout << "Building Finish!" << std::endl;
+        auto baseQuantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, std::move(codebooks));
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
+        }
+        baseQuantizer->SaveQuantizer(ptr);
+        ptr->ShutDown();
 
+        if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+        }
+        SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+        BOOST_ASSERT(SPTAG::COMMON::DistanceUtils::Quantizer);
+
+        rec_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * n * m), GetEnumValueType<R>(), m, n));
+        quan_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(std::uint8_t) * n * M), GetEnumValueType<std::uint8_t>(), M, n));
+        for (int i = 0; i < n; i++) {
+            auto nvec = &vecs[i * m];
+            COMMON::DistanceUtils::Quantizer->QuantizeVector(nvec, (uint8_t*)quan_vecset->GetVector(i));
+            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)quan_vecset->GetVector(i), rec_vecset->GetVector(i));
+        }
+        quan_vecset->Save("quantest_quan_vector.bin");
+        rec_vecset->Save("quantest_rec_vector.bin");
+    }
 }
 
 template <typename R>

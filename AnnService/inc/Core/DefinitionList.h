@@ -35,6 +35,7 @@ DefineVectorValueType2(Float, Float, float, float)
 
 DefineDistCalcMethod(L2)
 DefineDistCalcMethod(Cosine)
+DefineDistCalcMethod(InnerProduct)
 
 #endif // DefineDistCalcMethod
 
@@ -90,6 +91,7 @@ DefineErrorCode(Socket_FailedConnectToEndPoint, 0x4001)
 
 DefineIndexAlgo(BKT)
 DefineIndexAlgo(KDT)
+DefineIndexAlgo(SPANN)
 
 #endif // DefineIndexAlgo
 

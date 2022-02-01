@@ -37,8 +37,8 @@ namespace SPTAG
             if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
-            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ErrorCode::Success;
         }
@@ -56,8 +56,8 @@ namespace SPTAG
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
-            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ret;
         }
@@ -211,7 +211,7 @@ namespace SPTAG
 #pragma endregion
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
@@ -220,7 +220,7 @@ namespace SPTAG
             m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, false);
             m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
 
-            if (DistCalcMethod::Cosine == m_iDistCalcMethod)
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
                 int base = COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
@@ -229,8 +229,8 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
-            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
@@ -283,8 +283,8 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool(m_workSpacePool->GetMaxCheck(), newR, m_iHashTableExp));
-            ptr->m_workSpacePool->Init(m_iNumberOfThreads);
+            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            ptr->m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             ptr->m_threadPool.init();
 
             ErrorCode ret = ErrorCode::Success;
@@ -386,7 +386,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex)
+        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
@@ -404,7 +404,7 @@ namespace SPTAG
                         m_pMetadata->AddBatch(*p_metadataSet);
                         if (p_withMetaIndex) BuildMetaMapping(false);
                     }
-                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension)) != ErrorCode::Success) return ret;
+                    if ((ret = BuildIndex(p_data, p_vectorNum, p_dimension, p_normalized)) != ErrorCode::Success) return ret;
                     return ErrorCode::Success;
                 }
 
@@ -419,7 +419,7 @@ namespace SPTAG
                     m_deletedID.SetR(begin);
                     return ErrorCode::MemoryOverFlow;
                 }
-                if (DistCalcMethod::Cosine == m_iDistCalcMethod)
+                if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
                 {
                     int base = COMMON::Utils::GetBase<T>();
                     for (SizeType i = begin; i < end; i++) {
@@ -460,14 +460,14 @@ namespace SPTAG
             Index<T>::UpdateIndex()
         {
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), GetNumSamples(), m_iHashTableExp));
-            m_workSpacePool->Init(m_iNumberOfThreads);
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode
-            Index<T>::SetParameter(const char* p_param, const char* p_value)
+            Index<T>::SetParameter(const char* p_param, const char* p_value, const char* p_section)
         {
             if (nullptr == p_param || nullptr == p_value) return ErrorCode::Fail;
 
@@ -495,7 +495,7 @@ namespace SPTAG
 
         template <typename T>
         std::string
-            Index<T>::GetParameter(const char* p_param) const
+            Index<T>::GetParameter(const char* p_param, const char* p_section) const
         {
             if (nullptr == p_param) return std::string();
 

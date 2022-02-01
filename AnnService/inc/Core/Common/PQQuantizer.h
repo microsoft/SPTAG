@@ -77,7 +77,6 @@ namespace SPTAG
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
             bool m_EnableADC;
-            //bool m_IsSearching;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
 
@@ -87,16 +86,13 @@ namespace SPTAG
         };
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer()
+        PQQuantizer<T>::PQQuantizer() : m_NumSubvectors(0), m_KsPerSubvector(0), m_DimPerSubvector(0), m_BlockSize(0), m_EnableADC(false)
         {
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks))
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks)), m_EnableADC(EnableADC)
         {
-            //m_codebooks.reset(std::move(Codebooks));
-            m_EnableADC = EnableADC;
-
             auto temp_m_CosineDistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
             auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
 
@@ -241,7 +237,8 @@ namespace SPTAG
         template <typename T>
         std::uint64_t PQQuantizer<T>::BufferSize() const
         {
-            return sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector + sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType);
+            return sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector + 
+                sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + sizeof(VectorValueType) + sizeof(QuantizerType);
         }
 
         template <typename T>

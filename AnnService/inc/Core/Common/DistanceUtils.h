@@ -117,6 +117,7 @@ namespace SPTAG
             bool isSize4 = (sizeof(T) == 4);
             switch (p_method)
             {
+            case SPTAG::DistCalcMethod::InnerProduct:
             case SPTAG::DistCalcMethod::Cosine:
                 if (InstructionSet::AVX2() || (isSize4 && InstructionSet::AVX()))
                 {
@@ -154,6 +155,7 @@ namespace SPTAG
         {
             switch (p_method)
             {
+            case SPTAG::DistCalcMethod::InnerProduct:
             case SPTAG::DistCalcMethod::Cosine:
                 if (DistanceUtils::Quantizer) {
                     return ([](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return DistanceUtils::Quantizer->CosineDistance(pX, pY); });

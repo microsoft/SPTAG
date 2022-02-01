@@ -108,7 +108,6 @@
     <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
     <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
-    <CudaCompile Include="src\Core\Common\WorkSpacePool.cpp" />
     <CudaCompile Include="src\Core\MetadataSet.cpp" />
     <CudaCompile Include="src\Core\VectorIndex.cpp" />
     <CudaCompile Include="src\Core\VectorSet.cpp" />
@@ -135,6 +134,7 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
+    <ClInclude Include="inc\Core\Common\TruthSet.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />
@@ -152,9 +152,15 @@
     <ClInclude Include="inc\Core\MetadataSet.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\Index.h" />
+    <ClInclude Include="inc\Core\SPANN\Options.h" />
+    <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
+    <ClInclude Include="inc\Helper\AsyncFileReader.h" />
     <ClInclude Include="inc\Helper\Base64Encode.h" />
     <ClInclude Include="inc\Helper\CommonHelper.h" />
     <ClInclude Include="inc\Helper\Concurrent.h" />
@@ -171,12 +177,16 @@
     <ClInclude Include="inc\Helper\ThreadPool.h" />
     <ClInclude Include="inc\Helper\VectorSetReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\DefaultReader.h" />
+    <ClInclude Include="inc\Helper\VectorSetReaders\MemoryReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\TxtReader.h" />
     <ClInclude Include="inc\Helper\VectorSetReaders\XvecReader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Core\Common\CommonUtils.cpp" />
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
+    <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
+    <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp" />

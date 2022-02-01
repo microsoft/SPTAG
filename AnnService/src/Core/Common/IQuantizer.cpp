@@ -27,6 +27,8 @@ namespace SPTAG
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+                default: break;
                 }
                 
                 return DistanceUtils::Quantizer->LoadQuantizer(p_in);
@@ -39,11 +41,11 @@ namespace SPTAG
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+                default: break;
                 }
-
                 return DistanceUtils::Quantizer->LoadQuantizer(p_in);
             }
-            return ErrorCode::Success;
+            return ErrorCode::Fail;
         }
 
         ErrorCode IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
@@ -70,6 +72,7 @@ namespace SPTAG
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+                default: break;
                 }
 
                 return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);
@@ -82,6 +85,7 @@ namespace SPTAG
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+                default: break;
                 }
 
                 return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);

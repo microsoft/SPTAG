@@ -9,6 +9,7 @@ DefineBKTParameter(m_sGraphFilename, std::string, std::string("graph.bin"), "Gra
 DefineBKTParameter(m_sDataPointsFilename, std::string, std::string("vectors.bin"), "VectorFilePath")
 DefineBKTParameter(m_sDeleteDataPointsFilename, std::string, std::string("deletes.bin"), "DeleteVectorFilePath")
 
+DefineBKTParameter(m_pTrees.m_bfs, int, 0L, "EnableBfs")
 DefineBKTParameter(m_pTrees.m_iTreeNumber, int, 1L, "BKTNumber")
 DefineBKTParameter(m_pTrees.m_iBKTKmeansK, int, 32L, "BKTKmeansK")
 DefineBKTParameter(m_pTrees.m_iBKTLeafSize, int, 8L, "BKTLeafSize")
@@ -23,6 +24,7 @@ DefineBKTParameter(m_pGraph.m_iNeighborhoodSize, DimensionType, 32L, "Neighborho
 DefineBKTParameter(m_pGraph.m_fNeighborhoodScale, float, 2.0F, "GraphNeighborhoodScale")
 DefineBKTParameter(m_pGraph.m_fCEFScale, float, 2.0F, "GraphCEFScale")
 DefineBKTParameter(m_pGraph.m_iRefineIter, int, 2L, "RefineIterations")
+DefineBKTParameter(m_pGraph.m_rebuild, int, 0L, "EnableRebuild")
 DefineBKTParameter(m_pGraph.m_iCEF, int, 1000L, "CEF")
 DefineBKTParameter(m_pGraph.m_iAddCEF, int, 500L, "AddCEF")
 DefineBKTParameter(m_pGraph.m_iMaxCheckForRefineGraph, int, 8192L, "MaxCheckForRefineGraph")
