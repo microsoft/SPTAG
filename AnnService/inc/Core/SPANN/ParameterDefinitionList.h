@@ -32,6 +32,7 @@ DefineBasicParameter(m_ssdIndex, std::string, std::string("SPTAGFullList.bin"), 
 DefineBasicParameter(m_deleteHeadVectors, bool, false, "DeleteHeadVectors")
 DefineBasicParameter(m_ssdIndexFileNum, int, 1, "SSDIndexFileNum")
 DefineBasicParameter(m_quantizerFilePath, std::string, std::string(), "QuantizerFilePath")
+DefineBasicParameter(m_quantizerFileName, std::string, std::string("quantizer.bin"), "QuantizerFileName")
 
 #endif
 
