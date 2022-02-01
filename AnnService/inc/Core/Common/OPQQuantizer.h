@@ -3,8 +3,6 @@
 #ifndef _SPTAG_COMMON_OPQQUANTIZER_H_
 #define _SPTAG_COMMON_OPQQUANTIZER_H_
 
-#include <boost/numeric/ublas/matrix.hpp>
-#include <boost/numeric/ublas/lu.hpp>
 #include "PQQuantizer.h"
 
 namespace SPTAG
@@ -36,14 +34,15 @@ namespace SPTAG
 			}
 
 		protected:
+			using PQQuantizer<T>::m_NumSubvectors;
+			using PQQuantizer<T>::m_DimPerSubvector;
+			using PQQuantizer<T>::m_KsPerSubvector;
+			using PQQuantizer<T>::m_codebooks;
 			inline SizeType m_MatrixIndexCalc(SizeType i, SizeType j);
 
-			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec);
-
-			inline ErrorCode m_InvertMatrix(const OPQMatrixType* InMatrix, OPQMatrixType* OutMatrix);
+			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec, bool transpose = false);
 
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
-			std::unique_ptr<OPQMatrixType[]> m_InverseOPQMatrix;
 		};
 
 		template <typename T>
@@ -54,8 +53,6 @@ namespace SPTAG
 		template <typename T>
 		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks))
 		{
-			m_InverseOPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InvertMatrix(m_OPQMatrix.get(), m_InverseOPQMatrix.get());
 		}
 
 		template <typename T>
@@ -72,7 +69,8 @@ namespace SPTAG
 		{
 			void* pre_mat_vec = _mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			PQQuantizer<T>::ReconstructVector(qvec, pre_mat_vec);
-			m_MatrixVectorMultiply(m_InverseOPQMatrix.get(), pre_mat_vec, vecout);
+			// OPQ Matrix is orthonormal, so inverse = transpose
+			m_MatrixVectorMultiply(m_OPQMatrix.get(), pre_mat_vec, vecout, true);
 			_mm_free(pre_mat_vec);
 		}
 
@@ -88,7 +86,6 @@ namespace SPTAG
 			IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
 			IOBINARY(p_out, WriteBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
 			IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_OPQMatrix.get());
-			IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_InverseOPQMatrix.get());
 			LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
 			return ErrorCode::Success;
 		}
@@ -103,11 +100,8 @@ namespace SPTAG
 			}
 			
 			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InverseOPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_OPQMatrix.get());
 			LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
-			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_InverseOPQMatrix.get());
-			LOG(Helper::LogLevel::LL_Info, "After read Inverse OPQ Matrix.\n");
 
 			return ErrorCode::Success;
 		}
@@ -118,10 +112,8 @@ namespace SPTAG
 			PQQuantizer<T>::LoadQuantizer(raw_bytes);
 			raw_bytes += sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + (sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
 			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			m_InverseOPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			memcpy_s(m_OPQMatrix.get(), sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector), raw_bytes, sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			raw_bytes += sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector);
-			memcpy_s(m_InverseOPQMatrix.get(), sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector), raw_bytes, sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
 			return ErrorCode::Success;
 		}
 
@@ -132,7 +124,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec)
+		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const void* vec, void* mat_vec, bool transpose)
 		{
 			T* vec_T = (T*) vec;
 			T* mat_vec_T = (T*)mat_vec;
@@ -141,43 +133,18 @@ namespace SPTAG
 				mat_vec_T = 0;
 				for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
 				{
-					mat_vec_T[i] += mat[m_MatrixIndexCalc(i,j)] * vec_T[j];
+					if (transpose)
+					{
+						mat_vec_T[i] += mat[m_MatrixIndexCalc(j, i)] * vec_T[j];
+					}
+					else
+					{
+						mat_vec_T[i] += mat[m_MatrixIndexCalc(i, j)] * vec_T[j];
+					}
 				}
 			}
 		}
 
-		template <typename T>
-		ErrorCode OPQQuantizer<T>::m_InvertMatrix(const OPQMatrixType* InMatrix, OPQMatrixType* OutMatrix)
-		{
-			using namespace boost::numeric::ublas;
-			auto mat_dim = m_NumSubvectors * m_DimPerSubvector;
-			matrix<OPQMatrixType> in_m (mat_dim, mat_dim);
-			for (int i = 0; i < mat_dim; i++)
-			{
-				for (int j = 0; j < mat_dim; j++)
-				{
-					in_m(i, j) = InMatrix[m_MatrixIndexCalc(i, j)];
-				}
-			}
-			auto out_m = identity_matrix<OPQMatrixType>(mat_dim);
-			permutation_matrix<OPQMatrixType> perm(mat_dim);
-
-			if (lu_factorize(in_m, perm) != 0)
-			{
-				// Matrix is not invertible
-				return ErrorCode::Fail;
-			}
-
-			lu_substitute(in_m, perm, out_m);
-			for (int i = 0; i < mat_dim; i++)
-			{
-				for (int j = 0; j < mat_dim; j++)
-				{
-					OutMatrix[m_MatrixIndexCalc(i, j)] = out_m (i, j);
-				}
-			}
-			return ErrorCode::Success;
-		}
 	}
 }
 
