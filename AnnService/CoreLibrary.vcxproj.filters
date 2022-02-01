@@ -211,6 +211,9 @@
     <ClInclude Include="inc\Core\Common\TruthSet.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\OPQQuantizer.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
