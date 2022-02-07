@@ -437,7 +437,7 @@ break;
             template <typename T>
             void RebuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                std::vector<std::atomic_int> indegree(m_iGraphSize);
+                std::vector<int> indegree(m_iGraphSize);
 
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++) indegree[i] = 0;
@@ -490,7 +490,7 @@ break;
                         if(outnodes[z] >= 0) indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
                         outnodes[j] = outnodes[z];
                         z++;
-                        if (z >= m_iNeighborhoodSize) break;
+                        //if (z >= m_iNeighborhoodSize) break;
                     }
                     if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                 }
