@@ -137,6 +137,7 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
+    <ClInclude Include="inc\Core\Common\OptimizedDataset.h" />
     <ClInclude Include="inc\Core\Common\PQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\TruthSet.h" />
@@ -200,6 +201,7 @@
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
     <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Helper\ArgumentsParser.cpp" />
+    <ClCompile Include="src\Helper\AsyncFileReader.cpp" />
     <ClCompile Include="src\Helper\Base64Encode.cpp" />
     <ClCompile Include="src\Helper\CommonHelper.cpp" />
     <ClCompile Include="src\Helper\Concurrent.cpp" />

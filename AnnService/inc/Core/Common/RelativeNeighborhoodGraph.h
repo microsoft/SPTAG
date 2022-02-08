@@ -14,7 +14,7 @@ namespace SPTAG
         class RelativeNeighborhoodGraph: public NeighborhoodGraph
         {
         public:
-            RelativeNeighborhoodGraph() { m_pNeighborhoodGraph.SetName("RNG"); }
+            RelativeNeighborhoodGraph(std::shared_ptr<COMMON::Dataset<SizeType>> data = nullptr): NeighborhoodGraph(data) { m_pNeighborhoodGraph->SetName("RNG"); }
 
             void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) {
                 DimensionType count = 0;
@@ -37,7 +37,7 @@ namespace SPTAG
 
             void InsertNeighbors(VectorIndex* index, const SizeType node, SizeType insertNode, float insertDist)
             {                
-                SizeType* nodes = m_pNeighborhoodGraph[node];
+                SizeType* nodes = m_pNeighborhoodGraph->At(node);
                 const void* nodeVec = index->GetSample(node);
                 const void* insertVec = index->GetSample(insertNode);
                 

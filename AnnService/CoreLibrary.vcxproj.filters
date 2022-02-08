@@ -211,6 +211,9 @@
     <ClInclude Include="inc\Core\Common\TruthSet.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\OptimizedDataset.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -275,6 +278,9 @@
     </ClCompile>
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp">
       <Filter>Source Files\Core\SPANN</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Helper\AsyncFileReader.cpp">
+      <Filter>Source Files\Helper</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

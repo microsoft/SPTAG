@@ -34,7 +34,8 @@ namespace SPTAG
         class NeighborhoodGraph
         {
         public:
-            NeighborhoodGraph() : m_iTPTNumber(32),
+            NeighborhoodGraph(std::shared_ptr<COMMON::Dataset<SizeType>> data = nullptr) : m_pNeighborhoodGraph(std::move(data)), 
+                m_iTPTNumber(32),
                 m_iTPTLeafSize(2000),
                 m_iSamples(1000),
                 m_numTopDimensionTPTSplit(5),
@@ -53,7 +54,9 @@ namespace SPTAG
                 m_iheadNumGPUs(1),
                 m_iTPTBalanceFactor(2),
                 m_rebuild(0)
-            {}
+            {
+                if (m_pNeighborhoodGraph == nullptr) m_pNeighborhoodGraph.reset(new Dataset<SizeType>());
+            }
 
             ~NeighborhoodGraph() {}
 
@@ -88,7 +91,7 @@ namespace SPTAG
                             break;
                         }
                         for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
-                            if ((m_pNeighborhoodGraph)[x][k] == exact_rng[j]) {
+                            if (m_pNeighborhoodGraph->At(x)[k] == exact_rng[j]) {
                                 correct[i]++;
                                 break;
                             }
@@ -110,14 +113,15 @@ namespace SPTAG
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
                 // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)(m_pNeighborhoodGraph->At(0)), m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
                     for (SizeType i = 0; i < m_iGraphSize; i++) {
+                        T* nodes = m_pNeighborhoodGraph->At(i);
                         for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
-                            if ((iter = idmap->find(m_pNeighborhoodGraph[i][j])) != idmap->end())
-                                m_pNeighborhoodGraph[i][j] = iter->second;
+                            if ((iter = idmap->find(nodes[j])) != idmap->end())
+                                nodes[j] = iter->second;
                         }
                     }
                 }
@@ -341,7 +345,7 @@ break;
 
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                     for (DimensionType j = 0; j < m_iNeighborhoodSize; j++)
-                        (NeighborhoodDists)[i][j] = MaxDist;
+                        NeighborhoodDists.At(i)[j] = MaxDist;
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
@@ -377,8 +381,8 @@ break;
                                     p1 = (idmap->find(p1) == idmap->end()) ? p1 : idmap->at(p1);
                                     p2 = (idmap->find(p2) == idmap->end()) ? p2 : idmap->at(p2);
                                 }
-                                COMMON::Utils::AddNeighbor(p2, dist, (m_pNeighborhoodGraph)[p1], (NeighborhoodDists)[p1], m_iNeighborhoodSize);
-                                COMMON::Utils::AddNeighbor(p1, dist, (m_pNeighborhoodGraph)[p2], (NeighborhoodDists)[p2], m_iNeighborhoodSize);
+                                COMMON::Utils::AddNeighbor(p2, dist, m_pNeighborhoodGraph->At(p1), NeighborhoodDists.At(p1), m_iNeighborhoodSize);
+                                COMMON::Utils::AddNeighbor(p1, dist, m_pNeighborhoodGraph->At(p2), NeighborhoodDists.At(p2), m_iNeighborhoodSize);
                             }
                         }
                     }
@@ -400,7 +404,7 @@ break;
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale) * (m_rebuild + 1));
-                m_pNeighborhoodGraph.Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
+                m_pNeighborhoodGraph->Initialize(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
@@ -429,7 +433,7 @@ break;
                     for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
                         if (iter->first < 0)
                         {
-                            m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
+                            m_pNeighborhoodGraph->At(-1 - iter->first)[m_iNeighborhoodSize - 1] = -2 - iter->second;
                         }
                 }
             }
@@ -446,7 +450,7 @@ break;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
-                    SizeType* outnodes = m_pNeighborhoodGraph[i];
+                    SizeType* outnodes = m_pNeighborhoodGraph->At(i);
                     for (SizeType j = 0; j < m_iNeighborhoodSize; j++)
                     {
                         int node = outnodes[j];
@@ -462,7 +466,7 @@ break;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
                 {
-                    SizeType* outnodes = m_pNeighborhoodGraph[i];
+                    SizeType* outnodes = m_pNeighborhoodGraph->At(i);
                     std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
                     int total = 0;
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
@@ -525,16 +529,14 @@ break;
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::shared_ptr<Helper::DiskPriorityIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::shared_ptr<Helper::DiskPriorityIO> output, std::shared_ptr<NeighborhoodGraph>& newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                std::shared_ptr<NeighborhoodGraph> tmp;
-                if (newGraph == nullptr) {
-                    tmp = NeighborhoodGraph::CreateInstance(Type());
-                    newGraph = tmp.get();
-                }
-
                 SizeType R = (SizeType)indices.size();
-                newGraph->m_pNeighborhoodGraph.Initialize(R, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
+                
+                if (newGraph == nullptr) {
+                    newGraph = NeighborhoodGraph::CreateInstance(Type());
+                    newGraph->m_pNeighborhoodGraph->Initialize(R, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
+                }
                 newGraph->m_iGraphSize = R;
                 newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
@@ -543,7 +545,7 @@ break;
                 {
                     if ((i * 5) % R == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n", static_cast<int>(i * 1.0 / R * 100));
 
-                    SizeType* outnodes = newGraph->m_pNeighborhoodGraph[i];
+                    SizeType* outnodes = newGraph->m_pNeighborhoodGraph->At(i);
 
                     COMMON::QueryResultSet<T> query((const T*)index->GetSample(indices[i]), m_iCEF + 1);
                     index->RefineSearchIndex(query, false);
@@ -574,7 +576,7 @@ break;
                     query.SetTarget((T*)rec_query);
                 }
                 index->RefineSearchIndex(query, searchDeleted);
-                RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
+                RebuildNeighbors(index, node, m_pNeighborhoodGraph->At(node), query.GetResults(), CEF + 1);
                 if (rec_query)
                 {
                     _mm_free(rec_query);
@@ -594,42 +596,42 @@ break;
 
             inline std::uint64_t BufferSize() const
             {
-                return m_pNeighborhoodGraph.BufferSize();
+                return m_pNeighborhoodGraph->BufferSize();
             }
 
             ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph->Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
 
-                m_iGraphSize = m_pNeighborhoodGraph.R();
-                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iGraphSize = m_pNeighborhoodGraph->R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph->C();
                 return ret;
             }
 
             ErrorCode LoadGraph(std::string sGraphFilename, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph->Load(sGraphFilename, blockSize, capacity)) != ErrorCode::Success) return ret;
 
-                m_iGraphSize = m_pNeighborhoodGraph.R();
-                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iGraphSize = m_pNeighborhoodGraph->R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph->C();
                 return ret;
             }
 
             ErrorCode LoadGraph(char* pGraphMemFile, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
-                if ((ret = m_pNeighborhoodGraph.Load(pGraphMemFile, blockSize, capacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pNeighborhoodGraph->Load(pGraphMemFile, blockSize, capacity)) != ErrorCode::Success) return ret;
 
-                m_iGraphSize = m_pNeighborhoodGraph.R();
-                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                m_iGraphSize = m_pNeighborhoodGraph->R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph->C();
                 return ErrorCode::Success;
             }
 
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph->Name().c_str(), sGraphFilename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sGraphFilename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveGraph(ptr);
@@ -637,48 +639,52 @@ break;
 
             ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
             {
+                if (output == nullptr) return ErrorCode::EmptyDiskIO;
+
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
                 IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);
 
                 for (int i = 0; i < m_iGraphSize; i++)
-                    IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
-                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                    IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph->At(i));
+                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph->Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
                 return ErrorCode::Success;
             }
 
             inline ErrorCode AddBatch(SizeType num)
             {
-                ErrorCode ret = m_pNeighborhoodGraph.AddBatch(num);
+                ErrorCode ret = m_pNeighborhoodGraph->AddBatch(num);
                 if (ret != ErrorCode::Success) return ret;
 
                 m_iGraphSize += num;
                 return ErrorCode::Success;
             }
 
-            inline SizeType* operator[](SizeType index) { return m_pNeighborhoodGraph[index]; }
+            inline SizeType* operator[](SizeType index) { return m_pNeighborhoodGraph->At(index); }
 
-            inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph[index]; }
+            inline const SizeType* operator[](SizeType index) const { return m_pNeighborhoodGraph->At(index); }
 
             void Update(SizeType row, DimensionType col, SizeType val) {
                 std::lock_guard<std::mutex> lock(m_dataUpdateLock[row]);
-                m_pNeighborhoodGraph[row][col] = val;
+                m_pNeighborhoodGraph->At(row)[col] = val;
             }
 
             inline void SetR(SizeType rows) {
-                m_pNeighborhoodGraph.SetR(rows);
+                m_pNeighborhoodGraph->SetR(rows);
                 m_iGraphSize = rows;
             }
 
             inline SizeType R() const { return m_iGraphSize; }
 
-            inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
+            inline std::string Type() const { return m_pNeighborhoodGraph->Name(); }
+
+            inline std::shared_ptr<COMMON::Dataset<SizeType>>& GetData() { return m_pNeighborhoodGraph; }
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 
         protected:
             // Graph structure
             SizeType m_iGraphSize;
-            COMMON::Dataset<SizeType> m_pNeighborhoodGraph;
+            std::shared_ptr<COMMON::Dataset<SizeType>> m_pNeighborhoodGraph;
             FineGrainedLock m_dataUpdateLock;
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;

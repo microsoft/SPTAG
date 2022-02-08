@@ -146,7 +146,7 @@ void SaveCenters(T* centers, SizeType row, DimensionType col, const std::string&
 }
 
 template <typename T>
-inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
+inline float MultipleClustersAssign(const COMMON::Dataset<T>* data,
     std::vector<SizeType>& indices,
     const SizeType first, const SizeType last, COMMON::KmeansArgs<T>& args, COMMON::Dataset<LabelType>& label, bool updateCenters, float lambda, std::vector<float>& weights, float wlambda) {
     float currDist = 0;
@@ -170,7 +170,7 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
         for (SizeType i = istart; i < iend; i++) {
             for (int k = 0; k < args._K; k++) {
                 float penalty = lambda * (((options.m_newp == 1) && (args.counts[k] < avgCount)) ? avgCount : args.counts[k]) + wlambda * args.weightedCounts[k];
-                float dist = args.fComputeDistance(data[indices[i]], args.centers + k * args._D, args._D) + penalty;
+                float dist = args.fComputeDistance(data->At(indices[i]), args.centers + k * args._D, args._D) + penalty;
                 centerDist[k].node = k;
                 centerDist[k].distance = dist;
             }
@@ -180,13 +180,13 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
 
             for (int k = 0; k < label.C(); k++) {
                 if (centerDist[k].distance <= centerDist[0].distance * options.m_closurefactor) {
-                    label[i][k] = (LabelType)(centerDist[k].node);
+                    label.At(i)[k] = (LabelType)(centerDist[k].node);
                     inewCounts[centerDist[k].node]++;
                     inewWeightedCounts[centerDist[k].node] += weights[indices[i]];
                     idist += centerDist[k].distance;
 
                     if (updateCenters) {
-                        const T* v = (const T*)data[indices[i]];
+                        const T* v = data->At(indices[i]);
                         float* center = inewCenters + centerDist[k].node * args._D;
                         for (DimensionType j = 0; j < args._D; j++) center[j] += v[j];
                         if (centerDist[k].distance > iclusterDist[centerDist[k].node]) {
@@ -202,7 +202,7 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
                     }
                 }
                 else {
-                    label[i][k] = (std::numeric_limits<LabelType>::max)();
+                    label.At(i)[k] = (std::numeric_limits<LabelType>::max)();
                 }
             }
         }
@@ -247,7 +247,7 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
 }
 
 template <typename T>
-inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
+inline float HardMultipleClustersAssign(const COMMON::Dataset<T>* data,
 	std::vector<SizeType>& indices,
 	const SizeType first, const SizeType last, COMMON::KmeansArgs<T>& args, COMMON::Dataset<LabelType>& label, SizeType* mylimit, std::vector<float>& weights,
 	const int clusternum, const bool fill) {
@@ -264,7 +264,7 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
         std::vector<SPTAG::NodeDistPair> centerDist(args._K, SPTAG::NodeDistPair());
         for (SizeType i = istart; i < iend; i++) {
             for (int k = 0; k < args._K; k++) {
-                float dist = args.fComputeDistance(data[indices[i]], args.centers + k * args._D, args._D);
+                float dist = args.fComputeDistance(data->At(indices[i]), args.centers + k * args._D, args._D);
                 centerDist[k].node = k;
                 centerDist[k].distance = dist;
             }
@@ -321,19 +321,19 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
         float idist = 0;
         for (SizeType i = istart; i < iend; i++) {
             if (items[i].tonode >= 0) {
-                label[items[i].tonode][clusternum] = (LabelType)(items[i].node);
+                label.At(items[i].tonode)[clusternum] = (LabelType)(items[i].node);
                 inewCounts[items[i].node]++;
                 inewWeightedCounts[items[i].node] += weights[indices[items[i].tonode]];
                 idist += items[i].distance;
             }
             else {
                 items[i].tonode = -items[i].tonode - 1;
-                label[items[i].tonode][clusternum] = (std::numeric_limits<LabelType>::max)();
+                label.At(items[i].tonode)[clusternum] = (std::numeric_limits<LabelType>::max)();
             }
 
             if (fill) {
                 for (int k = clusternum + 1; k < label.C(); k++) {
-                    label[items[i].tonode][k] = (std::numeric_limits<LabelType>::max)();
+                    label.At(items[i].tonode)[k] = (std::numeric_limits<LabelType>::max)();
                 }
             }
         }
@@ -404,7 +404,7 @@ void Process(MPI_Datatype type) {
 	totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
 
     if (rank == 0 && options.m_maxIter > 0 && options.m_lambda < -1e-6f) {
-        float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
+        float fBalanceFactor = COMMON::DynamicFactorSelect<T>(&data, localindices, 0, data.R(), args, data.R());
         options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();    
     }
     MPI_Bcast(&(options.m_lambda), 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
@@ -415,7 +415,7 @@ void Process(MPI_Datatype type) {
         LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
             if (options.m_seed >= 0) std::srand(options.m_seed);
-            COMMON::InitCenters<T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
+            COMMON::InitCenters<T>(&data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
         }
     }
 
@@ -431,7 +431,7 @@ void Process(MPI_Datatype type) {
         args.ClearCenters();
         args.ClearCounts();
         args.ClearDists(-MaxDist);
-        d = MultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
+        d = MultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
         MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 		MPI_Allreduce(args.newWeightedCounts, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
         MPI_Allreduce(&d, &currDist, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
@@ -447,7 +447,7 @@ void Process(MPI_Datatype type) {
 
         if (rank == 0) {
             MPI_Reduce(MPI_IN_PLACE, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-            currDiff = COMMON::RefineCenters<T>(data, args);
+            currDiff = COMMON::RefineCenters<T>(&data, args);
             LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
         } else
             MPI_Reduce(args.newCenters, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -474,7 +474,7 @@ void Process(MPI_Datatype type) {
     args.ClearCounts();
     args.ClearDists(0);
 	for (int i = 0; i < options.m_clusterassign - 1; i++) {
-		d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
+		d += HardMultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
 		std::memcpy(myLimit.data(), args.counts, sizeof(SizeType)*args._K);
 		MPI_Allreduce(MPI_IN_PLACE, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 		MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
@@ -487,7 +487,7 @@ void Process(MPI_Datatype type) {
             if (totalCount > args.counts[k])
 			    myLimit[k] += (SizeType)((totalCount - args.counts[k]) / size);
 	}
-	d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
+	d += HardMultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
 	std::memcpy(args.newCounts, args.counts, sizeof(SizeType)*args._K);
 	MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 	MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
@@ -572,8 +572,8 @@ void Process(MPI_Datatype type) {
                         size_t total_rec = 0;
                         for (int k = 0; k < data.R(); k++) {
                             for (int kk = 0; kk < label.C(); kk++) {
-                                if (label[k][kk] == (LabelType)i) {
-                                    CHECKIO(out, WriteBinary, sizeof(T) * args._D, (char*)(data[localindices[k]]));
+                                if (label.At(k)[kk] == (LabelType)i) {
+                                    CHECKIO(out, WriteBinary, sizeof(T) * args._D, (char*)(data.At(localindices[k])));
                                     if (metas != nullptr) {
                                         ByteArray meta = metas->GetMetadata(localindices[k]);
                                         CHECKIO(metaout, WriteBinary, meta.Length(), (const char*)meta.Data());
@@ -600,8 +600,8 @@ void Process(MPI_Datatype type) {
                 size_t total_rec = 0;
                 for (int j = 0; j < data.R(); j++) {
                     for (int kk = 0; kk < label.C(); kk++) {
-                        if (label[j][kk] == (LabelType)i) {
-                            MPI_Send(data[localindices[j]], args._D, type, dest, 1, MPI_COMM_WORLD);
+                        if (label.At(j)[kk] == (LabelType)i) {
+                            MPI_Send(data.At(localindices[j]), args._D, type, dest, 1, MPI_COMM_WORLD);
                             if (metas != nullptr) {
                                 ByteArray meta = metas->GetMetadata(localindices[j]);
                                 int len = (int)meta.Length();
@@ -780,10 +780,10 @@ void ProcessWithoutMPI() {
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
             if (options.m_seed >= 0) std::srand(options.m_seed);
             if (options.m_maxIter > 0 && options.m_lambda < -1e-6f) {
-                float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
+                float fBalanceFactor = COMMON::DynamicFactorSelect<T>(&data, localindices, 0, data.R(), args, data.R());
                 options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
             }
-            COMMON::InitCenters<T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
+            COMMON::InitCenters<T>(&data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
         }
     }
     if (iteration < 0) {
@@ -804,12 +804,12 @@ void ProcessWithoutMPI() {
         args.ClearCenters();
         args.ClearCounts();
         args.ClearDists(-MaxDist);
-        d = MultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
+        d = MultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
         
         SyncSaveCenter(args, rank, iteration + 1, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0);
         if (rank == 0) {
             SyncLoadCenter(args, rank, iteration + 1, totalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
-            currDiff = COMMON::RefineCenters<T>(data, args);
+            currDiff = COMMON::RefineCenters<T>(&data, args);
             if (currDist < minClusterDist) {
                 noImprovement = 0;
                 minClusterDist = currDist;
@@ -845,7 +845,7 @@ void ProcessWithoutMPI() {
     args.ClearCounts();
     args.ClearDists(0);
     for (int i = 0; i < options.m_clusterassign - 1; i++) {
-        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
+        d += HardMultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
         std::memcpy(myLimit.data(), args.counts, sizeof(SizeType) * args._K);
         SyncSaveCenter(args, rank, 10000 + iteration + 1 + i, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0, true);
         SyncLoadCenter(args, rank, 10000 + iteration + 1 + i, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
@@ -858,7 +858,7 @@ void ProcessWithoutMPI() {
             if (totalCount > args.counts[k])
                 myLimit[k] += (SizeType)((totalCount - args.counts[k]) / options.m_totalparts);
     }
-    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
+    d += HardMultipleClustersAssign<T>(&data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
     std::memcpy(args.newCounts, args.counts, sizeof(SizeType) * args._K);
     SyncSaveCenter(args, rank, 10000 + iteration + options.m_clusterassign, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0, true);
     SyncLoadCenter(args, rank, 10000 + iteration + options.m_clusterassign, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
@@ -925,8 +925,8 @@ void Partition() {
         int records = 0;
         for (int k = 0; k < data.R(); k++) {
             for (int kk = 0; kk < label.C(); kk++) {
-                if (label[k][kk] == (LabelType)i) {
-                    CHECKIO(out, WriteBinary, sizeof(T) * cols, (char*)(data[k]));
+                if (label.At(k)[kk] == (LabelType)i) {
+                    CHECKIO(out, WriteBinary, sizeof(T) * cols, (char*)(data.At(k)));
                     if (metas != nullptr) {
                         ByteArray meta = metas->GetMetadata(k);
                         CHECKIO(metaout, WriteBinary, meta.Length(), (const char*)meta.Data());

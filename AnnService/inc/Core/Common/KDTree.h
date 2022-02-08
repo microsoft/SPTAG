@@ -48,10 +48,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            void Rebuild(const Dataset<T>& data, IAbortOperation* abort)
+            void Rebuild(const Dataset<T>* data, IAbortOperation* abort)
             {
                 COMMON::KDTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, 1, nullptr, abort);
+                newTrees.BuildTrees<T>(data, 1, nullptr, nullptr, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
@@ -59,7 +59,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
+            void BuildTrees(const Dataset<T>* data, int numOfThreads, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, IAbortOperation* abort = nullptr)
             {
                 if (COMMON::DistanceUtils::Quantizer)
                 {
@@ -67,7 +67,7 @@ namespace SPTAG
                     {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-BuildTreesCore<T, Type>(data, numOfThreads, indices, abort); \
+BuildTreesCore<T, Type>(data, numOfThreads, indices, reverseIndices, abort); \
 break;
 
 #include "inc/Core/DefinitionList.h"
@@ -78,16 +78,16 @@ break;
                 }
                 else
                 {
-                    BuildTreesCore<T, T>(data, numOfThreads, indices, abort);
+                    BuildTreesCore<T, T>(data, numOfThreads, indices, reverseIndices, abort);
                 }
             }
 
             template <typename T, typename R>
-            void BuildTreesCore(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
+            void BuildTreesCore(const Dataset<T>* data, int numOfThreads, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, IAbortOperation* abort = nullptr)
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
-                    localindices.resize(data.R());
+                    localindices.resize(data->R());
                     for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
@@ -112,6 +112,14 @@ break;
                     DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
                     LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
                 }
+
+#pragma omp parallel for
+                for (SizeType i = 0; i < m_iTreeNumber; i++) {
+                    if (m_pTreeRoots[i].left < 0)
+                        m_pTreeRoots[i].left = -reverseIndices->at(-m_pTreeRoots[i].left - 1) - 1;
+                    if (m_pTreeRoots[i].right < 0)
+                        m_pTreeRoots[i].right = -reverseIndices->at(-m_pTreeRoots[i].right - 1) - 1;
+                }
             }
 
             inline std::uint64_t BufferSize() const 
@@ -122,6 +130,8 @@ break;
 
             ErrorCode SaveTrees(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
             {
+                if (p_out == nullptr) return ErrorCode::EmptyDiskIO;
+
                 std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 IOBINARY(p_out, WriteBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
@@ -158,6 +168,8 @@ break;
 
             ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
             {
+                if (p_input == nullptr) return ErrorCode::LackOfInputs;
+
                 if (m_bOldVersion) {
                     struct KdtreeNode
                     {
@@ -211,7 +223,7 @@ break;
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>* p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
                     KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
@@ -219,7 +231,7 @@ break;
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
+            void SearchTrees(const Dataset<T>* p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
@@ -231,7 +243,7 @@ break;
         private:
 
             template <typename T>
-            void KDTSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T>& p_query,
+            void KDTSearch(const Dataset<T>* p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T>& p_query,
                 COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
             {
                 if (COMMON::DistanceUtils::Quantizer)
@@ -256,14 +268,14 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             }
 
             template <typename T, typename Q>
-            void KDTSearchCore(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
+            void KDTSearchCore(const Dataset<T>* p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
                            COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
                     SizeType index = -node - 1;
-                    if (index >= p_data.R()) return;
+                    if (index >= p_data->R()) return;
 #ifdef PREFETCH
-                    const T* data = p_data[index];
+                    const T* data = p_data->At(index);
                     _mm_prefetch((const char*)data, _MM_HINT_T0);
                     _mm_prefetch((const char*)(data + 64), _MM_HINT_T0);
 #endif
@@ -271,7 +283,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
 
                     ++p_space.m_iNumberOfTreeCheckedLeaves;
                     ++p_space.m_iNumberOfCheckedLeaves;
-                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetQuantizedTarget(), data, p_data.C())));
+                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetQuantizedTarget(), data, p_data->C())));
                     return;
                 }
 
@@ -297,7 +309,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
 
 
             template <typename T, typename R>
-            void DivideTree(const Dataset<T>& data, std::vector<SizeType>& indices, SizeType first, SizeType last,
+            void DivideTree(const Dataset<T>* data, std::vector<SizeType>& indices, SizeType first, SizeType last,
                 SizeType index, SizeType &iTreeSize, IAbortOperation* abort = nullptr) {
                 if (abort && abort->ShouldAbort()) return;
 
@@ -326,9 +338,9 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             }
 
             template <typename T, typename R>
-            void ChooseDivision(const Dataset<T>& data, KDTNode& node, const std::vector<SizeType>& indices, const SizeType first, const SizeType last)
+            void ChooseDivision(const Dataset<T>* data, KDTNode& node, const std::vector<SizeType>& indices, const SizeType first, const SizeType last)
             {
-                SizeType cols = data.C();
+                SizeType cols = data->C();
                 bool quantizer_exists = (nullptr != COMMON::DistanceUtils::Quantizer);
                 R* v_holder = nullptr;
                 if (quantizer_exists)
@@ -346,12 +358,12 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                     R* v;
                     if (quantizer_exists)
                     {
-                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)data[indices[j]], v_holder);
+                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)(data->At(indices[j])), v_holder);
                         v = v_holder;
                     } 
                     else
                     {
-                        v = (R*)data[indices[j]];
+                        v = (R*)(data->At(indices[j]));
                     }
                     for (DimensionType k = 0; k < cols; k++)
                     {
@@ -368,12 +380,12 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                     R* v;
                     if (quantizer_exists)
                     {
-                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)data[indices[j]], v_holder);
+                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)(data->At(indices[j])), v_holder);
                         v = v_holder;
                     }
                     else
                     {
-                        v = (R*)data[indices[j]];
+                        v = (R*)(data->At(indices[j]));
                     }
                     for (DimensionType k = 0; k < cols; k++)
                     {
@@ -423,7 +435,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             }
 
             template <typename T, typename R>
-            SizeType Subdivide(const Dataset<T>& data, const KDTNode& node, std::vector<SizeType>& indices, const SizeType first, const SizeType last) const
+            SizeType Subdivide(const Dataset<T>* data, const KDTNode& node, std::vector<SizeType>& indices, const SizeType first, const SizeType last) const
             {
                 SizeType i = first;
                 SizeType j = last;
@@ -440,12 +452,12 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                     SizeType ind = indices[i];
                     if (quantizer_exists)
                     {
-                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)data[ind], v_holder);
+                        COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)(data->At(ind)), v_holder);
                         v = v_holder;
                     } 
                     else
                     {
-                        v = (R*)data[ind];
+                        v = (R*)(data->At(ind));
                     }
                     float val = v[node.split_dim];
                     if (val < node.split_value)

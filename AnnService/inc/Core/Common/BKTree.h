@@ -134,19 +134,19 @@ namespace SPTAG
         }
 
         template <typename T>
-        float RefineCenters(const Dataset<T>& data, KmeansArgs<T>& args)
+        float RefineCenters(const Dataset<T>* data, KmeansArgs<T>& args)
         {
             int maxcluster = -1;
             SizeType maxCount = 0;
             for (int k = 0; k < args._DK; k++) {
-                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && DistanceUtils::ComputeDistance((T*)data[args.clusterIdx[k]], args.centers + k * args._D, args._D, DistCalcMethod::L2) > 1e-6)
+                if (args.counts[k] > maxCount && args.newCounts[k] > 0 && DistanceUtils::ComputeDistance((T*)(data->At(args.clusterIdx[k])), args.centers + k * args._D, args._D, DistCalcMethod::L2) > 1e-6)
                 {
                     maxcluster = k;
                     maxCount = args.counts[k];
                 }
             }
 
-            if (maxcluster != -1 && (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= data.R()))
+            if (maxcluster != -1 && (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= data->R()))
                 LOG(Helper::LogLevel::LL_Debug, "maxcluster:%d(%d) Error dist:%f\n", maxcluster, args.newCounts[maxcluster], args.clusterDist[maxcluster]);
 
             float diff = 0;
@@ -157,7 +157,7 @@ namespace SPTAG
                         //int nextid = Utils::rand_int(last, first);
                         //while (args.label[nextid] != maxcluster) nextid = Utils::rand_int(last, first);
                         SizeType nextid = args.clusterIdx[maxcluster];
-                        std::memcpy(TCenter, data[nextid], sizeof(T)*args._D);
+                        std::memcpy(TCenter, data->At(nextid), sizeof(T)*args._D);
                     }
                     else {
                         std::memcpy(TCenter, args.centers + k * args._D, sizeof(T)*args._D);
@@ -179,7 +179,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        inline float KmeansAssign(const Dataset<T>& data,
+        inline float KmeansAssign(const Dataset<T>* data,
             std::vector<SizeType>& indices,
             const SizeType first, const SizeType last, KmeansArgs<T>& args, 
             const bool updateCenters, float lambda) {
@@ -201,7 +201,7 @@ namespace SPTAG
                     int clusterid = 0;
                     float smallestDist = MaxDist;
                     for (int k = 0; k < args._DK; k++) {
-                        float dist = args.fComputeDistance(data[indices[i]], args.centers + k*args._D, args._D) + lambda*args.counts[k];
+                        float dist = args.fComputeDistance(data->At(indices[i]), args.centers + k*args._D, args._D) + lambda*args.counts[k];
                         if (dist > -MaxDist && dist < smallestDist) {
                             clusterid = k; smallestDist = dist;
                         }
@@ -211,7 +211,7 @@ namespace SPTAG
                     iweightedCounts[clusterid] += smallestDist;
                     idist += smallestDist;
                     if (updateCenters) {
-                        const T* v = (const T*)data[indices[i]];
+                        const T* v = (const T*)(data->At(indices[i]));
                         float* center = inewCenters + clusterid*args._D;
                         for (DimensionType j = 0; j < args._D; j++) center[j] += v[j];
                         if (smallestDist > iclusterDist[clusterid]) {
@@ -263,7 +263,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        inline float InitCenters(const Dataset<T>& data, 
+        inline float InitCenters(const Dataset<T>* data, 
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples, int tryIters) {
             SizeType batchEnd = min(first + samples, last);
@@ -271,7 +271,7 @@ namespace SPTAG
             for (int numKmeans = 0; numKmeans < tryIters; numKmeans++) {
                 for (int k = 0; k < args._DK; k++) {
                     SizeType randid = COMMON::Utils::rand(last, first);
-                    std::memcpy(args.centers + k*args._D, data[indices[randid]], sizeof(T)*args._D);
+                    std::memcpy(args.centers + k*args._D, data->At(indices[randid]), sizeof(T)*args._D);
                 }
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
@@ -288,7 +288,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        float TryClustering(const Dataset<T>& data,
+        float TryClustering(const Dataset<T>* data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last,
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
 
@@ -338,7 +338,7 @@ namespace SPTAG
             args.ClearDists(MaxDist);
             currDist = KmeansAssign(data, indices, first, last, args, false, 0);
             for (int k = 0; k < args._DK; k++) {
-                if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
+                if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data->At(args.clusterIdx[k]), sizeof(T) * args._D);
             }
 
             args.ClearCounts();
@@ -361,7 +361,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        float DynamicFactorSelect(const Dataset<T> & data,
+        float DynamicFactorSelect(const Dataset<T>* data,
             std::vector<SizeType> & indices, const SizeType first, const SizeType last,
             KmeansArgs<T> & args, int samples = 1000) {
 
@@ -392,7 +392,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        int KmeansClustering(const Dataset<T>& data,
+        int KmeansClustering(const Dataset<T>* data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
             
@@ -434,7 +434,7 @@ namespace SPTAG
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
             template <typename T>
-            void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod, IAbortOperation* abort)
+            void Rebuild(const Dataset<T>* data, DistCalcMethod distMethod, IAbortOperation* abort)
             {
                 BKTree newTrees(*this);
                 newTrees.BuildTrees<T>(data, distMethod, 1, nullptr, nullptr, false, abort);
@@ -446,7 +446,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, 
+            void BuildTrees(const Dataset<T>* data, DistCalcMethod distMethod, int numOfThreads, 
                 std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
                 bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
@@ -459,13 +459,13 @@ namespace SPTAG
 
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
-                    localindices.resize(data.R());
+                    localindices.resize(data->R());
                     for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
                 }
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
-                KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod);
+                KmeansArgs<T> args(m_iBKTKmeansK, data->C(), (SizeType)localindices.size(), numOfThreads, distMethod);
 
                 if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
 
@@ -537,6 +537,8 @@ namespace SPTAG
 
             ErrorCode SaveTrees(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
             {
+                if (p_out == nullptr) return ErrorCode::EmptyDiskIO;
+
                 std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 IOBINARY(p_out, WriteBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
@@ -574,6 +576,8 @@ namespace SPTAG
 
             ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
             {
+                if (p_input == nullptr) return ErrorCode::LackOfInputs;
+
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 m_pTreeStart.resize(m_iTreeNumber);
                 IOBINARY(p_input, ReadBinary, sizeof(SizeType) * m_iTreeNumber, (char*)m_pTreeStart.data());
@@ -597,12 +601,12 @@ namespace SPTAG
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>* data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (char i = 0; i < m_iTreeNumber; i++) {
                     const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
                     if (node.childStart < 0) {
-                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data[node.centerid], data.C())));
+                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data->At(node.centerid), data->C())));
                     } else if (m_bfs) {
                         float FactorQ = 1.1f;
                         int MaxBFSNodes = 100;
@@ -612,7 +616,7 @@ namespace SPTAG
                         p_curr->Top().distance = 1e9;
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
+                            float dist = fComputeDistance(p_query.GetQuantizedTarget(), data->At(index), data->C());
                             if (dist <= FactorQ * p_curr->Top().distance && p_curr->size() < MaxBFSNodes) {
                                 p_curr->insert(NodeDistPair(begin, dist));
                             }
@@ -635,7 +639,7 @@ namespace SPTAG
                                     }
                                     for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                                         SizeType index = m_pTreeRoots[begin].centerid;
-                                        float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
+                                        float dist = fComputeDistance(p_query.GetQuantizedTarget(), data->At(index), data->C());
                                         if (dist <= FactorQ * p_next->Top().distance && p_next->size() < MaxBFSNodes) {
                                             p_next->insert(NodeDistPair(begin, dist));
                                         }
@@ -655,14 +659,14 @@ namespace SPTAG
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data->At(index), data->C())));
                         }
                     }
                 }
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
+            void SearchTrees(const Dataset<T>* data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
                 COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty())
@@ -682,7 +686,7 @@ namespace SPTAG
                         }
                         for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data->At(index), data->C())));
                         } 
                     }
                 }

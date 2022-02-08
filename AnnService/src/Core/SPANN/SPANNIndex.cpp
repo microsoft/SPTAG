@@ -437,7 +437,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
                     bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, m_options.m_iSelectHeadNumberOfThreads);
 
-                bkt->BuildTrees<T>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
+                bkt->BuildTrees<T>(&data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
                 LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
@@ -499,7 +499,7 @@ namespace SPTAG
                         return false;
                     }
 
-                    if (output->WriteBinary(sizeof(T) * data.C(), (char*)(data[vid])) != sizeof(T) * data.C()) {
+                    if (output->WriteBinary(sizeof(T) * data.C(), (char*)(data.At(vid))) != sizeof(T) * data.C()) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                         return false;
                     }

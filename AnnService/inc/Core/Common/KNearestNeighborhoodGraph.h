@@ -13,7 +13,7 @@ namespace SPTAG
         class KNearestNeighborhoodGraph : public NeighborhoodGraph
         {
         public:
-            KNearestNeighborhoodGraph() { m_pNeighborhoodGraph.SetName("NNG"); }
+            KNearestNeighborhoodGraph(std::shared_ptr<COMMON::Dataset<SizeType>> data = nullptr) : NeighborhoodGraph(data) { m_pNeighborhoodGraph->SetName("NNG"); }
 
             void RebuildNeighbors(VectorIndex* index, const SizeType node, SizeType* nodes, const BasicResult* queryResults, const int numResults) {
                 DimensionType count = 0;
@@ -30,7 +30,7 @@ namespace SPTAG
             {
                 std::lock_guard<std::mutex> lock(m_dataUpdateLock[node]);
 
-                SizeType* nodes = m_pNeighborhoodGraph[node];
+                SizeType* nodes = m_pNeighborhoodGraph->At(node);
                 SizeType tmpNode;
                 float tmpDist;
                 for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)

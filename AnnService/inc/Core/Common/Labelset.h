@@ -15,30 +15,31 @@ namespace SPTAG
         {
         private:
             std::atomic<SizeType> m_inserted;
-            Dataset<std::int8_t> m_data;
+            std::shared_ptr<Dataset<std::int8_t>> m_data;
             
         public:
-            Labelset() 
+            Labelset(std::shared_ptr<Dataset<std::int8_t>> data = nullptr): m_data(std::move(data))
             {
                 m_inserted = 0;
-                m_data.SetName("DeleteID");
+                if (m_data == nullptr) m_data.reset(new Dataset<std::int8_t>());
+                m_data->SetName("DeleteID");
             }
 
             void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
             {
-                m_data.Initialize(size, 1, blockSize, capacity);
+                m_data->Initialize(size, 1, blockSize, capacity);
             }
 
             inline size_t Count() const { return m_inserted.load(); }
 
             inline bool Contains(const SizeType& key) const
             {
-                return *m_data[key] == 1;
+                return *(m_data->At(key)) == 1;
             }
 
             inline bool Insert(const SizeType& key)
             {
-                char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
+                char oldvalue = InterlockedExchange8((char*)(m_data->At(key)), 1);
                 if (oldvalue == 1) return false;
                 m_inserted++;
                 return true;
@@ -46,14 +47,16 @@ namespace SPTAG
 
             inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
             {
+                if (output == nullptr) return ErrorCode::EmptyDiskIO;
+
                 SizeType deleted = m_inserted.load();
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
-                return m_data.Save(output);
+                return m_data->Save(output);
             }
 
             inline ErrorCode Save(std::string filename)
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data.Name().c_str(), filename.c_str());
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_data->Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Save(ptr);
@@ -61,15 +64,17 @@ namespace SPTAG
 
             inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
             {
+                if (input == nullptr) return ErrorCode::LackOfInputs;
+
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
                 m_inserted = deleted;
-                return m_data.Load(input, blockSize, capacity);
+                return m_data->Load(input, blockSize, capacity);
             }
 
             inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
+                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data->Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return Load(ptr, blockSize, capacity);
@@ -78,22 +83,27 @@ namespace SPTAG
             inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
             {
                 m_inserted = *((SizeType*)pmemoryFile);
-                return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
+                return m_data->Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
 
             inline ErrorCode AddBatch(SizeType num)
             {
-                return m_data.AddBatch(num);
+                return m_data->AddBatch(num);
             }
 
             inline std::uint64_t BufferSize() const 
             {
-                return m_data.BufferSize() + sizeof(SizeType);
+                return m_data->BufferSize() + sizeof(SizeType);
             }
 
             inline void SetR(SizeType num)
             {
-                m_data.SetR(num);
+                m_data->SetR(num);
+            }
+
+            inline std::shared_ptr<Dataset<std::int8_t>>& GetData() 
+            {
+                return m_data;
             }
         };
     }

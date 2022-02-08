@@ -38,25 +38,25 @@ namespace SPTAG
         {
             class RebuildJob : public Helper::ThreadPool::Job {
             public:
-                RebuildJob(COMMON::Dataset<T>* p_data, COMMON::KDTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph) : m_data(p_data), m_tree(p_tree), m_graph(p_graph) {}
+                RebuildJob(COMMON::Dataset<T>* p_data, COMMON::KDTree* p_tree, COMMON::NeighborhoodGraph* p_graph) : m_data(p_data), m_tree(p_tree), m_graph(p_graph) {}
                 void exec(IAbortOperation* p_abort) {
-                    m_tree->Rebuild<T>(*m_data, p_abort);
+                    m_tree->Rebuild<T>(m_data, p_abort);
                 }
             private:
                 COMMON::Dataset<T>* m_data;
                 COMMON::KDTree* m_tree;
-                COMMON::RelativeNeighborhoodGraph* m_graph;
+                COMMON::NeighborhoodGraph* m_graph;
             };
 
         private:
             // data points
-            COMMON::Dataset<T> m_pSamples;
+            std::shared_ptr<COMMON::Dataset<T>> m_pSamples;
 
             // KDT structures. 
-            COMMON::KDTree m_pTrees;
+            std::shared_ptr<COMMON::KDTree> m_pTrees;
 
             // Graph structure
-            COMMON::RelativeNeighborhoodGraph m_pGraph;
+            std::shared_ptr<COMMON::NeighborhoodGraph> m_pGraph;
 
             std::string m_sKDTFilename;
             std::string m_sGraphFilename;
@@ -67,7 +67,7 @@ namespace SPTAG
             float m_fDeletePercentageForRefine;
             std::mutex m_dataAddLock; // protect data and graph
             std::shared_timed_mutex m_dataDeleteLock;
-            COMMON::Labelset m_deletedID;
+            std::shared_ptr<COMMON::Labelset> m_deletedID;
             
             std::unique_ptr<COMMON::WorkSpacePool<COMMON::WorkSpace>> m_workSpacePool;
             Helper::ThreadPool m_threadPool;
@@ -82,26 +82,32 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
+            bool m_bOptDataset;
 
         public:
             Index()
             {
+                m_pSamples.reset(new COMMON::Dataset<T>());
+                m_pSamples->SetName("Vector");
+                m_pTrees.reset(new COMMON::KDTree());
+                m_pGraph.reset(new COMMON::RelativeNeighborhoodGraph());
+                m_deletedID.reset(new COMMON::Labelset());
+
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \
 
 #include "inc/Core/KDT/ParameterDefinitionList.h"
 #undef DefineKDTParameter
 
-                m_pSamples.SetName("Vector");
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
             ~Index() {}
 
-            inline SizeType GetNumSamples() const { return m_pSamples.R(); }
-            inline SizeType GetNumDeleted() const { return (SizeType)m_deletedID.Count(); }
-            inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
+            inline SizeType GetNumSamples() const { return m_pSamples->R(); }
+            inline SizeType GetNumDeleted() const { return (SizeType)m_deletedID->Count(); }
+            inline DimensionType GetFeatureDim() const { return m_pSamples->C(); }
             
             inline int GetCurrMaxCheck() const { return m_iMaxCheck; }
             inline int GetNumThreads() const { return m_iNumberOfThreads; }
@@ -110,32 +116,32 @@ namespace SPTAG
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
             
             inline float AccurateDistance(const void* pX, const void* pY) const {
-                if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
+                if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples->C());
 
-                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());
-                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_pSamples.C());
-                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_pSamples.C());
+                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples->C());
+                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_pSamples->C());
+                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_pSamples->C());
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
             }
-            inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
-            inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
-            inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
-            inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
+            inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples->C()); }
+            inline const void* GetSample(const SizeType idx) const { return (void*)(m_pSamples->At(idx)); }
+            inline bool ContainSample(const SizeType idx) const { return !m_deletedID->Contains(idx); }
+            inline bool NeedRefine() const { return m_deletedID->Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
-                buffersize->push_back(m_pSamples.BufferSize());
-                buffersize->push_back(m_pTrees.BufferSize());
-                buffersize->push_back(m_pGraph.BufferSize());
-                buffersize->push_back(m_deletedID.BufferSize());
+                buffersize->push_back(m_pTrees->BufferSize());
+                buffersize->push_back(m_pSamples->BufferSize());
+                buffersize->push_back(m_pGraph->BufferSize());
+                buffersize->push_back(m_deletedID->BufferSize());
                 return std::move(buffersize);
             }
 
             std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
             {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
-                files->push_back(m_sDataPointsFilename);
                 files->push_back(m_sKDTFilename);
+                files->push_back(m_sDataPointsFilename);
                 files->push_back(m_sGraphFilename);
                 files->push_back(m_sDeleteDataPointsFilename);
                 return std::move(files);
