@@ -80,12 +80,10 @@ namespace SPTAG
         };
 
 #define ProcessPosting(vectorInfoSize) \
-        for (int i = 0; i < listInfo->listEleCount; ++i) { \
-            char* vectorInfo = buffer + listInfo->pageOffset + i * vectorInfoSize; \
+        for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
             int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
-            vectorInfo += sizeof(int); \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo); \
+            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
 
@@ -102,12 +100,11 @@ namespace SPTAG
             }
 
             virtual bool LoadIndex(Options& p_opt) {
-                m_ioThreads = p_opt.m_ioThreads;
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
-                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, p_opt.m_searchInternalResultNum * 2, 2, 2, 
+                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, p_opt.m_searchInternalResultNum, 2, 2, 
 #ifdef BATCH_READ
                         p_opt.m_iSSDNumberOfThreads
 #else
@@ -224,7 +221,6 @@ namespace SPTAG
                     if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
 
                     --unprocessed;
-                    request->m_readSize = 0;
                     char* buffer = request->m_buffer;
                     ListInfo* listInfo = static_cast<ListInfo*>(request->m_payload);
                     ProcessPosting(m_vectorInfoSize)
@@ -896,8 +892,6 @@ namespace SPTAG
             }
 
         private:
-
-            int m_ioThreads = 4;
             
             std::string m_extraFullGraphFile;
 

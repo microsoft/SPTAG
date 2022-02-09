@@ -137,6 +137,8 @@ namespace SPTAG {
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages);
             }
 
+            static void Reset() { g_spaceCount = 0; }
+
             std::vector<int> m_postingIDs;
 
             COMMON::OptHashPosVector m_deduper;
