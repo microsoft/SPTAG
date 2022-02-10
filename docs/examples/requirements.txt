@@ -1,4 +1,4 @@
-numpy==1.15.0
+numpy==1.21.0
 matplotlib==2.2.2
 Keras==2.2.4
 Pillow==9.0.0
