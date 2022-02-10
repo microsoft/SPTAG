@@ -130,7 +130,7 @@ namespace SPTAG
 			T* mat_vec_T = (T*)mat_vec;
 			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 			{
-				mat_vec_T = 0;
+				mat_vec_T[i] = 0;
 				for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
 				{
 					if (transpose)
