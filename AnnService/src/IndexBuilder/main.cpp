@@ -102,7 +102,7 @@ int main(int argc, char* argv[])
         code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized);
     }
     else {
-        indexBuilder->SetQuantizerFileName(boost::filesystem::path(options->m_quantizerFile).filename().string());
+        indexBuilder->SetQuantizerFileName(options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));
         code = indexBuilder->BuildIndex(options->m_normalized);    
     }
     if (code == ErrorCode::Success)
