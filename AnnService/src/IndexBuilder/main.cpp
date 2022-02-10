@@ -8,7 +8,6 @@
 
 #include <memory>
 #include <inc/Core/Common/DistanceUtils.h>
-#include <boost/filesystem.hpp>
 
 using namespace SPTAG;
 
