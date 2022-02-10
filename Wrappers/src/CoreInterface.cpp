@@ -40,8 +40,41 @@ AnnIndex::~AnnIndex()
 }
 
 
+
 bool
-AnnIndex::Build(ByteArray p_data, SizeType p_num)
+AnnIndex::BuildSPANN(bool p_normalized)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index) return false;
+
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_normalized));
+}
+
+bool
+AnnIndex::BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index) return false;
+
+    std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
+    if (!SPTAG::MetadataSet::GetMetadataOffsets(p_meta.Data(), p_meta.Length(), offsets, p_num + 1, '\n')) return false;
+
+    m_index->SetMetadata((new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num,
+        m_index->m_iDataBlockSize, m_index->m_iDataCapacity, m_index->m_iMetaRecordSize)));
+    if (p_withMetaIndex) m_index->BuildMetaMapping(false);
+
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_normalized));
+}
+
+
+bool
+AnnIndex::Build(ByteArray p_data, SizeType p_num, bool p_normalized)
 {
     if (nullptr == m_index)
     {
@@ -51,12 +84,12 @@ AnnIndex::Build(ByteArray p_data, SizeType p_num)
     {
         return false;
     }
-    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension));
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension, p_normalized));
 }
 
 
 bool
-AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex)
+AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized)
 {
     if (nullptr == m_index)
     {
@@ -73,19 +106,15 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, 
         static_cast<SPTAG::SizeType>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-    SizeType current = 1;
-    for (size_t i = 0; i < p_meta.Length(); i++) {
-        if (((char)p_meta.Data()[i]) == '\n')
-            offsets[current++] = (std::uint64_t)(i + 1);
-    }
+    if (!SPTAG::MetadataSet::GetMetadataOffsets(p_meta.Data(), p_meta.Length(), offsets, p_num + 1, '\n')) return false;
     std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num,
         m_index->m_iDataBlockSize, m_index->m_iDataCapacity, m_index->m_iMetaRecordSize));
-    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta, p_withMetaIndex));
+    return (SPTAG::ErrorCode::Success == m_index->BuildIndex(vectors, meta, p_withMetaIndex, p_normalized));
 }
 
 
 void
-AnnIndex::SetBuildParam(const char* p_name, const char* p_value)
+AnnIndex::SetBuildParam(const char* p_name, const char* p_value, const char* p_section)
 {
     if (nullptr == m_index) 
     {
@@ -97,14 +126,14 @@ AnnIndex::SetBuildParam(const char* p_name, const char* p_value)
         m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
 
     }
-    m_index->SetParameter(p_name, p_value);
+    m_index->SetParameter(p_name, p_value, p_section);
 }
 
 
 void
-AnnIndex::SetSearchParam(const char* p_name, const char* p_value)
+AnnIndex::SetSearchParam(const char* p_name, const char* p_value, const char* p_section)
 {
-    if (nullptr != m_index) m_index->SetParameter(p_name, p_value);
+    if (nullptr != m_index) m_index->SetParameter(p_name, p_value, p_section);
 }
 
 
@@ -179,7 +208,7 @@ AnnIndex::Load(const char* p_loaderFile)
 
 
 bool 
-AnnIndex::Add(ByteArray p_data, SizeType p_num)
+AnnIndex::Add(ByteArray p_data, SizeType p_num, bool p_normalized)
 {
     if (nullptr == m_index)
     {
@@ -190,12 +219,12 @@ AnnIndex::Add(ByteArray p_data, SizeType p_num)
         return false;
     }
 
-    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension, nullptr));
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(p_data.Data(), (SPTAG::SizeType)p_num, (SPTAG::DimensionType)m_dimension, nullptr, false, p_normalized));
 }
 
 
 bool
-AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
+AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized)
 {
     if (nullptr == m_index)
     {
@@ -212,13 +241,9 @@ AnnIndex::AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num)
         static_cast<SPTAG::SizeType>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-    SizeType current = 1;
-    for (size_t i = 0; i < p_meta.Length(); i++) {
-        if (((char)p_meta.Data()[i]) == '\n')
-            offsets[current++] = (std::uint64_t)(i + 1);
-    }
+    if (!SPTAG::MetadataSet::GetMetadataOffsets(p_meta.Data(), p_meta.Length(), offsets, p_num + 1, '\n')) return false;
     std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (SPTAG::SizeType)p_num));
-    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta));
+    return (SPTAG::ErrorCode::Success == m_index->AddIndex(vectors, meta, p_withMetaIndex, p_normalized));
 }
 
 

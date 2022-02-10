@@ -25,6 +25,7 @@
 #ifndef _SPTAG_COMMON_CUDA_DISTANCE_H_
 #define _SPTAG_COMMON_CUDA_DISTANCE_H_
 
+#include<cuda.h>
 #include<cstdint>
 #include<vector>
 #include<climits>
@@ -42,7 +43,7 @@ template<typename T> __host__ __device__ T INFTY() {}
 template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;}
 template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() {return LLONG_MAX;}
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
-template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
+//template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
 /*********************************************************************
@@ -56,13 +57,13 @@ class Point {
     int id;
     T coords[Dim];
 
- __host__ void load(vector<T> data) {
+  __host__ void load(vector<T> data) {
     for(int i=0; i<Dim; i++) {
       coords[i] = data[i];
     }
   }
 
-  __host__ void loadChunk(T* data, int exact_dim) {
+  __host__ __device__ void loadChunk(T* data, int exact_dim) {
     for(int i=0; i<exact_dim; i++) {
       coords[i] = data[i];
     }
@@ -70,7 +71,6 @@ class Point {
       coords[i] = 0;
     }
   }
-
 
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim; i++) {
@@ -151,7 +151,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
     }
   }
 
-  __host__ void loadChunk(uint8_t* data, int exact_dims) {
+  __host__ __device__ void loadChunk(uint8_t* data, int exact_dims) {
     for(int i=0; i<exact_dims/4; i++) {
       coords[i] = 0;
       for(int j=0; j<4; j++) {
@@ -262,7 +262,7 @@ class Point<int8_t, SUMTYPE, Dim> {
     }
   }
 
-  __host__ void loadChunk(int8_t* data, int exact_dims) {
+  __host__ __device__ void loadChunk(int8_t* data, int exact_dims) {
 
     uint8_t* test = reinterpret_cast<uint8_t*>(data);
     for(int i=0; i<exact_dims/4; i++) {

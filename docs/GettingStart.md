@@ -12,10 +12,12 @@
   -o, --outputfolder <value>    Output folder, required.
   -a, --algo <value>            Index Algorithm type (e.g. BKT, KDT), required.
 
-  -t, --thread <value>          Thread Number, default is 32.
-  --delimiter <value>           Vector delimiter, default is |.
+  -t, --thread <value>          Thread Number.
+  -dl, --delimiter <value>      Vector delimiter.
+  -norm, --normalized <value>   Vector is normalized.
+  -c, --config <value>          Config file for builder.
   -pq, --quantizer <value>      Quantizer File
-  -rt, --reconstructtype <value>Reconstruction value type for quantized vectors. Default is float. 
+  -m, --metaindex <value>       Enable delete vectors through metadata
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
@@ -32,6 +34,7 @@
 
   -t, --thread <value>          Thread Number.
   --delimiter <value>           Vector delimiter.
+  -norm, --normalized <value>   Vector is normalized.
   -r, --truth <value>           Truth file.
   -o, --result <value>          Output result file.
   -m, --maxcheck <value>        MaxCheck for index.
@@ -43,7 +46,7 @@
   -b, --batchsize <value>       Batch query size.
   -g, --gentruth <value>        Generate truth file.
   -q, --debugquery <value>      Debug query number.
-  -adc, --adc <value>           Enable ADC Distance computation (true/false)
+  -adc, --adc <value>           Enable ADC Distance computation
   Index.<ArgName>=<ArgValue>    Set the algorithm parameter ArgName with value ArgValue.
   ```
 
@@ -57,16 +60,10 @@ IndexAlgoType=BKT
 Dim=128
 VectorPath=base.1B.u8bin
 VectorType=DEFAULT
-VectorSize=1000000000
-VectorDelimiter=
 QueryPath=query.public.10K.u8bin
 QueryType=DEFAULT
-QuerySize=100000
-QueryDelimiter=
 WarmupPath=query.public.10K.u8bin
 WarmupType=DEFAULT
-WarmupSize=100000
-WarmupDelimiter=
 TruthPath=public_query_gt100.bin
 TruthType=DEFAULT
 IndexDirectory=sift1b
@@ -78,7 +75,6 @@ TreeNumber=1
 BKTKmeansK=32
 BKTLeafSize=8
 SamplesNumber=1000
-SaveBKT=false
 SelectThreshold=10
 SplitFactor=6
 SplitThreshold=25
@@ -104,46 +100,13 @@ PostingPageLimit=3
 NumberOfThreads=45
 MaxCheck=16324
 TmpDir=/tmp/
-   ```
-Then run ./SSDServing buildconfig.ini to build the index.
-
-   ### **SPANN Index Search**
-    Create a configure file searchconfig.ini as follows:
-   ```
-[Base]
-ValueType=UInt8
-DistCalcMethod=L2
-IndexAlgoType=BKT
-Dim=128
-VectorPath=base.1B.u8bin
-VectorType=DEFAULT
-VectorSize=1000000000
-VectorDelimiter=
-QueryPath=query.public.10K.u8bin
-QueryType=DEFAULT
-QuerySize=100000
-QueryDelimiter=
-WarmupPath=query.public.10K.u8bin
-WarmupType=DEFAULT
-WarmupSize=100000
-WarmupDelimiter=
-TruthPath=public_query_gt100.bin
-TruthType=DEFAULT
-IndexDirectory=sift1b
-QuantizerFilePath=quantizer.bin
-
-[SearchSSDIndex]
-isExecute=true
-BuildSsdIndex=false
-InternalResultNum=32
-NumberOfThreads=45
-ResultNum=10
-MaxCheck=2048
-MaxDistRatio=8.0
+SearchInternalResultNum=32
 SearchPostingPageLimit=3
-rerank=10
+SearchResult=result.txt
+ResultNum=10
+MaxDistRatio=8.0
    ```
-Then run ./SSDServing searchconfig.ini to do the query search.
+Then run ".\IndexBuilder.exe -c buildconfig.ini -d 128 -v UInt8 -f DEFAULT -i FromFile -o sift1b -a SPANN" to build the index.
 
 ### ** Input File format **
 
@@ -266,16 +229,16 @@ r = 3
 
 def testBuild(algo, distmethod, x, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
-    i.SetBuildParam("NumberOfThreads", '4')
-    i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.Build(x, x.shape[0]):
+    i.SetBuildParam("NumberOfThreads", '4', "Index")
+    i.SetBuildParam("DistCalcMethod", distmethod, "Index")
+    if i.Build(x, x.shape[0], False):
         i.Save(out)
 
 def testBuildWithMetaData(algo, distmethod, x, s, out):
     i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
-    i.SetBuildParam("NumberOfThreads", '4')
-    i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.BuildWithMetaData(x, s, x.shape[0], False):
+    i.SetBuildParam("NumberOfThreads", '4', "Index")
+    i.SetBuildParam("DistCalcMethod", distmethod, "Index")
+    if i.BuildWithMetaData(x, s, x.shape[0], False, False):
         i.Save(out)
 
 def testSearch(index, q, k):
@@ -287,7 +250,7 @@ def testSearch(index, q, k):
 
 def testSearchWithMetaData(index, q, k):
     j = SPTAG.AnnIndex.Load(index)
-    j.SetSearchParam("MaxCheck", '1024')
+    j.SetSearchParam("MaxCheck", '1024', "Index")
     for t in range(q.shape[0]):
         result = j.SearchWithMetaData(q[t], k)
         print (result[0]) # ids
@@ -299,9 +262,9 @@ def testAdd(index, x, out, algo, distmethod):
         i = SPTAG.AnnIndex.Load(index)
     else:
         i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
-    i.SetBuildParam("NumberOfThreads", '4')
-    i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.Add(x, x.shape[0]):
+    i.SetBuildParam("NumberOfThreads", '4', "Index")
+    i.SetBuildParam("DistCalcMethod", distmethod, "Index")
+    if i.Add(x, x.shape[0], False):
         i.Save(out)
 
 def testAddWithMetaData(index, x, s, out, algo, distmethod):
@@ -309,9 +272,9 @@ def testAddWithMetaData(index, x, s, out, algo, distmethod):
         i = SPTAG.AnnIndex.Load(index)
     else:
         i = SPTAG.AnnIndex(algo, 'Float', x.shape[1])
-    i.SetBuildParam("NumberOfThreads", '4')
-    i.SetBuildParam("DistCalcMethod", distmethod)
-    if i.AddWithMetaData(x, s, x.shape[0]):
+    i.SetBuildParam("NumberOfThreads", '4', "Index")
+    i.SetBuildParam("DistCalcMethod", distmethod, "Index")
+    if i.AddWithMetaData(x, s, x.shape[0], False, False):
         i.Save(out)
 
 def testDelete(index, x, out):
@@ -408,10 +371,10 @@ public class test
     {
         {
             AnnIndex idx = new AnnIndex("BKT", "Float", dimension);
-            idx.SetBuildParam("DistCalcMethod", "L2");
+            idx.SetBuildParam("DistCalcMethod", "L2", "Index");
             byte[] data = createFloatArray(n);
             byte[] meta = createMetadata(n);
-            idx.BuildWithMetaData(data, meta, n, false);
+            idx.BuildWithMetaData(data, meta, n, false, false);
             idx.Save("testcsharp");
         }
 

@@ -72,6 +72,8 @@ break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+                    default: break;
                     }
                 }
                 else
@@ -242,6 +244,8 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
+
+                    default: break;
                     }
                 }
                 else

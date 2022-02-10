@@ -55,7 +55,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>DEBUG;GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DEBUG;GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;_$(OutputType);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
@@ -82,9 +82,10 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GPU;_MBCS;_SCL_SECURE_NO_WARNINGS;_$(OutputType);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -103,47 +104,16 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="src\SSDServing\BuildHead\BootBuildHead.cpp" />
-    <CudaCompile Include="src\SSDServing\IndexBuildManager\main.cpp" />
-    <CudaCompile Include="src\SSDServing\IndexBuildManager\Utils.cpp" />
-    <CudaCompile Include="src\SSDServing\SelectHead_BKT\AnalyzeTree.cpp" />
-    <CudaCompile Include="src\SSDServing\SelectHead_BKT\SelectHead.cpp" />
-    <CudaCompile Include="src\SSDServing\SelectHead_BKT\BootSelectHead.cpp" />
-    <CudaCompile Include="src\SSDServing\VectorSearch\BootVectorSearch.cpp" />
-    <CudaCompile Include="src\SSDServing\VectorSearch\TimeUtils.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="inc\SSDServing\BuildHead\BootBuildHead.h" />
-    <ClInclude Include="inc\SSDServing\BuildHead\Options.h" />
-    <ClInclude Include="inc\SSDServing\BuildHead\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\Common\Utils.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\CommonDefines.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\main.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Options.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\IndexBuildManager\Utils.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\AnalyzeTree.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BKTNodeInfo.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BuildBKT.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\Options.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\SelectHead.h" />
-    <ClInclude Include="inc\SSDServing\SelectHead_BKT\BootSelectHead.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\AsyncFileReader.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\BootVectorSearch.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\BuildSsdIndex.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\ExtraFullGraphSearcher.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\IExtraSearcher.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\ParameterDefinitionList.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchSsdIndex.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\TimeUtils.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\Options.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchDefault.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchProcessor.h" />
-    <ClInclude Include="inc\SSDServing\VectorSearch\SearchStats.h" />
+    <ClInclude Include="inc\SSDServing\main.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead.h" />
+    <ClInclude Include="inc\SSDServing\SSDIndex.h" />
+    <ClInclude Include="inc\SSDServing\Utils.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\SSDServing\main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
