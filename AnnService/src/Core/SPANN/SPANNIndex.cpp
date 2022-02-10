@@ -609,11 +609,16 @@ namespace SPTAG
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
-            if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
+            if (m_options.m_vectorPath.empty())
+            {
+                LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
+            }
+            else if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
                 return ErrorCode::Fail;
             }
+  
             return BuildIndexInternal(vectorReader);
         }
 
