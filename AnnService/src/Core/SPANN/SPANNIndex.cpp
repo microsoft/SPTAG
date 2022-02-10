@@ -551,7 +551,7 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
                     return ErrorCode::Fail;
                 }
-                m_index->SetQuantizerFileName(m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1)));
+                m_index->SetQuantizerFileName(m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
                 if (m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
                     return ErrorCode::Fail;
