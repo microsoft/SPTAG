@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <inc/Core/Common/DistanceUtils.h>
+#include <boost/filesystem.hpp>
 
 using namespace SPTAG;
 
@@ -101,6 +102,7 @@ int main(int argc, char* argv[])
         code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized);
     }
     else {
+        indexBuilder->SetQuantizerFileName(boost::filesystem::path(options->m_quantizerFile).filename().string());
         code = indexBuilder->BuildIndex(options->m_normalized);    
     }
     if (code == ErrorCode::Success)

@@ -43,7 +43,6 @@ namespace SPTAG {
             bool m_deleteHeadVectors;
             int m_ssdIndexFileNum;
             std::string m_quantizerFilePath;
-            std::string m_quantizerFileName;
 
             // Section 2: for selecting head
             bool m_selectHead;
