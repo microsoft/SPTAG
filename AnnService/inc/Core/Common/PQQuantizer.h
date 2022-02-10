@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <cassert>
+#include <cstring>
 
 
 namespace SPTAG
@@ -308,7 +309,7 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
-            memcpy_s(m_codebooks.get(), sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
