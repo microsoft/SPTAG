@@ -533,9 +533,12 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                while (syscall(__NR_io_submit, m_iocps[(readRequest.m_status & 0xffff) % m_iocps.size()], 1, iocbs) < 1) {
+                int curTry = 0, maxTry = 10;
+                while (curTry < maxTry && syscall(__NR_io_submit, m_iocps[(readRequest.m_status & 0xffff) % m_iocps.size()], 1, iocbs) < 1) {
                     usleep(10);
+                    curTry++;
                 }
+                if (curTry == maxTry) return false;
                 return true;
             }
 

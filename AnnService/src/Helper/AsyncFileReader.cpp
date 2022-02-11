@@ -44,7 +44,10 @@ namespace SPTAG {
                                 submitted[i] += s;
                                 totalSubmitted += s;
                             }
-                            else LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
+                            else {
+                                LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
+                                return totalDone;
+                            }
                         }
                     }
                 }

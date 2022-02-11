@@ -104,11 +104,11 @@ namespace SPTAG
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
-                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, p_opt.m_searchInternalResultNum, 2, 2, 
+                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
 #ifdef BATCH_READ
-                        p_opt.m_iSSDNumberOfThreads
+                        p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
-                        p_opt.m_ioThreads
+                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
 #endif
                     )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
