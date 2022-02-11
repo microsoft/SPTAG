@@ -470,13 +470,6 @@ break;
                             reserve[j] = true;
                             total++;
                         }
-                    
-                    for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
-                        if (!reserve[j] && outnodes[j] >= 0) {
-                            reserve[j] = true;
-                            total++;
-                        }
-                    }
 
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
                         if (!reserve[j]) {
@@ -490,12 +483,9 @@ break;
                         if(outnodes[z] >= 0) indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
                         outnodes[j] = outnodes[z];
                         z++;
-                        //if (z >= m_iNeighborhoodSize) break;
                     }
                     if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                 }
-                LOG(Helper::LogLevel::LL_Info, "Clear indegree\n");
-                indegree.clear();
                 auto t2 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
             }
