@@ -437,7 +437,7 @@ break;
             template <typename T>
             void RebuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                std::vector<std::atomic_int> indegree(m_iGraphSize);
+                std::vector<int> indegree(m_iGraphSize);
 
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++) indegree[i] = 0;
@@ -457,7 +457,7 @@ break;
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
-                int rebuild_threshold = 16;
+                int rebuild_threshold = m_iNeighborhoodSize / 2;
                 int rebuildstart = m_iNeighborhoodSize / 2;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < m_iGraphSize; i++)
@@ -466,10 +466,11 @@ break;
                     std::vector<bool> reserve(2 * m_iNeighborhoodSize, false);
                     int total = 0;
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2; j++)
-                        if (indegree[outnodes[j]] < rebuild_threshold) {
+                        if ( outnodes[j] >= 0 && indegree[outnodes[j]] < rebuild_threshold) {
                             reserve[j] = true;
                             total++;
                         }
+
                     for (SizeType j = rebuildstart; j < m_iNeighborhoodSize * 2 && total < m_iNeighborhoodSize - rebuildstart; j++) {
                         if (!reserve[j]) {
                             reserve[j] = true;
@@ -478,8 +479,8 @@ break;
                     }
                     for (SizeType j = rebuildstart, z = rebuildstart; j < m_iNeighborhoodSize; j++) {
                         while (!reserve[z]) z++;
-                        indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
-                        indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
+                        if(outnodes[j] >= 0) indegree[outnodes[j]] = indegree[outnodes[j]] - 1;
+                        if(outnodes[z] >= 0) indegree[outnodes[z]] = indegree[outnodes[z]] + 1;
                         outnodes[j] = outnodes[z];
                         z++;
                     }
