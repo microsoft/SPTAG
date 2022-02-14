@@ -520,8 +520,6 @@ namespace SPTAG
                 }
             }
 
-            m_options.m_vectorSize = p_reader->GetVectorSet()->Count();
-
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
                 omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
@@ -615,10 +613,13 @@ namespace SPTAG
             {
                 LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
             }
-            else if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
-            {
-                LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-                return ErrorCode::Fail;
+            else {
+                if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                    return ErrorCode::Fail;
+                }
+                m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
             }
   
             return BuildIndexInternal(vectorReader);
@@ -638,6 +639,7 @@ namespace SPTAG
             std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
                 vectorSet));
             
+            m_options.m_vectorSize = p_vectorNum;
             return BuildIndexInternal(vectorReader);
         }
 
