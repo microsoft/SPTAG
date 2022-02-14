@@ -492,13 +492,6 @@ namespace SPTAG
                     m_deletedID.SetR(begin);
                     return ErrorCode::MemoryOverFlow;
                 }
-                if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
-                {
-                    int base = COMMON::Utils::GetBase<T>();
-                    for (SizeType i = begin; i < end; i++) {
-                        COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
-                    }
-                }
 
                 if (m_pMetadata != nullptr) {
                     if (p_metadataSet != nullptr) {
@@ -514,6 +507,14 @@ namespace SPTAG
                     else {
                         for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
                     }
+                }
+            }
+
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
+            {
+                int base = COMMON::Utils::GetBase<T>();
+                for (SizeType i = begin; i < end; i++) {
+                    COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                 }
             }
 
