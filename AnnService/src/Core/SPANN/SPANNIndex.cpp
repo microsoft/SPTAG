@@ -567,6 +567,11 @@ namespace SPTAG
                 }
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
+                m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+                m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+                m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+                m_index->UpdateIndex();
+
                 m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
                 if (m_options.m_buildSsdIndex) {
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
