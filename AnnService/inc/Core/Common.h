@@ -95,7 +95,6 @@ const float MaxDist = (std::numeric_limits<float>::max)() / 10;
 const float Epsilon = 0.000001f;
 const std::uint16_t PageSize = 4096;
 const int PageSizeEx = 12;
-const struct timespec AIOTimeout { 0, 30000 };
 
 extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
 

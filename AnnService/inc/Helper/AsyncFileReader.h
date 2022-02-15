@@ -429,6 +429,8 @@ namespace SPTAG
             Helper::Concurrent::ConcurrentQueue<ResourceType*> m_resources;
         };
 #else
+        extern struct timespec AIOTimeout;
+
         class RequestQueue
         {
         public:
@@ -535,7 +537,7 @@ namespace SPTAG
                 struct iocb* iocbs[1] = { &myiocb };
                 int curTry = 0, maxTry = 10;
                 while (curTry < maxTry && syscall(__NR_io_submit, m_iocps[(readRequest.m_status & 0xffff) % m_iocps.size()], 1, iocbs) < 1) {
-                    usleep(10);
+                    usleep(AIOTimeout.tv_nsec / 1000);
                     curTry++;
                 }
                 if (curTry == maxTry) return false;

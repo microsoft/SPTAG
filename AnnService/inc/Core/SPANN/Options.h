@@ -112,6 +112,7 @@ namespace SPTAG {
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;
             bool m_enableADC;
+            int m_iotimeout;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

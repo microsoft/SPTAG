@@ -122,6 +122,10 @@ namespace SPTAG
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
                 m_listPerFile = static_cast<int>((m_totalListCount + m_indexFiles.size() - 1) / m_indexFiles.size());
+
+#ifndef _MSC_VER
+                AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
+#endif
                 return true;
             }
 
@@ -139,25 +143,29 @@ namespace SPTAG
                 int diskRead = 0;
                 int diskIO = 0;
                 int listElements = 0;
+
+#if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
+#endif
 
                 bool oneContext = (m_indexFiles.size() == 1);
                 for (uint32_t pi = 0; pi < postingListCount; ++pi)
                 {
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
 
-                    ListInfo* listInfo;
-                    Helper::DiskPriorityIO* indexFile;
                     int fileid = 0;
+                    ListInfo* listInfo;
                     if (oneContext) {
                         listInfo = &(m_listInfos[0][curPostingID]);
-                        indexFile = m_indexFiles[0].get();
                     }
                     else {
                         fileid = curPostingID / m_listPerFile;
                         listInfo = &(m_listInfos[fileid][curPostingID % m_listPerFile]);
-                        indexFile = m_indexFiles[fileid].get();
                     }
+
+#ifndef BATCH_READ
+                    Helper::DiskPriorityIO* indexFile = m_indexFiles[fileid].get();
+#endif
 
                     if (listInfo->listEleCount == 0)
                     {
@@ -213,7 +221,7 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
 #ifdef BATCH_READ
-                unprocessed = BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
 #else
                 while (unprocessed > 0)
                 {

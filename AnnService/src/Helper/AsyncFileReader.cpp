@@ -6,6 +6,7 @@
 namespace SPTAG {
     namespace Helper {
 #ifndef _MSC_VER
+        struct timespec AIOTimeout {0, 30000};
         int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
             std::vector<struct iocb> myiocbs(num);
