@@ -86,7 +86,7 @@ namespace SPTAG {
 				}
 			}
 
-			std::string quantizerPath = index->GetParameter("QuantizerFilePath", SEC_BASE);
+			std::string quantizerPath = index->GetParameter("QuantizerFilePath", "Quantizer");
 			if (!quantizerPath.empty() && VectorIndex::LoadQuantizer(quantizerPath) != ErrorCode::Success)
 			{
 				exit(1);
