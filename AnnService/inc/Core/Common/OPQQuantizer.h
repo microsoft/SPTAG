@@ -130,18 +130,19 @@ namespace SPTAG
 			T* mat_vec_T = (T*)mat_vec;
 			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 			{
-				mat_vec_T[i] = 0;
+				OPQMatrixType tmp = 0;
 				for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
 				{
 					if (transpose)
 					{
-						mat_vec_T[i] += mat[m_MatrixIndexCalc(j, i)] * vec_T[j];
+						tmp += mat[m_MatrixIndexCalc(j, i)] * vec_T[j];
 					}
 					else
 					{
-						mat_vec_T[i] += mat[m_MatrixIndexCalc(i, j)] * vec_T[j];
+						tmp += mat[m_MatrixIndexCalc(i, j)] * vec_T[j];
 					}
 				}
+				mat_vec_T[i] = tmp;
 			}
 		}
 
