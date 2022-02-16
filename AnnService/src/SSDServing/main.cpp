@@ -29,6 +29,7 @@ namespace SPTAG {
 			const char* indexFilePath) {
 
 			bool searchSSD = false;
+			std::string quantizerPath = std::string();
 			if (forANNIndexTestTool) {
 				(*config_map)[SEC_BASE]["ValueType"] = Helper::Convert::ConvertToString(valueType);
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = Helper::Convert::ConvertToString(distCalcMethod);
@@ -63,6 +64,7 @@ namespace SPTAG {
 				distCalcMethod = iniReader.GetParameter(SEC_BASE, "DistCalcMethod", distCalcMethod);
 				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", false);
 				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", false);
+				quantizerPath = iniReader.GetParameter("Quantizer", "QuantizerFilePath", std::string());
 				
 				for (auto& KV : iniReader.GetParameters(SEC_SEARCH_SSD_INDEX)) {
 					std::string param = KV.first, value = KV.second;
@@ -86,7 +88,6 @@ namespace SPTAG {
 				}
 			}
 
-			std::string quantizerPath = index->GetParameter("QuantizerFilePath", "Quantizer");
 			if (!quantizerPath.empty() && VectorIndex::LoadQuantizer(quantizerPath) != ErrorCode::Success)
 			{
 				exit(1);
