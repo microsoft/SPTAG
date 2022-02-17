@@ -124,7 +124,7 @@ namespace SPTAG
                 m_listPerFile = static_cast<int>((m_totalListCount + m_indexFiles.size() - 1) / m_indexFiles.size());
 
 #ifndef _MSC_VER
-                AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
+                Helper::AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
 #endif
                 return true;
             }
