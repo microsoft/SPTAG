@@ -166,6 +166,14 @@ public:
         }
     }
 
+    inline void ClearTmp()
+    {
+        if (m_quantizedTarget) {
+            _mm_free(m_quantizedTarget);
+            m_quantizedTarget = nullptr;
+        }
+    }
+
 
     iterator begin()
     {

@@ -517,7 +517,10 @@ namespace SPTAG
                 }
             }
 
-            m_options.m_vectorSize = p_reader->GetVectorSet()->Count();
+            if (!m_options.m_vectorPath.empty())
+            {
+                m_options.m_vectorSize = p_reader->GetVectorSet()->Count();
+            }
 
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {

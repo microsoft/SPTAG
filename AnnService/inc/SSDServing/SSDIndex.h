@@ -133,6 +133,7 @@ namespace SPTAG {
                             double endTime = threadws.getElapsedMs();
                             p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
                             double exEndTime = threadws.getElapsedMs();
+                            p_results[index].ClearTmp();
 
                             p_stats[index].m_exLatency = exEndTime - endTime;
                             p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
