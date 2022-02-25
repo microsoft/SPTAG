@@ -14,10 +14,6 @@
 #include <climits>
 #include <future>
 
-#ifdef _MSC_VER
-#define ASYNC_READ 1
-#endif
-
 namespace SPTAG
 {
     namespace SPANN
@@ -83,6 +79,14 @@ namespace SPTAG
             }
         };
 
+#define ProcessPosting(vectorInfoSize) \
+        for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
+            int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
+            if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
+            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
+            queryResults.AddPoint(vectorID, distance2leaf); \
+        } \
+
         template <typename ValueType>
         class ExtraFullGraphSearcher : public IExtraSearcher
         {
@@ -100,17 +104,28 @@ namespace SPTAG
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
-                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, (1 << 20), 2, 2, p_opt.m_ioThreads)) {
+                    if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
+#ifdef BATCH_READ
+                        p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+#else
+                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+#endif
+                    )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
                         return false;
                     }
 
-                    m_indexContexts.emplace_back(curIndexFile);
-                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_indexContexts.back());
+                    m_indexFiles.emplace_back(curIndexFile);
+                    m_listInfos.emplace_back(0);
+                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back());
 
-                    curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexContexts.size());
+                    curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
-                m_listPerFile = static_cast<int>((m_totalListCount + m_indexContexts.size() - 1) / m_indexContexts.size());
+                m_listPerFile = static_cast<int>((m_totalListCount + m_indexFiles.size() - 1) / m_indexFiles.size());
+
+#ifndef _MSC_VER
+                Helper::AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
+#endif
                 return true;
             }
 
@@ -124,28 +139,33 @@ namespace SPTAG
                 p_exWorkSpace->m_deduper.clear();
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
+ 
+                int diskRead = 0;
+                int diskIO = 0;
+                int listElements = 0;
 
-                std::atomic<int> unprocessed(0);
-                std::atomic<int> curCheck(0);
-                std::atomic<int> listElements(0);
-                std::atomic<int> diskIO(0);
-                std::atomic<int> diskRead(0);
+#if defined(ASYNC_READ) && !defined(BATCH_READ)
+                int unprocessed = 0;
+#endif
 
-                bool oneContext = (m_indexContexts.size() == 1);
+                bool oneContext = (m_indexFiles.size() == 1);
                 for (uint32_t pi = 0; pi < postingListCount; ++pi)
                 {
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
 
-                    IndexContext* indexContext;
+                    int fileid = 0;
                     ListInfo* listInfo;
                     if (oneContext) {
-                        indexContext = &(m_indexContexts[0]);
-                        listInfo = &(indexContext->m_listInfos[curPostingID]);
+                        listInfo = &(m_listInfos[0][curPostingID]);
                     }
                     else {
-                        indexContext = &(m_indexContexts[curPostingID / m_listPerFile]);
-                        listInfo = &(indexContext->m_listInfos[curPostingID % m_listPerFile]);
+                        fileid = curPostingID / m_listPerFile;
+                        listInfo = &(m_listInfos[fileid][curPostingID % m_listPerFile]);
                     }
+
+#ifndef BATCH_READ
+                    Helper::DiskPriorityIO* indexFile = m_indexFiles[fileid].get();
+#endif
 
                     if (listInfo->listEleCount == 0)
                     {
@@ -154,100 +174,85 @@ namespace SPTAG
 
                     diskRead += listInfo->listPageCount;
                     diskIO += 1;
+                    listElements += listInfo->listEleCount;
 
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
                     char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
 
-#ifdef ASYNC_READ
-                    ++unprocessed;
+#ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_buffer = buffer;
-                    request.m_callback = [&p_exWorkSpace, &request](bool success)
-                    {
-                        request.m_success = success;
-                        p_exWorkSpace->m_processIocp.push(&request);
-                    };
-                    request.m_success = false;
-                    request.m_pListInfo = (void*)listInfo;
+                    request.m_status = (fileid << 16) | p_exWorkSpace->m_spaceID;
+                    request.m_payload = (void*)listInfo;
 
-                    if (!((indexContext->m_indexFile)->ReadFileAsync(request)))
+#ifdef BATCH_READ
+                    auto vectorInfoSize = m_vectorInfoSize;
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize](Helper::AsyncReadRequest* request)
+                    {
+                        request->m_readSize = 0;
+                        char* buffer = request->m_buffer;
+                        ListInfo* listInfo = (ListInfo*)(request->m_payload);
+                        ProcessPosting(vectorInfoSize)
+                    };
+#else
+                    request.m_callback = [&p_exWorkSpace](Helper::AsyncReadRequest* request)
+                    {
+                        p_exWorkSpace->m_processIocp.push(request);
+                    };
+
+                    ++unprocessed;
+                    if (!(indexFile->ReadFileAsync(request)))
                     {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
-                        p_exWorkSpace->m_processIocp.push(&request);
+                        unprocessed--;
                     }
+#endif
 #else
-                    auto numRead = (indexContext->m_indexFile)->ReadBinary(totalBytes, buffer, listInfo->listOffset);
+                    auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
                         LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
                         exit(-1);
                     }
+                    ProcessPosting(m_vectorInfoSize)
+#endif
+                }
 
-                    for (int i = 0; i < listInfo->listEleCount; ++i)
+#ifdef ASYNC_READ
+#ifdef BATCH_READ
+                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+#else
+                while (unprocessed > 0)
+                {
+                    Helper::AsyncReadRequest* request;
+                    if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
+
+                    --unprocessed;
+                    char* buffer = request->m_buffer;
+                    ListInfo* listInfo = static_cast<ListInfo*>(request->m_payload);
+                    ProcessPosting(m_vectorInfoSize)
+                }
+#endif
+#endif
+                if (truth) {
+                    for (uint32_t pi = 0; pi < postingListCount; ++pi)
                     {
-                        char* vectorInfo = buffer + listInfo->pageOffset + i * m_vectorInfoSize;
-                        int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-                        vectorInfo += sizeof(int);
+                        auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
 
-                        if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
+                        ListInfo* listInfo = &(m_listInfos[curPostingID / m_listPerFile][curPostingID % m_listPerFile]);
+                        char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
 
-                        auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
-                        queryResults.AddPoint(vectorID, distance2leaf);
-                        curCheck += 1;
-                    }
-
-                    if (truth) {
                         for (int i = 0; i < listInfo->listEleCount; ++i) {
                             char* vectorInfo = buffer + listInfo->pageOffset + i * m_vectorInfoSize;
                             int vectorID = *(reinterpret_cast<int*>(vectorInfo));
                             if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
                         }
                     }
-                    listElements += listInfo->listEleCount;
-#endif
                 }
 
-#ifdef ASYNC_READ
-                while (unprocessed > 0)
-                {
-                    Helper::DiskListRequest* request;
-                    if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
-
-                    --unprocessed;
-
-                    if (request->m_success)
-                    {
-                        ListInfo* listInfo = (ListInfo*)(request->m_pListInfo);
-                        char* buffer = request->m_buffer;
-
-                        for (int i = 0; i < listInfo->listEleCount; ++i)
-                        {
-                            char* vectorInfo = buffer + listInfo->pageOffset + i * m_vectorInfoSize;
-                            int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-                            vectorInfo += sizeof(int);
-
-                            if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
-
-                            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo);
-                            queryResults.AddPoint(vectorID, distance2leaf);
-                            curCheck += 1;
-                        }
-                        if (truth) {
-                            for (int i = 0; i < listInfo->listEleCount; ++i) {
-                                char* vectorInfo = buffer + listInfo->pageOffset + i * m_vectorInfoSize;
-                                int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-                                int curPostingID = p_exWorkSpace->m_postingIDs[request - p_exWorkSpace->m_diskRequests.data()];
-                                if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
-                            }
-                        }
-                        listElements += listInfo->listEleCount;
-                    }
-                }
-#endif
                 if (p_stats) 
                 {
-                    p_stats->m_exCheck = curCheck;
                     p_stats->m_totalListElementsCount = listElements;
                     p_stats->m_diskIOCount = diskIO;
                     p_stats->m_diskAccessCount = diskRead;
@@ -497,16 +502,7 @@ namespace SPTAG
                 std::uint16_t pageOffset = 0;
             };
 
-            struct IndexContext {
-                std::vector<ListInfo> m_listInfos;
-
-                std::shared_ptr<SPTAG::Helper::DiskPriorityIO> m_indexFile;
-
-                IndexContext(std::shared_ptr<SPTAG::Helper::DiskPriorityIO> indexFile) : m_indexFile(indexFile) {}
-            };
-
-        private:
-            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, IndexContext& p_indexContext)
+            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& m_listInfos)
             {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
@@ -518,7 +514,6 @@ namespace SPTAG
                 int m_totalDocumentCount;
                 int m_iDataDimension;
                 int m_listPageOffset;
-                auto& m_listInfos = p_indexContext.m_listInfos;
 
                 if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
                     LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
@@ -905,10 +900,12 @@ namespace SPTAG
             }
 
         private:
-
+            
             std::string m_extraFullGraphFile;
 
-            std::vector<IndexContext> m_indexContexts;
+            std::vector<std::vector<ListInfo>> m_listInfos;
+
+            std::vector<std::shared_ptr<Helper::DiskPriorityIO>> m_indexFiles;
 
             int m_vectorInfoSize = 0;
 

@@ -53,11 +53,10 @@ namespace SPTAG
                 SizeType tmpNode;
                 float tmpDist;
                 const void* tmpVec;
-                for (DimensionType k = 0; k < m_iNeighborhoodSize; k++)
+                int checkNeighborhoodSize = (nodes[m_iNeighborhoodSize - 1] < -1) ? m_iNeighborhoodSize - 1 : m_iNeighborhoodSize;
+                for (DimensionType k = 0; k < checkNeighborhoodSize; k++)
                 {
                     tmpNode = nodes[k];
-                    if (tmpNode < -1) break;
-
                     if (tmpNode < 0) {
                         nodes[k] = insertNode;
                         break;
@@ -68,14 +67,14 @@ namespace SPTAG
                     if (tmpDist > insertDist || (insertDist == tmpDist && insertNode < tmpNode))
                     {
                         nodes[k] = insertNode;
-                        while (++k < m_iNeighborhoodSize && nodes[k] >= -1 && index->ComputeDistance(tmpVec, nodeVec) <= index->ComputeDistance(tmpVec, insertVec)) {
+                        while (++k < checkNeighborhoodSize && index->ComputeDistance(tmpVec, nodeVec) <= index->ComputeDistance(tmpVec, insertVec)) {
                             std::swap(tmpNode, nodes[k]);
                             if (tmpNode < 0) return;
                             tmpVec = index->GetSample(tmpNode);
                         }
                         break;
                     }
-                    else if (index->ComputeDistance(tmpVec, insertVec) <= insertDist) {
+                    else if (index->ComputeDistance(tmpVec, insertVec) < insertDist) {
                         break;
                     }
                 }

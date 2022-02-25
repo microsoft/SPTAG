@@ -14,6 +14,7 @@ namespace SPTAG
 {
     namespace SPANN
     {
+        std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
 
         std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::AsyncFileIO()); };
@@ -66,7 +67,7 @@ namespace SPTAG
            
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 
@@ -89,7 +90,7 @@ namespace SPTAG
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 
@@ -208,12 +209,13 @@ namespace SPTAG
             }
             newResults.Reverse();
 
+            auto auto_ws = m_workSpacePool->Rent();
+
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
             float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;
             for (SizeType p = 0; p < partitions; p++) {
                 int subInternalResultNum = min(p_subInternalResultNum, p_internalResultNum - p_subInternalResultNum * p);
 
-                auto auto_ws = m_workSpacePool->Rent();
                 auto_ws->m_postingIDs.clear();
 
                 for (int i = p * p_subInternalResultNum; i < p * p_subInternalResultNum + subInternalResultNum; i++)
@@ -223,9 +225,10 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
-                m_workSpacePool->Return(auto_ws);
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);    
             }
+            
+            m_workSpacePool->Return(auto_ws);
 
             newResults.SortResult();
             std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_query.GetResults());
@@ -517,8 +520,6 @@ namespace SPTAG
                 }
             }
 
-            m_options.m_vectorSize = p_reader->GetVectorSet()->Count();
-
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
                 omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
@@ -566,6 +567,11 @@ namespace SPTAG
                 }
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
+                m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+                m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+                m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+                m_index->UpdateIndex();
+
                 m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
                 if (m_options.m_buildSsdIndex) {
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
@@ -598,7 +604,7 @@ namespace SPTAG
             }
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -612,10 +618,13 @@ namespace SPTAG
             {
                 LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
             }
-            else if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
-            {
-                LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-                return ErrorCode::Fail;
+            else {
+                if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                    return ErrorCode::Fail;
+                }
+                m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
             }
   
             return BuildIndexInternal(vectorReader);
@@ -635,6 +644,7 @@ namespace SPTAG
             std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
                 vectorSet));
             
+            m_options.m_vectorSize = p_vectorNum;
             return BuildIndexInternal(vectorReader);
         }
 
@@ -645,7 +655,7 @@ namespace SPTAG
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, min(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
             return ErrorCode::Success;
         }
 

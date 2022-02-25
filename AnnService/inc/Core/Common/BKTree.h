@@ -178,7 +178,7 @@ namespace SPTAG
             return diff;
         }
 
-#if defined(GPU)
+#if defined(NEWGPU)
 
 #include "inc/Core/Common/cuda/Kmeans.hxx"
 

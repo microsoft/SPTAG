@@ -282,36 +282,11 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", truthK, K, recall);
                 }
 
-                long long exCheckSum = 0;
-                int exCheckMax = 0;
-                long long exListSum = 0;
-                std::for_each(stats.begin(), stats.end(), [&](const SPANN::SearchStats& p_stat)
-                    {
-                        exCheckSum += p_stat.m_exCheck;
-                        exCheckMax = std::max<int>(exCheckMax, p_stat.m_exCheck);
-                        exListSum += p_stat.m_totalListElementsCount;
-                    });
-
-                LOG(Helper::LogLevel::LL_Info,
-                    "Max Ex Dist Check: %d, Average Ex Dist Check: %.2lf, Average Ex Elements Count: %.2lf.\n",
-                    exCheckMax,
-                    static_cast<double>(exCheckSum) / numQueries,
-                    static_cast<double>(exListSum) / numQueries);
-
-                LOG(Helper::LogLevel::LL_Info, "\nSleep Latency Distribution:\n");
+                LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
-                        return ss.m_sleepLatency;
-                    },
-                    "%.3lf");
-
-
-                LOG(Helper::LogLevel::LL_Info, "\nIn Queue Latency Distribution:\n");
-                PrintPercentiles<double, SPANN::SearchStats>(stats,
-                    [](const SPANN::SearchStats& ss) -> double
-                    {
-                        return ss.m_queueLatency;
+                        return ss.m_totalListElementsCount;
                     },
                     "%.3lf");
 
@@ -331,19 +306,11 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Search Latency Distribution:\n");
-                PrintPercentiles<double, SPANN::SearchStats>(stats,
-                    [](const SPANN::SearchStats& ss) -> double
-                    {
-                        return ss.m_totalSearchLatency;
-                    },
-                    "%.3lf");
-
                 LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
-                        return ss.m_totalLatency;
+                        return ss.m_totalSearchLatency;
                     },
                     "%.3lf");
 
@@ -372,11 +339,8 @@ namespace SPTAG {
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
-                    "Recall: %f, MaxExCheck: %d, AverageExCheck: %.2lf, AverageExElements: %.2lf\n",
-                    recall,
-                    exCheckMax,
-                    static_cast<double>(exCheckSum) / numQueries,
-                    static_cast<double>(exListSum) / numQueries);
+                    "Recall: %f\n",
+                    recall);
 
                 LOG(Helper::LogLevel::LL_Info, "\n");
 
