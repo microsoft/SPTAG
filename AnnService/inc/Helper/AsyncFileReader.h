@@ -8,7 +8,6 @@
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common.h"
 
-#include <memory>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -16,28 +15,22 @@
 #include <thread>
 #include <stdint.h>
 
+#define ASYNC_READ 1
+
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
 #else
+#define BATCH_READ 1
 #include <fcntl.h>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 #include <sys/syscall.h>
 #include <linux/aio_abi.h>
-
-#include "ConcurrentSet.h"
 #endif
 
 namespace SPTAG
 {
     namespace Helper
     {
-        struct DiskListRequest : public SPTAG::Helper::AsyncReadRequest
-        {
-            void* m_pListInfo;
-        };
 
 #ifdef _MSC_VER
         namespace DiskUtils
@@ -49,12 +42,11 @@ namespace SPTAG
             {
                 PrioritizedDiskFileReaderResource* const c_registeredResource;
 
-                const std::function<void(bool)>* m_callback;
-
+                void* m_data;
 
                 CallbackOverLapped(PrioritizedDiskFileReaderResource* p_registeredResource)
                     : c_registeredResource(p_registeredResource),
-                    m_callback(nullptr)
+                    m_data(nullptr)
                 {
                 }
             };
@@ -70,7 +62,7 @@ namespace SPTAG
                 }
             };
         }
-            
+
         class HandleWrapper
         {
         public:
@@ -112,14 +104,16 @@ namespace SPTAG
                 m_handle.Reset(::CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, 0));
             }
 
-            void push(DiskListRequest* j) {
+            void reset(int capacity) {}
+
+            void push(AsyncReadRequest* j) {
                 ::PostQueuedCompletionStatus(m_handle.GetHandle(),
                     0,
                     NULL,
                     reinterpret_cast<LPOVERLAPPED>(j));
             }
 
-            bool pop(DiskListRequest*& j) {
+            bool pop(AsyncReadRequest*& j) {
                 DWORD cBytes;
                 ULONG_PTR key;
                 OVERLAPPED* ol;
@@ -129,7 +123,7 @@ namespace SPTAG
                     &ol,
                     INFINITE);
                 if (FALSE == ret || nullptr == ol) return false;
-                j = reinterpret_cast<DiskListRequest*>(ol);
+                j = reinterpret_cast<AsyncReadRequest*>(ol);
                 return true;
             }
 
@@ -137,10 +131,10 @@ namespace SPTAG
             HandleWrapper m_handle;
         };
 
-        class AsyncFileIO : public SPTAG::Helper::DiskPriorityIO
+        class AsyncFileIO : public DiskPriorityIO
         {
         public:
-            AsyncFileIO(SPTAG::Helper::DiskIOScenario scenario = SPTAG::Helper::DiskIOScenario::DIS_UserRead) {}
+            AsyncFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
 
             virtual ~AsyncFileIO() { ShutDown(); }
 
@@ -169,13 +163,13 @@ namespace SPTAG
                 }
 
                 m_diskSectorSize = static_cast<uint32_t>(GetSectorSize(filePath));
-                LOG(SPTAG::Helper::LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
+                LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
 
                 PreAllocQueryContext();
                 return m_fileIocp.IsValid();
             }
 
-            virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX) 
+            virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 OVERLAPPED col;
                 memset(&col, 0, sizeof(col));
@@ -215,7 +209,7 @@ namespace SPTAG
                 return 0;
             }
 
-            virtual bool ReadFileAsync(SPTAG::Helper::AsyncReadRequest& readRequest)
+            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
             {
                 ResourceType* resource = GetResource();
 
@@ -223,7 +217,7 @@ namespace SPTAG
                 memset(&col, 0, sizeof(col));
                 col.Offset = (readRequest.m_offset & 0xffffffff);
                 col.OffsetHigh = (readRequest.m_offset >> 32);
-                col.m_callback = &(readRequest.m_callback);
+                col.m_data = (void*)&readRequest;
 
                 if (!::ReadFile(m_fileHandle.GetHandle(),
                     readRequest.m_buffer,
@@ -369,12 +363,12 @@ namespace SPTAG
                     }
 
                     col = (DiskUtils::CallbackOverLapped*)ol;
-                    auto callback = col->m_callback;
+                    auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
                     ReturnResource(col->c_registeredResource);
 
-                    if (nullptr != callback && (*callback))
+                    if (nullptr != req)
                     {
-                        (*callback)(true);
+                        req->m_callback(req);
                     }
                 }
             }
@@ -435,42 +429,46 @@ namespace SPTAG
             Helper::Concurrent::ConcurrentQueue<ResourceType*> m_resources;
         };
 #else
+        extern struct timespec AIOTimeout;
+
         class RequestQueue
         {
         public:
 
-            RequestQueue() {}
+            RequestQueue() :m_front(0), m_end(0), m_capacity(0) {}
 
             ~RequestQueue() {}
 
-            void push(DiskListRequest* j)
-            {
-                {
-                    std::lock_guard<std::mutex> lock(m_lock);
-                    m_queue.push(j);
+            void reset(int capacity) {
+                if (capacity > m_capacity) {
+                    m_capacity = capacity + 1;
+                    m_queue.reset(new AsyncReadRequest * [m_capacity]);
                 }
-                m_cond.notify_one();
             }
 
-            bool pop(DiskListRequest*& j)
+            void push(AsyncReadRequest* j)
             {
-                std::unique_lock<std::mutex> lock(m_lock);
-                while (m_queue.empty()) m_cond.wait(lock);
-                j = m_queue.front();
-                m_queue.pop();
+                m_queue[m_end++] = j;
+                if (m_end == m_capacity) m_end = 0;
+            }
+
+            bool pop(AsyncReadRequest*& j)
+            {
+                while (m_front == m_end) usleep(AIOTimeout.tv_nsec / 1000);
+                j = m_queue[m_front++];
+                if (m_front == m_capacity) m_front = 0;
                 return true;
             }
 
         protected:
-            std::queue<DiskListRequest*> m_queue;
-            std::mutex m_lock;
-            std::condition_variable m_cond;
+            int m_front, m_end, m_capacity;
+            std::unique_ptr<AsyncReadRequest* []> m_queue;
         };
 
-        class AsyncFileIO : public SPTAG::Helper::DiskPriorityIO
+        class AsyncFileIO : public DiskPriorityIO
         {
         public:
-            AsyncFileIO(SPTAG::Helper::DiskIOScenario scenario = SPTAG::Helper::DiskIOScenario::DIS_UserRead) {}
+            AsyncFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
 
             virtual ~AsyncFileIO() { ShutDown(); }
 
@@ -480,23 +478,29 @@ namespace SPTAG
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_fileHandle = open(filePath, O_RDONLY | O_NOATIME);
-                if (m_fileHandle == -1) {
-                    LOG(SPTAG::Helper::LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
-                    return false;
-                }
-                memset(&m_iocp, 0, sizeof(m_iocp));
-                auto ret = syscall(__NR_io_setup, 64, &m_iocp);
-                if (ret < 0) {
-                    LOG(SPTAG::Helper::LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
+                m_fileHandle = open(filePath, O_RDONLY | O_DIRECT);
+                if (m_fileHandle <= 0) {
+                    LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
 
-                int iocpThreads = threadPoolSize;
-                for (int i = 0; i < iocpThreads; ++i)
-                {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
+                m_iocps.resize(threadPoolSize);
+                memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
+                for (int i = 0; i < threadPoolSize; i++) {
+                    auto ret = syscall(__NR_io_setup, (int)maxIOSize, &(m_iocps[i]));
+                    if (ret < 0) {
+                        LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
+                        return false;
+                    }
                 }
+
+#ifndef BATCH_READ
+                m_shutdown = false;
+                for (int i = 0; i < threadPoolSize; ++i)
+                {
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
+                }
+#endif
                 return true;
             }
 
@@ -520,7 +524,7 @@ namespace SPTAG
                 return 0;
             }
 
-            virtual bool ReadFileAsync(SPTAG::Helper::AsyncReadRequest& readRequest)
+            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
             {
                 struct iocb myiocb = { 0 };
                 myiocb.aio_data = reinterpret_cast<uintptr_t>(&readRequest);
@@ -531,12 +535,12 @@ namespace SPTAG
                 myiocb.aio_offset = static_cast<std::int64_t>(readRequest.m_offset);
 
                 struct iocb* iocbs[1] = { &myiocb };
-                int res = syscall(__NR_io_submit, m_iocp, 1, iocbs);
-                if (res != 1)
-                {
-                    //LOG(Helper::LogLevel::LL_Error, "ReadFileAsync Failed! res = %d\n", (int)res);
-                    return false;
+                int curTry = 0, maxTry = 10;
+                while (curTry < maxTry && syscall(__NR_io_submit, m_iocps[(readRequest.m_status & 0xffff) % m_iocps.size()], 1, iocbs) < 1) {
+                    usleep(AIOTimeout.tv_nsec / 1000);
+                    curTry++;
                 }
+                if (curTry == maxTry) return false;
                 return true;
             }
 
@@ -544,8 +548,10 @@ namespace SPTAG
 
             virtual void ShutDown()
             {
-                syscall(__NR_io_destroy, m_iocp);
+                for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
                 close(m_fileHandle);
+#ifndef BATCH_READ
+                m_shutdown = true;
                 for (auto& th : m_fileIocpThreads)
                 {
                     if (th.joinable())
@@ -553,36 +559,42 @@ namespace SPTAG
                         th.join();
                     }
                 }
+#endif
             }
 
+            aio_context_t& GetIOCP(int i) { return m_iocps[i]; }
+
+            int GetFileHandler() { return m_fileHandle; }
+
         private:
-            void ListionIOCP() {
-                struct timespec timeout;
-                timeout.tv_sec = 1;
-                timeout.tv_nsec = 500000000;
-                struct io_event events[1];
-                while (true)
+#ifndef BATCH_READ
+            void ListionIOCP(int i) {
+                int b = 10;
+                std::vector<struct io_event> events(b);
+                while (!m_shutdown)
                 {
-                    int numEvents = syscall(__NR_io_getevents, m_iocp, 1, 1, events, &timeout);
-                    if (numEvents != 1)
-                    {
-                        break;
-                    }
-                    SPTAG::Helper::AsyncReadRequest* req = reinterpret_cast<SPTAG::Helper::AsyncReadRequest*>((events[0].data));
-                    auto callback = &(req->m_callback);
-                    if (nullptr != callback && (*callback))
-                    {
-                        (*callback)(true);
+                    int numEvents = syscall(__NR_io_getevents, m_iocps[i], b, b, events.data(), &AIOTimeout);
+
+                    for (int r = 0; r < numEvents; r++) {
+                        AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[r].data));
+                        if (nullptr != req)
+                        {
+                            req->m_callback(req);
+                        }
                     }
                 }
             }
-        private:
-            int m_fileHandle;
 
-            aio_context_t m_iocp;
+            bool m_shutdown;
 
             std::vector<std::thread> m_fileIocpThreads;
+#endif
+            int m_fileHandle;
+
+            std::vector<aio_context_t> m_iocps;
         };
+
+        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
 #endif
     }
 }

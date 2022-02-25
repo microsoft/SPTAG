@@ -29,6 +29,7 @@ namespace SPTAG
                 {
                     workspace.reset();
                 }
+                T::Reset();
             }
 
             std::shared_ptr<T> Rent()

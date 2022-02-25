@@ -7,7 +7,6 @@
 #include "Options.h"
 
 #include "inc/Core/VectorIndex.h"
-#include "inc/Core/Common/WorkSpace.h"
 #include "inc/Helper/AsyncFileReader.h"
 
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
@@ -19,6 +18,7 @@
 #include <memory>
 #include <vector>
 #include <chrono>
+#include <atomic>
 
 namespace SPTAG {
     namespace SPANN {
@@ -115,11 +115,13 @@ namespace SPTAG {
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
                 Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()));
+                m_spaceID = g_spaceCount++;
             }
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages) {
                 m_postingIDs.reserve(p_internalResultNum);
                 m_deduper.Init(p_maxCheck, p_hashExp);
+                m_processIocp.reset(p_internalResultNum);
                 m_pageBuffers.resize(p_internalResultNum);
                 for (int pi = 0; pi < p_internalResultNum; pi++) {
                     m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
@@ -135,6 +137,8 @@ namespace SPTAG {
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages);
             }
 
+            static void Reset() { g_spaceCount = 0; }
+
             std::vector<int> m_postingIDs;
 
             COMMON::OptHashPosVector m_deduper;
@@ -143,7 +147,11 @@ namespace SPTAG {
 
             std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
 
-            std::vector<Helper::DiskListRequest> m_diskRequests;
+            std::vector<Helper::AsyncReadRequest> m_diskRequests;
+
+            int m_spaceID;
+
+            static std::atomic_int g_spaceCount;
         };
 
         class IExtraSearcher

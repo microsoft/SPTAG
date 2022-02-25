@@ -57,11 +57,11 @@ namespace SPTAG
             void SetName(const std::string& name_) { name = name_; }
             const std::string& Name() const { return name; }
 
-            void SetR(SizeType R_) 
+            void SetR(SizeType R_)
             {
                 if (R_ >= rows)
                     incRows = R_ - rows;
-                else 
+                else
                 {
                     rows = R_;
                     incRows = 0;
@@ -84,7 +84,7 @@ namespace SPTAG
             {
                 return (T*)At(index);
             }
-            
+
             const T* operator[](SizeType index) const
             {
                 return At(index);
@@ -136,7 +136,7 @@ namespace SPTAG
                 IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
                 IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&cols);
                 IOBINARY(p_out, WriteBinary, sizeof(T) * cols * rows, (char*)data);
-                
+
                 SizeType blocks = (incRows >> rowsInBlockEx);
                 for (int i = 0; i < blocks; i++)
                     IOBINARY(p_out, WriteBinary, sizeof(T) * cols * (rowsInBlock + 1), (char*)incBlocks[i]);

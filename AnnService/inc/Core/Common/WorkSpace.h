@@ -253,6 +253,8 @@ namespace SPTAG
                 return nodeCheckStatus.HashTableExponent(); 
             }
 
+            static void Reset() {}
+
             OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting

@@ -201,6 +201,7 @@
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
     <ClCompile Include="src\Core\VectorIndex.cpp" />
     <ClCompile Include="src\Helper\ArgumentsParser.cpp" />
+    <ClCompile Include="src\Helper\AsyncFileReader.cpp" />
     <ClCompile Include="src\Helper\Base64Encode.cpp" />
     <ClCompile Include="src\Helper\CommonHelper.cpp" />
     <ClCompile Include="src\Helper\Concurrent.cpp" />
