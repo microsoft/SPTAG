@@ -79,7 +79,7 @@ namespace SPTAG
 			{
 				norm += post_mat_vec[i] * post_mat_vec[i];
 			}
-			norm = 127.0/sqrt(norm);
+			norm = ((float) Utils::GetBaseCore<T>())/sqrt(norm);
 			T* vecout_T = (T*)vecout;
 			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 			{
