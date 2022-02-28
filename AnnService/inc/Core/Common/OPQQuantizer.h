@@ -70,9 +70,22 @@ namespace SPTAG
 		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout)
 		{
 			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+			OPQMatrixType* post_mat_vec = (OPQMatrixType*)_mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
-			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout, true);
+			m_MatrixVectorMultiply<OPQMatrixType, OPQMatrixType>(m_OPQMatrix.get(), pre_mat_vec, post_mat_vec, true);
+			float norm = 0;
+			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
+			{
+				norm += post_mat_vec[i] * post_mat_vec[i];
+			}
+			norm = 127.0/sqrt(norm);
+			T* vecout_T = (T*)vecout;
+			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
+			{
+				vecout_T[i] = (T)(norm * post_mat_vec[i]);
+			}
+			_mm_free(post_mat_vec);
 			_mm_free(pre_mat_vec);
 		}
 
@@ -122,7 +135,7 @@ namespace SPTAG
 		template <typename T>
 		inline SizeType OPQQuantizer<T>::m_MatrixIndexCalc(SizeType i, SizeType j)
 		{
-			return (i * m_NumSubvectors * m_DimPerSubvector) + j;
+			return (j * m_NumSubvectors * m_DimPerSubvector) + i;
 		}
 
 		template <typename T>
