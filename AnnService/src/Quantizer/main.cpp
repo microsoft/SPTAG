@@ -42,6 +42,10 @@ int main(int argc, char* argv[])
         auto fp_load = SPTAG::f_createIO();
         std::shared_ptr<VectorSet> quantized_vectors;
         auto fullvectors = vectorReader->GetVectorSet();
+        if (options->m_normalized)
+        {
+            fullvectors->Normalize(options->m_threadNum);
+        }
         ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * fullvectors->Count());
         quantized_vectors.reset(new BasicVectorSet(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, fullvectors->Count()));
         if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
