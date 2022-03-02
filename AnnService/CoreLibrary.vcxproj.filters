@@ -50,6 +50,9 @@
     <Filter Include="Source Files\Core\SPANN">
       <UniqueIdentifier>{6a6e3f33-cc6d-441c-ae1f-3e0ba91222fd}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Core\DiskANN">
+      <UniqueIdentifier>{f5cd3389-f5cb-4f35-a9f3-7f2906173d43}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -210,6 +213,9 @@
     </ClInclude>
     <ClInclude Include="inc\Core\Common\TruthSet.h">
       <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\DiskANN\Index.h">
+      <Filter>Header Files\Core\DiskANN</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

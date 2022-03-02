@@ -72,7 +72,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <IncludePath>$(IncludePath);$(ProjectDir)</IncludePath>
+    <IncludePath>$(SolutionDir)\thirdparty;$(IncludePath);$(ProjectDir)</IncludePath>
   </PropertyGroup>
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
@@ -149,6 +149,7 @@
     <ClInclude Include="inc\Core\Common\WorkSpacePool.h" />
     <ClInclude Include="inc\Core\BKT\Index.h" />
     <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\Core\DiskANN\Index.h" />
     <ClInclude Include="inc\Core\KDT\Index.h" />
     <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\Common.h" />
