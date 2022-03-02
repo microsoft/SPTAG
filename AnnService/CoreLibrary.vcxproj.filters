@@ -53,6 +53,9 @@
     <Filter Include="Header Files\Core\DiskANN">
       <UniqueIdentifier>{f5cd3389-f5cb-4f35-a9f3-7f2906173d43}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Core\DiskANN">
+      <UniqueIdentifier>{5d2a8606-c643-4a88-a39d-cb535af7a291}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\Core\Common.h">
@@ -284,6 +287,9 @@
     </ClCompile>
     <ClCompile Include="src\Helper\AsyncFileReader.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\DiskANN\DiskANNIndex.cpp">
+      <Filter>Source Files\Core\DiskANN</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
