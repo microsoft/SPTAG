@@ -192,7 +192,7 @@ namespace SPTAG
 			auto dist = distCalc(RX, RY, m_NumSubvectors * m_DimPerSubvector);
 			_mm_free(RX);
 			_mm_free(RY);
-			return DistanceUtils::ConvertCosineSimilarityToDistance(dist);
+			return dist;
 		}
 	}
 }

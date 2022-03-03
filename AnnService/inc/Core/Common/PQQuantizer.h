@@ -99,12 +99,13 @@ namespace SPTAG
 
             auto cosineDist = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
             auto L2Dist = DistanceCalcSelector<T>(DistCalcMethod::L2);
+            int base = Utils::GetBase<T>();
 
             for (int i = 0; i < m_NumSubvectors; i++) {
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
                     for (int k = 0; k < m_KsPerSubvector; k++) {
-                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                        temp_m_CosineDistanceTables[m_DistIndexCalc(i, j, k)] = base*base - cosineDist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
                         temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
@@ -140,6 +141,7 @@ namespace SPTAG
             // pX must be query distance table for ADC
         {
             float out = 0;
+            int base = Utils::GetBase<T>();
             if (GetEnableADC())
             {
                 for (int i = 0; i < m_NumSubvectors; i++) {
@@ -152,7 +154,7 @@ namespace SPTAG
                     out += m_CosineDistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
                 }
             }
-            return DistanceUtils::ConvertCosineSimilarityToDistance(out);
+            return base*base - out;
         }
 
         template <typename T>
@@ -161,8 +163,9 @@ namespace SPTAG
             if (GetEnableADC())
             {
                 auto distCalcL2 = DistanceCalcSelector<T>(DistCalcMethod::L2);
-                auto distCalcCosine = DistanceCalcSelector<T>(DistCalcMethod::L2);
+                auto distCalcCosine = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
                 float* ADCtable = (float*) vecout;
+                int base = Utils::GetBase<T>();
 
                 for (int i = 0; i < m_NumSubvectors; i++)
                 {
@@ -171,7 +174,7 @@ namespace SPTAG
                     for (int j = 0; j < m_KsPerSubvector; j++)
                     {
                         ADCtable[i * m_KsPerSubvector + j] = distCalcL2(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
-                        ADCtable[(m_NumSubvectors * m_KsPerSubvector) + i * m_KsPerSubvector + j] = distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
+                        ADCtable[(m_NumSubvectors * m_KsPerSubvector) + i * m_KsPerSubvector + j] = base*base - distCalcCosine(subvec, &m_codebooks[basevecIdx + j * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
             }
