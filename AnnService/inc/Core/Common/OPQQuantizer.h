@@ -30,6 +30,10 @@ namespace SPTAG
 
 			virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
+			virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
+
+			virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
+
 			QuantizerType GetQuantizerType() {
 				return QuantizerType::OPQQuantizer;
 			}
@@ -62,6 +66,7 @@ namespace SPTAG
 		{
 			OPQMatrixType* mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec);
+			m_EnableADC = false;
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
 			_mm_free(mat_vec);
 		}
@@ -160,6 +165,35 @@ namespace SPTAG
 			}
 		}
 
+		template <typename T>
+		float OPQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
+		{
+			auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
+			T* RX = (T* )_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+			T* RY = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+
+			ReconstructVector(pX, (void*)RX);
+			ReconstructVector(pY, (void*)RY);
+			auto dist = distCalc(RX, RY, m_NumSubvectors * m_DimPerSubvector);
+			_mm_free(RX);
+			_mm_free(RY);
+			return dist;
+		}
+
+		template <typename T>
+		float OPQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
+		{
+			auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
+			T* RX = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+			T* RY = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+
+			ReconstructVector(pX, (void*)RX);
+			ReconstructVector(pY, (void*)RY);
+			auto dist = distCalc(RX, RY, m_NumSubvectors * m_DimPerSubvector);
+			_mm_free(RX);
+			_mm_free(RY);
+			return DistanceUtils::ConvertCosineSimilarityToDistance(dist);
+		}
 	}
 }
 
