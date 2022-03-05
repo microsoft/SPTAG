@@ -30,10 +30,6 @@ namespace SPTAG
 
 			virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
-			virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
-
-			virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
-
 			QuantizerType GetQuantizerType() {
 				return QuantizerType::OPQQuantizer;
 			}
