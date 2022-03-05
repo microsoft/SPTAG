@@ -44,6 +44,7 @@ int main(int argc, char* argv[])
         auto fullvectors = vectorReader->GetVectorSet();
         if (options->m_normalized)
         {
+            LOG(Helper::LogLevel::LL_Info, "Normalizing vectors.\n");
             fullvectors->Normalize(options->m_threadNum);
         }
         ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * fullvectors->Count());

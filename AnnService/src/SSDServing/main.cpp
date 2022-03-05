@@ -116,15 +116,20 @@ namespace SPTAG {
 			if (opts->m_generateTruth)
 			{
 				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
-				if (COMMON::DistanceUtils::Quantizer) valueType = VectorValueType::UInt8;
-				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, opts->m_dim, opts->m_vectorType, opts->m_vectorDelimiter));
+				SizeType dim = opts->m_dim;
+				if (COMMON::DistanceUtils::Quantizer)
+				{
+					valueType = VectorValueType::UInt8;
+					dim = COMMON::DistanceUtils::Quantizer->QuantizeSize();
+				}
+				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, opts->m_vectorType, opts->m_vectorDelimiter));
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
 				if (ErrorCode::Success != vectorReader->LoadFile(opts->m_vectorPath))
 				{
 					LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
 					exit(1);
 				}
-				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
+				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(opts->m_valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
 				auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
 				if (ErrorCode::Success != queryReader->LoadFile(opts->m_queryPath))
 				{

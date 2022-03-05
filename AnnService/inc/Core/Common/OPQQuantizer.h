@@ -75,22 +75,10 @@ namespace SPTAG
 		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout)
 		{
 			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
-			OPQMatrixType* post_mat_vec = (OPQMatrixType*)_mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
-			m_MatrixVectorMultiply<OPQMatrixType, OPQMatrixType>(m_OPQMatrix.get(), pre_mat_vec, post_mat_vec, true);
-			float norm = 0;
-			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
-			{
-				norm += post_mat_vec[i] * post_mat_vec[i];
-			}
-			norm = ((float) Utils::GetBaseCore<T>())/sqrt(norm);
-			T* vecout_T = (T*)vecout;
-			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
-			{
-				vecout_T[i] = (T)(norm * post_mat_vec[i]);
-			}
-			_mm_free(post_mat_vec);
+			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout, true);
+
 			_mm_free(pre_mat_vec);
 		}
 
@@ -165,35 +153,7 @@ namespace SPTAG
 			}
 		}
 
-		template <typename T>
-		float OPQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
-		{
-			auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
-			T* RX = (T* )_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
-			T* RY = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 
-			ReconstructVector(pX, (void*)RX);
-			ReconstructVector(pY, (void*)RY);
-			auto dist = distCalc(RX, RY, m_NumSubvectors * m_DimPerSubvector);
-			_mm_free(RX);
-			_mm_free(RY);
-			return dist;
-		}
-
-		template <typename T>
-		float OPQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
-		{
-			auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::Cosine);
-			T* RX = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
-			T* RY = (T*)_mm_malloc(sizeof(T) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
-
-			ReconstructVector(pX, (void*)RX);
-			ReconstructVector(pY, (void*)RY);
-			auto dist = distCalc(RX, RY, m_NumSubvectors * m_DimPerSubvector);
-			_mm_free(RX);
-			_mm_free(RY);
-			return dist;
-		}
 	}
 }
 

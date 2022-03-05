@@ -406,10 +406,24 @@ namespace SPTAG
 
         template <typename T>
         bool Index<T>::SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader) {
+            if (SPTAG::COMMON::DistanceUtils::Quantizer)
+            {
+                return SelectHeadInternal<std::uint8_t>(p_reader);
+            }
+            else
+            {
+                return SelectHeadInternal<T>(p_reader);
+            }
+        }
+
+
+        template <typename T>
+        template <typename InternalDataType>
+        bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader) {
             std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized())
                 vectorset->Normalize(m_options.m_iSelectHeadNumberOfThreads);
-            COMMON::Dataset<T> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (T*)vectorset->GetData());
+            COMMON::Dataset<InternalDataType> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (InternalDataType*)vectorset->GetData());
             
             auto t1 = std::chrono::high_resolution_clock::now();
             SelectHeadAdjustOptions(data.R());
@@ -437,7 +451,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
                     bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, m_options.m_iSelectHeadNumberOfThreads);
 
-                bkt->BuildTrees<T>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
+                bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
                 LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
@@ -499,7 +513,7 @@ namespace SPTAG
                         return false;
                     }
 
-                    if (output->WriteBinary(sizeof(T) * data.C(), (char*)(data[vid])) != sizeof(T) * data.C()) {
+                    if (output->WriteBinary(sizeof(InternalDataType) * data.C(), (char*)(data[vid])) != sizeof(InternalDataType) * data.C()) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                         return false;
                     }
@@ -616,7 +630,8 @@ namespace SPTAG
         ErrorCode Index<T>::BuildIndex(bool p_normalized) 
         {
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-            std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
+            SizeType dim = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeSize() : m_options.m_dim;
+            std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
             if (m_options.m_vectorPath.empty())
             {

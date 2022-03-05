@@ -140,6 +140,9 @@ namespace SPTAG
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
             bool SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
+            template <typename InternalDataType>
+            bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
+
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
         };
     } // namespace SPANN
