@@ -26,7 +26,7 @@ namespace SPTAG
 
             void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
             {
-                m_data.Initialize(size, 1, blockSize, capacity);
+                m_data.Initialize(size, 1, blockSize, capacity, nullptr, false);
             }
 
             inline size_t Count() const { return m_inserted.load(); }
