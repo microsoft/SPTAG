@@ -14,6 +14,8 @@
 #include <time.h>
 #include <omp.h>
 #include <string.h>
+#include <vector>
+#include <set>
 
 #define PREFETCH
 
@@ -77,15 +79,9 @@ namespace SPTAG
             }
 
             template <typename T>
-            static void BatchNormalize(T* data, SizeType row, DimensionType col, int base, int threads) {
-#pragma omp parallel for num_threads(threads)
-                for (SizeType i = 0; i < row; i++)
-                {
-                    SPTAG::COMMON::Utils::Normalize(data + i * (size_t)col, col, base);
-                }
-            }
+            static void BatchNormalize(T* data, SizeType row, DimensionType col, int base, int threads);
 
-            static inline void AddNeighbor(SizeType idx, float dist, SizeType *neighbors, float *dists, DimensionType size)
+            static inline void AddNeighbor(SizeType idx, float dist, SizeType* neighbors, float* dists, DimensionType size)
             {
                 size--;
                 if (dist < dists[size] || (dist == dists[size] && idx < neighbors[size]))

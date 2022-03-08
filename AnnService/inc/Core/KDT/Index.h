@@ -69,7 +69,7 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             COMMON::Labelset m_deletedID;
             
-            std::unique_ptr<COMMON::WorkSpacePool> m_workSpacePool;
+            std::unique_ptr<COMMON::WorkSpacePool<COMMON::WorkSpace>> m_workSpacePool;
             Helper::ThreadPool m_threadPool;
             int m_iNumberOfThreads;
 
@@ -119,7 +119,7 @@ namespace SPTAG
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
-            inline bool ContainSample(const SizeType idx) const { return !m_deletedID.Contains(idx); }
+            inline bool ContainSample(const SizeType idx) const { return idx < m_pSamples.R() && !m_deletedID.Contains(idx); }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
@@ -148,16 +148,16 @@ namespace SPTAG
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
-            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension);
+            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
-            ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false);
+            ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
 
-            ErrorCode SetParameter(const char* p_param, const char* p_value);
-            std::string GetParameter(const char* p_param) const;
+            ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr);
+            std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;
             ErrorCode UpdateIndex();
 
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, IAbortOperation* p_abort);

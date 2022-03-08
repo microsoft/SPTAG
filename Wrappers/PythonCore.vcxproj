@@ -82,13 +82,13 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>CoreLibrary.lib;$(SolutionDir)packages\python2.2.7.15\tools\libs\python27.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>CoreLibrary.lib;$(SolutionDir)packages\python.3.10.1\tools\libs\python310.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">_WINDLL;SWIG_PYTHON_INTERPRETER_NO_DEBUG;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)packages\python2.2.7.15\tools\include\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)packages\python.3.10.1\tools\include\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ControlFlowGuard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Guard</ControlFlowGuard>
       <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_WINDLL;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -126,7 +126,7 @@
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\python2.2.7.15\tools\python.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python2.2.7.15\tools\python.exe'))" />
+    <Error Condition="!Exists('..\packages\python.3.10.1\tools\python.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python.3.10.1\tools\python.exe'))" />
     <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
   </Target>
 </Project>

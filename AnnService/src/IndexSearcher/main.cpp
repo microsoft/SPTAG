@@ -4,14 +4,17 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/StringConvert.h"
 #include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/VectorIndex.h"
-#include <omp.h>
 #include <algorithm>
 #include <iomanip>
 #include <set>
+#include <atomic>
 #include <ctime>
+#include <thread>
 #include <chrono>
 
 using namespace SPTAG;
@@ -69,107 +72,6 @@ public:
 };
 
 template <typename T>
-float CalcRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, std::ofstream& log, bool debug = false)
-{
-    COMMON::DistanceUtils::Quantizer.reset();
-    float eps = 1e-6f;
-    float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
-    std::vector<float> thisrecall(NumQuerys, 0);
-    std::unique_ptr<bool[]> visited(new bool[K]);
-    for (SizeType i = 0; i < NumQuerys; i++)
-    {
-        memset(visited.get(), 0, K * sizeof(bool));
-        for (SizeType id : truth[i])
-        {
-            for (int j = 0; j < K; j++)
-            {
-                if (visited[j] || results[i].GetResult(j)->VID < 0) continue;
-
-                if (results[i].GetResult(j)->VID == id)
-                {
-                    thisrecall[i] += 1;
-                    visited[j] = true;
-                    break;
-                }
-                else if (vectorSet != nullptr) {
-                    float dist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(results[i].GetResult(j)->VID), querySet->Dimension(), index->GetDistCalcMethod());
-                    float truthDist = COMMON::DistanceUtils::ComputeDistance<T>((const T*) querySet->GetVector(i), (const T*) vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
-                    if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < eps) {
-                        thisrecall[i] += 1;
-                        visited[j] = true;
-                        break;
-                    }
-                    else if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::L2 && fabs(dist - truthDist) < eps * (dist + eps)) {
-                        thisrecall[i] += 1;
-                        visited[j] = true;
-                        break;
-                    }
-                }
-            }
-        }
-        thisrecall[i] /= truthK;
-        meanrecall += thisrecall[i];
-        if (thisrecall[i] < minrecall) minrecall = thisrecall[i];
-        if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
-
-        if (debug) {
-            std::string ll("recall:" + std::to_string(thisrecall[i]) + "\ngroundtruth:");
-            std::vector<NodeDistPair> truthvec;
-            for (SizeType id : truth[i]) {
-                float truthDist = 0.0;
-                if (vectorSet != nullptr) {
-                    truthDist = COMMON::DistanceUtils::ComputeDistance((const T*) querySet->GetVector(i), (const T*)vectorSet->GetVector(id), querySet->Dimension(), index->GetDistCalcMethod());
-                }
-                truthvec.emplace_back(id, truthDist);
-            }
-            std::sort(truthvec.begin(), truthvec.end());
-            for (int j = 0; j < truthvec.size(); j++)
-                ll += std::to_string(truthvec[j].node) + "@" + std::to_string(truthvec[j].distance) + ",";
-            LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
-            ll = "ann:";
-            for (int j = 0; j < K; j++)
-                ll += std::to_string(results[i].GetResult(j)->VID) + "@" + std::to_string(results[i].GetResult(j)->Dist) + ",";
-            LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
-        }
-    }
-    meanrecall /= NumQuerys;
-    for (SizeType i = 0; i < NumQuerys; i++)
-    {
-        stdrecall += (thisrecall[i] - meanrecall) * (thisrecall[i] - meanrecall);
-    }
-    stdrecall = std::sqrt(stdrecall / NumQuerys);
-    log << meanrecall << " " << stdrecall << " " << minrecall << " " << maxrecall << std::endl;
-    return meanrecall;
-}
-
-void LoadTruth(std::ifstream& fp, std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K)
-{
-    SizeType get;
-    std::string line;
-    for (SizeType i = 0; i < NumQuerys; ++i)
-    {
-        truth[i].clear();
-        for (int j = 0; j < K; ++j)
-        {
-            fp >> get;
-            truth[i].insert(get);
-        }
-        std::getline(fp, line);
-    }
-}
-
-void LoadTruthBin(std::ifstream& fp, std::vector<std::set<SizeType>>& truth, SizeType NumQuerys, int K, int truthDim)
-{
-    std::unique_ptr<int[]> ptr(new int[truthDim]);
-    for (SizeType i = 0; i < NumQuerys; ++i)
-    {
-        truth[i].clear();
-        fp.read((char*)(ptr.get()), truthDim * sizeof(int));
-        for (int j = 0; j < K; j++) truth[i].insert(ptr[j]);
-    }
-}
-
-template <typename T>
 int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 {
     std::ofstream log("Recall-result.out", std::ios::app);
@@ -201,77 +103,28 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         dataVectors = dataReader->GetVectorSet();
     }
 
-    std::ifstream ftruth;
+    std::shared_ptr<Helper::DiskPriorityIO> ftruth;
     int truthDim = 0;
     if (options->m_truthFile != "")
     {
         if (options->m_genTruth) {
-            std::ofstream ftruthout;
-            if (options->m_truthFile.find("bin") != std::string::npos) {
-                ftruthout.open(options->m_truthFile, std::ofstream::binary | std::ofstream::out);
-                int count = queryVectors->Count();
-                ftruthout.write((char*)&count, sizeof(int));
-                ftruthout.write((char*)&(options->m_truthK), sizeof(int));
+            if (dataVectors == nullptr) {
+                LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please speicify data vector file by setting -df option.\n");
+                exit(1);
             }
-            else {
-                ftruthout.open(options->m_truthFile, std::ofstream::out);
-            }
-
-            if (!ftruthout.is_open())
-            {
-                LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_truthFile.c_str());
-            }
-
-            std::vector<COMMON::QueryResultSet<T>> results(options->m_batch, COMMON::QueryResultSet<T>(NULL, options->m_truthK));
-            for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch) {
-                int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
-
-#pragma omp parallel for
-                for (int qid = 0; qid < numQuerys; qid++) {
-                    results[qid].Reset();
-                    results[qid].SetTarget((T*)queryVectors->GetVector(qid + startQuery));
-                    for (SizeType y = 0; y < index.GetNumSamples(); y++)
-                    {
-                        float dist = index.ComputeDistance(results[qid].GetTarget(), index.GetSample(y));
-                        results[qid].AddPoint(y, dist);
-                    }
-                    results[qid].SortResult();
-                }
-
-                for (int qid = 0; qid < numQuerys; qid++) {
-                    if (options->m_truthFile.find("bin") != std::string::npos) {
-                        for (int rid = 0; rid < options->m_truthK; rid++) {
-                            ftruthout.write((char*)&(results[qid].GetResult(rid)->VID), sizeof(int));
-                        }
-                    }
-                    else {
-                        for (int rid = 0; rid < options->m_truthK; rid++) {
-                            ftruthout << std::to_string(results[qid].GetResult(rid)->VID) << " ";
-                        }
-                        ftruthout << std::endl;
-                    }
-                }
-            }
-            ftruthout.close();
+            COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
+                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT);
         }
 
+        ftruth = SPTAG::f_createIO();
+        if (ftruth == nullptr || !ftruth->Initialize(options->m_truthFile.c_str(), std::ios::in | std::ios::binary)) {
+            LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
+            exit(1);
+        }
         if (options->m_truthFile.find("bin") != std::string::npos) {
-            ftruth.open(options->m_truthFile, std::ifstream::binary | std::ifstream::in);
-            if (!ftruth.is_open())
-            {
-                LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
-            }
-            int tq;
-            ftruth.read((char*)(&tq), sizeof(int));
-            ftruth.read((char*)(&truthDim), sizeof(int));
-            LOG(Helper::LogLevel::LL_Info, "Load binary truth(%d, %d)...\n", tq, truthDim);
+            LOG(Helper::LogLevel::LL_Info, "Load binary truth...\n");
         }
         else {
-            ftruth.open(options->m_truthFile);
-            if (!ftruth.is_open())
-            {
-                LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
-            }
             LOG(Helper::LogLevel::LL_Info, "Load txt truth...\n");
         }
     }
@@ -290,7 +143,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     if (options->m_truthK < 0) options->m_truthK = options->m_K;
 
     std::vector<std::set<SizeType>> truth(options->m_batch);
-    std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, options->m_K, options->m_withMeta != 0));
+    int internalResultNum = options->m_K;
+    if (index.GetIndexAlgoType() == IndexAlgoType::SPANN) {
+        int SPANNInternalResultNum;
+        if (SPTAG::Helper::Convert::ConvertStringTo<int>(index.GetParameter("SearchInternalResultNum", "BuildSSDIndex").c_str(), SPANNInternalResultNum))
+            internalResultNum = max(internalResultNum, SPANNInternalResultNum);
+    }
+    std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, internalResultNum, options->m_withMeta != 0));
     std::vector<float> latencies(options->m_batch, 0);
     int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
 
@@ -300,27 +159,44 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
         for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
-        if (ftruth.is_open() && truthDim > 0) LoadTruthBin(ftruth, truth, numQuerys, options->m_truthK, truthDim); else LoadTruth(ftruth, truth, numQuerys, options->m_truthK);
+        if (ftruth != nullptr) COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, (options->m_truthFile.find("bin") != std::string::npos)? TruthFileType::DEFAULT : TruthFileType::TXT);
 
 
         for (int mc = 0; mc < maxCheck.size(); mc++)
         {
             index.SetParameter("MaxCheck", maxCheck[mc].c_str());
 
-#pragma omp parallel for
             for (SizeType i = 0; i < numQuerys; i++) results[i].Reset();
 
-            auto batchstart = std::chrono::high_resolution_clock::now();
-#pragma omp parallel for schedule(dynamic)
-            for (int qid = 0; qid < numQuerys; qid++)
+            std::atomic_size_t queriesSent(0);
+            std::vector<std::thread> threads;
+            auto func = [&]()
             {
-                auto t1 = std::chrono::high_resolution_clock::now();
-                index.SearchIndex(results[qid]);
-                auto t2 = std::chrono::high_resolution_clock::now();
-                latencies[qid] = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0;
-            }
+                size_t qid = 0;
+                while (true)
+                {
+                    qid = queriesSent.fetch_add(1);
+                    if (qid < numQuerys)
+                    {
+                        auto t1 = std::chrono::high_resolution_clock::now();
+                        index.SearchIndex(results[qid]);
+                        auto t2 = std::chrono::high_resolution_clock::now();
+                        latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+            };
+
+            auto batchstart = std::chrono::high_resolution_clock::now();
+
+            for (std::uint32_t i = 0; i < options->m_threadNum; i++) { threads.emplace_back(func); }
+            for (auto& thread : threads) { thread.join(); }
+
             auto batchend = std::chrono::high_resolution_clock::now();
-            float batchLatency = std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() / 1000000.0;
+            float batchLatency = (float)(std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() / 1000000.0);
 
             float timeMean = 0, timeMin = MaxDist, timeMax = 0, timeStd = 0;
             for (int qid = 0; qid < numQuerys; qid++)
@@ -339,9 +215,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             float l95 = latencies[SizeType(numQuerys * 0.95)];
 
             float recall = 0;
-            if (ftruth.is_open())
+            if (ftruth != nullptr)
             {
-                recall = CalcRecall<T>(&index, results, truth, numQuerys, options->m_K, options->m_truthK, queryVectors, dataVectors, log, options->m_debugQuery > 0);
+                recall = COMMON::TruthSet::CalculateRecall<T>(&index, results, truth, options->m_K, options->m_truthK, queryVectors, dataVectors, numQuerys, &log, options->m_debugQuery > 0);
             }
 
 #ifndef _MSC_VER
@@ -353,7 +229,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
-            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\t\t%.2f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
+            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
             totalAvg[mc] += timeMean * numQuerys;
             total95[mc] += l95 * numQuerys;
             total99[mc] += l99 * numQuerys;
@@ -396,11 +272,10 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
     for (int mc = 0; mc < maxCheck.size(); mc++)
-        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
+        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
 
     LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
-    ftruth.close();
     fp.close();
     log.close();
     return 0;
@@ -445,12 +320,15 @@ int main(int argc, char** argv)
         LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
-    if (!iniReader.DoesParameterExist("Index", "NumberOfThreads"))
-        iniReader.SetParameter("Index", "NumberOfThreads", std::to_string(options->m_threadNum));
-
-    for (const auto& iter : iniReader.GetParameters("Index"))
-    {
-        vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
+    std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };
+    for (int i = 0; i < 5; i++) {
+        if (!iniReader.DoesParameterExist(sections[i], "NumberOfThreads")) {
+            iniReader.SetParameter(sections[i], "NumberOfThreads", std::to_string(options->m_threadNum));
+        }
+        for (const auto& iter : iniReader.GetParameters(sections[i]))
+        {
+            vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str(), sections[i]);
+        }
     }
 
     vecIndex->UpdateIndex();

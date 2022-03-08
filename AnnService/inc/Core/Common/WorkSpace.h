@@ -8,6 +8,8 @@
 #include "CommonUtils.h"
 #include "Heap.h"
 
+#include <stdarg.h>
+
 namespace SPTAG
 {
     namespace COMMON
@@ -79,6 +81,8 @@ namespace SPTAG
             }
 
             inline int HashTableExponent() const { return m_exp; }
+
+            inline int MaxCheck() const { return (1 << (int)(log2(m_poolSize + 1) - m_exp)); }
 
             inline bool CheckAndSet(SizeType idx)
             {
@@ -197,18 +201,32 @@ namespace SPTAG
         // Variables for each single NN search
         struct WorkSpace
         {
-            void Initialize(int maxCheck, SizeType dataSize, int hashExp)
+            WorkSpace() {}
+
+            WorkSpace(WorkSpace& other) 
+            {
+                Initialize(other.m_iMaxCheck, other.nodeCheckStatus.HashTableExponent());
+            }
+
+            void Initialize(int maxCheck, int hashExp)
             {
                 nodeCheckStatus.Init(maxCheck, hashExp);
                 m_SPTQueue.Resize(maxCheck * 10);
                 m_NGQueue.Resize(maxCheck * 30);
                 m_Results.Resize(maxCheck / 16);
 
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                //m_iContinuousLimit = maxCheck / 64;
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
-                //m_iContinuousLimit = maxCheck / 64;
                 m_iMaxCheck = maxCheck;
-                m_iNumOfContinuousNoBetterPropagation = 0;
+            }
+
+            void Initialize(va_list& arg)
+            {
+                int maxCheck = va_arg(arg, int);
+                int hashExp = va_arg(arg, int);
+                Initialize(maxCheck, hashExp);
             }
 
             void Reset(int maxCheck, int resultNum)
@@ -235,6 +253,8 @@ namespace SPTAG
                 return nodeCheckStatus.HashTableExponent(); 
             }
 
+            static void Reset() {}
+
             OptHashPosVector nodeCheckStatus;
 
             // counter for dynamic pivoting
@@ -249,6 +269,9 @@ namespace SPTAG
 
             // Priority queue Used for Tree
             Heap<NodeDistPair> m_SPTQueue;
+            // Priority queue Used for Tree BFS
+            Heap<NodeDistPair> m_currBSPTQueue;
+            Heap<NodeDistPair> m_nextBSPTQueue;
 
             DistPriorityQueue m_Results;
         };

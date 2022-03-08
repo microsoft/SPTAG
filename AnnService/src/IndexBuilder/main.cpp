@@ -21,6 +21,7 @@ public:
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
         AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
+        AddOptionalOption(m_metaMapping, "-m", "--metaindex", "Enable delete vectors through metadata");
     }
 
     ~BuilderOptions() {}
@@ -34,6 +35,8 @@ public:
     std::string m_builderConfigFile;
 
     std::string m_quantizerFile;
+
+    bool m_metaMapping = false;
 };
 
 int main(int argc, char* argv[])
@@ -43,21 +46,11 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
-    if (!options->m_quantizerFile.empty())
+    if (!options->m_quantizerFile.empty() && VectorIndex::LoadQuantizer(options->m_quantizerFile) != ErrorCode::Success)
     {
-        auto ptr = SPTAG::f_createIO();
-        if (!ptr->Initialize(options->m_quantizerFile.c_str(), std::ios::binary | std::ios::in))
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
-            exit(1);
-        }
-        auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        if (code != ErrorCode::Success)
-        {
-            LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-            exit(1);
-        }
+        exit(1);
     }
+    LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
 
@@ -86,26 +79,32 @@ int main(int argc, char* argv[])
         LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
-    if (!iniReader.DoesParameterExist("Index", "NumberOfThreads")) {
-        iniReader.SetParameter("Index", "NumberOfThreads", std::to_string(options->m_threadNum));
+    std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };
+    for (int i = 0; i < 5; i++) {
+        if (!iniReader.DoesParameterExist(sections[i], "NumberOfThreads")) {
+            iniReader.SetParameter(sections[i], "NumberOfThreads", std::to_string(options->m_threadNum));
+        }
+        for (const auto& iter : iniReader.GetParameters(sections[i]))
+        {
+            indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str(), sections[i]);
+        }
     }
-    for (const auto& iter : iniReader.GetParameters("Index"))
-    {
-        indexBuilder->SetParameter(iter.first.c_str(), iter.second.c_str());
+    
+    ErrorCode code;
+    if (fileexists(options->m_inputFiles.c_str())) {
+        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
+        if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+            exit(1);
+        }
+        code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized);
     }
-
-    LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
-
-    auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-    if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
-    {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
-        exit(1);
+    else {
+        code = indexBuilder->BuildIndex(options->m_normalized);    
     }
-    ErrorCode code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet());
-    indexBuilder->SaveIndex(options->m_outputFolder);
-
-    if (ErrorCode::Success != code)
+    if (code == ErrorCode::Success) indexBuilder->SaveIndex(options->m_outputFolder);
+    else
     {
         LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
         exit(1);

@@ -7,6 +7,7 @@
 #include <functional>
 #include <fstream>
 #include <string.h>
+#include <memory>
 
 namespace SPTAG
 {
@@ -25,13 +26,13 @@ namespace SPTAG
             std::uint64_t m_offset;
             std::uint64_t m_readSize;
             char* m_buffer;
-            std::function<void(bool)> m_callback;
-            
+            std::function<void(AsyncReadRequest*)> m_callback;
+            int m_status;
+
             // Carry items like counter for callback to process.
             void* m_payload;
-            bool m_success;
-
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_payload(nullptr), m_success(false) {}
+            
+            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr) {}
         };
 
         class DiskPriorityIO
@@ -56,7 +57,7 @@ namespace SPTAG
 
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest) = 0;
+            virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
 
             virtual std::uint64_t TellP() = 0;
 
@@ -133,11 +134,6 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 return WriteBinary(strlen(buffer), (const char*)buffer, offset);
-            }
-
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
-            {
-                return false;
             }
 
             virtual std::uint64_t TellP()
@@ -244,11 +240,6 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX)
             {
                 return WriteBinary(strlen(buffer), (const char*)buffer, offset);
-            }
-
-            virtual bool ReadFileAsync(AsyncReadRequest& readRequest)
-            {
-                return false;
             }
 
             virtual std::uint64_t TellP()

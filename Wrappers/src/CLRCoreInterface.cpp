@@ -24,28 +24,38 @@ namespace Microsoft
                 m_inputVectorSize = SPTAG::GetValueTypeSize((*m_Instance)->GetVectorValueType()) * m_dimension;
             }
 
-            void AnnIndex::SetBuildParam(String^ p_name, String^ p_value)
+            void AnnIndex::SetBuildParam(String^ p_name, String^ p_value, String^ p_section)
             {
                 if (m_Instance != nullptr)
-                    (*m_Instance)->SetParameter(string_to_char_array(p_name), string_to_char_array(p_value));
+                    (*m_Instance)->SetParameter(string_to_char_array(p_name), string_to_char_array(p_value), string_to_char_array(p_section));
             }
 
-            void AnnIndex::SetSearchParam(String^ p_name, String^ p_value)
+            void AnnIndex::SetSearchParam(String^ p_name, String^ p_value, String^ p_section)
             {
                 if (m_Instance != nullptr)
-                    (*m_Instance)->SetParameter(string_to_char_array(p_name), string_to_char_array(p_value));
+                    (*m_Instance)->SetParameter(string_to_char_array(p_name), string_to_char_array(p_value), string_to_char_array(p_section));
             }
 
             bool AnnIndex::Build(array<Byte>^ p_data, int p_num)
+            {
+                return Build(p_data, p_num, false);
+            }
+
+            bool AnnIndex::Build(array<Byte>^ p_data, int p_num, bool p_normalized)
             {
                 if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
                     return false;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(ptr, p_num, m_dimension));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(ptr, p_num, m_dimension, p_normalized));
             }
 
             bool AnnIndex::BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex)
+            {
+                return BuildWithMetaData(p_data, p_meta, p_num, p_withMetaIndex, false);
+            }
+
+            bool AnnIndex::BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized)
             {
                 if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
                     return false;
@@ -55,15 +65,11 @@ namespace Microsoft
 
                 pin_ptr<Byte> metaptr = &p_meta[0];
                 std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-                int current = 0;
-                for (long long i = 0; i < p_meta->LongLength; i++) {
-                    if (((char)metaptr[i]) == '\n')
-                        offsets[++current] = (std::uint64_t)(i + 1);
-                }
+                if (!SPTAG::MetadataSet::GetMetadataOffsets(metaptr, p_meta->LongLength, offsets, p_num + 1, '\n')) return false;
                 std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false), 
                     SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num, 
                     (*m_Instance)->m_iDataBlockSize, (*m_Instance)->m_iDataCapacity, (*m_Instance)->m_iMetaRecordSize));
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(vectors, meta, p_withMetaIndex));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(vectors, meta, p_withMetaIndex, p_normalized));
             }
 
             array<BasicResult^>^ AnnIndex::Search(array<Byte>^ p_data, int p_resultNum)
@@ -129,14 +135,26 @@ namespace Microsoft
 
             bool AnnIndex::Add(array<Byte>^ p_data, int p_num)
             {
+                return Add(p_data, p_num, false);
+            }
+
+
+            bool AnnIndex::Add(array<Byte>^ p_data, int p_num, bool p_normalized)
+            {
                 if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
                     return false;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension, nullptr));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(ptr, p_num, m_dimension, nullptr, false, p_normalized));
             }
 
-            bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num)
+
+            bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex)
+            {
+                return AddWithMetaData(p_data, p_meta, p_num, p_withMetaIndex, false);
+            }
+
+            bool AnnIndex::AddWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized)
             {
                 if (m_Instance == nullptr || p_num == 0 || m_dimension == 0 || p_data->LongLength != p_num * m_inputVectorSize)
                     return false;
@@ -146,13 +164,9 @@ namespace Microsoft
 
                 pin_ptr<Byte> metaptr = &p_meta[0];
                 std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-                int current = 0;
-                for (long long i = 0; i < p_meta->LongLength; i++) {
-                    if (((char)metaptr[i]) == '\n')
-                        offsets[++current] = (std::uint64_t)(i + 1);
-                }
+                if (!SPTAG::MetadataSet::GetMetadataOffsets(metaptr, p_meta->LongLength, offsets, p_num + 1, '\n')) return false;
                 std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false), SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num));
-                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(vectors, meta));
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->AddIndex(vectors, meta, p_withMetaIndex, p_normalized));
             }
 
             bool AnnIndex::Delete(array<Byte>^ p_data, int p_num)
