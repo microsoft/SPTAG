@@ -1,0 +1,104 @@
+﻿diff --git a/include/aux_utils.h b/include/aux_utils.h
+index f980b7f..83a3633 100644
+--- a/include/aux_utils.h
++++ b/include/aux_utils.h
+@@ -29,7 +29,7 @@ typedef int FileHandle;
+ #include "common_includes.h"
+ #include "utils.h"
+ #include "windows_customizations.h"
+-#include "gperftools/malloc_extension.h"
++//#include "gperftools/malloc_extension.h"
+ 
+ namespace diskann {
+   const size_t   TRAINING_SET_SIZE = 100000;
+diff --git a/include/index.h b/include/index.h
+index fdcac5f..43ff5a7 100644
+--- a/include/index.h
++++ b/include/index.h
+@@ -55,7 +55,8 @@ namespace diskann {
+     DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(const T *      query,
+                                                            const size_t   K,
+                                                            const unsigned L,
+-                                                           unsigned *indices);
++                                                           unsigned *indices,
++                                                           float *   distances);
+ 
+     DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(
+         const T *query, const uint64_t K, const unsigned L,
+@@ -101,7 +102,12 @@ namespace diskann {
+     DISKANN_DLLEXPORT void optimize_graph();
+ 
+     DISKANN_DLLEXPORT void search_with_opt_graph(const T *query, size_t K,
+-                                                 size_t L, unsigned *indices);
++                                                 size_t L, unsigned *indices,
++                                                 float *distances);
++
++    DISKANN_DLLEXPORT int get_dimension() const { return _dim; }
++
++    DISKANN_DLLEXPORT int get_vector_number() const { return _nd; }
+ 
+     /*  Internals of the library */
+    protected:
+diff --git a/src/aux_utils.cpp b/src/aux_utils.cpp
+index f143b88..028d839 100644
+--- a/src/aux_utils.cpp
++++ b/src/aux_utils.cpp
+@@ -808,7 +808,7 @@ namespace diskann {
+     delete[] train_data;
+ 
+     train_data = nullptr;
+-    MallocExtension::instance()->ReleaseFreeMemory();
++    //MallocExtension::instance()->ReleaseFreeMemory();
+ 
+     diskann::build_merged_vamana_index<T>(
+         data_file_to_use.c_str(), diskann::Metric::L2, L, R, p_val,
+diff --git a/src/index.cpp b/src/index.cpp
+index 38b58da..72a9af6 100644
+--- a/src/index.cpp
++++ b/src/index.cpp
+@@ -1029,7 +1029,8 @@ namespace diskann {
+   std::pair<uint32_t, uint32_t> Index<T, TagT>::search(const T *      query,
+                                                        const size_t   K,
+                                                        const unsigned L,
+-                                                       unsigned *     indices) {
++                                                       unsigned *     indices,
++                                                       float *distances) {
+     std::vector<unsigned>    init_ids;
+     tsl::robin_set<unsigned> visited(10 * L);
+     std::vector<Neighbor>    best_L_nodes, expanded_nodes_info;
+@@ -1045,6 +1046,7 @@ namespace diskann {
+     size_t pos = 0;
+     for (auto it : best_L_nodes) {
+       indices[pos] = it.id;
++      distances[pos] = it.distance;
+       pos++;
+       if (pos == K)
+         break;
+@@ -1086,7 +1088,8 @@ namespace diskann {
+       unsigned *indices_buffer) {
+     const bool alloc = indices_buffer == NULL;
+     auto       indices = alloc ? new unsigned[K] : indices_buffer;
+-    auto       ret = search(query, K, L, indices);
++    auto       dists = new float[K];
++    auto       ret = search(query, K, L, indices, dists);
+     for (int i = 0; i < (int) K; ++i)
+       tags[i] = _location_to_tag[indices[i]];
+     if (alloc)
+@@ -1121,7 +1124,8 @@ namespace diskann {
+ 
+   template<typename T, typename TagT>
+   void Index<T, TagT>::search_with_opt_graph(const T *query, size_t K, size_t L,
+-                                             unsigned *indices) {
++                                             unsigned *indices,
++                                             float *   distances) {
+     DistanceFastL2<T> *dist_fast = (DistanceFastL2<T> *) _distance;
+ 
+     std::vector<Neighbor> retset(L + 1);
+@@ -1215,6 +1219,7 @@ namespace diskann {
+     }
+     for (size_t i = 0; i < K; i++) {
+       indices[i] = retset[i].id;
++      distances[i] = retset[i].distance;
+     }
+   }
+ 

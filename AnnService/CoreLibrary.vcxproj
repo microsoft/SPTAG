@@ -150,6 +150,7 @@
     <ClInclude Include="inc\Core\BKT\Index.h" />
     <ClInclude Include="inc\Core\BKT\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\DiskANN\Index.h" />
+    <ClInclude Include="inc\Core\DiskANN\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\KDT\Index.h" />
     <ClInclude Include="inc\Core\KDT\ParameterDefinitionList.h" />
     <ClInclude Include="inc\Core\Common.h" />

@@ -4,9 +4,24 @@
 #ifndef _SPTAG_DISKANN_INDEX_H_
 #define _SPTAG_DISKANN_INDEX_H_
 
+#include <omp.h>
+#include <string.h>
 #include "../Common.h"
 #include "../VectorIndex.h"
+#include "../Common/CommonUtils.h"
+#include "../Common/DistanceUtils.h"
+
 #include "DiskANN/include/index.h"
+#include "DiskANN/include/utils.h"
+#include "DiskANN/include/memory_mapper.h"
+
+#ifndef _MSC_VER
+#include <sys/mman.h>
+#include <unistd.h>
+#else
+#include <Windows.h>
+#endif
+
 
 namespace SPTAG
 {
@@ -22,56 +37,68 @@ namespace SPTAG
         class Index : public VectorIndex
         {
         private:
+            std::shared_ptr<diskann::Index<T>> m_index;
 
+            unsigned R;
+            unsigned L;
+            unsigned C;
+            float alpha;
+            bool saturate_graph;
+
+            std::string m_sGraphFilename;
+            std::string m_sDataPointsFilename;
+
+            unsigned m_iNumberOfThreads;
+            DistCalcMethod m_distCalcMethod;
+            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
+            int m_iBaseSquare;
 
         public:
             Index()
             {
+#define DefineDiskANNParameter(VarName, VarType, DefaultValue, RepresentStr) \
+                VarName = DefaultValue; \
+
+#include "inc/Core/DiskANN/ParameterDefinitionList.h"
+#undef DefineDiskANNParameter
+
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_distCalcMethod);
+                m_iBaseSquare = (m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
             ~Index() {}
 
-            inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_index; }
-            inline std::shared_ptr<IExtraSearcher> GetDiskIndex() { return m_extraSearcher; }
-            inline Options* GetOptions() { return &m_options; }
-
-            inline SizeType GetNumSamples() const { return m_options.m_vectorSize; }
-            inline DimensionType GetFeatureDim() const { return m_options.m_dim; }
-
-            inline int GetCurrMaxCheck() const { return m_options.m_maxCheck; }
-            inline int GetNumThreads() const { return m_options.m_iSSDNumberOfThreads; }
-            inline DistCalcMethod GetDistCalcMethod() const { return m_options.m_distCalcMethod; }
-            inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::SPANN; }
+            inline SizeType GetNumSamples() const { return m_index->get_vector_number(); }
+            inline DimensionType GetFeatureDim() const { return m_index->get_dimension(); }
+            inline int GetNumThreads() const { return m_iNumberOfThreads; }
+            inline DistCalcMethod GetDistCalcMethod() const { return m_distCalcMethod; }
+            inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::DISKANN; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
 
             inline float AccurateDistance(const void* pX, const void* pY) const {
-                if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
+                if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim());
 
-                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
-                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, m_options.m_dim);
-                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, m_options.m_dim);
+                float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim());
+                float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, GetFeatureDim());
+                float yy = m_iBaseSquare - m_fComputeDistance((const T*)pY, (const T*)pY, GetFeatureDim());
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
             }
-            inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim); }
-            inline bool ContainSample(const SizeType idx) const { return idx < m_options.m_vectorSize; }
+            inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim()); }
+            inline bool ContainSample(const SizeType idx) const { return idx < GetNumSamples(); }
 
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
-                auto headIndexBufferSize = m_index->BufferSize();
-                buffersize->insert(buffersize->end(), headIndexBufferSize->begin(), headIndexBufferSize->end());
-                buffersize->push_back(sizeof(long long) * m_index->GetNumSamples());
+                buffersize->push_back(sizeof(T) * GetNumSamples() * GetFeatureDim());
+                buffersize->push_back(0); // GraphSize
                 return std::move(buffersize);
             }
 
             std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
             {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
-                auto headfiles = m_index->GetIndexFiles();
-                for (auto file : *headfiles) {
-                    files->push_back(m_options.m_headIndexFolder + FolderSep + file);
-                }
-                files->push_back(m_options.m_headIDFile);
+                files->push_back(m_sDataPointsFilename);
+                files->push_back(m_sGraphFilename);
                 return std::move(files);
             }
 

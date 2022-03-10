@@ -220,6 +220,9 @@
     <ClInclude Include="inc\Core\DiskANN\Index.h">
       <Filter>Header Files\Core\DiskANN</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\DiskANN\ParameterDefinitionList.h">
+      <Filter>Header Files\Core\DiskANN</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
