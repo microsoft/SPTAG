@@ -29,6 +29,8 @@
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 
+#include "../IQuantizer.h"
+
 #include <chrono>
 
 template<typename T, typename SUMTYPE, int Dim>
@@ -984,8 +986,10 @@ auto end_t = std::chrono::high_resolution_clock::now();
 /***************************************************************************************
  * Function called by SPTAG to create an initial graph on the GPU.  
  ***************************************************************************************/
-template<typename T>
-void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor) {
+template<typename T, typename R>
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor, std::shared_ptr<SPTAG::COMMON::IQuantizer> Quantizer) {
+
+std::cout << "T:" << typeid(T).name() << ", R:" << typeid(R).name() << std::endl;
 
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
