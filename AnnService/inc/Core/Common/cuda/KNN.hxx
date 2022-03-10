@@ -30,15 +30,9 @@
 #include "TPtree.hxx"
 #include "GPUQuantizer.hxx"
 
+#include "../IQuantizer.h"
 
-template<typename T, typename SUMTYPE>
-__forceinline__ __device__ bool violatesRNG_PS(T* a, T* b, SUMTYPE dist, int dim) {
-  SUMTYPE between;
-
-  between = cosine(a, b, dim);
-
-  return between <= dist;
-}
+#include <chrono>
 
 template<typename T, typename SUMTYPE, int Dim>
 __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
@@ -1137,12 +1131,13 @@ __device__ void check_neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, in
 }
 */
 
-/************************************************************************
- * Refine graph by performing check_neighbors_RNG on every node in the graph
- ************************************************************************/
-/*
-template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void neighbors_RNG(Point<T,SUMTYPE,Dim>* data, int* results, int N, int KVAL, int metric) {
+/***************************************************************************************
+ * Function called by SPTAG to create an initial graph on the GPU.  
+ ***************************************************************************************/
+template<typename T, typename R>
+void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor, std::shared_ptr<SPTAG::COMMON::IQuantizer> Quantizer) {
+
+std::cout << "T:" << typeid(T).name() << ", R:" << typeid(R).name() << std::endl;
 
   extern __shared__ char sharememory[];
   int* RNG_id = &((int*)sharememory)[2*KVAL*threadIdx.x];

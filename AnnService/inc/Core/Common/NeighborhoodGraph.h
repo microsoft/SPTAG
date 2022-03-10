@@ -109,28 +109,23 @@ namespace SPTAG
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-                if (index->m_pQuantizer) {
-			printf("has quantizer!\n");
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
-			/*
+                if (COMMON::DistanceUtils::Quantizer) {
                     switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
                     {
 #define GPUDefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-buildGraph<T, Type>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor); \
+buildGraph<T, Type>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor, COMMON:DistanceUtils::Quantizer); \
 break;
 
 #include "inc/Core/DefinitionList.h"
 #undef GPUDefineVectorValueType
                    default: break; 
                    }
-		   */
                 }
                 else {
-			printf("no quantizer!\n");
 
                     // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
+                    buildGraph<T, T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor, NULL);
                 }
 
                 if (idmap != nullptr) {
