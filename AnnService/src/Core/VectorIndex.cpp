@@ -10,6 +10,7 @@
 #include "inc/Core/BKT/Index.h"
 #include "inc/Core/KDT/Index.h"
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/DiskANN/Index.h"
 
 typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
 
@@ -570,6 +571,19 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
 #define DefineVectorValueType(Name, Type) \
     case VectorValueType::Name: \
         return std::shared_ptr<VectorIndex>(new SPANN::Index<Type>); \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+        default: break;
+        }
+    }
+    else if (p_algo == IndexAlgoType::DISKANN) {
+        switch (p_valuetype)
+        {
+#define DefineVectorValueType(Name, Type) \
+    case VectorValueType::Name: \
+        return std::shared_ptr<VectorIndex>(new DiskANN::Index<Type>); \
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType

@@ -5,7 +5,7 @@
 
 DefineVectorValueType(Int8, std::int8_t)
 DefineVectorValueType(UInt8, std::uint8_t)
-DefineVectorValueType(Int16, std::int16_t)
+//DefineVectorValueType(Int16, std::int16_t)
 DefineVectorValueType(Float, float)
 
 #endif // DefineVectorValueType

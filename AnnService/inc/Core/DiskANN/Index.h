@@ -4,24 +4,12 @@
 #ifndef _SPTAG_DISKANN_INDEX_H_
 #define _SPTAG_DISKANN_INDEX_H_
 
-#include <omp.h>
-#include <string.h>
 #include "../Common.h"
 #include "../VectorIndex.h"
 #include "../Common/CommonUtils.h"
 #include "../Common/DistanceUtils.h"
 
 #include "DiskANN/include/index.h"
-#include "DiskANN/include/utils.h"
-#include "DiskANN/include/memory_mapper.h"
-
-#ifndef _MSC_VER
-#include <sys/mman.h>
-#include <unistd.h>
-#else
-#include <Windows.h>
-#endif
-
 
 namespace SPTAG
 {
@@ -68,15 +56,15 @@ namespace SPTAG
 
             ~Index() {}
 
-            inline SizeType GetNumSamples() const { return m_index->get_vector_number(); }
-            inline DimensionType GetFeatureDim() const { return m_index->get_dimension(); }
+            inline SizeType GetNumSamples() const { return (SizeType)m_index->get_vector_number(); }
+            inline DimensionType GetFeatureDim() const { return (DimensionType)m_index->get_dimension(); }
             inline int GetNumThreads() const { return m_iNumberOfThreads; }
             inline DistCalcMethod GetDistCalcMethod() const { return m_distCalcMethod; }
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::DISKANN; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
 
             inline float AccurateDistance(const void* pX, const void* pY) const {
-                if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim());
+                if (m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim());
 
                 float xy = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pY, GetFeatureDim());
                 float xx = m_iBaseSquare - m_fComputeDistance((const T*)pX, (const T*)pX, GetFeatureDim());
@@ -110,8 +98,8 @@ namespace SPTAG
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs) { return ErrorCode::Undefined; }
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false); // *
-            ErrorCode BuildIndex(bool p_normalized = false); // *
             ErrorCode SearchIndex(QueryResult& p_query, bool p_searchDeleted = false) const; // *
+            ErrorCode UpdateIndex();
 
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr); // *
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const; // *

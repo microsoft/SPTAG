@@ -8,12 +8,12 @@ DefineDiskANNParameter(m_sGraphFilename, std::string, std::string("graph.bin"), 
 DefineDiskANNParameter(m_sDataPointsFilename, std::string, std::string("vectors.bin"), "VectorFilePath")
 
 DefineDiskANNParameter(m_iNumberOfThreads, unsigned, 1, "NumberOfThreads")
-DefineDiskANNParameter(m_iDistCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
+DefineDiskANNParameter(m_distCalcMethod, SPTAG::DistCalcMethod, SPTAG::DistCalcMethod::Cosine, "DistCalcMethod")
 
 DefineDiskANNParameter(R, unsigned, 1, "R")
 DefineDiskANNParameter(L, unsigned, 1, "L")
 DefineDiskANNParameter(C, unsigned, 750, "C")
-DefineDiskANNParameter(alpha, float, 1.0f, "alpha");
+DefineDiskANNParameter(alpha, float, 1.0f, "alpha")
 DefineDiskANNParameter(saturate_graph, bool, false, "saturate_graph")
 
 #endif

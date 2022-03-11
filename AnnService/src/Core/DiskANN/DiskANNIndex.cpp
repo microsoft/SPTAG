@@ -2,6 +2,10 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/DiskANN/Index.h"
+
+#include "DiskANN/include/utils.h"
+#include "DiskANN/include/memory_mapper.h"
+
 #include <chrono>
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -60,7 +64,6 @@ namespace SPTAG
                 return ErrorCode::FailedOpenFile;
             }
 
-            std::uint64_t readSize;
             while ((readSize = p_indexStreams[1]->ReadBinary(bufferSize, bufferHolder.get()))) {
                 if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
                     return ErrorCode::DiskIOFail;
@@ -68,8 +71,9 @@ namespace SPTAG
             }
             output->ShutDown();
 
-            m_index->load(m_sGraphFilename);
+            m_index->load(m_sGraphFilename.c_str());
             if (metric == diskann::Metric::FAST_L2) m_index->optimize_graph();
+            return ErrorCode::Success;
         }
 
         template <typename T>
@@ -110,14 +114,13 @@ namespace SPTAG
             input->ShutDown();
             remove(m_sDataPointsFilename.c_str());
             
-            m_index->save(m_sGraphFilename);
+            m_index->save(m_sGraphFilename.c_str());
             if (input == nullptr || !input->Initialize(m_sGraphFilename.c_str(), std::ios::binary | std::ios::in))
             {
                 LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", m_sGraphFilename.c_str());
                 return ErrorCode::FailedOpenFile;
             }
 
-            std::uint64_t readSize;
             while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
                 if (p_indexStreams[1]->WriteBinary(readSize, bufferHolder.get()) != readSize) {
                     return ErrorCode::DiskIOFail;
@@ -125,6 +128,7 @@ namespace SPTAG
             }
             input->ShutDown();
             remove(m_sGraphFilename.c_str());
+            return ErrorCode::Success;
         }
 
 #pragma region K-NN search
@@ -140,10 +144,10 @@ namespace SPTAG
             std::vector<float>    query_result_dists(p_query.GetResultNum());
 
             if (m_distCalcMethod == DistCalcMethod::L2) {
-                m_index->search_with_opt_graph(p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
+                m_index->search_with_opt_graph((const T*)p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
             }
             else {
-                m_index->search(p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
+                m_index->search((const T*)p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
             }
 
             for (int i = 0; i < p_query.GetResultNum(); i++) {
@@ -163,25 +167,6 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 #pragma endregion
-
-        template <typename T>
-        ErrorCode Index<T>::BuildIndex(bool p_normalized)
-        {
-            SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-            std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
-            auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
-            if (m_options.m_vectorPath.empty())
-            {
-                LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
-            }
-            else if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
-            {
-                LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-                return ErrorCode::Fail;
-            }
-            std::shared_ptr<VectorSet> vectorSet = vectorReader->GetVectorSet();
-            BuildIndex(vectorSet->GetData(), vectorSet->Count(), vectorSet->Dimension(), p_normalized);
-        }
 
         template <typename T>
         ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized)
@@ -207,6 +192,15 @@ namespace SPTAG
             m_index->build(paras);
             std::chrono::duration<double> diff = std::chrono::high_resolution_clock::now() - s;
             LOG(Helper::LogLevel::LL_Info, "DiskANN Indexing time:%lld\n", diff.count());
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode
+            Index<T>::UpdateIndex()
+        {
+            omp_set_num_threads(m_iNumberOfThreads);
+            return ErrorCode::Success;
         }
 
         template <typename T>
@@ -230,8 +224,8 @@ namespace SPTAG
 #undef DefineDiskANNParameter
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_distCalcMethod);
+                m_iBaseSquare = (m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
             return ErrorCode::Success;
         }

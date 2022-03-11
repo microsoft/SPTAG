@@ -22,6 +22,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 
 #if defined(__INTEL_COMPILER)
 #include <malloc.h>

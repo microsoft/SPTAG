@@ -11,8 +11,29 @@ index f980b7f..83a3633 100644
  
  namespace diskann {
    const size_t   TRAINING_SET_SIZE = 100000;
+diff --git a/include/distance.h b/include/distance.h
+index 086c428..58eb6bb 100644
+--- a/include/distance.h
++++ b/include/distance.h
+@@ -1,6 +1,6 @@
+ #pragma once
+ 
+-#include <utils.h>
++#include "utils.h"
+ #ifdef _WINDOWS
+ #include <immintrin.h>
+ #include <smmintrin.h>
+@@ -10,7 +10,7 @@
+ #include <immintrin.h>
+ #endif
+ 
+-#include <cosine_similarity.h>
++#include "cosine_similarity.h"
+ #include <iostream>
+ 
+ namespace {
 diff --git a/include/index.h b/include/index.h
-index fdcac5f..43ff5a7 100644
+index fdcac5f..c9df126 100644
 --- a/include/index.h
 +++ b/include/index.h
 @@ -55,7 +55,8 @@ namespace diskann {
@@ -33,12 +54,25 @@ index fdcac5f..43ff5a7 100644
 +                                                 size_t L, unsigned *indices,
 +                                                 float *distances);
 +
-+    DISKANN_DLLEXPORT int get_dimension() const { return _dim; }
++    DISKANN_DLLEXPORT size_t get_dimension() const { return _dim; }
 +
-+    DISKANN_DLLEXPORT int get_vector_number() const { return _nd; }
++    DISKANN_DLLEXPORT size_t get_vector_number() const { return _nd; }
  
      /*  Internals of the library */
     protected:
+diff --git a/include/utils.h b/include/utils.h
+index 9bf2e14..050e1c1 100644
+--- a/include/utils.h
++++ b/include/utils.h
+@@ -341,7 +341,7 @@ namespace diskann {
+       dists = new float[npts * dim];
+       reader.read((char*) dists, npts * dim * sizeof(float));
+     }
+-    float min_dist = std::numeric_limits<float>::max();
++    float min_dist = (std::numeric_limits<float>::max)();
+     float max_dist = 0;
+     groundtruth.resize(npts);
+     for (_u32 i = 0; i < npts; i++) {
 diff --git a/src/aux_utils.cpp b/src/aux_utils.cpp
 index f143b88..028d839 100644
 --- a/src/aux_utils.cpp
