@@ -3,7 +3,7 @@
 
 set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 
-include_directories(${AnnService})
+include_directories(${AnnService} ${PROJECT_SOURCE_DIR}/thirdparty)
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
@@ -32,15 +32,19 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -fPIC)
 endif()
 
-add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLib DistanceUtils)
+#add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
+#target_link_libraries (SPTAGLib DistanceUtils)
+#thirdparty_dependent(SPTAGLib)
+
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
 target_link_libraries (SPTAGLibStatic DistanceUtils)
+thirdparty_dependent(SPTAGLibStatic)
+
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
 
-install(TARGETS SPTAGLib SPTAGLibStatic
+install(TARGETS SPTAGLibStatic
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib)

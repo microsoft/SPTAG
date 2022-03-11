@@ -555,6 +555,7 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
                     return ErrorCode::Fail;
                 }
+                m_index.reset();
             }
             auto t3 = std::chrono::high_resolution_clock::now();
             double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();

@@ -37,7 +37,6 @@ namespace SPTAG
 
             const std::size_t bufferSize = 1 << 30;
             std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
-            char* buf = bufferHolder.get();
 
             std::shared_ptr<Helper::DiskPriorityIO> output = f_createIO();
             if (output == nullptr || !output->Initialize(m_sDataPointsFilename.c_str(), std::ios::binary | std::ios::out))
@@ -54,7 +53,7 @@ namespace SPTAG
             }
             output->ShutDown();
 
-            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::Cosine) ? diskann::Metric::INNER_PRODUCT : diskann::Metric::FAST_L2;
+            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::Cosine) ? diskann::Metric::INNER_PRODUCT : diskann::Metric::L2;
             m_index.reset(new diskann::Index<T>(metric, m_sDataPointsFilename.c_str()));
 
             
@@ -96,7 +95,6 @@ namespace SPTAG
 
             const std::size_t bufferSize = 1 << 30;
             std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
-            char* buf = bufferHolder.get();
 
             std::shared_ptr<Helper::DiskPriorityIO> input = f_createIO();
             if (input == nullptr || !input->Initialize(m_sDataPointsFilename.c_str(), std::ios::binary | std::ios::in))
@@ -143,12 +141,7 @@ namespace SPTAG
             std::vector<uint32_t> query_result_ids(p_query.GetResultNum());
             std::vector<float>    query_result_dists(p_query.GetResultNum());
 
-            if (m_distCalcMethod == DistCalcMethod::L2) {
-                m_index->search_with_opt_graph((const T*)p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
-            }
-            else {
-                m_index->search((const T*)p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
-            }
+            m_index->search((const T*)p_query.GetTarget(), p_query.GetResultNum(), L, query_result_ids.data(), query_result_dists.data());
 
             for (int i = 0; i < p_query.GetResultNum(); i++) {
                 auto res = p_query.GetResult(i);
@@ -186,12 +179,14 @@ namespace SPTAG
             paras.Set<bool>("saturate_graph", saturate_graph);
             paras.Set<unsigned>("num_threads", m_iNumberOfThreads);
 
-            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::Cosine) ? diskann::Metric::INNER_PRODUCT : diskann::Metric::FAST_L2;
+            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::Cosine) ? diskann::Metric::INNER_PRODUCT : diskann::Metric::L2;
             m_index.reset(new diskann::Index<T>(metric, m_sDataPointsFilename.c_str()));
             auto s = std::chrono::high_resolution_clock::now();
             m_index->build(paras);
             std::chrono::duration<double> diff = std::chrono::high_resolution_clock::now() - s;
             LOG(Helper::LogLevel::LL_Info, "DiskANN Indexing time:%lld\n", diff.count());
+
+            m_bReady = true;
             return ErrorCode::Success;
         }
 

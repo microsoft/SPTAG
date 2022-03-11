@@ -104,7 +104,7 @@ namespace SPTAG
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr); // *
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const; // *
 
-            inline const void* GetSample(const SizeType idx) const { return nullptr; }
+            inline const void* GetSample(const SizeType idx) const { return (const void*)m_index->get_vector(idx); }
             inline SizeType GetNumDeleted() const { return 0; }
             inline bool NeedRefine() const { return false; }
 

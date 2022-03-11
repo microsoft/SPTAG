@@ -1,4 +1,19 @@
-﻿diff --git a/include/aux_utils.h b/include/aux_utils.h
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6bd3886..4432a60 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -13,8 +13,8 @@ set(CMAKE_STANDARD 14)
+ if(MSVC)
+ 	set(CMAKE_CXX_COMPILER $ENV{VCToolsInstallDir}/bin/Hostx64/x64/cl.exe)
+ 	set(CMAKE_CXX_LINK_EXECUTABLE $ENV{VCToolsInstallDir}/bin/Hostx64/x64/link.exe)
+-else()
+-	set(CMAKE_CXX_COMPILER g++)
++#else()
++	#set(CMAKE_CXX_COMPILER g++)
+ endif()
+ 
+ project(diskann)
+diff --git a/include/aux_utils.h b/include/aux_utils.h
 index f980b7f..83a3633 100644
 --- a/include/aux_utils.h
 +++ b/include/aux_utils.h
@@ -33,7 +48,7 @@ index 086c428..58eb6bb 100644
  
  namespace {
 diff --git a/include/index.h b/include/index.h
-index fdcac5f..c9df126 100644
+index fdcac5f..650baad 100644
 --- a/include/index.h
 +++ b/include/index.h
 @@ -55,7 +55,8 @@ namespace diskann {
@@ -46,7 +61,7 @@ index fdcac5f..c9df126 100644
  
      DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(
          const T *query, const uint64_t K, const unsigned L,
-@@ -101,7 +102,12 @@ namespace diskann {
+@@ -101,7 +102,14 @@ namespace diskann {
      DISKANN_DLLEXPORT void optimize_graph();
  
      DISKANN_DLLEXPORT void search_with_opt_graph(const T *query, size_t K,
@@ -57,6 +72,8 @@ index fdcac5f..c9df126 100644
 +    DISKANN_DLLEXPORT size_t get_dimension() const { return _dim; }
 +
 +    DISKANN_DLLEXPORT size_t get_vector_number() const { return _nd; }
++
++    DISKANN_DLLEXPORT const T* get_vector(int id) const { return _data + _aligned_dim * (size_t) id; }
  
      /*  Internals of the library */
     protected:
@@ -136,3 +153,20 @@ index 38b58da..72a9af6 100644
      }
    }
  
+diff --git a/tests/search_memory_index.cpp b/tests/search_memory_index.cpp
+index e9951eb..45f8ce1 100644
+--- a/tests/search_memory_index.cpp
++++ b/tests/search_memory_index.cpp
+@@ -124,10 +124,10 @@ int search_memory_index(int argc, char** argv) {
+       if (metric == diskann::FAST_L2) {
+         index.search_with_opt_graph(
+             query + i * query_aligned_dim, recall_at, L,
+-            query_result_ids[test_id].data() + i * recall_at);
++            query_result_ids[test_id].data() + i * recall_at, query_result_dists[test_id].data() + i * recall_at);
+       } else {
+         index.search(query + i * query_aligned_dim, recall_at, L,
+-                     query_result_ids[test_id].data() + i * recall_at);
++                     query_result_ids[test_id].data() + i * recall_at, query_result_dists[test_id].data() + i * recall_at);
+       }
+       auto qe = std::chrono::high_resolution_clock::now();
+       std::chrono::duration<double> diff = qe - qs;
