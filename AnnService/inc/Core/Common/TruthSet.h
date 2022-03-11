@@ -314,7 +314,13 @@ namespace SPTAG
                     {
                         if (visited[z]) continue;
 
-                        if (fabs(sampleANN.GetResult(z)->Dist - sampleTruth.GetResult(y)->Dist) < Epsilon)
+                        if (sampleANN.GetResult(z)->VID == sampleTruth.GetResult(y)->VID)
+                        {
+                            recalls += 1;
+                            visited[z] = true;
+                            break;
+                        }
+                        else if (fabs(sampleANN.GetResult(z)->Dist - sampleTruth.GetResult(y)->Dist) < Epsilon)
                         {
                             recalls += 1;
                             visited[z] = true;
