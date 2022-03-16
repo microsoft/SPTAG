@@ -36,6 +36,7 @@ namespace SPTAG
             int _K;
             int _DK;
             DimensionType _D;
+            DimensionType _RD;
             int _T;
             DistCalcMethod _M;
             T* centers;
@@ -50,17 +51,21 @@ namespace SPTAG
             float* newWeightedCounts;
             float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length);
 
-            KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod) : _K(k), _DK(k), _D(dim), _T(threadnum), _M(distMethod) {
-                centers = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
-                newTCenters = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
-                counts = new SizeType[k];
-                newCenters = new float[threadnum * k * dim];
-                newCounts = new SizeType[threadnum * k];
+            KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod) : _K(k), _DK(k), _D(dim), _RD(dim), _T(threadnum), _M(distMethod) {
+                if (DistanceUtils::Quantizer) {
+                    _RD = DistanceUtils::Quantizer->ReconstructDim();
+                }
+
+                centers = (T*)_mm_malloc(sizeof(T) * _K * _D, ALIGN_SPTAG);
+                newTCenters = (T*)_mm_malloc(sizeof(T) * _K * _D, ALIGN_SPTAG);
+                counts = new SizeType[_K];
+                newCenters = new float[_T * _K * _RD];
+                newCounts = new SizeType[_T * _K];
                 label = new int[datasize];
-                clusterIdx = new SizeType[threadnum * k];
-                clusterDist = new float[threadnum * k];
-                weightedCounts = new float[k];
-                newWeightedCounts = new float[threadnum * k];
+                clusterIdx = new SizeType[_T * _K];
+                clusterDist = new float[_T * _K];
+                weightedCounts = new float[_K];
+                newWeightedCounts = new float[_T * _K];
                 fComputeDistance = COMMON::DistanceCalcSelector<T>(distMethod);
             }
 
@@ -83,7 +88,7 @@ namespace SPTAG
             }
 
             inline void ClearCenters() {
-                memset(newCenters, 0, sizeof(float) * _T * _K * _D);
+                memset(newCenters, 0, sizeof(float) * _T * _K * _RD);
             }
 
             inline void ClearDists(float dist) {
@@ -133,7 +138,7 @@ namespace SPTAG
             if (lambda < 0) lambda = 0;
         }
 
-        template <typename T>
+        template <typename T, typename R>
         float RefineCenters(const Dataset<T>& data, KmeansArgs<T>& args)
         {
             int maxcluster = -1;
@@ -150,6 +155,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Debug, "maxcluster:%d(%d) Error dist:%f\n", maxcluster, args.newCounts[maxcluster], args.clusterDist[maxcluster]);
 
             float diff = 0;
+            std::vector<R> reconstructVector(args._RD, 0);
             for (int k = 0; k < args._DK; k++) {
                 T* TCenter = args.newTCenters + k * args._D;
                 if (args.counts[k] == 0) {
@@ -164,14 +170,21 @@ namespace SPTAG
                     }
                 }
                 else {
-                    float* currCenters = args.newCenters + k * args._D;
-                    for (DimensionType j = 0; j < args._D; j++) currCenters[j] /= args.counts[k];
-
+                    float* currCenters = args.newCenters + k * args._RD;
+                    for (DimensionType j = 0; j < args._RD; j++) {
+                        currCenters[j] /= args.counts[k];
+                    }
                     if (args._M == DistCalcMethod::Cosine) {
-                        COMMON::Utils::Normalize(currCenters, args._D, COMMON::Utils::GetBase<T>());
+                        COMMON::Utils::Normalize(currCenters, args._RD, COMMON::Utils::GetBase<T>());
                     }
 
-                    for (DimensionType j = 0; j < args._D; j++) TCenter[j] = (T)(currCenters[j]);
+                    if (DistanceUtils::Quantizer) {
+                        for (DimensionType j = 0; j < args._RD; j++) reconstructVector[j] = (R)(currCenters[j]);
+                        DistanceUtils::Quantizer->QuantizeVector(reconstructVector.data(), (uint8_t*)TCenter);
+                    }
+                    else {
+                        for (DimensionType j = 0; j < args._RD; j++) TCenter[j] = (T)(currCenters[j]);
+                    }
                 }
                 diff += args.fComputeDistance(args.centers + k*args._D, TCenter, args._D);
             }
@@ -182,7 +195,7 @@ namespace SPTAG
 
 #include "inc/Core/Common/cuda/Kmeans.hxx"
 
-        template <typename T>
+        template <typename T, typename R>
         inline float KmeansAssign(const Dataset<T>& data,
             std::vector<SizeType>& indices,
             const SizeType first, const SizeType last, KmeansArgs<T>& args,
@@ -198,7 +211,7 @@ namespace SPTAG
 
 #else
 
-        template <typename T>
+        template <typename T, typename R>
         inline float KmeansAssign(const Dataset<T>& data,
             std::vector<SizeType>& indices,
             const SizeType first, const SizeType last, KmeansArgs<T>& args, 
@@ -212,11 +225,14 @@ namespace SPTAG
                 SizeType istart = first + tid * subsize;
                 SizeType iend = min(first + (tid + 1) * subsize, last);
                 SizeType *inewCounts = args.newCounts + tid * args._K;
-                float *inewCenters = args.newCenters + tid * args._K * args._D;
+                float *inewCenters = args.newCenters + tid * args._K * args._RD;
                 SizeType * iclusterIdx = args.clusterIdx + tid * args._K;
                 float * iclusterDist = args.clusterDist + tid * args._K;
                 float * iweightedCounts = args.newWeightedCounts + tid * args._K;
                 float idist = 0;
+                R* reconstructVector = nullptr;
+                if (DistanceUtils::Quantizer) reconstructVector = (R*)_mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+
                 for (SizeType i = istart; i < iend; i++) {
                     int clusterid = 0;
                     float smallestDist = MaxDist;
@@ -231,9 +247,15 @@ namespace SPTAG
                     iweightedCounts[clusterid] += smallestDist;
                     idist += smallestDist;
                     if (updateCenters) {
-                        const T* v = (const T*)data[indices[i]];
-                        float* center = inewCenters + clusterid*args._D;
-                        for (DimensionType j = 0; j < args._D; j++) center[j] += v[j];
+                        if (DistanceUtils::Quantizer) {
+                            DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)data[indices[i]], reconstructVector);
+                        }
+                        else {
+                            reconstructVector = (R*)data[indices[i]];
+                        }
+                        float* center = inewCenters + clusterid*args._RD;
+                        for (DimensionType j = 0; j < args._RD; j++) center[j] += reconstructVector[j];
+
                         if (smallestDist > iclusterDist[clusterid]) {
                             iclusterDist[clusterid] = smallestDist;
                             iclusterIdx[clusterid] = indices[i];
@@ -246,6 +268,7 @@ namespace SPTAG
                         }
                     }
                 }
+                if (DistanceUtils::Quantizer) _mm_free(reconstructVector);
                 currDist += idist;
             }
 
@@ -258,8 +281,8 @@ namespace SPTAG
 
             if (updateCenters) {
                 for (int i = 1; i < args._T; i++) {
-                    float* currCenter = args.newCenters + i*args._K*args._D;
-                    for (size_t j = 0; j < ((size_t)args._DK) * args._D; j++) args.newCenters[j] += currCenter[j];
+                    float* currCenter = args.newCenters + i*args._K*args._RD;
+                    for (size_t j = 0; j < ((size_t)args._DK) * args._RD; j++) args.newCenters[j] += currCenter[j];
 
                     for (int k = 0; k < args._DK; k++) {
                         if (args.clusterIdx[i*args._K + k] != -1 && args.clusterDist[i*args._K + k] > args.clusterDist[k]) {
@@ -285,7 +308,7 @@ namespace SPTAG
 #endif
 
 
-        template <typename T>
+        template <typename T, typename R>
         inline float InitCenters(const Dataset<T>& data, 
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples, int tryIters) {
@@ -298,7 +321,7 @@ namespace SPTAG
                 }
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, 0);
+                currDist = KmeansAssign<T, R>(data, indices, first, batchEnd, args, true, 0);
                 if (currDist < minClusterDist) {
                     minClusterDist = currDist;
                     memcpy(args.newTCenters, args.centers, sizeof(T)*args._K*args._D);
@@ -310,12 +333,12 @@ namespace SPTAG
             return lambda;
         }
 
-        template <typename T>
+        template <typename T, typename R>
         float TryClustering(const Dataset<T>& data,
             std::vector<SizeType>& indices, const SizeType first, const SizeType last,
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
 
-            float adjustedLambda = InitCenters(data, indices, first, last, args, samples, 3);
+            float adjustedLambda = InitCenters<T, R>(data, indices, first, last, args, samples, 3);
             if (abort && abort->ShouldAbort()) return 0;
 
             SizeType batchEnd = min(first + samples, last);
@@ -329,7 +352,7 @@ namespace SPTAG
                 args.ClearCenters();
                 args.ClearCounts();
                 args.ClearDists(-MaxDist);
-                currDist = KmeansAssign(data, indices, first, batchEnd, args, true, min(adjustedLambda, originalLambda));
+                currDist = KmeansAssign<T, R>(data, indices, first, batchEnd, args, true, min(adjustedLambda, originalLambda));
                 std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
                 if (currDist < minClusterDist) {
@@ -350,7 +373,7 @@ namespace SPTAG
                 }
                 */
 
-                currDiff = RefineCenters(data, args);
+                currDiff = RefineCenters<T, R>(data, args);
                 //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
 
                 if (abort && abort->ShouldAbort()) return 0;
@@ -359,14 +382,14 @@ namespace SPTAG
 
             args.ClearCounts();
             args.ClearDists(MaxDist);
-            currDist = KmeansAssign(data, indices, first, last, args, false, 0);
+            currDist = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
             for (int k = 0; k < args._DK; k++) {
                 if (args.clusterIdx[k] != -1) std::memcpy(args.centers + k * args._D, data[args.clusterIdx[k]], sizeof(T) * args._D);
             }
 
             args.ClearCounts();
             args.ClearDists(MaxDist);
-            currDist = KmeansAssign(data, indices, first, last, args, false, 0);
+            currDist = KmeansAssign<T, R>(data, indices, first, last, args, false, 0);
             std::memcpy(args.counts, args.newCounts, sizeof(SizeType) * args._K);
 
             SizeType maxCount = 0, minCount = (std::numeric_limits<SizeType>::max)(), availableClusters = 0;
@@ -390,7 +413,27 @@ namespace SPTAG
 
             float bestLambdaFactor = 100.0f, bestCountStd = (std::numeric_limits<float>::max)();
             for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
-                float CountStd = TryClustering(data, indices, first, last, args, samples, lambdaFactor, true);
+                float CountStd;
+                if (COMMON::DistanceUtils::Quantizer)
+                {
+                    switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                    {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+CountStd = TryClustering<T, Type>(data, indices, first, last, args, samples, lambdaFactor, true); \
+break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                    default: break;
+                    }
+                }
+                else
+                {
+                    CountStd = TryClustering<T, T>(data, indices, first, last, args, samples, lambdaFactor, true);
+                }
+
                 if (CountStd < bestCountStd) {
                     bestLambdaFactor = lambdaFactor;
                     bestCountStd = CountStd;
@@ -419,7 +462,26 @@ namespace SPTAG
             std::vector<SizeType>& indices, const SizeType first, const SizeType last, 
             KmeansArgs<T>& args, int samples = 1000, float lambdaFactor = 100.0f, bool debug = false, IAbortOperation* abort = nullptr) {
             
-            TryClustering(data, indices, first, last, args, samples, lambdaFactor, debug, abort);
+            if (COMMON::DistanceUtils::Quantizer)
+            {
+                switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+TryClustering<T, Type>(data, indices, first, last, args, samples, lambdaFactor, debug, abort); \
+break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                default: break;
+                }
+            }
+            else
+            {
+                TryClustering<T, T>(data, indices, first, last, args, samples, lambdaFactor, debug, abort);
+            }
+
             if (abort && abort->ShouldAbort()) return 1;
 
             int numClusters = 0;

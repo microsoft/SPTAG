@@ -29,6 +29,7 @@ namespace SPTAG {
 			const char* indexFilePath) {
 
 			bool searchSSD = false;
+			std::string QuantizerFilePath = "";
 			if (forANNIndexTestTool) {
 				(*config_map)[SEC_BASE]["ValueType"] = Helper::Convert::ConvertToString(valueType);
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = Helper::Convert::ConvertToString(distCalcMethod);
@@ -50,6 +51,11 @@ namespace SPTAG {
 				(*config_map)[SEC_BUILD_HEAD]["isExecute"] = "true";
 				(*config_map)[SEC_BUILD_SSD_INDEX]["isExecute"] = "true";
 				(*config_map)[SEC_BUILD_SSD_INDEX]["BuildSsdIndex"] = "true";
+
+				std::map<std::string, std::string>::iterator iter;
+				if ((iter = (*config_map)[SEC_BASE].find("QuantizerFilePath")) != (*config_map)[SEC_BASE].end()) {
+					QuantizerFilePath = iter->second;
+				}
 			}
 			else {
 				Helper::IniReader iniReader;
@@ -63,7 +69,8 @@ namespace SPTAG {
 				distCalcMethod = iniReader.GetParameter(SEC_BASE, "DistCalcMethod", distCalcMethod);
 				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", false);
 				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", false);
-				
+				QuantizerFilePath = iniReader.GetParameter(SEC_BASE, "QuantizerFilePath", std::string(""));
+
 				for (auto& KV : iniReader.GetParameters(SEC_SEARCH_SSD_INDEX)) {
 					std::string param = KV.first, value = KV.second;
 					if (buildSSD && Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "BuildSsdIndex")) continue;
@@ -73,7 +80,13 @@ namespace SPTAG {
 					(*config_map)[SEC_BUILD_SSD_INDEX][param] = value;
 				}
 			}
-			
+
+			if (!QuantizerFilePath.empty() && VectorIndex::LoadQuantizer(QuantizerFilePath) != ErrorCode::Success)
+			{
+				exit(1);
+			}
+			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", QuantizerFilePath.c_str());
+
 			std::shared_ptr<VectorIndex> index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, valueType);
 			if (index == nullptr) {
 				LOG(Helper::LogLevel::LL_Error, "Cannot create Index with ValueType %s!\n", (*config_map)[SEC_BASE]["ValueType"].c_str());
@@ -85,13 +98,6 @@ namespace SPTAG {
 					index->SetParameter(KV.first, KV.second, sectionKV.first);
 				}
 			}
-
-			std::string quantizerPath = index->GetParameter("QuantizerFilePath", SEC_BASE);
-			if (!quantizerPath.empty() && VectorIndex::LoadQuantizer(quantizerPath) != ErrorCode::Success)
-			{
-				exit(1);
-			}
-			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", quantizerPath.c_str());
 
 			if (index->BuildIndex() != ErrorCode::Success) {
 				LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");

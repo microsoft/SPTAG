@@ -138,7 +138,6 @@ namespace SPTAG
             void SelectHeadAdjustOptions(int p_vectorCount);
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
-            bool SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
             template <typename InternalDataType>
             bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);

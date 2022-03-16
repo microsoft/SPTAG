@@ -405,19 +405,6 @@ namespace SPTAG
         }
 
         template <typename T>
-        bool Index<T>::SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader) {
-            if (SPTAG::COMMON::DistanceUtils::Quantizer)
-            {
-                return SelectHeadInternal<std::uint8_t>(p_reader);
-            }
-            else
-            {
-                return SelectHeadInternal<T>(p_reader);
-            }
-        }
-
-
-        template <typename T>
         template <typename InternalDataType>
         bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader) {
             std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
@@ -537,7 +524,16 @@ namespace SPTAG
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
                 omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
-                if (!SelectHead(p_reader)) {
+                bool success = false;
+                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                {
+                    success = SelectHeadInternal<std::uint8_t>(p_reader);
+                }
+                else
+                {
+                    success = SelectHeadInternal<T>(p_reader);
+                }
+                if (!success) {
                     LOG(Helper::LogLevel::LL_Error, "SelectHead Failed!\n");
                     return ErrorCode::Fail;
                 }
@@ -548,6 +544,8 @@ namespace SPTAG
 
             if (m_options.m_buildHead) {
                 auto valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
+                auto dims = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() : m_options.m_dim;
+
                 m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
                 m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
                 for (const auto& iter : m_headParameters)
@@ -555,7 +553,7 @@ namespace SPTAG
                     m_index->SetParameter(iter.first.c_str(), iter.second.c_str());
                 }
 
-                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, m_options.m_dim, VectorFileType::DEFAULT));
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dims, VectorFileType::DEFAULT));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile))
                 {
@@ -590,7 +588,14 @@ namespace SPTAG
                 m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
                 m_index->UpdateIndex();
 
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                {
+                    m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                }
+                else {
+                    m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                }
+
                 if (m_options.m_buildSsdIndex) {
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
                         LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
@@ -630,7 +635,7 @@ namespace SPTAG
         ErrorCode Index<T>::BuildIndex(bool p_normalized) 
         {
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-            SizeType dim = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->QuantizeSize() : m_options.m_dim;
+            SizeType dim = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors() : m_options.m_dim;
             std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
             if (m_options.m_vectorPath.empty())
@@ -657,7 +662,7 @@ namespace SPTAG
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
                 COMMON::Utils::BatchNormalize((T*)p_data, p_vectorNum, p_dimension, COMMON::Utils::GetBase<T>(), m_options.m_iSSDNumberOfThreads);
             }
-            std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, p_vectorNum * p_dimension * sizeof(T), false),
+            std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
                 GetEnumValueType<T>(), p_dimension, p_vectorNum));
             SPTAG::VectorValueType valueType = SPTAG::COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
