@@ -165,6 +165,7 @@ namespace SPTAG
                     exit(-1);
                 }
 
+                LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
                 std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
 #pragma omp parallel for
@@ -185,7 +186,7 @@ namespace SPTAG
                     }
 
                 }
-
+                LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
                 writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
 
                 auto ptr = SPTAG::f_createIO();

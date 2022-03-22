@@ -990,12 +990,6 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
 
-  // Make sure that neighborhood size is a power of 2
-  if(m_iNeighborhoodSize == 0 || (m_iNeighborhoodSize & (m_iNeighborhoodSize-1)) != 0) {
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "NeighborhoodSize (with scaling factor applied) is %d but must be a power of 2 for GPU construction.\n", m_iNeighborhoodSize);
-    exit(1);
-  }
-
   // Have to give compiler-time known bounds on dimensions so that we can store points in registers
   // This significantly speeds up distance comparisons.
   // Create other options here for other commonly-used dimension values.
@@ -1015,6 +1009,15 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
       }
       else if (m_iFeatureDim <= 768) {
           buildGraphGPU_Batch<T, float, 768>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else if (m_iFeatureDim <= 1024) {
+          buildGraphGPU_Batch<T, float, 1024>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else if (m_iFeatureDim <= 2048) {
+          buildGraphGPU_Batch<T, float, 2048>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else if (m_iFeatureDim <= 4096) {
+          buildGraphGPU_Batch<T, float, 4096>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
       }
       else {
           LOG(SPTAG::Helper::LogLevel::LL_Error, "%d dimensions not currently supported for GPU construction.\n");
@@ -1036,7 +1039,17 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
       }
       else if (m_iFeatureDim <= 768) {
           buildGraphGPU_Batch<T, int32_t, 768>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
-      } else {
+      }
+      else if (m_iFeatureDim <= 1024) {
+          buildGraphGPU_Batch<T, int32_t, 1024>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else if (m_iFeatureDim <= 2048) {
+          buildGraphGPU_Batch<T, int32_t, 2048>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else if (m_iFeatureDim <= 4096) {
+          buildGraphGPU_Batch<T, int32_t, 4096>(index, (size_t)m_iGraphSize, (size_t)m_iNeighborhoodSize, trees, results, graph, leafSize, NUM_GPUS, balanceFactor);
+      }
+      else {
           LOG(SPTAG::Helper::LogLevel::LL_Error, "%d dimensions not currently supported for GPU construction.\n");
           exit(1);
       }
