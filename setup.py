@@ -34,6 +34,7 @@ import setuptools
 from setuptools.command.develop import develop
 
 release = os.environ.get('SPTAG_RELEASE')
+nuget_release = os.environ.get('NUGET_RELEASE')
 python_version = "%d.%d" % (sys.version_info.major, sys.version_info.minor)
 print ("Python version:%s" % python_version)
 
@@ -75,6 +76,36 @@ def _find_python_packages():
         shutil.copytree('Release', 'sptag')
     elif os.path.exists(os.path.join('x64', 'Release')):
         shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
+
+        if os.path.exists('lib'): shutil.rmtree('lib')
+        os.mkdir('lib')
+        os.mkdir(os.path.join('lib', 'net472'))
+        for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
+            print (file)
+            shutil.copy(file, "lib\\net472\\")
+        f = open('sptag.nuspec', 'w')
+        spec = '''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>MSSPTAG.Managed.Library</id>
+    <version>%s</version>
+    <title>MSSPTAG.Managed.Library</title>
+    <authors>cheqi,haidwa,mingqli</authors>
+    <owners>cheqi,haidwa,mingqli</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
+    <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
+    <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
+    <copyright>Copyright @ Microsoft</copyright>
+  </metadata>
+  <files>
+    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" />
+    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" />
+  </files>
+</package>
+''' % (nuget_release)
+        f.write(spec)
+        f.close()
     f = open(os.path.join('sptag', '__init__.py'), 'w')
     f.close()
     return ['sptag']
