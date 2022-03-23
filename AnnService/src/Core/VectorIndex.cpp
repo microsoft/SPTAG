@@ -751,13 +751,6 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
         }
         metaStart += 2;
     }
-    if (iniReader.DoesSectionExist("Quantizer") && p_indexBlobs.size() > metaStart)
-    {
-        std::shared_ptr<Helper::DiskPriorityIO> ptr(new Helper::SimpleBufferIO());
-        if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[metaStart].Data(), std::ios::binary | std::ios::in, p_indexBlobs[metaStart].Length())) return ErrorCode::EmptyDiskIO;
-        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        if (ret != ErrorCode::Success) return ret;
-    }
 
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
