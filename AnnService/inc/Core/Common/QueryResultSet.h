@@ -47,9 +47,8 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
         }
-        m_quantizedTarget = nullptr;
     }
 
     inline const T* GetTarget() const
