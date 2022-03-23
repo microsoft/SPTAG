@@ -668,9 +668,16 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp);
+        if (ret != ErrorCode::Success) return ret;
+    }
+
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
+    
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     std::uint64_t blobs;
@@ -695,11 +702,6 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
         }
     }
 
-    if (iniReader.DoesSectionExist("Quantizer"))
-    {
-        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp);
-        if (ret != ErrorCode::Success) return ret;
-    }
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -715,9 +717,15 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        if ((ret = COMMON::IQuantizer::LoadIQuantizer(p_indexBlobs[4])) != ErrorCode::Success) return ret;
+    }
+
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
+    
     if ((p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     if ((ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs)) != ErrorCode::Success) return ret;
@@ -749,11 +757,6 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
         if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[metaStart].Data(), std::ios::binary | std::ios::in, p_indexBlobs[metaStart].Length())) return ErrorCode::EmptyDiskIO;
         ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
         if (ret != ErrorCode::Success) return ret;
-    }
-
-    if (iniReader.DoesSectionExist("Quantizer") && p_indexBlobs.size() > 4)
-    {
-        if ((ret = COMMON::IQuantizer::LoadIQuantizer(p_indexBlobs[4])) != ErrorCode::Success) return ret;
     }
 
     p_vectorIndex->m_bReady = true;
