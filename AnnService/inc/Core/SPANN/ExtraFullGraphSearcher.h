@@ -101,7 +101,6 @@ namespace SPTAG
 
             virtual bool LoadIndex(Options& p_opt) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
-                auto ssdVectorSize = 
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
