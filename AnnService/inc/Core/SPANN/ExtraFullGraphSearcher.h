@@ -101,14 +101,15 @@ namespace SPTAG
 
             virtual bool LoadIndex(Options& p_opt) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
+                auto ssdVectorSize = 
                 std::string curFile = m_extraFullGraphFile;
                 do {
                     auto curIndexFile = f_createAsyncIO();
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
 #ifdef BATCH_READ
-                        p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+                        max(p_opt.m_searchInternalResultNum*m_vectorInfoSize, 1 << 12), 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
-                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+                        max(m_vectorInfoSize*(p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1), 1 << 12), 2, 2, p_opt.m_ioThreads
 #endif
                     )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
@@ -537,6 +538,7 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
                     exit(1);
                 }
+                if (SPTAG::COMMON::DistanceUtils::Quantizer) m_vectorInfoSize = SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors();
 
                 m_listInfos.resize(m_listCount);
 
