@@ -37,9 +37,9 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(uint8_t* raw_bytes) = 0;
 
-            static ErrorCode LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
+            static std::shared_ptr<IQuantizer> LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
 
-            static ErrorCode LoadIQuantizer(SPTAG::ByteArray bytes);
+            static std::shared_ptr<IQuantizer> LoadIQuantizer(SPTAG::ByteArray bytes);
 
             virtual bool GetEnableADC() = 0;
 

@@ -56,14 +56,14 @@ public:
         return reinterpret_cast<const T*>(m_target);
     }
 
-    T* GetQuantizedTarget()
+    T* GetQuantizedTarget(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
     {
-        if (COMMON::DistanceUtils::Quantizer)
+        if (quantizer)
         {
             if (!m_quantizedTarget)
             {
-                m_quantizedTarget = _mm_malloc(COMMON::DistanceUtils::Quantizer->QuantizeSize(), ALIGN_SPTAG);
-                COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+                m_quantizedTarget = _mm_malloc(quantizer->QuantizeSize(), ALIGN_SPTAG);
+                quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
             }
             return reinterpret_cast<T*>(m_quantizedTarget);
         }

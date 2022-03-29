@@ -782,6 +782,7 @@ break;
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_iBKTKmeansK, m_iBKTLeafSize, m_iSamples, m_bfs;
             float m_fBalanceFactor;
+            std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
         };
     }
 }

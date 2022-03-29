@@ -7,11 +7,12 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        ErrorCode IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
+        std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
             QuantizerType quantizerType = QuantizerType::Undefined;
             VectorValueType reconstructType = VectorValueType::Undefined;
-            IOBINARY(p_in, ReadBinary, sizeof(QuantizerType), (char*)&quantizerType);
-            IOBINARY(p_in, ReadBinary, sizeof(VectorValueType), (char*)&reconstructType);
+            std::shared_ptr<IQuantizer> ret = nullptr;
+            if (p_in->ReadBinary(sizeof(QuantizerType), (char*)&quantizerType) != sizeof(QuantizerType)) return ret;
+            if (p_in->ReadBinary(sizeof(VectorValueType), (char*)&reconstructType) != sizeof(VectorValueType)) return ret;
             LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
             switch (quantizerType) {
             case QuantizerType::None:
@@ -22,7 +23,7 @@ namespace SPTAG
                 switch (reconstructType) {
                     #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        DistanceUtils::Quantizer.reset(new PQQuantizer<Type>()); \
+                        ret.reset(new PQQuantizer<Type>()); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -31,24 +32,26 @@ namespace SPTAG
                 default: break;
                 }
                 
-                return DistanceUtils::Quantizer->LoadQuantizer(p_in);
+                if (ret->LoadQuantizer(p_in) != ErrorCode::Success) ret.reset();
+                return ret;
             case QuantizerType::OPQQuantizer:
                 switch (reconstructType) {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        DistanceUtils::Quantizer.reset(new OPQQuantizer<Type>()); \
+                        ret.reset(new OPQQuantizer<Type>()); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
                 default: break;
                 }
-                return DistanceUtils::Quantizer->LoadQuantizer(p_in);
+                if (ret->LoadQuantizer(p_in) != ErrorCode::Success) ret.reset();
+                return ret;
             }
-            return ErrorCode::Fail;
+            return ret;
         }
 
-        ErrorCode IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
+        std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
         {
             auto raw_bytes = bytes.Data();
             QuantizerType quantizerType = *(QuantizerType*) raw_bytes;
@@ -57,17 +60,18 @@ namespace SPTAG
             VectorValueType reconstructType = *(VectorValueType*)raw_bytes;
             raw_bytes += sizeof(VectorValueType);
             LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            std::shared_ptr<IQuantizer> ret = nullptr;
 
             switch (quantizerType) {
             case QuantizerType::None:
-                return ErrorCode::FailedParseValue;
+                return ret;
             case QuantizerType::Undefined:
-                return ErrorCode::FailedParseValue;
+                return ret;
             case QuantizerType::PQQuantizer:
                 switch (reconstructType) {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        DistanceUtils::Quantizer.reset(new PQQuantizer<Type>()); \
+                        ret.reset(new PQQuantizer<Type>()); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -75,12 +79,13 @@ namespace SPTAG
                 default: break;
                 }
 
-                return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);
+                if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
+                return ret;
             case QuantizerType::OPQQuantizer:
                 switch (reconstructType) {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        DistanceUtils::Quantizer.reset(new OPQQuantizer<Type>()); \
+                        ret.reset(new OPQQuantizer<Type>()); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -88,9 +93,10 @@ namespace SPTAG
                 default: break;
                 }
 
-                return DistanceUtils::Quantizer->LoadQuantizer(raw_bytes);
+                if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
+                return ret;
             }
-            return ErrorCode::Fail;
+            return ret;
         }
     }
 }

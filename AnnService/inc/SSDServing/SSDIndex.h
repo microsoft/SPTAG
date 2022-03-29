@@ -165,9 +165,9 @@ namespace SPTAG {
                 std::string truthFile = p_opts.m_truthPath;
                 std::string warmupFile = p_opts.m_warmupPath;
 
-                if (COMMON::DistanceUtils::Quantizer)
+                if (p_index->m_pQuantizer)
                 {
-                    COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
+                   p_index->m_pQuantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
                 if (!p_opts.m_logFile.empty())
@@ -246,7 +246,6 @@ namespace SPTAG {
 
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
                     LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
-                    COMMON::DistanceUtils::Quantizer.reset();
                     for (int i = 0; i < results.size(); i++)
                     {
                         for (int j = 0; j < K; j++)

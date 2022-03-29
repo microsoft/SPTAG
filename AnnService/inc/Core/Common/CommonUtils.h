@@ -59,7 +59,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            static int GetBase();
+            static int GetBase(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
 
             template <typename T>
             static void Normalize(T* arr, DimensionType col, int base) {

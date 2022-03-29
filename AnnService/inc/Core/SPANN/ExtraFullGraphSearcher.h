@@ -83,7 +83,7 @@ namespace SPTAG
         for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
             int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
+            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(p_index->m_pQuantizer), vectorInfo + sizeof(int)); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
 

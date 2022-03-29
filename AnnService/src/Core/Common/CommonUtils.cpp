@@ -5,11 +5,11 @@ using namespace SPTAG;
 using namespace SPTAG::COMMON;
 
 template<typename T>
-int Utils::GetBase()
+int Utils::GetBase(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
 {
-	if (DistanceUtils::Quantizer)
+	if (quantizer)
 	{
-		return DistanceUtils::Quantizer->GetBase();
+		return quantizer->GetBase();
 	}
 	else
 	{

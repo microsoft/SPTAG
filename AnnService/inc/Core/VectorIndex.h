@@ -10,6 +10,7 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include <unordered_set>
+#include "inc/Core/Common/IQuantizer.h"
 
 namespace SPTAG
 {
@@ -104,7 +105,7 @@ public:
 
     virtual void SetQuantizerFileName(std::string p_QuantizerFileName) { m_sQuantizerFile = p_QuantizerFileName; }
 
-    static ErrorCode LoadQuantizer(std::string p_quantizerFile);
+    virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
@@ -157,6 +158,7 @@ protected:
     std::string m_sQuantizerFile = "quantizer.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::shared_ptr<void> m_pMetaToVec;
+    std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer = nullptr;
 
 public:
     int m_iDataBlockSize;
