@@ -83,6 +83,8 @@ namespace SPTAG
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
 
+            bool m_bOptDataset;
+
         public:
             Index()
             {
@@ -124,8 +126,8 @@ namespace SPTAG
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
                 std::shared_ptr<std::vector<std::uint64_t>> buffersize(new std::vector<std::uint64_t>);
-                buffersize->push_back(m_pSamples.BufferSize());
                 buffersize->push_back(m_pTrees.BufferSize());
+                buffersize->push_back(m_pSamples.BufferSize());
                 buffersize->push_back(m_pGraph.BufferSize());
                 buffersize->push_back(m_deletedID.BufferSize());
                 return std::move(buffersize);
@@ -134,8 +136,8 @@ namespace SPTAG
             std::shared_ptr<std::vector<std::string>> GetIndexFiles() const
             {
                 std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
-                files->push_back(m_sDataPointsFilename);
                 files->push_back(m_sKDTFilename);
+                files->push_back(m_sDataPointsFilename);
                 files->push_back(m_sGraphFilename);
                 files->push_back(m_sDeleteDataPointsFilename);
                 return std::move(files);

@@ -51,7 +51,7 @@ namespace SPTAG
             void Rebuild(const Dataset<T>& data, IAbortOperation* abort)
             {
                 COMMON::KDTree newTrees(*this);
-                newTrees.BuildTrees<T>(data, 1, nullptr, abort);
+                newTrees.BuildTrees<T>(data, 1, nullptr, nullptr, abort);
 
                 std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
@@ -59,7 +59,7 @@ namespace SPTAG
             }
 
             template <typename T>
-            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
+            void BuildTrees(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, IAbortOperation* abort = nullptr)
             {
                 if (COMMON::DistanceUtils::Quantizer)
                 {
@@ -67,7 +67,7 @@ namespace SPTAG
                     {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-BuildTreesCore<T, Type>(data, numOfThreads, indices, abort); \
+BuildTreesCore<T, Type>(data, numOfThreads, indices, reverseIndices, abort); \
 break;
 
 #include "inc/Core/DefinitionList.h"
@@ -78,12 +78,12 @@ break;
                 }
                 else
                 {
-                    BuildTreesCore<T, T>(data, numOfThreads, indices, abort);
+                    BuildTreesCore<T, T>(data, numOfThreads, indices, reverseIndices, abort);
                 }
             }
 
             template <typename T, typename R>
-            void BuildTreesCore(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, IAbortOperation* abort = nullptr)
+            void BuildTreesCore(const Dataset<T>& data, int numOfThreads, std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, IAbortOperation* abort = nullptr)
             {
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
@@ -111,6 +111,16 @@ break;
                     SizeType iTreeSize = m_pTreeStart[i];
                     DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
                     LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
+                }
+
+                if (reverseIndices) {
+#pragma omp parallel for
+                    for (SizeType i = 0; i < m_pTreeRoots.size(); i++) {
+                        if (m_pTreeRoots[i].left < 0)
+                            m_pTreeRoots[i].left = -reverseIndices->at(-m_pTreeRoots[i].left - 1) - 1;
+                        if (m_pTreeRoots[i].right < 0)
+                            m_pTreeRoots[i].right = -reverseIndices->at(-m_pTreeRoots[i].right - 1) - 1;
+                    }
                 }
             }
 

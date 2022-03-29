@@ -10,7 +10,7 @@ namespace SPTAG
     {
         // structure to save Data and Graph
         template <typename T>
-        class Dataset
+        class OldDataset
         {
         private:
             std::string name = "Data";
@@ -25,23 +25,23 @@ namespace SPTAG
             std::vector<T*> incBlocks;
 
         public:
-            Dataset() {}
+            OldDataset() {}
 
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            OldDataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true)
             {
                 Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_);
             }
-            ~Dataset()
+            ~OldDataset()
             {
                 if (ownData) _mm_free(data);
                 for (T* ptr : incBlocks) _mm_free(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
-                data = data_;
+                data = (T*)data_;
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
@@ -90,7 +90,7 @@ namespace SPTAG
                 return At(index);
             }
 
-            ErrorCode AddBatch(const T* pData, SizeType num)
+            ErrorCode AddBatch(SizeType num, const T* pData = nullptr)
             {
                 if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
 
@@ -100,31 +100,13 @@ namespace SPTAG
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
                         T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN_SPTAG);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        if (!pData) std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
                         incBlocks.push_back(newBlock);
                     }
                     SizeType curBlockPos = ((incRows + written) & rowsInBlock);
                     SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
-                    std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
+                    if (pData) std::memcpy(incBlocks[curBlockIdx] + ((size_t)curBlockPos) * cols, pData + ((size_t)written) * cols, ((size_t)toWrite) * cols * sizeof(T));
                     written += toWrite;
-                }
-                incRows += written;
-                return ErrorCode::Success;
-            }
-
-            ErrorCode AddBatch(SizeType num)
-            {
-                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
-
-                SizeType written = 0;
-                while (written < num) {
-                    SizeType curBlockIdx = (incRows + written) >> rowsInBlockEx;
-                    if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(sizeof(T) * (rowsInBlock + 1) * cols, ALIGN_SPTAG);
-                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
-                        std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
-                        incBlocks.push_back(newBlock);
-                    }
-                    written += min(rowsInBlock + 1 - ((incRows + written) & rowsInBlock), num - written);
                 }
                 incRows += written;
                 return ErrorCode::Success;
@@ -190,7 +172,7 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
+            ErrorCode Refine(const std::vector<SizeType>& indices, OldDataset<T>& data) const
             {
                 SizeType R = (SizeType)(indices.size());
                 data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
@@ -221,6 +203,262 @@ namespace SPTAG
                 return Refine(indices, ptr);
             }
         };
+
+        // structure to save Data and Graph
+        template <typename T>
+        class Dataset
+        {
+        private:
+            std::string name = "Data";
+            SizeType rows = 0;
+            DimensionType cols = 1;
+            char* data = nullptr;
+            bool ownData = false;
+            SizeType incRows = 0;
+            SizeType maxRows;
+            SizeType rowsInBlock;
+            SizeType rowsInBlockEx;
+            std::shared_ptr<std::vector<char*>> incBlocks;
+
+            DimensionType colStart = 0;
+            DimensionType mycols = 0;
+
+        public:
+            Dataset() {}
+
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int colEnd_ = -1, std::string name_ = "Data")
+            {
+                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_, incBlocks_, colStart_, colEnd_, name_);
+            }
+            ~Dataset()
+            {
+            }
+
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int colEnd_ = -1, std::string name_ = "Data")
+            {
+                name = name_;
+                rows = rows_;
+                mycols = cols_;
+                if (colEnd_ >= colStart_) cols = colEnd_;
+                else cols = mycols * sizeof(T);
+                data = data_;
+                ownData = transferOnwership_;
+                if (data_ == nullptr)
+                {
+                    ownData = true;
+                    data = (char*)_mm_malloc(((size_t)rows) * cols, ALIGN_SPTAG);
+                    std::memset(data, -1, ((size_t)rows) * cols);
+                }
+                maxRows = capacity_;
+                rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
+                rowsInBlock = (1 << rowsInBlockEx) - 1;
+                incBlocks = incBlocks_;
+                if (incBlocks == nullptr) incBlocks.reset(new std::vector<char*>());
+                incBlocks->reserve((static_cast<std::int64_t>(capacity_) + rowsInBlock) >> rowsInBlockEx);
+                colStart = colStart_;
+            }
+
+            bool IsReady() const { return data != nullptr; }
+
+            void SetName(const std::string& name_) { name = name_; }
+            const std::string& Name() const { return name; }
+
+            void SetR(SizeType R_)
+            {
+                if (R_ >= rows)
+                    incRows = R_ - rows;
+                else
+                {
+                    rows = R_;
+                    incRows = 0;
+                }
+            }
+
+            inline SizeType R() const { return rows + incRows; }
+            inline const DimensionType& C() const { return mycols; }
+            inline std::uint64_t BufferSize() const { return sizeof(SizeType) + sizeof(DimensionType) + sizeof(T) * R() * C(); }
+
+#define GETITEM(index) \
+            if (index >= rows) { \
+            SizeType incIndex = index - rows; \
+            return (T*)((*incBlocks)[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols + colStart); \
+            } \
+            return (T*)(data + ((size_t)index) * cols + colStart); \
+
+            inline const T* At(SizeType index) const
+            {
+                GETITEM(index)
+            }
+
+            inline T* At(SizeType index)
+            {
+                GETITEM(index)
+            }
+
+            inline T* operator[](SizeType index)
+            {
+                GETITEM(index)
+            }
+
+            inline const T* operator[](SizeType index) const
+            {
+                GETITEM(index)
+            }
+
+#undef GETITEM
+
+            ErrorCode AddBatch(SizeType num, const T* pData = nullptr)
+            {
+                if (colStart != 0) return ErrorCode::Success;
+                if (R() > maxRows - num) return ErrorCode::MemoryOverFlow;
+
+                SizeType written = 0;
+                while (written < num) {
+                    SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
+                    if (curBlockIdx >= (SizeType)(incBlocks->size())) {
+                        char* newBlock = (char*)_mm_malloc(((size_t)rowsInBlock + 1) * cols, ALIGN_SPTAG);
+                        if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
+                        std::memset(newBlock, -1, ((size_t)rowsInBlock + 1) * cols);
+                        incBlocks->push_back(newBlock);
+                    }
+                    SizeType curBlockPos = ((incRows + written) & rowsInBlock);
+                    SizeType toWrite = min(rowsInBlock + 1 - curBlockPos, num - written);
+                    if (pData) {
+                        for (int i = 0; i < toWrite; i++) {
+                            std::memcpy((*incBlocks)[curBlockIdx] + ((size_t)curBlockPos + i) * cols + colStart, pData + ((size_t)written + i) * mycols, mycols * sizeof(T));
+                        }
+                    }
+                    written += toWrite;
+                }
+                incRows += written;
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
+            {
+                SizeType CR = R();
+                IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
+                IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&mycols);
+                for (SizeType i = 0; i < CR; i++) {
+                    IOBINARY(p_out, WriteBinary, sizeof(T) * mycols, (char*)At(i));
+                }
+
+                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, mycols);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Save(std::string sDataPointsFileName) const
+            {
+                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return Save(ptr);
+            }
+
+            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> pInput, SizeType blockSize, SizeType capacity)
+            {
+                IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&(rows));
+                IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&mycols);
+
+                if (data == nullptr) Initialize(rows, mycols, blockSize, capacity);
+
+                for (SizeType i = 0; i < rows; i++) {
+                    IOBINARY(pInput, ReadBinary, sizeof(T) * mycols, (char*)At(i));
+                }
+                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, mycols);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
+            {
+                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+                return Load(ptr, blockSize, capacity);
+            }
+
+            // Functions for loading models from memory mapped files
+            ErrorCode Load(char* pDataPointsMemFile, SizeType blockSize, SizeType capacity)
+            {
+                SizeType R;
+                DimensionType C;
+                R = *((SizeType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(SizeType);
+
+                C = *((DimensionType*)pDataPointsMemFile);
+                pDataPointsMemFile += sizeof(DimensionType);
+
+                Initialize(R, C, blockSize, capacity, (char*)pDataPointsMemFile);
+                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
+                return ErrorCode::Success;
+            }
+
+            ErrorCode Refine(const std::vector<SizeType>& indices, COMMON::Dataset<T>& dataset) const
+            {
+                SizeType newrows = (SizeType)(indices.size());
+                if (dataset.data == nullptr) dataset.Initialize(newrows, mycols, rowsInBlock + 1, static_cast<SizeType>(incBlocks->capacity() * (rowsInBlock + 1)));
+
+                for (SizeType i = 0; i < newrows; i++) {
+                    std::memcpy((void*)dataset.At(i), (void*)At(indices[i]), sizeof(T) * mycols);
+                }
+                return ErrorCode::Success;
+            }
+
+            virtual ErrorCode Refine(const std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskPriorityIO> output) const
+            {
+                SizeType newrows = (SizeType)(indices.size());
+                IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&newrows);
+                IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&mycols);
+
+                for (SizeType i = 0; i < newrows; i++) {
+                    IOBINARY(output, WriteBinary, sizeof(T) * mycols, (char*)At(indices[i]));
+                }
+                LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), newrows, C());
+                return ErrorCode::Success;
+            }
+
+            virtual ErrorCode Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
+            {
+                LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return Refine(indices, ptr);
+            }
+        };
+
+        template <typename T>
+        ErrorCode LoadOptimizedDatasets(std::shared_ptr<Helper::DiskPriorityIO> pVectorsInput, std::shared_ptr<Helper::DiskPriorityIO> pGraphInput,
+            Dataset<T>& pVectors, Dataset<SizeType>& pGraph, DimensionType pNeighborhoodSize,
+            SizeType blockSize, SizeType capacity) {
+            SizeType VR, GR;
+            DimensionType VC, GC;
+            IOBINARY(pVectorsInput, ReadBinary, sizeof(SizeType), (char*)&VR);
+            IOBINARY(pVectorsInput, ReadBinary, sizeof(DimensionType), (char*)&VC);
+            DimensionType roundVC = (VC + 7) / 8 * 8;
+            DimensionType totalC = sizeof(T) * roundVC + sizeof(SizeType) * pNeighborhoodSize;
+
+            char* data = (char*)_mm_malloc(((size_t)totalC) * VR, ALIGN_SPTAG);
+            std::shared_ptr<std::vector<char*>> incBlocks(new std::vector<char*>());
+
+            pVectors.Initialize(VR, VC, blockSize, capacity, data, true, incBlocks, 0, totalC, "Opt" + pVectors.Name());
+            for (SizeType i = 0; i < VR; i++) {
+                IOBINARY(pVectorsInput, ReadBinary, sizeof(T) * VC, (char*)(pVectors.At(i)));
+            }
+
+            IOBINARY(pGraphInput, ReadBinary, sizeof(SizeType), (char*)&GR);
+            IOBINARY(pGraphInput, ReadBinary, sizeof(DimensionType), (char*)&GC);
+            if (GR != VR || GC != pNeighborhoodSize) return ErrorCode::DiskIOFail;
+
+            pGraph.Initialize(GR, GC, blockSize, capacity, data, false, incBlocks, sizeof(T) * VC, totalC, "Opt" + pGraph.Name());
+            for (SizeType i = 0; i < VR; i++) {
+                IOBINARY(pGraphInput, ReadBinary, sizeof(SizeType) * GC, (char*)(pGraph.At(i)));
+            }
+
+            LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", pVectors.Name().c_str(), pVectors.R(), pVectors.C());
+            LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", pGraph.Name().c_str(), pGraph.R(), pGraph.C());
+
+            return ErrorCode::Success;
+        }
     }
 }
 

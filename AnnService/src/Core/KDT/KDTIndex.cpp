@@ -31,8 +31,8 @@ namespace SPTAG
         {
             if (p_indexBlobs.size() < 3) return ErrorCode::LackOfInputs;
 
-            if (m_pSamples.Load((char*)p_indexBlobs[0].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pTrees.LoadTrees((char*)p_indexBlobs[0].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (m_pSamples.Load((char*)p_indexBlobs[1].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (p_indexBlobs.size() > 3 && m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
@@ -49,9 +49,15 @@ namespace SPTAG
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
             ErrorCode ret = ErrorCode::Success;
-            if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
-            if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
-            if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if ((ret = m_pTrees.LoadTrees(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if (m_bOptDataset) {
+                if ((ret = COMMON::LoadOptimizedDatasets(p_indexStreams[1], p_indexStreams[2], m_pSamples, m_pGraph.GetData(), m_pGraph.m_iNeighborhoodSize, m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            }
+            else {
+                if ((ret = m_pSamples.Load(p_indexStreams[1], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+                if ((ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            }
+
             if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 
@@ -88,8 +94,8 @@ namespace SPTAG
             std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
 
             ErrorCode ret = ErrorCode::Success;
-            if ((ret = m_pSamples.Save(p_indexStreams[0])) != ErrorCode::Success) return ret;
-            if ((ret = m_pTrees.SaveTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            if ((ret = m_pTrees.SaveTrees(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if ((ret = m_pSamples.Save(p_indexStreams[1])) != ErrorCode::Success) return ret;
             if ((ret = m_pGraph.SaveGraph(p_indexStreams[2])) != ErrorCode::Success) return ret;
             if ((ret = m_deletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
             return ret;
@@ -217,7 +223,7 @@ namespace SPTAG
 
             omp_set_num_threads(m_iNumberOfThreads);
 
-            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, false);
+            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (char*)p_data, false);
             m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
@@ -329,21 +335,13 @@ namespace SPTAG
             if (newR == 0) return ErrorCode::EmptyIndex;
 
             ErrorCode ret = ErrorCode::Success;
-            if ((ret = m_pSamples.Refine(indices, p_indexStreams[0])) != ErrorCode::Success) return ret;
-
-            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             COMMON::KDTree newTrees(m_pTrees);
-            newTrees.BuildTrees<T>(m_pSamples, omp_get_num_threads(), &indices);
-#pragma omp parallel for
-            for (SizeType i = 0; i < newTrees.size(); i++) {
-                if (newTrees[i].left < 0)
-                    newTrees[i].left = -reverseIndices[-newTrees[i].left - 1] - 1;
-                if (newTrees[i].right < 0)
-                    newTrees[i].right = -reverseIndices[-newTrees[i].right - 1] - 1;
-            }
-            if ((ret = newTrees.SaveTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
+            newTrees.BuildTrees<T>(m_pSamples, omp_get_num_threads(), &indices, &reverseIndices);
+            if ((ret = newTrees.SaveTrees(p_indexStreams[0])) != ErrorCode::Success) return ret;
+            if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
+            if ((ret = m_pSamples.Refine(indices, p_indexStreams[1])) != ErrorCode::Success) return ret;
             if (p_abort != nullptr && p_abort->ShouldAbort()) return ErrorCode::ExternalAbort;
 
             if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr)) != ErrorCode::Success) return ret;
@@ -410,7 +408,7 @@ namespace SPTAG
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
-                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
+                if (m_pSamples.AddBatch(p_vectorNum, (const T*)p_data) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");

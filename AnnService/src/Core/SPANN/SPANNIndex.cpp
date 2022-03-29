@@ -409,7 +409,7 @@ namespace SPTAG
             std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized())
                 vectorset->Normalize(m_options.m_iSelectHeadNumberOfThreads);
-            COMMON::Dataset<T> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (T*)vectorset->GetData());
+            COMMON::Dataset<T> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (char*)vectorset->GetData());
             
             auto t1 = std::chrono::high_resolution_clock::now();
             SelectHeadAdjustOptions(data.R());

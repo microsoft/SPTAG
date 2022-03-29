@@ -676,6 +676,8 @@ break;
 
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 
+            COMMON::Dataset<SizeType>& GetData() { return m_pNeighborhoodGraph; }
+
         protected:
             // Graph structure
             SizeType m_iGraphSize;

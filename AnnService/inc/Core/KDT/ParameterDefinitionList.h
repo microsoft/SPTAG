@@ -48,5 +48,6 @@ DefineKDTParameter(m_iHashTableExp, int, 2L, "HashTableExponent")
 DefineKDTParameter(m_iDataBlockSize, int, 1024 * 1024, "DataBlockSize")
 DefineKDTParameter(m_iDataCapacity, int, MaxSize, "DataCapacity")
 DefineKDTParameter(m_iMetaRecordSize, int, 10, "MetaRecordSize")
+DefineKDTParameter(m_bOptDataset, bool, false, "UseOptDataset")
 
 #endif
