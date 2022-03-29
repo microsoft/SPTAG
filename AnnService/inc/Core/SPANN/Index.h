@@ -66,7 +66,7 @@ namespace SPTAG
             inline Options* GetOptions() { return &m_options; }
 
             inline SizeType GetNumSamples() const { return m_options.m_vectorSize; }
-            inline DimensionType GetFeatureDim() const { return m_options.m_dim; }
+            inline DimensionType GetFeatureDim() const { return m_index->GetFeatureDim(); }
         
             inline int GetCurrMaxCheck() const { return m_options.m_maxCheck; }
             inline int GetNumThreads() const { return m_options.m_iSSDNumberOfThreads; }
