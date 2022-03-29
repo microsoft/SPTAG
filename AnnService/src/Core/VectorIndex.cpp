@@ -368,6 +368,9 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize);
     if ((ret = SaveIndexConfig(fp)) != ErrorCode::Success) return ret;
     configSize = fp->TellP() - sizeof(configSize);
+    if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
+        ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(fp);
+    }
 
     if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
@@ -386,10 +389,6 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
             if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
 
             if (ErrorCode::Success == ret && m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(fp, fp);
-        }
-
-        if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
-            ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(fp);
         }
     }
     if (ErrorCode::Success == ret) IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
@@ -670,6 +669,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
 
     ErrorCode ret = ErrorCode::Success;
+    
     if (iniReader.DoesSectionExist("Quantizer"))
     {
         ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp);
@@ -702,6 +702,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
         }
     }
 
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -719,7 +720,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
 
     ErrorCode ret = ErrorCode::Success;
-    if (iniReader.DoesSectionExist("Quantizer"))
+    if (!iniReader.GetParameter<std::string>("Base", "QuantizerFilePath", std::string()).empty())
     {
         if ((ret = COMMON::IQuantizer::LoadIQuantizer(p_indexBlobs[4])) != ErrorCode::Success) return ret;
     }
