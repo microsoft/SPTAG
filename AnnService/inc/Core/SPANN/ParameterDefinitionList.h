@@ -105,7 +105,7 @@ DefineSSDParameter(m_queryCountLimit, int, (std::numeric_limits<int>::max)(), "Q
 DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler")
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum")
-DefineSSDParameter(m_searchPostingPageLimit, int, (std::numeric_limits<int>::max)() - 1, "SearchPostingPageLimit")
+DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit")
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
