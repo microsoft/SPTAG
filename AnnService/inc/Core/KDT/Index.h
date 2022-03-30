@@ -74,7 +74,7 @@ namespace SPTAG
             int m_iNumberOfThreads;
 
             DistCalcMethod m_iDistCalcMethod;
-            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
+            std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
  
             int m_iMaxCheck;
@@ -93,8 +93,8 @@ namespace SPTAG
 #undef DefineKDTParameter
 
                 m_pSamples.SetName("Vector");
-                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>(m_pQuantizer) * COMMON::Utils::GetBase<T>(m_pQuantizer) : 1;
             }
 
             ~Index() {}
@@ -108,6 +108,7 @@ namespace SPTAG
             inline DistCalcMethod GetDistCalcMethod() const { return m_iDistCalcMethod; }
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::KDT; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
+            void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
             
             inline float AccurateDistance(const void* pX, const void* pY) const {
                 if (m_iDistCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C());

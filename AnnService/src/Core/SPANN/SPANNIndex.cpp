@@ -32,6 +32,35 @@ namespace SPTAG
             return true;
         }
 
+        template <>
+        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (m_pQuantizer)
+            {
+                if (m_options.m_distCalcMethod == SPTAG::DistCalcMethod::L2)
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->L2Distance(pX, pY); });
+                }
+                else
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->CosineDistance(pX, pY); });
+                }
+            }
+            m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) * COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) : 1;
+        }
+
+        template <typename T>
+        void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (quantizer)
+            {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+            }
+            
+        }
+
         template <typename T>
         ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
         {

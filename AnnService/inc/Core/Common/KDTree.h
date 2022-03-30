@@ -211,7 +211,7 @@ break;
             }
 
             template <typename T>
-            void InitSearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+            void InitSearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
                     KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
@@ -219,7 +219,7 @@ break;
             }
 
             template <typename T>
-            void SearchTrees(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
+            void SearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
@@ -231,7 +231,7 @@ break;
         private:
 
             template <typename T>
-            void KDTSearch(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T>& p_query,
+            void KDTSearch(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T>& p_query,
                 COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
             {
                 if (m_pQuantizer)
@@ -256,7 +256,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             }
 
             template <typename T, typename Q>
-            void KDTSearchCore(const Dataset<T>& p_data, float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length), COMMON::QueryResultSet<T> &p_query,
+            void KDTSearchCore(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query,
                            COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {

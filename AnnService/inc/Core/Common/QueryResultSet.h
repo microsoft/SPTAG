@@ -30,7 +30,7 @@ template<typename T>
 class QueryResultSet : public QueryResult
 {
 public:
-    QueryResultSet(const T* _target, int _K) : QueryResult(_target, _K, false)
+    QueryResultSet(const T* _target, int _K, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer) : QueryResult(_target, _K, false, quantizer)
     {
     }
 
@@ -47,7 +47,7 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+            m_pQuantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
         }
     }
 
@@ -56,14 +56,14 @@ public:
         return reinterpret_cast<const T*>(m_target);
     }
 
-    T* GetQuantizedTarget(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+    T* GetQuantizedTarget()
     {
         if (quantizer)
         {
             if (!m_quantizedTarget)
             {
                 m_quantizedTarget = _mm_malloc(quantizer->QuantizeSize(), ALIGN_SPTAG);
-                quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+                m_pQuantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
             }
             return reinterpret_cast<T*>(m_quantizedTarget);
         }

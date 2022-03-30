@@ -105,6 +105,15 @@ public:
 
     virtual void SetQuantizerFileName(std::string p_QuantizerFileName) { m_sQuantizerFile = p_QuantizerFileName; }
 
+    virtual void SetQuantizerADC(bool enableADC) {
+        if (m_pQuantizer) m_pQuantizer->SetEnableADC(enableADC);
+    }
+
+    virtual void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+    {
+        m_pQuantizer = quantizer;
+    }
+
     virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
@@ -158,12 +167,12 @@ protected:
     std::string m_sQuantizerFile = "quantizer.bin";
     std::shared_ptr<MetadataSet> m_pMetadata;
     std::shared_ptr<void> m_pMetaToVec;
-    std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer = nullptr;
 
 public:
     int m_iDataBlockSize;
     int m_iDataCapacity;
     int m_iMetaRecordSize;
+    std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer = nullptr;
 };
 
 

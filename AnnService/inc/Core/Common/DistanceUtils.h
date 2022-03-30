@@ -72,7 +72,7 @@ namespace SPTAG
                     c1 = ((float)(*pX++) * (float)(*pY++)); diff += c1;
                 }
                 while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
-                int base = Utils::GetBase<T>();
+                int base = Utils::GetBase<T>(nullptr);
                 return base * base - diff;
             }
 

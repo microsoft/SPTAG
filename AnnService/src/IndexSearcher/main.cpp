@@ -296,10 +296,7 @@ int main(int argc, char** argv)
         LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
-    if (SPTAG::COMMON::DistanceUtils::Quantizer)
-    {
-        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
-    }
+    vecIndex->SetQuantizerADC(options->m_enableADC);
 
     Helper::IniReader iniReader;
     for (int i = 1; i < argc; i++)

@@ -49,14 +49,14 @@ namespace SPTAG
 
             Options m_options;
 
-            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
+            std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
 
         public:
             Index()
             {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod);
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>(m_pQuantizer) * COMMON::Utils::GetBase<T>(m_pQuantizer) : 1;
             }
 
             ~Index() {}
@@ -73,6 +73,8 @@ namespace SPTAG
             inline DistCalcMethod GetDistCalcMethod() const { return m_options.m_distCalcMethod; }
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::SPANN; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
+
+            void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
             
             inline float AccurateDistance(const void* pX, const void* pY) const { 
                 if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);

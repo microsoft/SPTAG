@@ -26,6 +26,34 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template <>
+        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (m_pQuantizer)
+            {
+                if (m_iDistCalcMethod == SPTAG::DistCalcMethod::L2)
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->L2Distance(pX, pY); });
+                }
+                else
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->CosineDistance(pX, pY); });
+                }
+            }
+            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) * COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) : 1;
+        }
+
+        template <typename T>
+        void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (quantizer)
+            {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+            }
+        }
+
         template <typename T>
         ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
         {
@@ -196,7 +224,7 @@ namespace SPTAG
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
-                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(m_pQuantizer), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
                 if (p_space.m_Results.insert(distance2leaf)) { \
                     p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \

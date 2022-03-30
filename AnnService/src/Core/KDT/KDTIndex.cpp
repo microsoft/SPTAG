@@ -26,6 +26,34 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template <>
+        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (m_pQuantizer)
+            {
+                if (m_iDistCalcMethod == SPTAG::DistCalcMethod::L2)
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->L2Distance(pX, pY); });
+                }
+                else
+                {
+                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->CosineDistance(pX, pY); });
+                }
+            }
+            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) * COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) : 1;
+        }
+
+        template <typename T>
+        void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            if (quantizer)
+            {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+            }
+        }
+
         template <typename T>
         ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
         {
@@ -118,7 +146,7 @@ namespace SPTAG
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
-                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(m_pQuantizer), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
                 p_space.m_iNumberOfCheckedLeaves++; \
                 p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
@@ -222,7 +250,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>();
+                int base = COMMON::Utils::GetBase<T>(m_pQuantizer);
 #pragma omp parallel for
                 for (SizeType i = 0; i < GetNumSamples(); i++) {
                     COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
@@ -439,7 +467,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>();
+                int base = COMMON::Utils::GetBase<T>(m_pQuantizer);
                 for (SizeType i = begin; i < end; i++) {
                     COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                 }
@@ -488,7 +516,7 @@ namespace SPTAG
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>(m_pQuantizer) * COMMON::Utils::GetBase<T>(m_pQuantizer) : 1;
             }
             return ErrorCode::Success;
         }
