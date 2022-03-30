@@ -519,7 +519,7 @@ VectorIndex::LoadQuantizer(std::string p_quantizerFile)
         LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
         return ErrorCode::FailedOpenFile;
     }
-    m_pQuantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+    SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr));
     if (!m_pQuantizer)
     {
         LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");

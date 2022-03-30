@@ -109,10 +109,7 @@ public:
         if (m_pQuantizer) m_pQuantizer->SetEnableADC(enableADC);
     }
 
-    virtual void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
-    {
-        m_pQuantizer = quantizer;
-    }
+    virtual void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer) = 0;
 
     virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 

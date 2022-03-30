@@ -81,13 +81,14 @@ namespace SPTAG {
 				}
 			}
 
-			if (!QuantizerFilePath.empty() && VectorIndex::LoadQuantizer(QuantizerFilePath) != ErrorCode::Success)
-			{
-				exit(1);
-			}
+
 			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", QuantizerFilePath.c_str());
 
 			std::shared_ptr<VectorIndex> index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, valueType);
+			if (!QuantizerFilePath.empty() && index->LoadQuantizer(QuantizerFilePath) != ErrorCode::Success)
+			{
+				exit(1);
+			}
 			if (index == nullptr) {
 				LOG(Helper::LogLevel::LL_Error, "Cannot create Index with ValueType %s!\n", (*config_map)[SEC_BASE]["ValueType"].c_str());
 				return -1;
@@ -123,10 +124,10 @@ namespace SPTAG {
 			{
 				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
 				SizeType dim = opts->m_dim;
-				if (COMMON::DistanceUtils::Quantizer)
+				if (index->m_pQuantizer)
 				{
 					valueType = VectorValueType::UInt8;
-					dim = COMMON::DistanceUtils::Quantizer->QuantizeSize();
+					dim = index->m_pQuantizer->GetNumSubvectors();
 				}
 				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, opts->m_vectorType, opts->m_vectorDelimiter));
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
@@ -144,14 +145,14 @@ namespace SPTAG {
 				}
 				auto vectorSet = vectorReader->GetVectorSet();
 				auto querySet = queryReader->GetVectorSet();
-				if (distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(opts->m_iSSDNumberOfThreads);
+				if (distCalcMethod == DistCalcMethod::Cosine && !index->m_pQuantizer) vectorSet->Normalize(opts->m_iSSDNumberOfThreads);
 
 				omp_set_num_threads(opts->m_iSSDNumberOfThreads);
 
 #define DefineVectorValueType(Name, Type) \
 	if (opts->m_valueType == VectorValueType::Name) { \
 		COMMON::TruthSet::GenerateTruth<Type>(querySet, vectorSet, opts->m_truthPath, \
-			distCalcMethod, opts->m_resultNum, opts->m_truthType); \
+			distCalcMethod, opts->m_resultNum, opts->m_truthType, index->m_pQuantizer); \
 	} \
 
 #include "inc/Core/DefinitionList.h"

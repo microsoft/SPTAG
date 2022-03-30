@@ -478,7 +478,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
             bool m_bOldVersion;
-            const std::shared_ptr<SPTAG::COMMON::IQuantizer>& m_pQuantizer;
+            std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
         };
     }
 }
