@@ -273,7 +273,7 @@ namespace SPTAG
                         }
                     }
                 }
-                if (reconstructVector) _mm_free(reconstructVector);
+                if (args.m_pQuantizer) _mm_free(reconstructVector);
                 currDist += idist;
             }
 

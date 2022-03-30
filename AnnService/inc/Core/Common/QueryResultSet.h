@@ -55,16 +55,19 @@ public:
     inline void SetTarget(const T* p_target, const std::shared_ptr<IQuantizer>& quantizer)
     {
         m_target = p_target;
-        if (m_quantizedTarget && (m_quantizedSize == quantizer->QuantizeSize()))
+        if (quantizer)
         {
-            quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
-        } 
-        else
-        {
-            if (m_quantizedTarget) _mm_free(m_quantizedTarget);
-            m_quantizedSize = quantizer->QuantizeSize();
-            m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
-            quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
+            if (m_quantizedTarget && (m_quantizedSize == quantizer->QuantizeSize()))
+            {
+                quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
+            }
+            else
+            {
+                if (m_quantizedTarget) _mm_free(m_quantizedTarget);
+                m_quantizedSize = quantizer->QuantizeSize();
+                m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
+                quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
+            }
         }
     }
 
