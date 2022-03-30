@@ -39,6 +39,7 @@ int main(int argc, char* argv[])
     }
     case QuantizerType::PQQuantizer:
     {
+        std::shared_ptr<COMMON::IQuantizer> quantizer;
         auto fp_load = SPTAG::f_createIO();
         std::shared_ptr<VectorSet> quantized_vectors;
         auto fullvectors = vectorReader->GetVectorSet();
@@ -57,7 +58,7 @@ int main(int argc, char* argv[])
             {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        COMMON::DistanceUtils::Quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, fullvectors, quantized_vectors))); \
+                        quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, fullvectors, quantized_vectors))); \
                         break;
 
 #include "inc/Core/DefinitionList.h"
@@ -67,7 +68,7 @@ int main(int argc, char* argv[])
             auto ptr = SPTAG::f_createIO();
             if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
             {
-                if (ErrorCode::Success != COMMON::DistanceUtils::Quantizer->SaveQuantizer(ptr))
+                if (ErrorCode::Success != quantizer->SaveQuantizer(ptr))
                 {
                     LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
                     exit(1);
@@ -81,17 +82,18 @@ int main(int argc, char* argv[])
         }
         else
         {
-            if (ErrorCode::Success != SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load))
+            quantizer->LoadIQuantizer(fp_load);
+            if (!quantizer)
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
                 exit(1);
             }
-            COMMON::DistanceUtils::Quantizer->SetEnableADC(false);
+            quantizer->SetEnableADC(false);
 
 #pragma omp parallel for
             for (int i = 0; i < fullvectors->Count(); i++)
             {
-                COMMON::DistanceUtils::Quantizer->QuantizeVector(fullvectors->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
+                quantizer->QuantizeVector(fullvectors->GetVector(i), (uint8_t *)quantized_vectors->GetVector(i));
             }
             
             

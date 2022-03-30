@@ -68,7 +68,7 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
 #pragma omp parallel for
     for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
         LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
-        auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2);
+        auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2, nullptr);
         auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 
         for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
@@ -117,18 +117,18 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     return codebooks;
 }
 
-ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskPriorityIO> fp)
+ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskPriorityIO> fp, const std::shared_ptr<COMMON::IQuantizer>& quantizer)
 {
 	SizeType cnt = vectors->Count();
-	DimensionType dim = COMMON::DistanceUtils::Quantizer->GetNumSubvectors();
-	SizeType qvec_size = COMMON::DistanceUtils::Quantizer->QuantizeSize();
+	DimensionType dim = quantizer->GetNumSubvectors();
+	SizeType qvec_size = quantizer->QuantizeSize();
 	IOBINARY(fp, WriteBinary, sizeof(SizeType), (char*)&cnt);
 	IOBINARY(fp, WriteBinary, sizeof(DimensionType), (char*)&dim);
 
 	uint8_t* qvec = (uint8_t*) _mm_malloc(qvec_size, ALIGN_SPTAG);
 	for (int i = 0; i < cnt; i++)
 	{
-		COMMON::DistanceUtils::Quantizer->QuantizeVector(vectors->GetVector(i), qvec);
+		quantizer->QuantizeVector(vectors->GetVector(i), qvec);
 		IOBINARY(fp, WriteBinary, qvec_size, (char*)qvec);
 	}
 	
