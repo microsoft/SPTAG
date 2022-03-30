@@ -113,7 +113,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                 exit(1);
             }
             COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
-                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT);
+                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT, index.m_pQuantizer);
         }
 
         ftruth = SPTAG::f_createIO();

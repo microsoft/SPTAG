@@ -46,13 +46,17 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
-    if (!options->m_quantizerFile.empty() && VectorIndex::LoadQuantizer(options->m_quantizerFile) != ErrorCode::Success)
-    {
-        exit(1);
-    }
     LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
+    if (!options->m_quantizerFile.empty())
+    {
+        indexBuilder->LoadQuantizer(options->m_quantizerFile);
+        if (!indexBuilder->m_pQuantizer)
+        {
+            exit(1);
+        }
+    }
 
     Helper::IniReader iniReader;
     if (!options->m_builderConfigFile.empty() && iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
