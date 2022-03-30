@@ -897,7 +897,12 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     {
                         reconstructed_vector = _mm_malloc(m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
                         m_pQuantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
-                        resultSet.SetTarget(reconstructed_vector);
+                        switch (m_pQuantizer->GetReconstructType()) {
+#define DefineVectorValueType(Name, Type) \
+                    case VectorValueType::Name: \
+                        (*((COMMON::QueryResultSet<Type>*)&resultSet)).SetTarget(reconstructed_vector, m_pQuantizer); \
+                        break;
+                        }
                     }
                     else
                     {

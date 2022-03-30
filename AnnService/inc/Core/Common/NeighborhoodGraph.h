@@ -572,7 +572,7 @@ break;
                 if (index->m_pQuantizer) {
                     rec_query = _mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
                     index->m_pQuantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
-                    query.SetTarget((T*)rec_query);
+                    query.SetTarget((T*)rec_query, index->m_pQuantizer);
                 }
                 index->RefineSearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
