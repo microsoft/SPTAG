@@ -159,10 +159,9 @@ namespace SPTAG
             template<typename T>
             static void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
                 const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType) {
-                if (querySet->Dimension() != vectorSet->Dimension() && !SPTAG::COMMON::DistanceUtils::Quantizer)
+                if (querySet->Dimension() != vectorSet->Dimension())
                 {
                     LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
-                    exit(-1);
                 }
 
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
@@ -290,12 +289,12 @@ namespace SPTAG
                 COMMON::QueryResultSet<void> sampleANN(query, K);
                 COMMON::QueryResultSet<void> sampleTruth(query, K);
                 void* reconstructVector = nullptr;
-                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                if (index->m_pQuantizer)
                 {
-                    reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
-                    SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
-                    sampleANN.SetTarget(reconstructVector);
-                    sampleTruth.SetTarget(reconstructVector);
+                    reconstructVector = _mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    index->m_pQuantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
+                    sampleANN.SetTarget(reconstructVector, index->m_pQuantizer);
+                    sampleTruth.SetTarget(reconstructVector, index->m_pQuantizer);
                 }
 
                 index->SearchIndex(sampleANN);

@@ -30,7 +30,7 @@ template<typename T>
 class QueryResultSet : public QueryResult
 {
 public:
-    QueryResultSet(const T* _target, int _K, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer) : QueryResult(_target, _K, false, quantizer)
+    QueryResultSet(const T* _target, int _K) : QueryResult(_target, _K, false)
     {
     }
 
@@ -47,7 +47,24 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            m_pQuantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
+            _mm_free(m_quantizedTarget);
+        }
+        m_quantizedTarget = nullptr;
+    }
+
+    inline void SetTarget(const T* p_target, const std::shared_ptr<IQuantizer>& quantizer)
+    {
+        m_target = p_target;
+        if (m_quantizedTarget && (m_quantizedSize == quantizer->QuantizeSize()))
+        {
+            quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
+        } 
+        else
+        {
+            if (m_quantizedTarget) _mm_free(m_quantizedTarget);
+            m_quantizedSize = quantizer->QuantizeSize();
+            m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
+            quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
         }
     }
 
@@ -58,13 +75,8 @@ public:
 
     T* GetQuantizedTarget()
     {
-        if (quantizer)
+        if (m_quantizedTarget)
         {
-            if (!m_quantizedTarget)
-            {
-                m_quantizedTarget = _mm_malloc(quantizer->QuantizeSize(), ALIGN_SPTAG);
-                m_pQuantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
-            }
             return reinterpret_cast<T*>(m_quantizedTarget);
         }
         else

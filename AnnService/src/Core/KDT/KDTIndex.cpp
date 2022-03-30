@@ -32,16 +32,15 @@ namespace SPTAG
             m_pQuantizer = quantizer;
             if (m_pQuantizer)
             {
-                if (m_iDistCalcMethod == SPTAG::DistCalcMethod::L2)
-                {
-                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->L2Distance(pX, pY); });
-                }
-                else
-                {
-                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->CosineDistance(pX, pY); });
-                }
+                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
             }
-            m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) * COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) : 1;
+            else
+            {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
+            }
+
         }
 
         template <typename T>
@@ -146,7 +145,7 @@ namespace SPTAG
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
-                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(m_pQuantizer), (m_pSamples)[nn_index], GetFeatureDim()); \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
                 p_space.m_iNumberOfCheckedLeaves++; \
                 p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
@@ -250,7 +249,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>(m_pQuantizer);
+                int base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
                 for (SizeType i = 0; i < GetNumSamples(); i++) {
                     COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
@@ -467,7 +466,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>(m_pQuantizer);
+                int base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
                 for (SizeType i = begin; i < end; i++) {
                     COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                 }
@@ -516,7 +515,8 @@ namespace SPTAG
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>(m_pQuantizer) * COMMON::Utils::GetBase<T>(m_pQuantizer) : 1;
+                auto base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? base * base : 1;
             }
             return ErrorCode::Success;
         }

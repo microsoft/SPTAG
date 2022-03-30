@@ -83,7 +83,7 @@ namespace SPTAG
         for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
             int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(p_index->m_pQuantizer), vectorInfo + sizeof(int)); \
+            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
 
@@ -537,7 +537,6 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
                     exit(1);
                 }
-                if (SPTAG::COMMON::DistanceUtils::Quantizer) m_vectorInfoSize = SPTAG::COMMON::DistanceUtils::Quantizer->GetNumSubvectors();
 
                 m_listInfos.resize(m_listCount);
 

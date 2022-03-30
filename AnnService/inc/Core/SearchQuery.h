@@ -27,7 +27,7 @@ public:
     }
 
 
-    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta) : m_quantizedTarget(nullptr)
+    QueryResult(const void* p_target, int p_resultNum, bool p_withMeta) : m_quantizedTarget(nullptr), m_quantizedSize(0)
     {
         Init(p_target, p_resultNum, p_withMeta);
     }
@@ -37,7 +37,8 @@ public:
         : m_target(p_target),
           m_resultNum(p_resultNum),
           m_withMeta(p_withMeta),
-          m_quantizedTarget(nullptr)
+          m_quantizedTarget(nullptr),
+          m_quantizedSize(0)
     {
         m_results.Set(p_results, p_resultNum, false);
     }
@@ -49,6 +50,12 @@ public:
         if (m_resultNum > 0)
         {
             std::copy(p_other.m_results.Data(), p_other.m_results.Data() + m_resultNum, m_results.Data());
+        }
+        if (p_other.m_quantizedTarget)
+        {
+            m_quantizedSize = p_other.m_quantizedSize;
+            m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
+            std::copy(reinterpret_cast<std::uint8_t*>(p_other.m_quantizedTarget), reinterpret_cast<std::uint8_t*>(p_other.m_quantizedTarget) + m_quantizedSize, reinterpret_cast<std::uint8_t*>(m_quantizedTarget));
         }
     }
 
@@ -203,6 +210,8 @@ protected:
     const void* m_target;
 
     void* m_quantizedTarget;
+
+    SizeType m_quantizedSize;
 
     int m_resultNum;
 

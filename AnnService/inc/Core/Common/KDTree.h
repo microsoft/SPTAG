@@ -271,7 +271,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
 
                     ++p_space.m_iNumberOfTreeCheckedLeaves;
                     ++p_space.m_iNumberOfCheckedLeaves;
-                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetQuantizedTarget(m_pQuantizer), data, p_data.C())));
+                    p_space.m_NGQueue.insert(NodeDistPair(index, fComputeDistance(p_query.GetQuantizedTarget(), data, p_data.C())));
                     return;
                 }
 
@@ -478,7 +478,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             std::unique_ptr<std::shared_timed_mutex> m_lock;
             int m_iTreeNumber, m_numTopDimensionKDTSplit, m_iSamples;
             bool m_bOldVersion;
-            std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer;
+            const std::shared_ptr<SPTAG::COMMON::IQuantizer>& m_pQuantizer;
         };
     }
 }

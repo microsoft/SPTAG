@@ -38,16 +38,14 @@ namespace SPTAG
             m_pQuantizer = quantizer;
             if (m_pQuantizer)
             {
-                if (m_options.m_distCalcMethod == SPTAG::DistCalcMethod::L2)
-                {
-                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->L2Distance(pX, pY); });
-                }
-                else
-                {
-                    m_fComputeDistance = ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return m_pQuantizer->CosineDistance(pX, pY); });
-                }
+                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
             }
-            m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) * COMMON::Utils::GetBase<std::uint8_t>(m_pQuantizer) : 1;
+            else
+            {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
+            }  
         }
 
         template <typename T>
