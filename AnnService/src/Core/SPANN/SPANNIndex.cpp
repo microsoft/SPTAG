@@ -46,6 +46,10 @@ namespace SPTAG
                 m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
             }  
+            if (m_index)
+            {
+                m_index->SetQuantizer(quantizer);
+            }
         }
 
         template <typename T>
@@ -56,7 +60,10 @@ namespace SPTAG
             {
                 LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
             }
-            
+            if (m_index)
+            {
+                m_index->SetQuantizer(quantizer);
+            }
         }
 
         template <typename T>
@@ -88,7 +95,15 @@ namespace SPTAG
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
-            m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            if (m_pQuantizer)
+            {
+                m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+            }
+            else
+            {
+                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            }
+            
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset((std::uint64_t*)(p_indexBlobs.back().Data()), [=](std::uint64_t* ptr) {});
@@ -111,7 +126,15 @@ namespace SPTAG
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
-            m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            if (m_pQuantizer)
+            {
+                m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+            }
+            else
+            {
+                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+            }
+
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());

@@ -196,7 +196,7 @@ namespace SPTAG {
                     std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
-                        warmupResults[i].SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)));
+                        (*((COMMON::QueryResultSet<ValueType>*)&warmupResults[i])).SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)), p_index->m_pQuantizer);
                         warmupResults[i].Reset();
                     }
 
@@ -220,7 +220,7 @@ namespace SPTAG {
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
-                    results[i].SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)));
+                    (*((COMMON::QueryResultSet<ValueType>*)&results[i])).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
                     results[i].Reset();
                 }
 

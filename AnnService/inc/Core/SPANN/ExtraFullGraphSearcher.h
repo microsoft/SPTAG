@@ -318,7 +318,7 @@ namespace SPTAG
                         SizeType start = i * batchSize;
                         SizeType end = min(start + batchSize, fullCount);
                         auto fullVectors = p_reader->GetVectorSet(start, end);
-                        if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
+                        if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
 
                         if (p_opt.m_batches > 1) {
                             selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount);
@@ -456,7 +456,7 @@ namespace SPTAG
                 if (p_opt.m_ssdIndexFileNum > 1) selections.SaveBatch();
 
                 auto fullVectors = p_reader->GetVectorSet();
-                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
+                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
 
                 for (int i = 0; i < p_opt.m_ssdIndexFileNum; i++) {
                     size_t curPostingListOffSet = i * postingFileSize;
