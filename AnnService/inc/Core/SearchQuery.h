@@ -112,6 +112,7 @@ public:
             _mm_free(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
+        m_quantizedSize = 0;
     }
 
 

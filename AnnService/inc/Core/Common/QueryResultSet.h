@@ -50,6 +50,7 @@ public:
             _mm_free(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
+        m_quantizedSize = 0;
     }
 
     inline void SetTarget(const T* p_target, const std::shared_ptr<IQuantizer>& quantizer)
@@ -68,6 +69,15 @@ public:
                 m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
                 quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
             }
+        }
+        else
+        {
+            if (m_quantizedTarget)
+            {
+                _mm_free(m_quantizedTarget);
+            }
+            m_quantizedTarget = nullptr;
+            m_quantizedSize = 0;
         }
     }
 
