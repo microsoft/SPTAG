@@ -639,7 +639,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         metaStart += 2;
     }
     if (iniReader.DoesSectionExist("Quantizer")) {
-        p_vectorIndex->m_pQuantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]);
+        p_vectorIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]));
         if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
     }
     p_vectorIndex->m_bReady = true;

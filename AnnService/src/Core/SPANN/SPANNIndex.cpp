@@ -633,6 +633,7 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
                     return ErrorCode::Fail;
                 }
+                m_index->SetQuantizer(m_pQuantizer);
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
                 m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
