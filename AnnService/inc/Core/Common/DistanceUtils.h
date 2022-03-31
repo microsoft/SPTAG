@@ -10,7 +10,6 @@
 
 #include "CommonUtils.h"
 #include "InstructionUtils.h"
-#include "IQuantizer.h"
 
 namespace SPTAG
 {

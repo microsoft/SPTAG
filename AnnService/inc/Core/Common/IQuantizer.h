@@ -7,6 +7,7 @@
 #include "../Common.h"
 #include <cstdint>
 #include "../CommonDataStructure.h"
+#include "DistanceUtils.h"
 
 namespace SPTAG
 {
