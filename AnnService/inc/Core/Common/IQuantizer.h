@@ -21,23 +21,7 @@ namespace SPTAG
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) = 0;
 
             template <typename T>
-            std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
-            {
-                return SPTAG::COMMON::DistanceCalcSelector<T>(p_method);
-            }
-
-            template <>
-            std::function<float(const std::uint8_t*, const std::uint8_t*, SizeType)> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
-            {
-                if (p_method == SPTAG::DistCalcMethod::L2)
-                {
-                    return ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return L2Distance(pX, pY); });
-                }
-                else
-                {
-                    return ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return CosineDistance(pX, pY); });
-                }
-            }
+            std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) = 0;
 
@@ -73,6 +57,25 @@ namespace SPTAG
 
             virtual int GetBase() = 0;
         };
+
+        template <>
+        std::function<float(const std::uint8_t*, const std::uint8_t*, SizeType)> IQuantizer::DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
+        {
+            if (p_method == SPTAG::DistCalcMethod::L2)
+            {
+                return ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return L2Distance(pX, pY); });
+            }
+            else
+            {
+                return ([this](const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length) {return CosineDistance(pX, pY); });
+            }
+        }
+
+        template <typename T>
+        std::function<float(const T*, const T*, SizeType)> IQuantizer::DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
+        {
+            return SPTAG::COMMON::DistanceCalcSelector<T>(p_method);
+        }
     }
 }
 
