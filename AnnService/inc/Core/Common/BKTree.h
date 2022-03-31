@@ -52,7 +52,7 @@ namespace SPTAG
             std::function<float(const T*, const T*, DimensionType)> fComputeDistance;
             const std::shared_ptr<IQuantizer>& m_pQuantizer;
 
-            KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod, const std::shared_ptr<IQuantizer>& quantizer) : _K(k), _DK(k), _D(dim), _RD(dim), _T(threadnum), _M(distMethod), m_pQuantizer(quantizer){
+            KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod, const std::shared_ptr<IQuantizer>& quantizer = nullptr) : _K(k), _DK(k), _D(dim), _RD(dim), _T(threadnum), _M(distMethod), m_pQuantizer(quantizer){
                 if (m_pQuantizer) {
                     _RD = m_pQuantizer->ReconstructDim();
                     fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(distMethod);
@@ -414,14 +414,14 @@ namespace SPTAG
         template <typename T>
         float DynamicFactorSelect(const Dataset<T> & data,
             std::vector<SizeType> & indices, const SizeType first, const SizeType last,
-            KmeansArgs<T> & args, const std::shared_ptr<IQuantizer>& quantizer, int samples = 1000) {
+            KmeansArgs<T> & args, int samples = 1000) {
 
             float bestLambdaFactor = 100.0f, bestCountStd = (std::numeric_limits<float>::max)();
             for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
                 float CountStd;
-                if (quantizer)
+                if (args.m_pQuantizer)
                 {
-                    switch (quantizer->GetReconstructType())
+                    switch (args.m_pQuantizer->GetReconstructType())
                     {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
@@ -558,7 +558,7 @@ break;
                 }
                 KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod, m_pQuantizer);
 
-                if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_pQuantizer, m_iSamples);
+                if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)

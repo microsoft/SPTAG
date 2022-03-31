@@ -117,5 +117,10 @@ namespace SPTAG
         {
             return SPTAG::COMMON::DistanceCalcSelector<T>(p_method);
         }
+
+#define DefineVectorValueType(Name, Type) \
+template std::function<float(const Type*, const Type*, SizeType)> IQuantizer::DistanceCalcSelector<Type>(SPTAG::DistCalcMethod p_method) const;
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
     }
 }
