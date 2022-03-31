@@ -19,6 +19,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
+#include "../Common/IQuantizer.h"
 
 #include <functional>
 #include <shared_mutex>

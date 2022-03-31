@@ -19,6 +19,7 @@
 #include "inc/Helper/ThreadPool.h"
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/VectorSetReader.h"
+#include "../Common/IQuantizer.h"
 
 #include "IExtraSearcher.h"
 #include "Options.h"

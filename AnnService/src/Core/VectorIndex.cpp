@@ -900,8 +900,12 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                         switch (m_pQuantizer->GetReconstructType()) {
 #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
-                        (*((COMMON::QueryResultSet<Type>*)&resultSet)).SetTarget(reconstructed_vector, m_pQuantizer); \
+                        (*((COMMON::QueryResultSet<Type>*)&resultSet)).SetTarget(reinterpret_cast<Type*>(reconstructed_vector), m_pQuantizer); \
                         break;
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                    default:
+                        LOG(Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s", Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
                         }
                     }
                     else
