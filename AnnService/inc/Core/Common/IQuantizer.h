@@ -16,22 +16,22 @@ namespace SPTAG
         class IQuantizer
         {
         public:
-            virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) = 0;
+            virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
-            virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) = 0;
+            virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
             template <typename T>
-            std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
+            std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const;
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) = 0;
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const = 0;
 
-            virtual SizeType QuantizeSize() = 0;
+            virtual SizeType QuantizeSize() const = 0;
 
-            virtual void ReconstructVector(const std::uint8_t* qvec, void* vecout) = 0;
+            virtual void ReconstructVector(const std::uint8_t* qvec, void* vecout) const = 0;
 
-            virtual SizeType ReconstructSize() = 0;
+            virtual SizeType ReconstructSize() const = 0;
 
-            virtual DimensionType ReconstructDim() = 0;
+            virtual DimensionType ReconstructDim() const = 0;
 
             virtual std::uint64_t BufferSize() const = 0;
 
@@ -45,17 +45,17 @@ namespace SPTAG
 
             static std::shared_ptr<IQuantizer> LoadIQuantizer(SPTAG::ByteArray bytes);
 
-            virtual bool GetEnableADC() = 0;
+            virtual bool GetEnableADC() const = 0;
 
             virtual void SetEnableADC(bool enableADC) = 0;
 
-            virtual QuantizerType GetQuantizerType() = 0;
+            virtual QuantizerType GetQuantizerType() const = 0;
 
-            virtual VectorValueType GetReconstructType() = 0;
+            virtual VectorValueType GetReconstructType() const = 0;
 
             virtual DimensionType GetNumSubvectors() const = 0;
 
-            virtual int GetBase() = 0;
+            virtual int GetBase() const = 0;
         };
     }
 }

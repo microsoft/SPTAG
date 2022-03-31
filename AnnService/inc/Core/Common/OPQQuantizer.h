@@ -20,9 +20,9 @@ namespace SPTAG
 
 			OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix);
 
-			virtual void QuantizeVector(const void* vec, std::uint8_t* vecout);
+			virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
 
-			void ReconstructVector(const std::uint8_t* qvec, void* vecout);
+			void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
 
 			virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const;
 
@@ -30,18 +30,19 @@ namespace SPTAG
 
 			virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
-			virtual SizeType ReconstructSize();
+			virtual SizeType ReconstructSize() const;
 
 			virtual std::uint64_t BufferSize() const;
 
-			virtual int GetBase();
+			virtual int GetBase() const;
 
 
-			QuantizerType GetQuantizerType() {
+			QuantizerType GetQuantizerType() const 
+			{
 				return QuantizerType::OPQQuantizer;
 			}
 
-			VectorValueType GetReconstructType()
+			VectorValueType GetReconstructType() const
 			{
 				return GetEnumValueType<T>();
 			}
@@ -52,10 +53,10 @@ namespace SPTAG
 			using PQQuantizer<OPQMatrixType>::m_DimPerSubvector;
 			using PQQuantizer<OPQMatrixType>::m_KsPerSubvector;
 			using PQQuantizer<OPQMatrixType>::m_codebooks;
-			inline SizeType m_MatrixIndexCalc(SizeType i, SizeType j);
+			inline SizeType m_MatrixIndexCalc(SizeType i, SizeType j) const;
 
 			template <typename I, typename O>
-			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose = false);
+			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose = false) const;
 
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
 		};
@@ -71,7 +72,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout)
+		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
 		{
 			OPQMatrixType* mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec, true);
@@ -80,7 +81,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout)
+		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout) const
 		{
 			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
@@ -134,7 +135,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		SizeType OPQQuantizer<T>::ReconstructSize()
+		SizeType OPQQuantizer<T>::ReconstructSize() const
 		{
 			return sizeof(T) * ReconstructDim();
 		}
@@ -146,20 +147,20 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		int OPQQuantizer<T>::GetBase()
+		int OPQQuantizer<T>::GetBase() const
 		{
 			return COMMON::Utils::GetBase<T>();
 		}
 
 		template <typename T>
-		inline SizeType OPQQuantizer<T>::m_MatrixIndexCalc(SizeType i, SizeType j)
+		inline SizeType OPQQuantizer<T>::m_MatrixIndexCalc(SizeType i, SizeType j) const
 		{
 			return (i * m_NumSubvectors * m_DimPerSubvector) + j;
 		}
 
 		template <typename T>
 		template <typename I, typename O>
-		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose)
+		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose) const
 		{
 			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 			{

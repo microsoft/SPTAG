@@ -29,19 +29,19 @@ namespace SPTAG
 
             ~PQQuantizer();
 
-            virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY);
+            virtual float L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY);
+            virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout);
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
             
-            virtual SizeType QuantizeSize();
+            virtual SizeType QuantizeSize() const;
 
-            void ReconstructVector(const std::uint8_t* qvec, void* vecout);
+            void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
 
-            virtual SizeType ReconstructSize();
+            virtual SizeType ReconstructSize() const;
 
-            virtual DimensionType ReconstructDim();
+            virtual DimensionType ReconstructDim() const;
 
             virtual std::uint64_t BufferSize() const;
 
@@ -53,22 +53,22 @@ namespace SPTAG
 
             virtual DimensionType GetNumSubvectors() const;
 
-            virtual int GetBase();
+            virtual int GetBase() const;
 
             SizeType GetKsPerSubvector() const;
 
             DimensionType GetDimPerSubvector() const;
 
-            virtual bool GetEnableADC();
+            virtual bool GetEnableADC() const;
 
             virtual void SetEnableADC(bool enableADC);
 
-            VectorValueType GetReconstructType()
+            VectorValueType GetReconstructType() const
             {
                 return GetEnumValueType<T>();
             }
 
-            QuantizerType GetQuantizerType() {
+            QuantizerType GetQuantizerType() const {
                 return QuantizerType::PQQuantizer;
             }
 
@@ -79,7 +79,7 @@ namespace SPTAG
             SizeType m_BlockSize;
             bool m_EnableADC;
 
-            inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k);
+            inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const;
 
             std::unique_ptr<T[]> m_codebooks;
             std::unique_ptr<const float[]> m_CosineDistanceTables;
@@ -119,7 +119,7 @@ namespace SPTAG
         {}
 
         template <typename T>
-        float PQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY)
+        float PQQuantizer<T>::L2Distance(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
             float out = 0;
@@ -137,7 +137,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY)
+        float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
             float out = 0;
@@ -158,7 +158,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout)
+        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
         {
             if (GetEnableADC())
             {
@@ -202,7 +202,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        SizeType PQQuantizer<T>::QuantizeSize()
+        SizeType PQQuantizer<T>::QuantizeSize() const
         {
             if (GetEnableADC())
             {
@@ -215,7 +215,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        void PQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout)
+        void PQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout) const
         {
             for (int i = 0; i < m_NumSubvectors; i++) {
                 SizeType codebook_idx = (i * m_KsPerSubvector * m_DimPerSubvector) + (qvec[i] * m_DimPerSubvector);
@@ -227,13 +227,13 @@ namespace SPTAG
         }
 
         template <typename T>
-        SizeType PQQuantizer<T>::ReconstructSize()
+        SizeType PQQuantizer<T>::ReconstructSize() const
         {       
             return sizeof(T) * ReconstructDim();
         }
 
         template <typename T>
-        DimensionType PQQuantizer<T>::ReconstructDim()
+        DimensionType PQQuantizer<T>::ReconstructDim() const
         {
             return m_DimPerSubvector * m_NumSubvectors;
         }
@@ -338,7 +338,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        int PQQuantizer<T>::GetBase()
+        int PQQuantizer<T>::GetBase() const
         {
             return COMMON::Utils::GetBase<T>();
         }
@@ -362,7 +362,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        bool PQQuantizer<T>::GetEnableADC()
+        bool PQQuantizer<T>::GetEnableADC() const
         {
             return m_EnableADC;
         }
@@ -374,7 +374,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        inline SizeType PQQuantizer<T>::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) {
+        inline SizeType PQQuantizer<T>::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const {
             return m_BlockSize * i + j * m_KsPerSubvector + k;
         }
     }

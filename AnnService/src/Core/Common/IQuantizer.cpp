@@ -100,7 +100,7 @@ namespace SPTAG
         }
 
         template <>
-        std::function<float(const std::uint8_t*, const std::uint8_t*, SizeType)> IQuantizer::DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
+        std::function<float(const std::uint8_t*, const std::uint8_t*, SizeType)> IQuantizer::DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method) const
         {
             if (p_method == SPTAG::DistCalcMethod::L2)
             {
@@ -113,7 +113,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        std::function<float(const T*, const T*, SizeType)> IQuantizer::DistanceCalcSelector(SPTAG::DistCalcMethod p_method)
+        std::function<float(const T*, const T*, SizeType)> IQuantizer::DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const
         {
             return SPTAG::COMMON::DistanceCalcSelector<T>(p_method);
         }
