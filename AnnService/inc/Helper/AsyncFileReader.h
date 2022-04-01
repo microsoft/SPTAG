@@ -18,6 +18,7 @@
 #define ASYNC_READ 1
 
 #ifdef _MSC_VER
+#define BATCH_READ 1
 #include <tchar.h>
 #include <Windows.h>
 #else
@@ -144,7 +145,7 @@ namespace SPTAG
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4)
             {
-                m_fileHandle.Reset(::CreateFileA(filePath,
+                m_fileHandle.Reset(::CreateFile(filePath,
                     GENERIC_READ,
                     FILE_SHARE_READ,
                     NULL,
@@ -154,19 +155,22 @@ namespace SPTAG
 
                 if (!m_fileHandle.IsValid()) return false;
 
-                int iocpThreads = threadPoolSize;
+                m_diskSectorSize = static_cast<uint32_t>(GetSectorSize(filePath));
+                LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
 
+                PreAllocQueryContext();
+
+#ifndef BATCH_READ
+                int iocpThreads = threadPoolSize;
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
                 {
                     m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
                 }
-
-                m_diskSectorSize = static_cast<uint32_t>(GetSectorSize(filePath));
-                LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
-
-                PreAllocQueryContext();
                 return m_fileIocp.IsValid();
+#else
+                return true;
+#endif
             }
 
             virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
@@ -229,6 +233,55 @@ namespace SPTAG
                     return false;
                 }
                 return true;
+            }
+
+            virtual int BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount)
+            {
+                int ret = 0;
+                std::vector<ResourceType*> waitResources;
+                for (std::uint32_t i = 0; i < requestCount; i++) {
+                    AsyncReadRequest* readRequest = &(readRequests[i]);
+                    if (readRequest->m_readSize == 0) continue;
+
+                    ResourceType* resource = GetResource();
+                    DiskUtils::CallbackOverLapped& col = resource->m_col;
+                    memset(&col, 0, sizeof(col));
+                    col.Offset = (readRequest->m_offset & 0xffffffff);
+                    col.OffsetHigh = (readRequest->m_offset >> 32);
+                    col.m_data = (void*)readRequest;
+
+                    col.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+                    if (!::ReadFile(m_fileHandle.GetHandle(),
+                        readRequest->m_buffer,
+                        static_cast<DWORD>(readRequest->m_readSize),
+                        nullptr,
+                        &col) && GetLastError() != ERROR_IO_PENDING)
+                    {
+                        if (col.hEvent) CloseHandle(col.hEvent);
+                        ReturnResource(resource);
+                        LOG(Helper::LogLevel::LL_Error, "Cannot read request %d error:%u\n", i, GetLastError());
+                    }
+                    else {
+                        waitResources.push_back(resource);
+                    }
+                }
+
+                for (int i = 0; i < waitResources.size(); i++) {
+                    DWORD readbytes = 0;
+                    DiskUtils::CallbackOverLapped* col = &(waitResources[i]->m_col);
+                    AsyncReadRequest* readRequest = (AsyncReadRequest*)(col->m_data);
+
+                    if (!::GetOverlappedResult(m_fileHandle.GetHandle(), col, &readbytes, TRUE) || readbytes != readRequest->m_readSize) {
+                        LOG(Helper::LogLevel::LL_Error, "Cannot wait request %d readbytes:%llu expect:%llu error:%u\n", i, readbytes, readRequest->m_readSize, GetLastError());
+                    }
+                    else {
+                        readRequest->m_success = true;
+                        ret++;
+                    }
+                    if (col->hEvent) CloseHandle(col->hEvent);
+                    ReturnResource(waitResources[i]);
+                }
+                return ret;
             }
 
             virtual std::uint64_t TellP() { return 0; }
@@ -368,6 +421,7 @@ namespace SPTAG
 
                     if (nullptr != req)
                     {
+                        req->m_success = true;
                         req->m_callback(req);
                     }
                 }
@@ -593,9 +647,8 @@ namespace SPTAG
 
             std::vector<aio_context_t> m_iocps;
         };
-
-        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
 #endif
+        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
     }
 }
 

@@ -82,6 +82,43 @@ namespace SPTAG {
             }
             return totalDone;
         }
+#else
+        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        {
+            int ret = 0;
+            if (handlers.size() == 1) {
+                ret = handlers[0]->BatchReadFile(readRequests, num);
+            }
+            else {            
+                int currFileId = 0, currReqStart = 0;
+                for (int i = 0; i < num; i++) {
+                    AsyncReadRequest* readRequest = &(readRequests[i]);
+                    if (readRequest->m_readSize == 0) continue;
+
+                    int fileid = (readRequest->m_status >> 16);
+                    if (fileid != currFileId) {
+                        ret += handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        currFileId = fileid;
+                        currReqStart = i;
+                    }
+                }
+                if (currReqStart < num) {
+                    ret += handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                }
+            }
+
+            for (int i = 0; i < num; i++) {
+                AsyncReadRequest* req = &(readRequests[i]);
+                if (req->m_success)
+                {
+                    req->m_callback(req);
+                }
+                else {
+                    req->m_readSize = 0;
+                }
+            }
+            return ret;
+        }
 #endif
     }
 }
