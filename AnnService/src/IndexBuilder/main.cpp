@@ -110,7 +110,6 @@ int main(int argc, char* argv[])
     }
     if (code == ErrorCode::Success)
     {
-
         indexBuilder->SaveIndex(options->m_outputFolder);
     }
     else

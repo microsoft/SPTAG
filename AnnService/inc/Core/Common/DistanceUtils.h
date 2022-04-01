@@ -146,43 +146,6 @@ namespace SPTAG
             }
             return nullptr;
         }
-
-        template<>
-        inline DistanceCalcReturn<std::uint8_t> DistanceCalcSelector<std::uint8_t>(SPTAG::DistCalcMethod p_method)
-        {
-            switch (p_method)
-            {
-            case SPTAG::DistCalcMethod::InnerProduct:
-            case SPTAG::DistCalcMethod::Cosine:
-                if (InstructionSet::AVX2())
-                {
-                    return &(DistanceUtils::ComputeCosineDistance_AVX);
-                }
-                else if (InstructionSet::SSE2())
-                {
-                    return &(DistanceUtils::ComputeCosineDistance_SSE);
-                }
-                else {
-                    return &(DistanceUtils::ComputeCosineDistance<std::uint8_t>);
-                }
-
-            case SPTAG::DistCalcMethod::L2:
-                if (InstructionSet::AVX2())
-                {
-                    return &(DistanceUtils::ComputeL2Distance_AVX);
-                }
-                else if (InstructionSet::SSE2())
-                {
-                    return &(DistanceUtils::ComputeL2Distance_SSE);
-                }
-                else {
-                    return &(DistanceUtils::ComputeL2Distance<std::uint8_t>);
-                }
-            default:
-                break;
-            }
-            return nullptr;
-        }
     }
 }
 

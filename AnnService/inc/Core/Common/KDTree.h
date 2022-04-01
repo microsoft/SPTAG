@@ -427,7 +427,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
             {
                 SizeType i = first;
                 SizeType j = last;
-                bool quantizer_exists = (bool) m_pQuantizer;
+                bool quantizer_exists = (m_pQuantizer != nullptr);
                 R* v_holder = nullptr;
                 if (quantizer_exists)
                 {
