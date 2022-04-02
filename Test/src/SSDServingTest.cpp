@@ -324,6 +324,7 @@ void TestSearchSSDIndex(
 	config << "QpsLimit=" << 0 << std::endl;
 	config << "ResultNum=" << 32 << std::endl;
 	config << "MaxCheck=" << 2048 << std::endl;
+	config << "SearchPostingPageLimit=" << 2 << std::endl;
 	config << "QueryCountLimit=" << 10000 << std::endl;
 
 	config.close();
