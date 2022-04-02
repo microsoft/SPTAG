@@ -179,23 +179,20 @@ namespace SPTAG
                 memset(&col, 0, sizeof(col));
                 col.Offset = (offset & 0xffffffff);
                 col.OffsetHigh = (offset >> 32);
-
+                col.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
                 if (!::ReadFile(m_fileHandle.GetHandle(),
                     buffer,
                     static_cast<DWORD>(readSize),
                     nullptr,
-                    &col) && GetLastError() != ERROR_IO_PENDING) return 0;
+                    &col) && GetLastError() != ERROR_IO_PENDING) {
+                    if (col.hEvent) CloseHandle(col.hEvent);
+                    return 0;
+                }
 
-                DWORD cBytes;
-                ULONG_PTR key;
-                OVERLAPPED* ol;
-                BOOL ret = ::GetQueuedCompletionStatus(this->m_fileIocp.GetHandle(),
-                    &cBytes,
-                    &key,
-                    &ol,
-                    INFINITE);
-                if (FALSE == ret || nullptr == ol) return 0;
-                return readSize;
+                DWORD cBytes = 0;
+                ::GetOverlappedResult(m_fileHandle.GetHandle(), &col, &cBytes, TRUE);
+                if (col.hEvent) CloseHandle(col.hEvent);
+                return cBytes;
             }
 
             virtual std::uint64_t WriteBinary(std::uint64_t writeSize, const char* buffer, std::uint64_t offset = UINT64_MAX)
@@ -415,14 +412,16 @@ namespace SPTAG
                         return;
                     }
 
-                    col = (DiskUtils::CallbackOverLapped*)ol;
-                    auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
-                    ReturnResource(col->c_registeredResource);
+                    if (typeid(*ol) == typeid(DiskUtils::CallbackOverLapped)) {
+                        col = (DiskUtils::CallbackOverLapped*)ol;
+                        auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
+                        ReturnResource(col->c_registeredResource);
 
-                    if (nullptr != req)
-                    {
-                        req->m_success = true;
-                        req->m_callback(req);
+                        if (nullptr != req)
+                        {
+                            req->m_success = true;
+                            req->m_callback(req);
+                        }
                     }
                 }
             }
