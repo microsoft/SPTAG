@@ -600,6 +600,7 @@ namespace SPTAG
 
                 m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
                 m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+                m_index->SetQuantizer(m_pQuantizer);
                 for (const auto& iter : m_headParameters)
                 {
                     m_index->SetParameter(iter.first.c_str(), iter.second.c_str());
