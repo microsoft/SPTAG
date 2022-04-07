@@ -60,7 +60,7 @@ namespace SPTAG
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
             
-            virtual int BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return 0; }
+            virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
             virtual std::uint64_t TellP() = 0;
 

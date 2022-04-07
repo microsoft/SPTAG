@@ -232,9 +232,8 @@ namespace SPTAG
                 return true;
             }
 
-            virtual int BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount)
+            virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount)
             {
-                int ret = 0;
                 std::vector<ResourceType*> waitResources;
                 for (std::uint32_t i = 0; i < requestCount; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
@@ -273,12 +272,11 @@ namespace SPTAG
                     }
                     else {
                         readRequest->m_success = true;
-                        ret++;
                     }
                     if (col->hEvent) CloseHandle(col->hEvent);
                     ReturnResource(waitResources[i]);
                 }
-                return ret;
+                return true;
             }
 
             virtual std::uint64_t TellP() { return 0; }
@@ -647,7 +645,7 @@ namespace SPTAG
             std::vector<aio_context_t> m_iocps;
         };
 #endif
-        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
     }
 }
 

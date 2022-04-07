@@ -7,7 +7,7 @@ namespace SPTAG {
     namespace Helper {
 #ifndef _MSC_VER
         struct timespec AIOTimeout {0, 30000};
-        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
             std::vector<struct iocb> myiocbs(num);
             std::vector<std::vector<struct iocb*>> iocbs(handlers.size());
@@ -47,7 +47,6 @@ namespace SPTAG {
                             }
                             else {
                                 LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
-                                return totalDone;
                             }
                         }
                     }
@@ -80,14 +79,13 @@ namespace SPTAG {
                     req->m_callback(req);
                 }
             }
-            return totalDone;
         }
 #else
-        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
-            int ret = 0;
+            
             if (handlers.size() == 1) {
-                ret = handlers[0]->BatchReadFile(readRequests, num);
+                handlers[0]->BatchReadFile(readRequests, num);
             }
             else {            
                 int currFileId = 0, currReqStart = 0;
@@ -97,13 +95,13 @@ namespace SPTAG {
 
                     int fileid = (readRequest->m_status >> 16);
                     if (fileid != currFileId) {
-                        ret += handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
                         currFileId = fileid;
                         currReqStart = i;
                     }
                 }
                 if (currReqStart < num) {
-                    ret += handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                    handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
                 }
             }
 
@@ -117,7 +115,6 @@ namespace SPTAG {
                     req->m_readSize = 0;
                 }
             }
-            return ret;
         }
 #endif
     }
