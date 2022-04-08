@@ -226,9 +226,9 @@ namespace SPTAG
         public:
             Dataset() {}
 
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1, std::string name_ = "Data")
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
             {
-                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_, incBlocks_, colStart_, rowEnd_, name_);
+                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_, incBlocks_, colStart_, rowEnd_);
             }
             ~Dataset()
             {
@@ -237,9 +237,8 @@ namespace SPTAG
                 incBlocks->clear();
             }
 
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1, std::string name_ = "Data")
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1)
             {
-                name = name_;
                 rows = rows_;
                 mycols = cols_;
                 if (rowEnd_ >= colStart_) cols = rowEnd_;
@@ -438,13 +437,14 @@ namespace SPTAG
             DimensionType VC, GC;
             IOBINARY(pVectorsInput, ReadBinary, sizeof(SizeType), (char*)&VR);
             IOBINARY(pVectorsInput, ReadBinary, sizeof(DimensionType), (char*)&VC);
-            DimensionType roundVC = (VC + 7) / 8 * 8;
-            DimensionType totalC = sizeof(T) * roundVC + sizeof(SizeType) * pNeighborhoodSize;
+            DimensionType totalC = ALIGN_ROUND(sizeof(T) * VC + sizeof(SizeType) * pNeighborhoodSize);
 
+            LOG(Helper::LogLevel::LL_Info, "OPT TotalC: %d\n", totalC);
             char* data = (char*)ALIGN_ALLOC(((size_t)totalC) * VR);
             std::shared_ptr<std::vector<char*>> incBlocks(new std::vector<char*>());
 
-            pVectors.Initialize(VR, VC, blockSize, capacity, data, true, incBlocks, 0, totalC, "Opt" + pVectors.Name());
+            pVectors.Initialize(VR, VC, blockSize, capacity, data, true, incBlocks, 0, totalC);
+            pVectors.SetName("Opt" + pVectors.Name());
             for (SizeType i = 0; i < VR; i++) {
                 IOBINARY(pVectorsInput, ReadBinary, sizeof(T) * VC, (char*)(pVectors.At(i)));
             }
@@ -453,7 +453,8 @@ namespace SPTAG
             IOBINARY(pGraphInput, ReadBinary, sizeof(DimensionType), (char*)&GC);
             if (GR != VR || GC != pNeighborhoodSize) return ErrorCode::DiskIOFail;
 
-            pGraph.Initialize(GR, GC, blockSize, capacity, data, false, incBlocks, sizeof(T) * VC, totalC, "Opt" + pGraph.Name());
+            pGraph.Initialize(GR, GC, blockSize, capacity, data, false, incBlocks, sizeof(T) * VC, totalC);
+            pGraph.SetName("Opt" + pGraph.Name());
             for (SizeType i = 0; i < VR; i++) {
                 IOBINARY(pGraphInput, ReadBinary, sizeof(SizeType) * GC, (char*)(pGraph.At(i)));
             }
