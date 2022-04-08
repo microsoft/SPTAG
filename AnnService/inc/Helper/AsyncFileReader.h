@@ -18,7 +18,6 @@
 #define ASYNC_READ 1
 
 #ifdef _MSC_VER
-#define BATCH_READ 1
 #include <tchar.h>
 #include <Windows.h>
 #else
