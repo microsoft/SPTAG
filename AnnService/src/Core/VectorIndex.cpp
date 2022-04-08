@@ -368,9 +368,6 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize);
     if ((ret = SaveIndexConfig(fp)) != ErrorCode::Success) return ret;
     configSize = fp->TellP() - sizeof(configSize);
-    if (ErrorCode::Success == ret && m_pQuantizer) {
-        ret = m_pQuantizer->SaveQuantizer(fp);
-    }
 
     if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
@@ -389,6 +386,9 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
             if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
 
             if (ErrorCode::Success == ret && m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(fp, fp);
+        }
+        if (ErrorCode::Success == ret && m_pQuantizer) {
+            ret = m_pQuantizer->SaveQuantizer(fp);
         }
     }
     if (ErrorCode::Success == ret) IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
@@ -671,12 +671,6 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
     ErrorCode ret = ErrorCode::Success;
 
     if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
-
-    if (iniReader.DoesSectionExist("Quantizer"))
-    {
-        p_vectorIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp));
-        if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
-    }
     
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
@@ -702,6 +696,11 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
         }
     }
 
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        p_vectorIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp));
+        if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
+    }
 
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
