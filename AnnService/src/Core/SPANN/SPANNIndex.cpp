@@ -421,7 +421,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
                 selected.resize(data.R());
                 for (int i = 0; i < data.R(); i++) selected[i] = i;
-                std::random_shuffle(selected.begin(), selected.end());
+                std::shuffle(selected.begin(), selected.end(), rg);
                 int headCnt = static_cast<int>(std::round(m_options.m_ratio * data.R()));
                 selected.resize(headCnt);
             }

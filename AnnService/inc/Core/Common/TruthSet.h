@@ -293,7 +293,7 @@ namespace SPTAG
                 void* reconstructVector = nullptr;
                 if (SPTAG::COMMON::DistanceUtils::Quantizer)
                 {
-                    reconstructVector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+                    reconstructVector = ALIGN_ALLOC(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize());
                     SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
                     sampleANN.SetTarget(reconstructVector);
                     sampleTruth.SetTarget(reconstructVector);
@@ -325,7 +325,7 @@ namespace SPTAG
                 }
                 if (reconstructVector)
                 {
-                    _mm_free(reconstructVector);
+                    ALIGN_FREE(reconstructVector);
                 }
 
                 return recalls / K;

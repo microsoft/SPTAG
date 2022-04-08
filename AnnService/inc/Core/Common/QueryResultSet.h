@@ -47,7 +47,7 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
     }
@@ -63,7 +63,7 @@ public:
         {
             if (!m_quantizedTarget)
             {
-                m_quantizedTarget = _mm_malloc(COMMON::DistanceUtils::Quantizer->QuantizeSize(), ALIGN_SPTAG);
+                m_quantizedTarget = ALIGN_ALLOC(COMMON::DistanceUtils::Quantizer->QuantizeSize());
                 COMMON::DistanceUtils::Quantizer->QuantizeVector((void*)m_target, (uint8_t*)m_quantizedTarget);
             }
             return reinterpret_cast<T*>(m_quantizedTarget);
