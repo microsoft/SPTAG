@@ -886,7 +886,7 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
                     selected.resize(vectorSet->Count());
                     for (int i = 0; i < vectorSet->Count(); i++) selected[i] = i;
-                    std::random_shuffle(selected.begin(), selected.end());
+                    std::shuffle(selected.begin(), selected.end(), rg);
 
                     int headCnt = static_cast<int>(std::round(opts.m_ratio * vectorSet->Count()));
                     selected.resize(headCnt);
