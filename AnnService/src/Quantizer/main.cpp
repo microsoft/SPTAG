@@ -121,6 +121,65 @@ int main(int argc, char* argv[])
         
         break;
     }
+    case QuantizerType::OPQQuantizer:
+    {
+        std::shared_ptr<COMMON::IQuantizer> quantizer;
+        auto fp_load = SPTAG::f_createIO();
+        std::shared_ptr<VectorSet> quantized_vectors;
+        auto fullvectors = vectorReader->GetVectorSet();
+        if (options->m_normalized)
+        {
+            LOG(Helper::LogLevel::LL_Info, "Normalizing vectors.\n");
+            fullvectors->Normalize(options->m_threadNum);
+        }
+        ByteArray OPQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * fullvectors->Count());
+        quantized_vectors.reset(new BasicVectorSet(OPQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, fullvectors->Count()));
+        if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
+        {
+            LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Not supported for OPQ.\n");
+            exit(1);
+        }
+        else
+        {
+            quantizer->LoadIQuantizer(fp_load);
+            if (!quantizer)
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
+                exit(1);
+            }
+            quantizer->SetEnableADC(false);
+
+#pragma omp parallel for
+            for (int i = 0; i < fullvectors->Count(); i++)
+            {
+                quantizer->QuantizeVector(fullvectors->GetVector(i), (uint8_t*)quantized_vectors->GetVector(i));
+            }
+
+
+        }
+        if (ErrorCode::Success != quantized_vectors->Save(options->m_outputFile))
+        {
+            LOG(Helper::LogLevel::LL_Error, "Failed to save quantized vectors.\n");
+            exit(1);
+        }
+        if (!options->m_outputFullVecFile.empty())
+        {
+            if (ErrorCode::Success != fullvectors->Save(options->m_outputFullVecFile))
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to save uncompressed vectors.\n");
+                exit(1);
+            }
+        }
+
+
+        auto metadataSet = vectorReader->GetMetadataSet();
+        if (metadataSet)
+        {
+            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        }
+
+        break;
+    }
     default:
     {
         LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer type.\n");
