@@ -417,7 +417,6 @@ namespace SPTAG
 
                         if (nullptr != req)
                         {
-                            req->m_success = true;
                             req->m_callback(req);
                         }
                     }

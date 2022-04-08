@@ -190,13 +190,12 @@ namespace SPTAG
                     request.m_buffer = buffer;
                     request.m_status = (fileid << 16) | p_exWorkSpace->m_spaceID;
                     request.m_payload = (void*)listInfo; 
+                    request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
                     request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize](Helper::AsyncReadRequest* request)
                     {
-                        request->m_readSize = 0;
-                        request->m_success = false;
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
                         ProcessPosting(vectorInfoSize)

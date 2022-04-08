@@ -31,6 +31,7 @@ namespace SPTAG {
                 myiocb->aio_nbytes = readRequest->m_readSize;
                 myiocb->aio_offset = static_cast<std::int64_t>(readRequest->m_offset);
 
+                readRequest->m_readSize = 0;
                 iocbs[fileid].emplace_back(myiocb);
             }
             std::vector<struct io_event> events(totalToSubmit);
@@ -106,13 +107,12 @@ namespace SPTAG {
             }
 
             for (int i = 0; i < num; i++) {
-                AsyncReadRequest* req = &(readRequests[i]);
-                if (req->m_success)
+                AsyncReadRequest* readRequest = &(readRequests[i]);
+                if (readRequest->m_readSize == 0) continue;
+                readRequest->m_readSize = 0;
+                if (readRequest->m_success)
                 {
-                    req->m_callback(req);
-                }
-                else {
-                    req->m_readSize = 0;
+                    readRequest->m_callback(readRequest);
                 }
             }
         }
