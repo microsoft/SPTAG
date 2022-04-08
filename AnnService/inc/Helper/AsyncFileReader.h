@@ -174,10 +174,13 @@ namespace SPTAG
 
             virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
             {
-                OVERLAPPED col;
+                ResourceType* resource = GetResource();
+
+                DiskUtils::CallbackOverLapped& col = resource->m_col;
                 memset(&col, 0, sizeof(col));
                 col.Offset = (offset & 0xffffffff);
                 col.OffsetHigh = (offset >> 32);
+                col.m_data = nullptr;
                 col.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
                 if (!::ReadFile(m_fileHandle.GetHandle(),
                     buffer,
@@ -185,12 +188,14 @@ namespace SPTAG
                     nullptr,
                     &col) && GetLastError() != ERROR_IO_PENDING) {
                     if (col.hEvent) CloseHandle(col.hEvent);
+                    ReturnResource(resource);
                     return 0;
                 }
 
                 DWORD cBytes = 0;
                 ::GetOverlappedResult(m_fileHandle.GetHandle(), &col, &cBytes, TRUE);
                 if (col.hEvent) CloseHandle(col.hEvent);
+                ReturnResource(resource);
                 return cBytes;
             }
 
@@ -409,15 +414,13 @@ namespace SPTAG
                         return;
                     }
 
-                    if (typeid(*ol) == typeid(DiskUtils::CallbackOverLapped)) {
-                        col = (DiskUtils::CallbackOverLapped*)ol;
-                        auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
-                        ReturnResource(col->c_registeredResource);
+                    col = (DiskUtils::CallbackOverLapped*)ol;
+                    auto req = static_cast<Helper::AsyncReadRequest*>(col->m_data);
+                    ReturnResource(col->c_registeredResource);
 
-                        if (nullptr != req)
-                        {
-                            req->m_callback(req);
-                        }
+                    if (nullptr != req)
+                    {
+                        req->m_callback(req);
                     }
                 }
             }
