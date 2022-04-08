@@ -69,7 +69,7 @@ public:
     {
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
     }
 
@@ -102,7 +102,7 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
     }

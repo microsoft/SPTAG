@@ -51,8 +51,8 @@ namespace SPTAG
             float(*fComputeDistance)(const T* pX, const T* pY, DimensionType length);
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod) : _K(k), _DK(k), _D(dim), _T(threadnum), _M(distMethod) {
-                centers = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
-                newTCenters = (T*)_mm_malloc(sizeof(T) * k * dim, ALIGN_SPTAG);
+                centers = (T*)ALIGN_ALLOC(sizeof(T) * k * dim);
+                newTCenters = (T*)ALIGN_ALLOC(sizeof(T) * k * dim);
                 counts = new SizeType[k];
                 newCenters = new float[threadnum * k * dim];
                 newCounts = new SizeType[threadnum * k];
@@ -65,8 +65,8 @@ namespace SPTAG
             }
 
             ~KmeansArgs() {
-                _mm_free(centers);
-                _mm_free(newTCenters);
+                ALIGN_FREE(centers);
+                ALIGN_FREE(newTCenters);
                 delete[] counts;
                 delete[] newCenters;
                 delete[] newCounts;
@@ -324,7 +324,7 @@ namespace SPTAG
             float originalLambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
-                std::random_shuffle(indices.begin() + first, indices.begin() + last);
+                std::shuffle(indices.begin() + first, indices.begin() + last, rg);
 
                 args.ClearCenters();
                 args.ClearCounts();
@@ -495,7 +495,7 @@ namespace SPTAG
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
                 {
-                    std::random_shuffle(localindices.begin(), localindices.end());
+                    std::shuffle(localindices.begin(), localindices.end(), rg);
 
                     m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());

@@ -21,6 +21,8 @@ std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
 
+std::mt19937 SPTAG::rg;
+
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
 namespace SPTAG {
@@ -921,7 +923,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     void* reconstructed_vector = nullptr;
                     if (SPTAG::COMMON::DistanceUtils::Quantizer)
                     {
-                        reconstructed_vector = _mm_malloc(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+                        reconstructed_vector = ALIGN_ALLOC(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize());
                         SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
                         resultSet.SetTarget(reconstructed_vector);
                     }
@@ -970,7 +972,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
                     if (reconstructed_vector)
                     {
-                        _mm_free(reconstructed_vector);
+                        ALIGN_FREE(reconstructed_vector);
                     }
                 }
                 rngFailedCountTotal += rngFailedCount;

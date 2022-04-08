@@ -105,10 +105,14 @@ namespace SPTAG
                 do {
                     auto curIndexFile = f_createAsyncIO();
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
+#ifndef _MSC_VER
 #ifdef BATCH_READ
                         p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
                         p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+#endif
+#else
+                        (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, p_opt.m_ioThreads
 #endif
                     )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
@@ -185,18 +189,18 @@ namespace SPTAG
                     request.m_readSize = totalBytes;
                     request.m_buffer = buffer;
                     request.m_status = (fileid << 16) | p_exWorkSpace->m_spaceID;
-                    request.m_payload = (void*)listInfo;
+                    request.m_payload = (void*)listInfo; 
+                    request.m_success = false;
 
-#ifdef BATCH_READ
+#ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
                     request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize](Helper::AsyncReadRequest* request)
                     {
-                        request->m_readSize = 0;
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
                         ProcessPosting(vectorInfoSize)
                     };
-#else
+#else // async read
                     request.m_callback = [&p_exWorkSpace](Helper::AsyncReadRequest* request)
                     {
                         p_exWorkSpace->m_processIocp.push(request);
@@ -209,7 +213,7 @@ namespace SPTAG
                         unprocessed--;
                     }
 #endif
-#else
+#else // sync read
                     auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
                         LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);

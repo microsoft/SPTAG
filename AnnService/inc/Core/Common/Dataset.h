@@ -33,8 +33,8 @@ namespace SPTAG
             }
             ~OldDataset()
             {
-                if (ownData) _mm_free(data);
-                for (T* ptr : incBlocks) _mm_free(ptr);
+                if (ownData) ALIGN_FREE(data);
+                for (T* ptr : incBlocks) ALIGN_FREE(ptr);
                 incBlocks.clear();
             }
             void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true)
@@ -45,7 +45,7 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN_SPTAG);
+                    data = (T*)ALIGN_ALLOC(((size_t)rows) * cols * sizeof(T));
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
@@ -98,7 +98,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN_SPTAG);
+                        T* newBlock = (T*)ALIGN_ALLOC(((size_t)rowsInBlock + 1) * cols * sizeof(T));
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         if (!pData) std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
                         incBlocks.push_back(newBlock);
@@ -226,28 +226,32 @@ namespace SPTAG
         public:
             Dataset() {}
 
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int colEnd_ = -1, std::string name_ = "Data")
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1, std::string name_ = "Data")
             {
-                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_, incBlocks_, colStart_, colEnd_, name_);
+                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_, incBlocks_, colStart_, rowEnd_, name_);
             }
             ~Dataset()
             {
+                if (ownData) ALIGN_FREE(data);
+                for (char* ptr : *incBlocks) ALIGN_FREE(ptr);
+                incBlocks->clear();
             }
 
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int colEnd_ = -1, std::string name_ = "Data")
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, char* data_ = nullptr, bool transferOnwership_ = true, std::shared_ptr<std::vector<char*>> incBlocks_ = nullptr, int colStart_ = 0, int rowEnd_ = -1, std::string name_ = "Data")
             {
                 name = name_;
                 rows = rows_;
                 mycols = cols_;
-                if (colEnd_ >= colStart_) cols = colEnd_;
+                if (rowEnd_ >= colStart_) cols = rowEnd_;
                 else cols = mycols * sizeof(T);
                 data = data_;
                 ownData = transferOnwership_;
-                if (data_ == nullptr)
+                if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (char*)_mm_malloc(((size_t)rows) * cols, ALIGN_SPTAG);
-                    std::memset(data, -1, ((size_t)rows) * cols);
+                    data = (char*)ALIGN_ALLOC(((size_t)rows) * cols);
+                    if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols);
+                    else std::memset(data, -1, ((size_t)rows) * cols);
                 }
                 maxRows = capacity_;
                 rowsInBlockEx = static_cast<SizeType>(ceil(log2(rowsInBlock_)));
@@ -316,7 +320,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
                     if (curBlockIdx >= (SizeType)(incBlocks->size())) {
-                        char* newBlock = (char*)_mm_malloc(((size_t)rowsInBlock + 1) * cols, ALIGN_SPTAG);
+                        char* newBlock = (char*)ALIGN_ALLOC(((size_t)rowsInBlock + 1) * cols);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         std::memset(newBlock, -1, ((size_t)rowsInBlock + 1) * cols);
                         incBlocks->push_back(newBlock);
@@ -437,7 +441,7 @@ namespace SPTAG
             DimensionType roundVC = (VC + 7) / 8 * 8;
             DimensionType totalC = sizeof(T) * roundVC + sizeof(SizeType) * pNeighborhoodSize;
 
-            char* data = (char*)_mm_malloc(((size_t)totalC) * VR, ALIGN_SPTAG);
+            char* data = (char*)ALIGN_ALLOC(((size_t)totalC) * VR);
             std::shared_ptr<std::vector<char*>> incBlocks(new std::vector<char*>());
 
             pVectors.Initialize(VR, VC, blockSize, capacity, data, true, incBlocks, 0, totalC, "Opt" + pVectors.Name());
