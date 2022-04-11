@@ -163,7 +163,7 @@ break;
                     R* v_holder = nullptr;
                     if (quantizer_exists) {
                         cols = index->m_pQuantizer->ReconstructDim();
-                        v_holder = (R*)_mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                        v_holder = (R*)ALIGN_ALLOC(index->m_pQuantizer->ReconstructSize());
                     }
                     std::vector<float> Mean(cols, 0);
 
@@ -325,7 +325,7 @@ break;
                     indexs.clear();
                     weight.clear();
                     bestweight.clear();
-                    if (v_holder) _mm_free(v_holder);
+                    if (v_holder) ALIGN_FREE(v_holder);
 
                     PartitionByTptreeCore<T, R>(index, indices, first, i - 1, leaves);
                     PartitionByTptreeCore<T, R>(index, indices, i, last, leaves);
@@ -350,7 +350,7 @@ break;
                 {
                     Sleep(i * 100); std::srand(clock());
                     for (SizeType j = 0; j < m_iGraphSize; j++) TptreeDataIndices[i][j] = j;
-                    std::random_shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end());
+                    std::shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end(), rg);
                     PartitionByTptree<T>(index, TptreeDataIndices[i], 0, m_iGraphSize - 1, TptreeLeafNodes[i]);
                     LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
                 }
@@ -570,7 +570,7 @@ break;
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
                 void* rec_query = nullptr;
                 if (index->m_pQuantizer) {
-                    rec_query = _mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    rec_query = ALIGN_ALLOC(index->m_pQuantizer->ReconstructSize());
                     index->m_pQuantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
                     query.SetTarget((T*)rec_query, index->m_pQuantizer);
                 }
@@ -578,7 +578,7 @@ break;
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);
                 if (rec_query)
                 {
-                    _mm_free(rec_query);
+                    ALIGN_FREE(rec_query);
                 }
                 if (updateNeighbors) {
                     // update neighbors

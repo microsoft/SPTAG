@@ -21,6 +21,8 @@ std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
 
+std::mt19937 SPTAG::rg;
+
 std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
 
 namespace SPTAG {
@@ -825,11 +827,23 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 #define DefineVectorValueType(Name, Type) \
         case VectorValueType::Name: \
             if(fullVectors->Dimension() <= 64) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 64>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
             } else if (fullVectors->Dimension() <= 100) { \
-                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 100>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 128) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 128>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 200) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 200>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 768) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 768>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 1024) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 1024>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 2048) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 2048>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            } else if (fullVectors->Dimension() <= 4096) { \
+                getTailNeighborsTPT<Type, float, SUMTYPE, 4096>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
             } else { \
-                LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n"); \
+                LOG(Helper::LogLevel::LL_Error, "Datasets of >768 dimensions not currently supported for GPU Index build\n"); \
                 exit(1); \
             } \
             break; \
@@ -844,13 +858,31 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
         typedef float SUMTYPE;
 
         if (fullVectors->Dimension() <= 64) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 64, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+            getTailNeighborsTPT<float, float, SUMTYPE, 64>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
         }
         else if (fullVectors->Dimension() <= 100) {
-            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, 100, replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+            getTailNeighborsTPT<float, float, SUMTYPE, 100>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 128) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 128>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 200) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 200>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 768) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 768>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 1024) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 1024>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 2048) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 2048>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
+        }
+        else if (fullVectors->Dimension() <= 4096) {
+            getTailNeighborsTPT<float, float, SUMTYPE, 4096>((float*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections);
         }
         else {
-            LOG(Helper::LogLevel::LL_Error, "Datasets of >100 dimensions not currently supported for GPU Index build\n");
+            LOG(Helper::LogLevel::LL_Error, "Datasets of >768 dimensions not currently supported for GPU Index build\n");
             exit(1);
         }
     }
@@ -894,7 +926,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     void* reconstructed_vector = nullptr;
                     if (m_pQuantizer)
                     {
-                        reconstructed_vector = _mm_malloc(m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                        reconstructed_vector = ALIGN_ALLOC(m_pQuantizer->ReconstructSize());
                         m_pQuantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
                         switch (m_pQuantizer->GetReconstructType()) {
 #define DefineVectorValueType(Name, Type) \
@@ -952,7 +984,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 
                     if (reconstructed_vector)
                     {
-                        _mm_free(reconstructed_vector);
+                        ALIGN_FREE(reconstructed_vector);
                     }
                 }
                 rngFailedCountTotal += rngFailedCount;
