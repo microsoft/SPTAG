@@ -133,6 +133,7 @@ namespace SPTAG {
                             double endTime = threadws.getElapsedMs();
                             p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
                             double exEndTime = threadws.getElapsedMs();
+                            p_results[index].ClearTmp();
 
                             p_stats[index].m_exLatency = exEndTime - endTime;
                             p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
@@ -164,9 +165,9 @@ namespace SPTAG {
                 std::string truthFile = p_opts.m_truthPath;
                 std::string warmupFile = p_opts.m_warmupPath;
 
-                if (COMMON::DistanceUtils::Quantizer)
+                if (p_index->m_pQuantizer)
                 {
-                    COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
+                   p_index->m_pQuantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
                 if (!p_opts.m_logFile.empty())
@@ -195,7 +196,7 @@ namespace SPTAG {
                     std::vector<SPANN::SearchStats> warmpUpStats(warmupNumQueries);
                     for (int i = 0; i < warmupNumQueries; ++i)
                     {
-                        warmupResults[i].SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)));
+                        (*((COMMON::QueryResultSet<ValueType>*)&warmupResults[i])).SetTarget(reinterpret_cast<ValueType*>(warmupQuerySet->GetVector(i)), p_index->m_pQuantizer);
                         warmupResults[i].Reset();
                     }
 
@@ -219,7 +220,7 @@ namespace SPTAG {
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
-                    results[i].SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)));
+                    (*((COMMON::QueryResultSet<ValueType>*)&results[i])).SetTarget(reinterpret_cast<ValueType*>(querySet->GetVector(i)), p_index->m_pQuantizer);
                     results[i].Reset();
                 }
 
@@ -245,7 +246,6 @@ namespace SPTAG {
 
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
                     LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
-                    COMMON::DistanceUtils::Quantizer.reset();
                     for (int i = 0; i < results.size(); i++)
                     {
                         for (int j = 0; j < K; j++)

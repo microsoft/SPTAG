@@ -484,6 +484,25 @@ inline std::string ConvertToString<TruthFileType>(const TruthFileType& p_value)
     return "Undefined";
 }
 
+template <>
+inline std::string ConvertToString<ErrorCode>(const ErrorCode& p_value)
+{
+    switch (p_value)
+    {
+#define DefineErrorCode(Name, Code) \
+    case ErrorCode::Name: \
+        return #Name; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineErrorCode
+
+    default:
+        break;
+    }
+    
+    return "Undefined";
+}
+
 } // namespace Convert
 } // namespace Helper
 } // namespace SPTAG

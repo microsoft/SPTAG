@@ -23,7 +23,6 @@ add_library (DistanceUtils STATIC
     inc/Core/Common/DistanceUtils.h 
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
-    inc/Core/Common/IQuantizer.h
     src/Core/Common/DistanceUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )
@@ -75,19 +74,8 @@ if (NOT LIBRARYONLY)
       LIBRARY DESTINATION lib)
 endif()
 
-set(VECTORSEARCH_INC_DIR ${AnnService}/inc/SSDServing/VectorSearch)
-set(VECTORSEARCH_IMP_DIR ${AnnService}/src/SSDServing/VectorSearch)
 file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
 file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
-if(NOT WIN32)
-    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
-            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
-            )
-elseif(WIN32)
-    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
-            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
-            )
-endif()
 
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})

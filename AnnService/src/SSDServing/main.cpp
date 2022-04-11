@@ -29,6 +29,7 @@ namespace SPTAG {
 			const char* indexFilePath) {
 
 			bool searchSSD = false;
+			std::string QuantizerFilePath = "";
 			if (forANNIndexTestTool) {
 				(*config_map)[SEC_BASE]["ValueType"] = Helper::Convert::ConvertToString(valueType);
 				(*config_map)[SEC_BASE]["DistCalcMethod"] = Helper::Convert::ConvertToString(distCalcMethod);
@@ -50,6 +51,11 @@ namespace SPTAG {
 				(*config_map)[SEC_BUILD_HEAD]["isExecute"] = "true";
 				(*config_map)[SEC_BUILD_SSD_INDEX]["isExecute"] = "true";
 				(*config_map)[SEC_BUILD_SSD_INDEX]["BuildSsdIndex"] = "true";
+
+				std::map<std::string, std::string>::iterator iter;
+				if ((iter = (*config_map)[SEC_BASE].find("QuantizerFilePath")) != (*config_map)[SEC_BASE].end()) {
+					QuantizerFilePath = iter->second;
+				}
 			}
 			else {
 				Helper::IniReader iniReader;
@@ -63,7 +69,8 @@ namespace SPTAG {
 				distCalcMethod = iniReader.GetParameter(SEC_BASE, "DistCalcMethod", distCalcMethod);
 				bool buildSSD = iniReader.GetParameter(SEC_BUILD_SSD_INDEX, "isExecute", false);
 				searchSSD = iniReader.GetParameter(SEC_SEARCH_SSD_INDEX, "isExecute", false);
-				
+				QuantizerFilePath = iniReader.GetParameter(SEC_BASE, "QuantizerFilePath", std::string(""));
+
 				for (auto& KV : iniReader.GetParameters(SEC_SEARCH_SSD_INDEX)) {
 					std::string param = KV.first, value = KV.second;
 					if (buildSSD && Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "BuildSsdIndex")) continue;
@@ -73,8 +80,15 @@ namespace SPTAG {
 					(*config_map)[SEC_BUILD_SSD_INDEX][param] = value;
 				}
 			}
-			
+
+
+			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", QuantizerFilePath.c_str());
+
 			std::shared_ptr<VectorIndex> index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, valueType);
+			if (!QuantizerFilePath.empty() && index->LoadQuantizer(QuantizerFilePath) != ErrorCode::Success)
+			{
+				exit(1);
+			}
 			if (index == nullptr) {
 				LOG(Helper::LogLevel::LL_Error, "Cannot create Index with ValueType %s!\n", (*config_map)[SEC_BASE]["ValueType"].c_str());
 				return -1;
@@ -85,13 +99,6 @@ namespace SPTAG {
 					index->SetParameter(KV.first, KV.second, sectionKV.first);
 				}
 			}
-
-			std::string quantizerPath = index->GetParameter("QuantizerFilePath", SEC_BASE);
-			if (!quantizerPath.empty() && VectorIndex::LoadQuantizer(quantizerPath) != ErrorCode::Success)
-			{
-				exit(1);
-			}
-			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", quantizerPath.c_str());
 
 			if (index->BuildIndex() != ErrorCode::Success) {
 				LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
@@ -116,15 +123,20 @@ namespace SPTAG {
 			if (opts->m_generateTruth)
 			{
 				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
-				if (COMMON::DistanceUtils::Quantizer) valueType = VectorValueType::UInt8;
-				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, opts->m_dim, opts->m_vectorType, opts->m_vectorDelimiter));
+				SizeType dim = opts->m_dim;
+				if (index->m_pQuantizer)
+				{
+					valueType = VectorValueType::UInt8;
+					dim = index->m_pQuantizer->GetNumSubvectors();
+				}
+				std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, opts->m_vectorType, opts->m_vectorDelimiter));
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
 				if (ErrorCode::Success != vectorReader->LoadFile(opts->m_vectorPath))
 				{
 					LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
 					exit(1);
 				}
-				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
+				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(opts->m_valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
 				auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
 				if (ErrorCode::Success != queryReader->LoadFile(opts->m_queryPath))
 				{
@@ -133,14 +145,14 @@ namespace SPTAG {
 				}
 				auto vectorSet = vectorReader->GetVectorSet();
 				auto querySet = queryReader->GetVectorSet();
-				if (distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(opts->m_iSSDNumberOfThreads);
+				if (distCalcMethod == DistCalcMethod::Cosine && !index->m_pQuantizer) vectorSet->Normalize(opts->m_iSSDNumberOfThreads);
 
 				omp_set_num_threads(opts->m_iSSDNumberOfThreads);
 
 #define DefineVectorValueType(Name, Type) \
 	if (opts->m_valueType == VectorValueType::Name) { \
 		COMMON::TruthSet::GenerateTruth<Type>(querySet, vectorSet, opts->m_truthPath, \
-			distCalcMethod, opts->m_resultNum, opts->m_truthType); \
+			distCalcMethod, opts->m_resultNum, opts->m_truthType, index->m_pQuantizer); \
 	} \
 
 #include "inc/Core/DefinitionList.h"

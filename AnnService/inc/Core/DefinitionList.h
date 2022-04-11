@@ -43,6 +43,7 @@ DefineDistCalcMethod(InnerProduct)
 
 DefineQuantizerType(None, std::shared_ptr<void>)
 DefineQuantizerType(PQQuantizer, std::shared_ptr<SPTAG::COMMON::PQQuantizer>)
+DefineQuantizerType(OPQQuantizer, std::shared_ptr<SPTAG::COMMON::OPQQuantizer>)
 
 #endif // DefineQuantizerType
 

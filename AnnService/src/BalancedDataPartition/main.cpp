@@ -415,7 +415,7 @@ void Process(MPI_Datatype type) {
         LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
             if (options.m_seed >= 0) std::srand(options.m_seed);
-            COMMON::InitCenters<T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
+            COMMON::InitCenters<T, T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
         }
     }
 
@@ -447,7 +447,7 @@ void Process(MPI_Datatype type) {
 
         if (rank == 0) {
             MPI_Reduce(MPI_IN_PLACE, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-            currDiff = COMMON::RefineCenters<T>(data, args);
+            currDiff = COMMON::RefineCenters<T, T>(data, args);
             LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
         } else
             MPI_Reduce(args.newCenters, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -783,7 +783,7 @@ void ProcessWithoutMPI() {
                 float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
                 options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
             }
-            COMMON::InitCenters<T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
+            COMMON::InitCenters<T, T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
         }
     }
     if (iteration < 0) {
@@ -809,7 +809,7 @@ void ProcessWithoutMPI() {
         SyncSaveCenter(args, rank, iteration + 1, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0);
         if (rank == 0) {
             SyncLoadCenter(args, rank, iteration + 1, totalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
-            currDiff = COMMON::RefineCenters<T>(data, args);
+            currDiff = COMMON::RefineCenters<T, T>(data, args);
             if (currDist < minClusterDist) {
                 noImprovement = 0;
                 minClusterDist = currDist;

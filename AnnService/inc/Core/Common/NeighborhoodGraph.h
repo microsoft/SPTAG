@@ -127,9 +127,9 @@ namespace SPTAG
             void PartitionByTptree(VectorIndex* index, std::vector<SizeType>& indices, const SizeType first, const SizeType last,
                 std::vector<std::pair<SizeType, SizeType>>& leaves)
             {
-                if (COMMON::DistanceUtils::Quantizer)
+                if (index->m_pQuantizer)
                 {
-                    switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
+                    switch (index->m_pQuantizer->GetReconstructType())
                     {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
@@ -159,11 +159,11 @@ break;
                 else
                 {
                     SizeType cols = index->GetFeatureDim();
-                    bool quantizer_exists = (bool)COMMON::DistanceUtils::Quantizer;
+                    bool quantizer_exists = (bool)index->m_pQuantizer;
                     R* v_holder = nullptr;
                     if (quantizer_exists) {
-                        cols = COMMON::DistanceUtils::Quantizer->ReconstructDim();
-                        v_holder = (R*)_mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
+                        cols = index->m_pQuantizer->ReconstructDim();
+                        v_holder = (R*)_mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
                     }
                     std::vector<float> Mean(cols, 0);
 
@@ -176,7 +176,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
                             v = v_holder;
                         }
                         else
@@ -205,7 +205,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
                             v = v_holder;
                         }
                         else
@@ -252,7 +252,7 @@ break;
                             R* v;
                             if (quantizer_exists)
                             {
-                                COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
+                                index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
                                 v = v_holder;
                             }
                             else
@@ -291,7 +291,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            COMMON::DistanceUtils::Quantizer->ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
+                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
                             v = v_holder;
                         }
                         else
@@ -569,10 +569,10 @@ break;
             {
                 COMMON::QueryResultSet<T> query((const T*)index->GetSample(node), CEF + 1);
                 void* rec_query = nullptr;
-                if (COMMON::DistanceUtils::Quantizer) {
-                    rec_query = _mm_malloc(COMMON::DistanceUtils::Quantizer->ReconstructSize(), ALIGN_SPTAG);
-                    COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
-                    query.SetTarget((T*)rec_query);
+                if (index->m_pQuantizer) {
+                    rec_query = _mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    index->m_pQuantizer->ReconstructVector((const uint8_t*)query.GetTarget(), rec_query);
+                    query.SetTarget((T*)rec_query, index->m_pQuantizer);
                 }
                 index->RefineSearchIndex(query, searchDeleted);
                 RebuildNeighbors(index, node, m_pNeighborhoodGraph[node], query.GetResults(), CEF + 1);

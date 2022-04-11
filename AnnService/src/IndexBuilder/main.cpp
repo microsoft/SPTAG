@@ -46,13 +46,17 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
-    if (!options->m_quantizerFile.empty() && VectorIndex::LoadQuantizer(options->m_quantizerFile) != ErrorCode::Success)
-    {
-        exit(1);
-    }
     LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
+    if (!options->m_quantizerFile.empty())
+    {
+        indexBuilder->LoadQuantizer(options->m_quantizerFile);
+        if (!indexBuilder->m_pQuantizer)
+        {
+            exit(1);
+        }
+    }
 
     Helper::IniReader iniReader;
     if (!options->m_builderConfigFile.empty() && iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
@@ -101,9 +105,13 @@ int main(int argc, char* argv[])
         code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized);
     }
     else {
+        indexBuilder->SetQuantizerFileName(options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));
         code = indexBuilder->BuildIndex(options->m_normalized);    
     }
-    if (code == ErrorCode::Success) indexBuilder->SaveIndex(options->m_outputFolder);
+    if (code == ErrorCode::Success)
+    {
+        indexBuilder->SaveIndex(options->m_outputFolder);
+    }
     else
     {
         LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");

@@ -106,9 +106,9 @@ namespace SPTAG
                     auto curIndexFile = f_createAsyncIO();
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
 #ifdef BATCH_READ
-                        p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+                        max(p_opt.m_searchInternalResultNum*m_vectorInfoSize, 1 << 12), 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
-                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+                        max(m_vectorInfoSize*(p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1), 1 << 12), 2, 2, p_opt.m_ioThreads
 #endif
                     )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
@@ -318,7 +318,7 @@ namespace SPTAG
                         SizeType start = i * batchSize;
                         SizeType end = min(start + batchSize, fullCount);
                         auto fullVectors = p_reader->GetVectorSet(start, end);
-                        if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
+                        if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
 
                         if (p_opt.m_batches > 1) {
                             selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount);
@@ -456,7 +456,7 @@ namespace SPTAG
                 if (p_opt.m_ssdIndexFileNum > 1) selections.SaveBatch();
 
                 auto fullVectors = p_reader->GetVectorSet();
-                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
+                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
 
                 for (int i = 0; i < p_opt.m_ssdIndexFileNum; i++) {
                     size_t curPostingListOffSet = i * postingFileSize;
