@@ -26,6 +26,34 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template <>
+        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            m_pTrees.m_pQuantizer = quantizer;
+            if (m_pQuantizer)
+            {
+                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
+            }
+            else
+            {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_iDistCalcMethod);
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
+            }
+        }
+
+        template <typename T>
+        void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
+        {
+            m_pQuantizer = quantizer;
+            m_pTrees.m_pQuantizer = quantizer;
+            if (quantizer)
+            {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+            }
+        }
+
         template <typename T>
         ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
         {
@@ -223,7 +251,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>();
+                int base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
 #pragma omp parallel for
                 for (SizeType i = 0; i < GetNumSamples(); i++) {
                     COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
@@ -440,7 +468,7 @@ namespace SPTAG
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
-                int base = COMMON::Utils::GetBase<T>();
+                int base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
                 for (SizeType i = begin; i < end; i++) {
                     COMMON::Utils::Normalize((T*)m_pSamples[i], GetFeatureDim(), base);
                 }
@@ -488,8 +516,9 @@ namespace SPTAG
 #undef DefineKDTParameter
 
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
-                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_fComputeDistance = m_pQuantizer ? m_pQuantizer->DistanceCalcSelector<T>(m_iDistCalcMethod) : COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod);
+                auto base = m_pQuantizer ? m_pQuantizer->GetBase() : COMMON::Utils::GetBase<T>();
+                m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? base * base : 1;
             }
             return ErrorCode::Success;
         }

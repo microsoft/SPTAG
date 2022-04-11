@@ -113,7 +113,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                 exit(1);
             }
             COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
-                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT);
+                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT, index.m_pQuantizer);
         }
 
         ftruth = SPTAG::f_createIO();
@@ -296,10 +296,7 @@ int main(int argc, char** argv)
         LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
-    if (SPTAG::COMMON::DistanceUtils::Quantizer)
-    {
-        COMMON::DistanceUtils::Quantizer->SetEnableADC(options->m_enableADC);
-    }
+    vecIndex->SetQuantizerADC(options->m_enableADC);
 
     Helper::IniReader iniReader;
     for (int i = 1; i < argc; i++)

@@ -19,6 +19,7 @@
 #include "inc/Helper/ThreadPool.h"
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/VectorSetReader.h"
+#include "../Common/IQuantizer.h"
 
 #include "IExtraSearcher.h"
 #include "Options.h"
@@ -49,13 +50,13 @@ namespace SPTAG
 
             Options m_options;
 
-            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
+            std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
 
         public:
             Index()
             {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+                m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
 
@@ -66,13 +67,15 @@ namespace SPTAG
             inline Options* GetOptions() { return &m_options; }
 
             inline SizeType GetNumSamples() const { return m_options.m_vectorSize; }
-            inline DimensionType GetFeatureDim() const { return m_options.m_dim; }
+            inline DimensionType GetFeatureDim() const { return m_pQuantizer ? m_pQuantizer->ReconstructDim() : m_index->GetFeatureDim(); }
         
             inline int GetCurrMaxCheck() const { return m_options.m_maxCheck; }
             inline int GetNumThreads() const { return m_options.m_iSSDNumberOfThreads; }
             inline DistCalcMethod GetDistCalcMethod() const { return m_options.m_distCalcMethod; }
             inline IndexAlgoType GetIndexAlgoType() const { return IndexAlgoType::SPANN; }
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
+
+            void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
             
             inline float AccurateDistance(const void* pX, const void* pY) const { 
                 if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
@@ -138,7 +141,9 @@ namespace SPTAG
             void SelectHeadAdjustOptions(int p_vectorCount);
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
-            bool SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader);
+
+            template <typename InternalDataType>
+            bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
         };

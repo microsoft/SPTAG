@@ -139,6 +139,7 @@
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
+    <ClInclude Include="inc\Core\Common\OPQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\PQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\TruthSet.h" />

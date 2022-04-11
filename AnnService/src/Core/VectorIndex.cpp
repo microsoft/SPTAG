@@ -147,9 +147,9 @@ std::shared_ptr<std::vector<std::uint64_t>> VectorIndex::CalculateBufferSize() c
         ret->push_back(metasize.second);
     }
 
-    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    if (m_pQuantizer)
     {
-        ret->push_back(SPTAG::COMMON::DistanceUtils::Quantizer->BufferSize());
+        ret->push_back(m_pQuantizer->BufferSize());
     }
     return std::move(ret);
 }
@@ -186,7 +186,7 @@ VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut
         IOSTRING(p_configOut, WriteString, "\n");
     }
 
-    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+    if (m_pQuantizer)
     {
         IOSTRING(p_configOut, WriteString, "[Quantizer]\n");
         IOSTRING(p_configOut, WriteString, ("QuantizerFilePath=" + m_sQuantizerFile + "\n").c_str());
@@ -274,8 +274,8 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     }
     if (m_pMetadata != nullptr) metaStart += 2;
     
-    if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer && p_indexStreams.size() > metaStart) {
-        ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(p_indexStreams[metaStart]);
+    if (ErrorCode::Success == ret && m_pQuantizer && p_indexStreams.size() > metaStart) {
+        ret = m_pQuantizer->SaveQuantizer(p_indexStreams[metaStart]);
     }
     return ret;
 }
@@ -324,7 +324,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
         indexfiles->push_back(m_sMetadataFile);
         indexfiles->push_back(m_sMetadataIndexFile);
     }
-    if (SPTAG::COMMON::DistanceUtils::Quantizer) {
+    if (m_pQuantizer) {
         indexfiles->push_back(m_sQuantizerFile);
     }
     std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
@@ -349,8 +349,8 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     }
     if (m_pMetadata != nullptr) metaStart += 2;
 
-    if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
-        ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(handles[metaStart]);
+    if (ErrorCode::Success == ret && m_pQuantizer) {
+        ret = m_pQuantizer->SaveQuantizer(handles[metaStart]);
     }
     return ret;
 }
@@ -389,9 +389,8 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
 
             if (ErrorCode::Success == ret && m_pMetadata != nullptr) ret = m_pMetadata->SaveMetadata(fp, fp);
         }
-
-        if (ErrorCode::Success == ret && SPTAG::COMMON::DistanceUtils::Quantizer) {
-            ret = SPTAG::COMMON::DistanceUtils::Quantizer->SaveQuantizer(fp);
+        if (ErrorCode::Success == ret && m_pQuantizer) {
+            ret = m_pQuantizer->SaveQuantizer(fp);
         }
     }
     if (ErrorCode::Success == ret) IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
@@ -522,11 +521,11 @@ VectorIndex::LoadQuantizer(std::string p_quantizerFile)
         LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
         return ErrorCode::FailedOpenFile;
     }
-    auto code = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-    if (code != ErrorCode::Success)
+    SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr));
+    if (!m_pQuantizer)
     {
         LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
-        return code;
+        return ErrorCode::FailedParseValue;
     }
     return ErrorCode::Success;
 }
@@ -642,8 +641,8 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
         metaStart += 2;
     }
     if (iniReader.DoesSectionExist("Quantizer")) {
-        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]);
-        if (ret != ErrorCode::Success) return ret;
+        p_vectorIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]));
+        if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
     }
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
@@ -670,9 +669,11 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
+
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
+    
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     std::uint64_t blobs;
@@ -699,9 +700,10 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
     if (iniReader.DoesSectionExist("Quantizer"))
     {
-        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp);
-        if (ret != ErrorCode::Success) return ret;
+        p_vectorIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp));
+        if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
     }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -717,9 +719,16 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
-    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
+
+    if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
+    if (!iniReader.GetParameter<std::string>("Base", "QuantizerFilePath", std::string()).empty())
+    {
+        p_vectorIndex->SetQuantizer(COMMON::IQuantizer::LoadIQuantizer(p_indexBlobs[4]));
+        if (!p_vectorIndex->m_pQuantizer) return ErrorCode::FailedParseValue;
+    }
+    
     if ((p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     if ((ret = p_vectorIndex->LoadIndexDataFromMemory(p_indexBlobs)) != ErrorCode::Success) return ret;
@@ -745,13 +754,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
         }
         metaStart += 2;
     }
-    if (iniReader.DoesSectionExist("Quantizer") && p_indexBlobs.size() > metaStart)
-    {
-        std::shared_ptr<Helper::DiskPriorityIO> ptr(new Helper::SimpleBufferIO());
-        if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[metaStart].Data(), std::ios::binary | std::ios::in, p_indexBlobs[metaStart].Length())) return ErrorCode::EmptyDiskIO;
-        ret = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        if (ret != ErrorCode::Success) return ret;
-    }
+
     p_vectorIndex->m_bReady = true;
     return ErrorCode::Success;
 }
@@ -921,11 +924,20 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     }
                     
                     void* reconstructed_vector = nullptr;
-                    if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                    if (m_pQuantizer)
                     {
-                        reconstructed_vector = ALIGN_ALLOC(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize());
-                        SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
-                        resultSet.SetTarget(reconstructed_vector);
+                        reconstructed_vector = ALIGN_ALLOC(m_pQuantizer->ReconstructSize());
+                        m_pQuantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
+                        switch (m_pQuantizer->GetReconstructType()) {
+#define DefineVectorValueType(Name, Type) \
+                    case VectorValueType::Name: \
+                        (*((COMMON::QueryResultSet<Type>*)&resultSet)).SetTarget(reinterpret_cast<Type*>(reconstructed_vector), m_pQuantizer); \
+                        break;
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+                    default:
+                        LOG(Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s", Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
+                        }
                     }
                     else
                     {

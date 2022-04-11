@@ -115,7 +115,7 @@ protected:
 
         virtual void PrintDescription()
         {
-            std::size_t padding = 30;
+            std::size_t padding = 40;
             if (!m_representStringShort.empty())
             {
                 LOG(Helper::LogLevel::LL_Empty, "%s", m_representStringShort.c_str());

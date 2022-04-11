@@ -158,23 +158,25 @@ namespace SPTAG
 
             template<typename T>
             static void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
-                const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType) {
-                if (querySet->Dimension() != vectorSet->Dimension() && !SPTAG::COMMON::DistanceUtils::Quantizer)
+                const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
+                if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
                 {
                     LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
-                    exit(-1);
+                    exit(1);
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
                 std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
+                auto fComputeDistance = quantizer ? quantizer->DistanceCalcSelector<T>(distMethod) : COMMON::DistanceCalcSelector<T>(distMethod);
 #pragma omp parallel for
                 for (int i = 0; i < querySet->Count(); ++i)
                 {
                     SPTAG::COMMON::QueryResultSet<T> query((const T*)(querySet->GetVector(i)), K);
+                    query.SetTarget((const T*)(querySet->GetVector(i)), quantizer);
                     for (SPTAG::SizeType j = 0; j < vectorSet->Count(); j++)
                     {
-                        float dist = SPTAG::COMMON::DistanceUtils::ComputeDistance(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension(), distMethod);
+                        float dist = fComputeDistance(query.GetQuantizedTarget(), reinterpret_cast<T*>(vectorSet->GetVector(j)), vectorSet->Dimension());
                         query.AddPoint(j, dist);
                     }
                     query.SortResult();
@@ -291,12 +293,12 @@ namespace SPTAG
                 COMMON::QueryResultSet<void> sampleANN(query, K);
                 COMMON::QueryResultSet<void> sampleTruth(query, K);
                 void* reconstructVector = nullptr;
-                if (SPTAG::COMMON::DistanceUtils::Quantizer)
+                if (index->m_pQuantizer)
                 {
-                    reconstructVector = ALIGN_ALLOC(SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructSize());
-                    SPTAG::COMMON::DistanceUtils::Quantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
-                    sampleANN.SetTarget(reconstructVector);
-                    sampleTruth.SetTarget(reconstructVector);
+                    reconstructVector = ALIGN_ALLOC(index->m_pQuantizer->ReconstructSize());
+                    index->m_pQuantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
+                    sampleANN.SetTarget(reconstructVector, index->m_pQuantizer);
+                    sampleTruth.SetTarget(reconstructVector, index->m_pQuantizer);
                 }
 
                 index->SearchIndex(sampleANN);
