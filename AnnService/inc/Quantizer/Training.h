@@ -125,11 +125,12 @@ ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr
 	IOBINARY(fp, WriteBinary, sizeof(SizeType), (char*)&cnt);
 	IOBINARY(fp, WriteBinary, sizeof(DimensionType), (char*)&dim);
 
-	uint8_t* qvec = (uint8_t*) _mm_malloc(qvec_size, ALIGN_SPTAG);
+	uint8_t* qvec = (uint8_t*)ALIGN_ALLOC(qvec_size);
 	for (int i = 0; i < cnt; i++)
 	{
 		quantizer->QuantizeVector(vectors->GetVector(i), qvec);
 		IOBINARY(fp, WriteBinary, qvec_size, (char*)qvec);
 	}
+    ALIGN_FREE(qvec);
 	
 }
