@@ -212,7 +212,7 @@ namespace SPTAG
                 workSpace->m_postingIDs.clear();
 
                 float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
-                for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
+                for (int i = 0; i < min(m_options.m_searchInternalResultNum, p_queryResults->GetResultNum()); ++i)
                 {
                     auto res = p_queryResults->GetResult(i);
                     if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
