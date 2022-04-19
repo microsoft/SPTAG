@@ -209,6 +209,7 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
             if (!p_workSpace) return ErrorCode::LackOfInputs;
+            p_workSpace->Reset(p_workSpace->m_iMaxCheck, p_query.GetResultNum);
 
             if (m_deletedID.Count() == 0 || p_searchDeleted)
                 SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *p_workSpace);

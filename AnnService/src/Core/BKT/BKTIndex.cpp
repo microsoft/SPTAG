@@ -293,6 +293,8 @@ namespace SPTAG
         ErrorCode Index<T>::SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
+            if (!p_workSpace) return ErrorCode::LackOfInputs;
+            p_workSpace->Reset(p_workSpace->m_iMaxCheck, p_query.GetResultNum);
 
             SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *p_workSpace, p_searchDeleted, true);
 
