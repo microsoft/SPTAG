@@ -11,6 +11,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include <unordered_set>
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Core/Common/WorkSpace.h"
 
 namespace SPTAG
 {
@@ -35,6 +36,8 @@ public:
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndex(QueryResult& p_results, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted = false) const = 0;
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 

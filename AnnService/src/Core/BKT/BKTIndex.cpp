@@ -290,6 +290,24 @@ namespace SPTAG
         }
 
         template<typename T>
+        ErrorCode Index<T>::SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *p_workSpace, p_searchDeleted, true);
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
             auto workSpace = m_workSpacePool->Rent();

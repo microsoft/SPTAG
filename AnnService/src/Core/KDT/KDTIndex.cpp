@@ -203,6 +203,29 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template<typename T>
+        ErrorCode
+            Index<T>::SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            if (!p_workSpace) return ErrorCode::LackOfInputs;
+
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *p_workSpace);
+            else
+                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *p_workSpace);
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
         template <typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {

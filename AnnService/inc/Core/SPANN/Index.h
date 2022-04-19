@@ -118,6 +118,8 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false);
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, ExtraWorkSpace* p_extraWorkSpace, bool p_searchDeleted = false) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr);
             ErrorCode UpdateIndex();

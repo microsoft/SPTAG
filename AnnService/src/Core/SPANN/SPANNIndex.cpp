@@ -243,6 +243,62 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template<typename T>
+        ErrorCode Index<T>::SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, bool p_searchDeleted) const
+        {
+            std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
+            if (m_extraSearcher != nullptr) {
+                workSpace = m_workSpacePool->Rent();
+                workSpace->m_postingIDs.clear();
+                SearchIndex(p_query, p_workSpace, workSpace.get(), p_searchDeleted);
+                m_workSpacePool->Return(workSpace);
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndex(QueryResult& p_query, SPTAG::COMMON::WorkSpace* p_workSpace, ExtraWorkSpace* p_extraWorkSpace, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            m_index->SearchIndex(p_query, p_workSpace);
+
+            COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            if (m_extraSearcher != nullptr) {
+                if (!p_extraWorkSpace) return ErrorCode::LackOfInputs;
+                p_extraWorkSpace->m_postingIDs.clear();
+
+                float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+                for (int i = 0; i < min(m_options.m_searchInternalResultNum, p_queryResults->GetResultNum()); ++i)
+                {
+                    auto res = p_queryResults->GetResult(i);
+                    if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+                    p_extraWorkSpace->m_postingIDs.emplace_back(res->VID);
+                }
+
+                for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
+                {
+                    auto res = p_queryResults->GetResult(i);
+                    if (res->VID == -1) break;
+                    res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                }
+
+                p_queryResults->Reverse();
+                m_extraSearcher->SearchIndex(p_extraWorkSpace, *p_queryResults, m_index, nullptr);
+                p_queryResults->SortResult();
+            }
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
         template <typename T>
         ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
             SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found)
