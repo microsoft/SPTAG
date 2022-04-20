@@ -110,22 +110,27 @@ namespace SPTAG
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
                 if (COMMON::DistanceUtils::Quantizer) {
+			printf("has quantizer!\n");
+                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
+			/*
                     switch (COMMON::DistanceUtils::Quantizer->GetReconstructType())
                     {
 #define GPUDefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-buildGraph<T, Type>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor, COMMON:DistanceUtils::Quantizer); \
+buildGraph<T, Type>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor); \
 break;
 
 #include "inc/Core/DefinitionList.h"
 #undef GPUDefineVectorValueType
                    default: break; 
                    }
+		   */
                 }
                 else {
+			printf("no quantizer!\n");
 
                     // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                    buildGraph<T, T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor, NULL);
+                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
                 }
 
                 if (idmap != nullptr) {
@@ -160,6 +165,7 @@ break;
                 }
                 else
                 {
+			printf("No quantizer!\n");
                     PartitionByTptreeCore<T, T>(index, indices, first, last, leaves);
                 }
             }
@@ -351,6 +357,7 @@ break;
             template <typename T>
             void BuildInitKNNGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap)
             {
+
                 COMMON::Dataset<float> NeighborhoodDists(m_iGraphSize, m_iNeighborhoodSize, index->m_iDataBlockSize, index->m_iDataCapacity);
                 std::vector<std::vector<SizeType>> TptreeDataIndices(m_iTPTNumber, std::vector<SizeType>(m_iGraphSize));
                 std::vector<std::vector<std::pair<SizeType, SizeType>>> TptreeLeafNodes(m_iTPTNumber, std::vector<std::pair<SizeType, SizeType>>());
@@ -373,6 +380,13 @@ break;
                 LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+
+		for(int i=0; i<10; i++) {
+                  for(int j=0; j<20; j++) {
+                    std::cout << static_cast<int16_t>(((uint8_t*)index->GetSample(i))[j]) << ", ";
+		  }
+		  std::cout << std::endl;
+		}
 
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {

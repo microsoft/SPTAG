@@ -57,6 +57,8 @@ namespace SPTAG
 
             SizeType GetKsPerSubvector() const;
 
+            SizeType GetBlockSize() const;
+
             DimensionType GetDimPerSubvector() const;
 
             virtual bool GetEnableADC() const;
@@ -356,6 +358,12 @@ namespace SPTAG
         }
 
         template <typename T>
+        SizeType PQQuantizer<T>::GetBlockSize() const
+        {
+            return m_BlockSize;
+        }
+
+        template <typename T>
         DimensionType PQQuantizer<T>::GetDimPerSubvector() const
         {
             return m_DimPerSubvector;
@@ -377,6 +385,14 @@ namespace SPTAG
         inline SizeType PQQuantizer<T>::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const {
             return m_BlockSize * i + j * m_KsPerSubvector + k;
         }
+
+	template <typename T>
+        float* PQQuantizer<T>::GetCosineDistanceTables() {
+		printf("Getting pointer to cosine distance tables...\n");
+		// SEG FAULTS HERE, HOW CAN WE ACCESS THIS?
+		printf("Example values: %f, %f, %f\n", m_CosineDistanceTables[0], m_CosineDistanceTables[1], m_CosineDistanceTables[2]);
+          return (float*)(m_CosineDistanceTables.get());
+	}
     }
 }
 
