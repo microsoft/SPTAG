@@ -627,6 +627,13 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t
   for(int i=0; i<rows; i++) {
     data = (T*)index->GetSample(i);
 
+//	  if(i < 10) {
+//for(int j=0; j<exact_dim; j++) {
+//  std::cout << static_cast<int16_t>(data[i*exact_dim+j]) << ", ";
+//}
+//std::cout << std::endl;
+//	  }
+
     pointArray[i].loadChunk(data, exact_dim);
   }
   return pointArray;

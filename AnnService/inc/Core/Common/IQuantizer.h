@@ -56,6 +56,12 @@ namespace SPTAG
             virtual DimensionType GetNumSubvectors() const = 0;
 
             virtual int GetBase() const = 0;
+
+	    virtual float* GetCosineDistanceTables() = 0;
+
+	    virtual SizeType GetKsPerSubvector() const = 0;
+	    
+	    virtual SizeType GetBlockSize() const = 0;
         };
     }
 }
