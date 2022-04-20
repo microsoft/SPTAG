@@ -38,6 +38,8 @@ using namespace std;
 
 using namespace SPTAG;
 
+enum DistMetric { L2, Cosine };
+
 // Templated infinity value
 template<typename T> __host__ __device__ T INFTY() {}
 template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;}
@@ -124,7 +126,6 @@ class Point {
     if(metric == 0) return l2(other);
     else return cosine(other);
   }
-
 };
 
 // Less-than operator between two points.
@@ -170,6 +171,22 @@ class Point<uint8_t, SUMTYPE, Dim> {
     }
     id = other.id;
     return *this;
+  }
+
+  __host__ uint8_t getVal(int idx) {
+    if(idx % 4 == 0) {
+      return (uint8_t)(coords[idx/4] & 0x000000FF);
+    }
+    else if(idx % 4 == 1) {
+      return (uint8_t)((coords[idx/4] & 0x0000FF00)>>8);
+    }
+    else if(idx % 4 == 2) {
+      return (uint8_t)((coords[idx/4] & 0x00FF0000)>>16);
+    }
+    else if(idx % 4 == 3) {
+      return (uint8_t)((coords[idx/4])>>24);
+    }
+    return 0;
   }
 
   __device__ __host__ SUMTYPE l2_block(Point<uint8_t,SUMTYPE,Dim>* other) {return 0;}
@@ -374,8 +391,17 @@ class Point<int8_t, SUMTYPE, Dim> {
  ********************************************************************/
 template<typename T, typename SUMTYPE, int Dim>
 __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim) {
-  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+//  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+  Point<T,SUMTYPE,Dim>* pointArray = new Point<T,SUMTYPE,Dim>[rows];
   for(int i=0; i<rows; i++) {
+/*
+	  if(i < 10) {
+for(int j=0; j<exact_dim; j++) {
+  std::cout << static_cast<int16_t>(data[i*exact_dim+j]) << ", ";
+}
+std::cout << std::endl;
+	  }
+*/
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
   }
   return pointArray;
@@ -383,12 +409,22 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
 
 template<typename T, typename SUMTYPE, int Dim>
 __host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t rows, int exact_dim) {
-  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+//  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+  Point<T,SUMTYPE,Dim>* pointArray = new Point<T,SUMTYPE,Dim>[rows];
+  printf("allocated %d points in convertMatrix\n");
 
   T* data;
 
   for(int i=0; i<rows; i++) {
     data = (T*)index->GetSample(i);
+
+//	  if(i < 10) {
+//for(int j=0; j<exact_dim; j++) {
+//  std::cout << static_cast<int16_t>(data[i*exact_dim+j]) << ", ";
+//}
+//std::cout << std::endl;
+//	  }
+
     pointArray[i].loadChunk(data, exact_dim);
   }
   return pointArray;
