@@ -258,14 +258,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
 
     int resultErr;
-    size_t headRows, tailRows;
+    size_t headRows;
     headRows = headIndex->GetNumSamples();
-    if(headVectorIDS.size() == 0) { // If list of headVectors is not given, have to extract them from headIndex
-        tailRows = N;
-    }
-    else {
-        tailRows = N - headVectorIDS.size();
-    }
     int TPTlevels = (int)std::log2(headRows/LEAF_SIZE);
 
     // Buffer to shuttle vectors from index structure to GPU
@@ -462,7 +456,6 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "gpu:%d, copying results size %lu to resu
 
                 CUDA_CHECK(cudaMemcpy(results, d_results[gpuNum]+(i*RNG_SIZE), copy_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost));
                 size_t fullIdx = GPUPointOffset[gpuNum]+offset[gpuNum]+i;
-                SizeType resIdx = 0;
                 //#pragma omp parallel for
                 for (size_t j = 0; j < copy_size; j++) {
                     size_t vecIdx = fullIdx+j;
@@ -474,7 +467,6 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "gpu:%d, copying results size %lu to resu
                             selections[vecOffset + resNum].distance = (float)results[resOffset + resNum].dist;
                         }
                     }
-                    resIdx++;
                 }
             }
         }
