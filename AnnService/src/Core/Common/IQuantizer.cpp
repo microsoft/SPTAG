@@ -7,6 +7,7 @@ namespace SPTAG
     namespace COMMON
     {
         ErrorCode IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
+printf("LoadIQuantizer!\n"); 
             QuantizerType quantizerType = QuantizerType::Undefined;
             VectorValueType reconstructType = VectorValueType::Undefined;
             IOBINARY(p_in, ReadBinary, sizeof(QuantizerType), (char*)&quantizerType);
@@ -18,6 +19,7 @@ namespace SPTAG
             case QuantizerType::Undefined:
                 break;
             case QuantizerType::PQQuantizer:
+		printf("Resetting Quantizer to type PQQuantizer!\n");
                 switch (reconstructType) {
                     #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \

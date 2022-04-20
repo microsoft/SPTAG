@@ -514,6 +514,7 @@ const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
 ErrorCode
 VectorIndex::LoadQuantizer(std::string p_quantizerFile)
 {
+	printf("about to create quantizer IO...\n");
     auto ptr = SPTAG::f_createIO();
     if (!ptr->Initialize(p_quantizerFile.c_str(), std::ios::binary | std::ios::in))
     {
