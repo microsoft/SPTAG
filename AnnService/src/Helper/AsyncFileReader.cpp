@@ -79,17 +79,16 @@ namespace SPTAG {
                 {
                     req->m_callback(req);
                 }
-                DiskPriorityIO::g_fCleanup(req);
             }
         }
 #else
-        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        using BatchOp = bool (DiskPriorityIO::*)(AsyncReadRequest*, uint32_t);
+        void CallOnAppropriateBatch(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num, BatchOp f)
         {
-            
             if (handlers.size() == 1) {
-                handlers[0]->BatchReadFile(readRequests, num);
+                (handlers[0].get()->*f)(readRequests, num);
             }
-            else {            
+            else {
                 int currFileId = 0, currReqStart = 0;
                 for (int i = 0; i < num; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
@@ -97,15 +96,21 @@ namespace SPTAG {
 
                     int fileid = (readRequest->m_status >> 16);
                     if (fileid != currFileId) {
-                        handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        (handlers[currFileId].get()->*f)(readRequests + currReqStart, i - currReqStart);
                         currFileId = fileid;
                         currReqStart = i;
                     }
                 }
                 if (currReqStart < num) {
-                    handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                    (handlers[currFileId].get()->*f)(readRequests + currReqStart, num - currReqStart);
                 }
             }
+        }
+
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        {
+            
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskPriorityIO::BatchReadFile);
 
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
@@ -115,8 +120,9 @@ namespace SPTAG {
                 {
                     readRequest->m_callback(readRequest);
                 }
-                DiskPriorityIO::g_fCleanup(readRequest);
             }
+
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskPriorityIO::BatchCleanRequests);
         }
 #endif
     }
