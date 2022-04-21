@@ -104,7 +104,7 @@ break;
                     Sleep(i * 100); std::srand(clock());
 
                     std::vector<SizeType> pindices(localindices.begin(), localindices.end());
-                    std::random_shuffle(pindices.begin(), pindices.end());
+                    std::shuffle(pindices.begin(), pindices.end(), rg);
 
                     m_pTreeStart[i] = i * (SizeType)pindices.size();
                     LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
@@ -334,7 +334,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 if (quantizer_exists)
                 {
                     cols = m_pQuantizer->ReconstructDim();
-                    v_holder = (R*)_mm_malloc(m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    v_holder = (R*)ALIGN_ALLOC(m_pQuantizer->ReconstructSize());
                 }
                 std::vector<float> meanValues(cols, 0);
                 std::vector<float> varianceValues(cols, 0);
@@ -383,7 +383,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 }
                 if (quantizer_exists)
                 {
-                    _mm_free(v_holder);
+                    ALIGN_FREE(v_holder);
                 }
                 // choose the split dimension as one of the dimension inside TOP_DIM maximum variance
                 node.split_dim = SelectDivisionDimension(varianceValues);
@@ -431,7 +431,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 R* v_holder = nullptr;
                 if (quantizer_exists)
                 {
-                    v_holder = (R*)_mm_malloc(m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    v_holder = (R*)ALIGN_ALLOC(m_pQuantizer->ReconstructSize());
                 }
                 // decide which child one point belongs
                 while (i <= j)
@@ -460,7 +460,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 }
                 if (quantizer_exists)
                 {
-                    _mm_free(v_holder);
+                    ALIGN_FREE(v_holder);
                 }
                 // if all the points in the node are equal,equally split the node into 2
                 if ((i == first) || (i == last + 1))

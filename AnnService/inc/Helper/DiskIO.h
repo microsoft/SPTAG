@@ -31,8 +31,9 @@ namespace SPTAG
 
             // Carry items like counter for callback to process.
             void* m_payload;
-            
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr) {}
+            bool m_success;
+
+            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false) {}
         };
 
         class DiskPriorityIO
@@ -58,6 +59,8 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
+            
+            virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
             virtual std::uint64_t TellP() = 0;
 

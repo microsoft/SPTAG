@@ -7,7 +7,7 @@ namespace SPTAG {
     namespace Helper {
 #ifndef _MSC_VER
         struct timespec AIOTimeout {0, 30000};
-        int BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
             std::vector<struct iocb> myiocbs(num);
             std::vector<std::vector<struct iocb*>> iocbs(handlers.size());
@@ -31,6 +31,7 @@ namespace SPTAG {
                 myiocb->aio_nbytes = readRequest->m_readSize;
                 myiocb->aio_offset = static_cast<std::int64_t>(readRequest->m_offset);
 
+                readRequest->m_readSize = 0;
                 iocbs[fileid].emplace_back(myiocb);
             }
             std::vector<struct io_event> events(totalToSubmit);
@@ -47,7 +48,6 @@ namespace SPTAG {
                             }
                             else {
                                 LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
-                                return totalDone;
                             }
                         }
                     }
@@ -80,7 +80,41 @@ namespace SPTAG {
                     req->m_callback(req);
                 }
             }
-            return totalDone;
+        }
+#else
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        {
+            
+            if (handlers.size() == 1) {
+                handlers[0]->BatchReadFile(readRequests, num);
+            }
+            else {            
+                int currFileId = 0, currReqStart = 0;
+                for (int i = 0; i < num; i++) {
+                    AsyncReadRequest* readRequest = &(readRequests[i]);
+                    if (readRequest->m_readSize == 0) continue;
+
+                    int fileid = (readRequest->m_status >> 16);
+                    if (fileid != currFileId) {
+                        handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        currFileId = fileid;
+                        currReqStart = i;
+                    }
+                }
+                if (currReqStart < num) {
+                    handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                }
+            }
+
+            for (int i = 0; i < num; i++) {
+                AsyncReadRequest* readRequest = &(readRequests[i]);
+                if (readRequest->m_readSize == 0) continue;
+                readRequest->m_readSize = 0;
+                if (readRequest->m_success)
+                {
+                    readRequest->m_callback(readRequest);
+                }
+            }
         }
 #endif
     }

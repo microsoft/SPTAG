@@ -9,12 +9,6 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/AsyncFileReader.h"
 
-#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
-#include <malloc.h>
-#else
-#include <mm_malloc.h>
-#endif // defined(__GNUC__)
-
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -87,7 +81,7 @@ namespace SPTAG {
                 if (m_pageBufferSize < p_size)
                 {
                     m_pageBufferSize = p_size;
-                    m_pageBuffer.reset(static_cast<T*>(_mm_malloc(sizeof(T) * m_pageBufferSize, 512)), [=](T* ptr) { _mm_free(ptr); });
+                    m_pageBuffer.reset(static_cast<T*>(PAGE_ALLOC(sizeof(T) * m_pageBufferSize)), [=](T* ptr) { PAGE_FREE(ptr); });
                 }
             }
 

@@ -165,6 +165,7 @@ namespace SPTAG
                     exit(1);
                 }
 
+                LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
                 std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
                 auto fComputeDistance = quantizer ? quantizer->DistanceCalcSelector<T>(distMethod) : COMMON::DistanceCalcSelector<T>(distMethod);
@@ -187,7 +188,7 @@ namespace SPTAG
                     }
 
                 }
-
+                LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
                 writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
 
                 auto ptr = SPTAG::f_createIO();
@@ -294,7 +295,7 @@ namespace SPTAG
                 void* reconstructVector = nullptr;
                 if (index->m_pQuantizer)
                 {
-                    reconstructVector = _mm_malloc(index->m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                    reconstructVector = ALIGN_ALLOC(index->m_pQuantizer->ReconstructSize());
                     index->m_pQuantizer->ReconstructVector((const uint8_t*)query, reconstructVector);
                     sampleANN.SetTarget(reconstructVector, index->m_pQuantizer);
                     sampleTruth.SetTarget(reconstructVector, index->m_pQuantizer);
@@ -326,7 +327,7 @@ namespace SPTAG
                 }
                 if (reconstructVector)
                 {
-                    _mm_free(reconstructVector);
+                    ALIGN_FREE(reconstructVector);
                 }
 
                 return recalls / K;
