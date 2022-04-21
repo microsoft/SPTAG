@@ -20,6 +20,7 @@
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
+#define BATCH_READ 1
 #else
 #define BATCH_READ 1
 #include <fcntl.h>

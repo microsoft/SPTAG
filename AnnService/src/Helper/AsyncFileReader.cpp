@@ -79,6 +79,7 @@ namespace SPTAG {
                 {
                     req->m_callback(req);
                 }
+                DiskPriorityIO::g_fCleanup(req);
             }
         }
 #else
@@ -114,6 +115,7 @@ namespace SPTAG {
                 {
                     readRequest->m_callback(readRequest);
                 }
+                DiskPriorityIO::g_fCleanup(readRequest);
             }
         }
 #endif

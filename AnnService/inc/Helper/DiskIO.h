@@ -33,7 +33,10 @@ namespace SPTAG
             void* m_payload;
             bool m_success;
 
-            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false) {}
+            // Carry exension metadata needed by some DiskPriorityIO implementations
+            void* m_extension;
+
+            AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false), m_extension(nullptr) {}
         };
 
         class DiskPriorityIO
@@ -66,6 +69,7 @@ namespace SPTAG
 
             virtual void ShutDown() = 0;
 
+            static std::function<void(AsyncReadRequest*)> g_fCleanup;
         };
 
         class SimpleFileIO : public DiskPriorityIO
