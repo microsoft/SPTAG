@@ -115,7 +115,7 @@ namespace SPTAG {
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
                 if (readRequest->m_readSize == 0) continue;
-                readRequest->m_readSize = 0;
+                
                 if (readRequest->m_success)
                 {
                     readRequest->m_callback(readRequest);
