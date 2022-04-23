@@ -116,9 +116,10 @@ namespace SPTAG {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
                 if (readRequest->m_readSize == 0) continue;
                 
-                if (readRequest->m_success)
+                if (readRequest->m_success && readRequest->m_callback)
                 {
                     readRequest->m_callback(readRequest);
+                    readRequest->m_callback = nullptr;
                 }
             }
 
