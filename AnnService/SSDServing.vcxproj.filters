@@ -12,6 +12,9 @@
     <ClInclude Include="inc\SSDServing\main.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inc\SSDServing\SelectHead.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="inc\SSDServing\Utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>

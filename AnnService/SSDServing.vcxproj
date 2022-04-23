@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="inc\SSDServing\main.h" />
+    <ClInclude Include="inc\SSDServing\SelectHead.h" />
     <ClInclude Include="inc\SSDServing\SSDIndex.h" />
     <ClInclude Include="inc\SSDServing\Utils.h" />
   </ItemGroup>
