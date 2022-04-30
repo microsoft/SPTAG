@@ -207,7 +207,7 @@ namespace SPTAG
             if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum) 
                 p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
             else
-                p_queryResults = new COMMON::QueryResultSet<T>(p_query.GetTarget(), m_options.m_searchInternalResultNum);
+                p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
 
             m_index->SearchIndex(*p_queryResults);
             
