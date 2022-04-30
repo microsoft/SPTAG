@@ -69,8 +69,7 @@ namespace SPTAG
 
             virtual std::uint64_t TellP() = 0;
 
-            virtual void ShutDown() = 0;
- 
+            virtual void ShutDown() = 0; 
         };
 
         class SimpleFileIO : public DiskPriorityIO

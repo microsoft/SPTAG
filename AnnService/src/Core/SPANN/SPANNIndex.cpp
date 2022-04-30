@@ -275,6 +275,7 @@ namespace SPTAG
             newResults.Reverse();
 
             auto auto_ws = m_workSpacePool->Rent();
+            auto_ws->m_deduper.clear();
 
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
             float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;
