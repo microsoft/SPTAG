@@ -29,6 +29,7 @@ namespace SPTAG {
             static bool SSE(void);
             static bool SSE2(void);
             static bool AVX2(void);
+            static bool AVX512(void);
             static void PrintInstructionSet(void);
 
         private:
@@ -42,6 +43,7 @@ namespace SPTAG {
                 bool HW_SSE2;
                 bool HW_AVX;
                 bool HW_AVX2;
+                bool HW_AVX512;
             };
         };
     }
