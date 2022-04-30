@@ -74,21 +74,21 @@ namespace SPTAG
 		template <typename T>
 		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
 		{
-			OPQMatrixType* mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
 			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec, true);
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
-			_mm_free(mat_vec);
+			ALIGN_FREE(mat_vec);
 		}
 
 		template <typename T>
 		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout) const
 		{
-			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) _mm_malloc(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector, ALIGN_SPTAG);
+			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
 			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout);
 
-			_mm_free(pre_mat_vec);
+			ALIGN_FREE(pre_mat_vec);
 		}
 
 		template <typename T>

@@ -33,8 +33,8 @@ namespace SPTAG
             }
             ~Dataset()
             {
-                if (ownData) _mm_free(data);
-                for (T* ptr : incBlocks) _mm_free(ptr);
+                if (ownData) ALIGN_FREE(data);
+                for (T* ptr : incBlocks) ALIGN_FREE(ptr);
                 incBlocks.clear();
             }
             void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
@@ -45,7 +45,7 @@ namespace SPTAG
                 if (data_ == nullptr || !transferOnwership_)
                 {
                     ownData = true;
-                    data = (T*)_mm_malloc(((size_t)rows) * cols * sizeof(T), ALIGN_SPTAG);
+                    data = (T*)ALIGN_ALLOC(((size_t)rows) * cols * sizeof(T));
                     if (data_ != nullptr) memcpy(data, data_, ((size_t)rows) * cols * sizeof(T));
                     else std::memset(data, -1, ((size_t)rows) * cols * sizeof(T));
                 }
@@ -98,7 +98,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = ((incRows + written) >> rowsInBlockEx);
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(((size_t)rowsInBlock + 1) * cols * sizeof(T), ALIGN_SPTAG);
+                        T* newBlock = (T*)ALIGN_ALLOC(((size_t)rowsInBlock + 1) * cols * sizeof(T));
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         incBlocks.push_back(newBlock);
                     }
@@ -119,7 +119,7 @@ namespace SPTAG
                 while (written < num) {
                     SizeType curBlockIdx = (incRows + written) >> rowsInBlockEx;
                     if (curBlockIdx >= (SizeType)incBlocks.size()) {
-                        T* newBlock = (T*)_mm_malloc(sizeof(T) * (rowsInBlock + 1) * cols, ALIGN_SPTAG);
+                        T* newBlock = (T*)ALIGN_ALLOC(sizeof(T) * (rowsInBlock + 1) * cols);
                         if (newBlock == nullptr) return ErrorCode::MemoryOverFlow;
                         std::memset(newBlock, -1, sizeof(T) * (rowsInBlock + 1) * cols);
                         incBlocks.push_back(newBlock);

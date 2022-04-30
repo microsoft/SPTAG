@@ -62,8 +62,8 @@ namespace SPTAG
                     fComputeDistance = COMMON::DistanceCalcSelector<T>(distMethod);
                 }
 
-                centers = (T*)_mm_malloc(sizeof(T) * _K * _D, ALIGN_SPTAG);
-                newTCenters = (T*)_mm_malloc(sizeof(T) * _K * _D, ALIGN_SPTAG);
+                centers = (T*)ALIGN_ALLOC(sizeof(T) * _K * _D);
+                newTCenters = (T*)ALIGN_ALLOC(sizeof(T) * _K * _D);
                 counts = new SizeType[_K];
                 newCenters = new float[_T * _K * _RD];
                 newCounts = new SizeType[_T * _K];
@@ -75,8 +75,8 @@ namespace SPTAG
             }
 
             ~KmeansArgs() {
-                _mm_free(centers);
-                _mm_free(newTCenters);
+                ALIGN_FREE(centers);
+                ALIGN_FREE(newTCenters);
                 delete[] counts;
                 delete[] newCenters;
                 delete[] newCounts;
@@ -236,7 +236,7 @@ namespace SPTAG
                 float * iweightedCounts = args.newWeightedCounts + tid * args._K;
                 float idist = 0;
                 R* reconstructVector = nullptr;
-                if (args.m_pQuantizer) reconstructVector = (R*)_mm_malloc(args.m_pQuantizer->ReconstructSize(), ALIGN_SPTAG);
+                if (args.m_pQuantizer) reconstructVector = (R*)ALIGN_ALLOC(args.m_pQuantizer->ReconstructSize());
 
                 for (SizeType i = istart; i < iend; i++) {
                     int clusterid = 0;
@@ -273,7 +273,7 @@ namespace SPTAG
                         }
                     }
                 }
-                if (args.m_pQuantizer) _mm_free(reconstructVector);
+                if (args.m_pQuantizer) ALIGN_FREE(reconstructVector);
                 currDist += idist;
             }
 
@@ -352,7 +352,7 @@ namespace SPTAG
             float originalLambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / lambdaFactor / (batchEnd - first);
             for (int iter = 0; iter < 100; iter++) {
                 std::memcpy(args.centers, args.newTCenters, sizeof(T)*args._K*args._D);
-                std::random_shuffle(indices.begin() + first, indices.begin() + last);
+                std::shuffle(indices.begin() + first, indices.begin() + last, rg);
 
                 args.ClearCenters();
                 args.ClearCounts();
@@ -563,7 +563,7 @@ break;
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
                 {
-                    std::random_shuffle(localindices.begin(), localindices.end());
+                    std::shuffle(localindices.begin(), localindices.end(), rg);
 
                     m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());

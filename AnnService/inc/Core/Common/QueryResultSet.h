@@ -47,7 +47,7 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
         m_quantizedSize = 0;
@@ -64,9 +64,9 @@ public:
             }
             else
             {
-                if (m_quantizedTarget) _mm_free(m_quantizedTarget);
+                if (m_quantizedTarget) ALIGN_FREE(m_quantizedTarget);
                 m_quantizedSize = quantizer->QuantizeSize();
-                m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
+                m_quantizedTarget = ALIGN_ALLOC(m_quantizedSize);
                 quantizer->QuantizeVector((void*)p_target, (uint8_t*)m_quantizedTarget);
             }
         }
@@ -74,7 +74,7 @@ public:
         {
             if (m_quantizedTarget)
             {
-                _mm_free(m_quantizedTarget);
+                ALIGN_FREE(m_quantizedTarget);
             }
             m_quantizedTarget = nullptr;
             m_quantizedSize = 0;

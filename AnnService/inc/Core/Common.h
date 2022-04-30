@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <memory>
+#include <random>
 #include <string>
 #include <limits>
 #include <vector>
@@ -84,7 +85,17 @@ inline bool fileexists(const TCHAR* path) {
 
 namespace SPTAG
 {
-#define ALIGN_SPTAG 32
+#if (__cplusplus < 201703L)
+#define ALIGN_ALLOC(size) _mm_malloc(size, 32)
+#define ALIGN_FREE(ptr) _mm_free(ptr)
+#define PAGE_ALLOC(size) _mm_malloc(size, 512)
+#define PAGE_FREE(ptr) _mm_free(ptr)
+#else
+#define ALIGN_ALLOC(size) ::operator new(size, (std::align_val_t)32)
+#define ALIGN_FREE(ptr) ::operator delete(ptr, (std::align_val_t)32)
+#define PAGE_ALLOC(size) ::operator new(size, (std::align_val_t)512)
+#define PAGE_FREE(ptr) ::operator delete(ptr, (std::align_val_t)512)
+#endif
 
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;
@@ -95,6 +106,8 @@ const float MaxDist = (std::numeric_limits<float>::max)() / 10;
 const float Epsilon = 0.000001f;
 const std::uint16_t PageSize = 4096;
 const int PageSizeEx = 12;
+
+extern std::mt19937 rg;
 
 extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
 

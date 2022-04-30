@@ -1,0 +1,1 @@
+recursive-include sptag *.py _SPTAG* Server.exe server

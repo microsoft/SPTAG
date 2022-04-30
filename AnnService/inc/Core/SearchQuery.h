@@ -54,7 +54,7 @@ public:
         if (p_other.m_quantizedTarget)
         {
             m_quantizedSize = p_other.m_quantizedSize;
-            m_quantizedTarget = _mm_malloc(m_quantizedSize, ALIGN_SPTAG);
+            m_quantizedTarget = ALIGN_ALLOC(m_quantizedSize);
             std::copy(reinterpret_cast<std::uint8_t*>(p_other.m_quantizedTarget), reinterpret_cast<std::uint8_t*>(p_other.m_quantizedTarget) + m_quantizedSize, reinterpret_cast<std::uint8_t*>(m_quantizedTarget));
         }
     }
@@ -76,7 +76,7 @@ public:
     {
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
     }
 
@@ -109,7 +109,7 @@ public:
         m_target = p_target;
         if (m_quantizedTarget)
         {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
         }
         m_quantizedTarget = nullptr;
         m_quantizedSize = 0;
@@ -177,7 +177,7 @@ public:
     inline void ClearTmp()
     {
         if (m_quantizedTarget) {
-            _mm_free(m_quantizedTarget);
+            ALIGN_FREE(m_quantizedTarget);
             m_quantizedTarget = nullptr;
         }
     }
