@@ -58,16 +58,16 @@ ValueType=UInt8
 DistCalcMethod=L2
 IndexAlgoType=BKT
 Dim=128
-VectorPath=base.1B.u8bin
+VectorPath=sift1b/base.1B.u8bin
 VectorType=DEFAULT
-QueryPath=query.public.10K.u8bin
+QueryPath=sift1b/query.public.10K.u8bin
 QueryType=DEFAULT
-WarmupPath=query.public.10K.u8bin
+WarmupPath=sift1b/query.public.10K.u8bin
 WarmupType=DEFAULT
-TruthPath=public_query_gt100.bin
+TruthPath=sift1b/public_query_gt100.bin
 TruthType=DEFAULT
 IndexDirectory=sift1b
-QuantizerFilePath=quantizer.bin
+QuantizerFilePath=
 
 [SelectHead]
 isExecute=true
@@ -108,8 +108,164 @@ MaxDistRatio=8.0
    ```
 Then run ".\IndexBuilder.exe -c buildconfig.ini -d 128 -v UInt8 -f DEFAULT -i FromFile -o sift1b -a SPANN" to build the index.
 
-### ** Input File format **
+Another build and search combined executable is SSDServing.exe which is used in the paper experiments.
 
+For sift1b dataset, use the default configuration below (buildconfig.ini) and run .\SSDServing.exe buildconfig.ini:
+```
+[Base]
+ValueType=UInt8
+DistCalcMethod=L2
+IndexAlgoType=BKT
+Dim=128
+VectorPath=sift1b/base.1B.u8bin
+VectorType=DEFAULT
+QueryPath==sift1b/query.public.10K.u8bin
+QueryType=DEFAULT
+WarmupPath==sift1b/query.public.10K.u8bin
+WarmupType=DEFAULT
+TruthPath==sift1b/public_query_gt100.bin
+TruthType=DEFAULT
+IndexDirectory=sift1b
+
+[SelectHead]
+isExecute=true
+TreeNumber=1
+BKTKmeansK=32
+BKTLeafSize=8
+SamplesNumber=1000
+SaveBKT=false
+SelectThreshold=10
+SplitFactor=6
+SplitThreshold=25
+Ratio=0.12
+NumberOfThreads=45
+BKTLambdaFactor=1.0
+
+[BuildHead]
+isExecute=true
+NeighborhoodSize=32
+TPTNumber=32
+TPTLeafSize=2000
+MaxCheck=16324
+MaxCheckForRefineGraph=16324
+RefineIterations=3
+NumberOfThreads=45
+BKTLambdaFactor=-1.0
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+InternalResultNum=64
+ReplicaCount=8
+PostingPageLimit=3
+NumberOfThreads=45
+MaxCheck=16324
+TmpDir=/tmp/
+
+[SearchSSDIndex]
+isExecute=true
+BuildSsdIndex=false
+InternalResultNum=96
+NumberOfThreads=1
+HashTableExponent=4
+ResultNum=10
+MaxCheck=1024
+MaxDistRatio=8.0
+SearchPostingPageLimit=3
+
+```
+
+For sift1m dataset, use the default configuration below (buildconfig.ini) and run .\SSDServing.exe buildconfig.ini:
+```
+[Base]
+ValueType=Float
+DistCalcMethod=L2
+IndexAlgoType=BKT
+Dim=128
+VectorPath=sift1m/sift_base.fvecs
+VectorType=XVEC
+QueryPath=sift1m/sift_query.fvecs
+QueryType=XVEC
+WarmupPath=sift1m/sift_query.fvecs
+WarmupType=XVEC
+TruthPath=sift1m/sift_groundtruth.ivecs
+TruthType=XVEC
+IndexDirectory=sift1m
+
+[SelectHead]
+isExecute=true
+TreeNumber=1
+BKTKmeansK=32
+BKTLeafSize=8
+SamplesNumber=1000
+SaveBKT=false
+SelectThreshold=50
+SplitFactor=6
+SplitThreshold=100
+Ratio=0.16
+NumberOfThreads=64
+BKTLambdaFactor=-1
+
+[BuildHead]
+isExecute=true
+NeighborhoodSize=32
+TPTNumber=32
+TPTLeafSize=2000
+MaxCheck=8192
+MaxCheckForRefineGraph=8192
+RefineIterations=3
+NumberOfThreads=64
+BKTLambdaFactor=-1
+
+[BuildSSDIndex]
+isExecute=true
+BuildSsdIndex=true
+InternalResultNum=64
+ReplicaCount=8
+PostingPageLimit=12
+NumberOfThreads=64
+MaxCheck=8192
+TmpDir=/tmp/
+
+[SearchSSDIndex]
+isExecute=true
+BuildSsdIndex=false
+InternalResultNum=32
+NumberOfThreads=1
+HashTableExponent=4
+ResultNum=10
+MaxCheck=2048
+MaxDistRatio=8.0
+SearchPostingPageLimit=12
+```
+
+### **Quantizer Training and Quantizing Vectors**
+> Use Quantizer.exe to train PQQuantizer and output quantizer & quantized vectors:
+
+  ```bash
+  Usage:
+  ./Quantizer [options]
+  Options:
+  -d, --dimension <value>                 Dimension of vector.
+  -v, --vectortype <value>                Input vector data type. Default is float.
+  -f, --filetype <value>                  Input file type (DEFAULT, TXT, XVEC). Default is DEFAULT.
+  -i, --input <value>                     Input raw data.
+  -o, --output <value>                    Output quantized vectors.
+  -om, --outputmeta <value>               Output metadata.
+  -omi, --outputmetaindex <value>         Output metadata index.
+
+  -t, --thread <value>                    Thread Number.
+  -dl, --delimiter <value>                Vector delimiter.
+  -norm, --normalized <value>             Vector is normalized.
+  -oq, --outputquantizer <value>          Output quantizer.
+  -qt, --quantizer <value>                Quantizer type.
+  -qd, --quantizeddim <value>             Quantized Dimension.
+  -ts, --train_samples <value>            Number of samples for training.
+  -debug, --debug <value>                 Print debug information.
+  -kml, --lambda <value>                  Kmeans lambda parameter.
+  ```
+
+### **Input File Format**
 
 #### DEFAULT (Binary)
 > Input raw data for index build and input query file for index search (suppose vector dimension is 3):
@@ -143,11 +299,24 @@ where each line represents a vector with its metadata and its value separated by
 ```
 where each line represents the K nearest neighbors of a query separated by a blank space. Each neighbor is given by its vector id.
 
+### **Meta Files Format**
+> Data for index build to provide the metadata of the vectors. There are two files:
+
+#### meta.bin
+```
+<vector 1 meta><vector 2 meta>...
+```
+
+#### metaindex.bin
+```
+<4 bytes int representing num_vectors><sizeof(uint64_t)*(num_vectors + 1) bytes representing position_array where the meta start and end positions in meta.bin for vector i is position_array[i] and position_array[i+1] respectively> 
+```
+
 ### **Quantizer File Format**
 > Data for using PQ quantizer in index build and index search
 ```
-<4 bytes int representing num_codebooks><4 bytes int representing entries_per_codebook><4 bytes int representing codebook_dim>
-<sizeof(ReconstructType)*num_codebooks*entries_per_codebook*codebook_dim representing codebook entries>
+<1 byte uint8 representing QuantizerType -- 0: NONE, 1: PQ, 2: OPQ><1 byte uint8 representing ReconstructDataType -- 0: int8, 1: uint8, 2: int16, 3: float><4 bytes int representing num_codebooks><4 bytes int representing entries_per_codebook><4 bytes int representing codebook_dim>
+<sizeof(ReconstructType)*num_codebooks*entries_per_codebook*codebook_dim representing codebook entries>[<sizeof(float) * reconstruct_dim * reconstruct_dim representing OPQ rotation matrix, row major order>]
 ```
 
 Note that `num_codebooks*codebook_dim=full_dim`. The current PQ implementation only supports `entries_per_codebook <= 256` (i.e. quantizing to `byte`).
