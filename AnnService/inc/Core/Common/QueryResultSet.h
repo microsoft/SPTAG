@@ -7,6 +7,7 @@
 #include "../SearchQuery.h"
 #include "DistanceUtils.h"
 #include <algorithm>
+#include "IQuantizer.h"
 
 namespace SPTAG
 {

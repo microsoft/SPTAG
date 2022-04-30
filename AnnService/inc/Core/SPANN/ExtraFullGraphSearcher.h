@@ -140,8 +140,6 @@ namespace SPTAG
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
-                p_exWorkSpace->m_deduper.clear();
-
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
  
                 int diskRead = 0;
@@ -170,11 +168,6 @@ namespace SPTAG
 #ifndef BATCH_READ
                     Helper::DiskPriorityIO* indexFile = m_indexFiles[fileid].get();
 #endif
-
-                    if (listInfo->listEleCount == 0)
-                    {
-                        continue;
-                    }
 
                     diskRead += listInfo->listPageCount;
                     diskIO += 1;
@@ -492,6 +485,22 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
              
                 return true;
+            }
+
+            virtual bool CheckValidPosting(SizeType postingID)
+            {
+                bool oneContext = (m_indexFiles.size() == 1);
+                int fileid = 0;
+                ListInfo* listInfo;
+                if (oneContext) {
+                    listInfo = &(m_listInfos[0][postingID]);
+                }
+                else {
+                    fileid = postingID / m_listPerFile;
+                    listInfo = &(m_listInfos[fileid][postingID % m_listPerFile]);
+                }
+
+                return listInfo->listEleCount != 0;
             }
 
         private:
