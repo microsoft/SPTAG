@@ -214,18 +214,16 @@ namespace SPTAG
                 float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
                 for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
                 {
-                    if (workSpace->m_postingIDs.size() > m_options.m_searchInternalResultNum) break;
                     auto res = p_queryResults->GetResult(i);
-                    if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
-                    if (!m_extraSearcher->CheckValidPosting(res->VID)) continue;
-                    workSpace->m_postingIDs.emplace_back(res->VID);
-                }
+                    auto postingID = res->VID;
 
-                for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
-                {
-                    auto res = p_queryResults->GetResult(i);
+                    // Overwrite the posting ID with the actual vector ID
                     if (res->VID == -1) break;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+
+                    // Don't do disk reads for irrelevant pages
+                    if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || (limitDist > 0.1 && res->Dist > limitDist) || !m_extraSearcher->CheckValidPosting(postingID)) continue;
+                    workSpace->m_postingIDs.emplace_back(postingID);
                 }
 
                 p_queryResults->Reverse();
