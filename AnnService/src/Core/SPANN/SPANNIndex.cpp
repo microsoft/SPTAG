@@ -212,10 +212,12 @@ namespace SPTAG
                 workSpace->m_postingIDs.clear();
 
                 float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
-                for (int i = 0; i < min(m_options.m_searchInternalResultNum, p_queryResults->GetResultNum()); ++i)
+                for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
                 {
+                    if (workSpace->m_postingIDs.size() > m_options.m_searchInternalResultNum) break;
                     auto res = p_queryResults->GetResult(i);
                     if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+                    if (!m_extraSearcher->CheckValidPosting(res->VID)) continue;
                     workSpace->m_postingIDs.emplace_back(res->VID);
                 }
 

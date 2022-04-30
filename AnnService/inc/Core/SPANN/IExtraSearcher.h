@@ -170,6 +170,8 @@ namespace SPTAG {
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
                 Options& p_opt) = 0;
+
+            virtual bool CheckValidPosting(SizeType postingID) = 0;
         };
     } // SPANN
 } // SPTAG
