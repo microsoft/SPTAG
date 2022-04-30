@@ -260,7 +260,7 @@ namespace SPTAG {
                     K = p_opts.m_rerank;
                 }
 
-                float recall = 0;
+                float recall = 0, MRR = 0;
                 std::vector<std::set<SizeType>> truth;
                 if (!truthFile.empty())
                 {
@@ -278,8 +278,8 @@ namespace SPTAG {
                         LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                     }
 
-                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
-                    LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", truthK, K, recall);
+                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
+                    LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
@@ -339,8 +339,7 @@ namespace SPTAG {
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
-                    "Recall: %f\n",
-                    recall);
+                    "Recall@%d: %f MRR@%d: %f\n", K, recall, K, MRR);
 
                 LOG(Helper::LogLevel::LL_Info, "\n");
 
