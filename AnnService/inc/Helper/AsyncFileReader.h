@@ -242,7 +242,6 @@ namespace SPTAG
                 std::vector<ResourceType*> waitResources;
                 for (std::uint32_t i = 0; i < requestCount; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (readRequest->m_readSize == 0) continue;
 
                     ResourceType* resource = GetResource();
                     DiskUtils::CallbackOverLapped& col = resource->m_col;

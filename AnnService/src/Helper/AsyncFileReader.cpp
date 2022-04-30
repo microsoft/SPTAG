@@ -18,7 +18,6 @@ namespace SPTAG {
             memset(myiocbs.data(), 0, num * sizeof(struct iocb));
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
-                if (readRequest->m_readSize == 0) continue;
 
                 channel = readRequest->m_status & 0xffff;
                 int fileid = (readRequest->m_status >> 16);
@@ -31,7 +30,6 @@ namespace SPTAG {
                 myiocb->aio_nbytes = readRequest->m_readSize;
                 myiocb->aio_offset = static_cast<std::int64_t>(readRequest->m_offset);
 
-                readRequest->m_readSize = 0;
                 iocbs[fileid].emplace_back(myiocb);
             }
             std::vector<struct io_event> events(totalToSubmit);
@@ -92,7 +90,6 @@ namespace SPTAG {
                 int currFileId = 0, currReqStart = 0;
                 for (int i = 0; i < num; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (readRequest->m_readSize == 0) continue;
 
                     int fileid = (readRequest->m_status >> 16);
                     if (fileid != currFileId) {
@@ -114,7 +111,6 @@ namespace SPTAG {
 
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
-                if (readRequest->m_readSize == 0) continue;
                 
                 if (readRequest->m_success && readRequest->m_callback)
                 {

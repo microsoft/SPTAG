@@ -140,8 +140,6 @@ namespace SPTAG
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
-                p_exWorkSpace->m_deduper.clear();
-
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
  
                 int diskRead = 0;
