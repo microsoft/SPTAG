@@ -203,34 +203,47 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
-            m_index->SearchIndex(p_query);
+            COMMON::QueryResultSet<T>* p_queryResults;
+            if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum) 
+                p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            else
+                p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
 
-            COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            m_index->SearchIndex(*p_queryResults);
+            
             std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
                 workSpace = m_workSpacePool->Rent();
+                workSpace->m_deduper.clear();
                 workSpace->m_postingIDs.clear();
 
                 float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
-                for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
-                {
-                    auto res = p_queryResults->GetResult(i);
-                    if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
-                    workSpace->m_postingIDs.emplace_back(res->VID);
-                }
-
                 for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
                 {
                     auto res = p_queryResults->GetResult(i);
                     if (res->VID == -1) break;
+
+                    auto postingID = res->VID;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                     if (res->VID == MaxSize) res->Dist = MaxDist;
+
+                    // Don't do disk reads for irrelevant pages
+                    if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || 
+                        (limitDist > 0.1 && res->Dist > limitDist) || 
+                        !m_extraSearcher->CheckValidPosting(postingID)) 
+                        continue;
+                    workSpace->m_postingIDs.emplace_back(postingID);
                 }
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
                 p_queryResults->SortResult();
                 m_workSpacePool->Return(workSpace);
+            }
+
+            if (p_query.GetResultNum() < m_options.m_searchInternalResultNum) {
+                std::copy(p_queryResults->GetResults(), p_queryResults->GetResults() + p_query.GetResultNum(), p_query.GetResults());
+                delete p_queryResults;
             }
 
             if (p_query.WithMeta() && nullptr != m_pMetadata)
@@ -264,6 +277,7 @@ namespace SPTAG
             newResults.Reverse();
 
             auto auto_ws = m_workSpacePool->Rent();
+            auto_ws->m_deduper.clear();
 
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
             float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;

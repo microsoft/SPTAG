@@ -82,7 +82,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            quantizer = COMMON::IQuantizer::LoadIQuantizer(fp_load);
+            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
             if (!quantizer)
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
@@ -141,7 +141,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            quantizer = COMMON::IQuantizer::LoadIQuantizer(fp_load);
+            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
             if (!quantizer)
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
