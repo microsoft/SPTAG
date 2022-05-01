@@ -242,6 +242,11 @@ namespace SPTAG
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
         {
+            if (m_pQuantizer && !p_query.HasQuantizedTarget())
+            {
+                p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
+            }
+
             if (m_deletedID.Count() == 0 || p_searchDeleted)
             {
                 if (p_searchDuplicated)

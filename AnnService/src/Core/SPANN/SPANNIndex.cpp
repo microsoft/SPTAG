@@ -211,6 +211,7 @@ namespace SPTAG
 
             m_index->SearchIndex(*p_queryResults);
             
+            if (m_pQuantizer.get() != m_index->m_pQuantizer.get()) { p_queryResults.SetTarget(p_queryResults->GetTarget(), m_index->m_pQuantizer); }
             std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
                 workSpace = m_workSpacePool->Rent();

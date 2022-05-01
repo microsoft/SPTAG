@@ -99,6 +99,11 @@ public:
         }
     }
 
+    bool HasQuantizedTarget()
+    {
+        return m_quantizedTarget;
+    }
+
     inline float worstDist() const
     {
         return m_results[0].Dist;
