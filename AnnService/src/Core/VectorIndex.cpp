@@ -405,7 +405,9 @@ ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
 {
-    if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
+    bool valueMatches = p_vectorSet->GetValueType() != GetVectorValueType();
+    bool quantizerMatches = ((bool)m_pQuantizer) && (p_vectorSet->GetValueType() == SPTAG::VectorValueType::UInt8);
+    if (nullptr == p_vectorSet || !(valueMatches || quantizerMatches))
     {
         return ErrorCode::Fail;
     }

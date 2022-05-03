@@ -31,7 +31,7 @@ AnnIndex::AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index)
       m_dimension(p_index->GetFeatureDim()),
       m_index(p_index)
 {
-    m_inputVectorSize = SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
+    m_inputVectorSize = p_index->m_pQuantizer ? m_dimension : SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
 }
 
 
@@ -99,9 +99,10 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, 
     {
         return false;
     }
-
+    
+    auto vectorType = m_index->m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_inputValueType;
     std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
-        m_inputValueType,
+        vectorType,
         static_cast<SPTAG::DimensionType>(m_dimension),
         static_cast<SPTAG::SizeType>(p_num)));
 
@@ -140,8 +141,22 @@ AnnIndex::SetSearchParam(const char* p_name, const char* p_value, const char* p_
 bool
 AnnIndex::LoadQuantizer(const char* p_quantizerFile)
 {
-    if (nullptr != m_index) return m_index->LoadQuantizer(p_quantizerFile) == SPTAG::ErrorCode::Success;
-    return false;
+    if (nullptr == m_index)
+    {
+        if (SPTAG::IndexAlgoType::Undefined == m_algoType ||
+            SPTAG::VectorValueType::Undefined == m_inputValueType)
+        {
+            return false;
+        }
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+
+    }
+    auto ret = (m_index->LoadQuantizer(p_quantizerFile) == SPTAG::ErrorCode::Success);
+    if (ret)
+    {
+        m_inputVectorSize = m_dimension;
+    }
+    return ret;
 }
 
 
