@@ -211,6 +211,7 @@ namespace SPTAG
 
             m_index->SearchIndex(*p_queryResults);
             
+            if (m_pQuantizer.get() != m_index->m_pQuantizer.get()) { p_queryResults->SetTarget(p_queryResults->GetTarget(), m_index->m_pQuantizer); }
             std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
                 workSpace = m_workSpacePool->Rent();
@@ -225,6 +226,7 @@ namespace SPTAG
 
                     auto postingID = res->VID;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    if (res->VID == MaxSize) res->Dist = MaxDist;
 
                     // Don't do disk reads for irrelevant pages
                     if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || 
@@ -271,6 +273,7 @@ namespace SPTAG
                 auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                 if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
                 res->VID = global_VID;
+                if (res->VID == MaxSize) res->Dist = MaxDist;
             }
             newResults.Reverse();
 
@@ -636,6 +639,10 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
                     return ErrorCode::Fail;
                 }
+                m_index.reset();
+                if (LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_index) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
+                }
             }
             auto t3 = std::chrono::high_resolution_clock::now();
             double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
@@ -665,6 +672,19 @@ namespace SPTAG
                 }
 
                 if (m_options.m_buildSsdIndex) {
+                    if (!m_options.m_excludehead) {
+                        LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
+                        std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
+                        if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s for overwrite\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                            return ErrorCode::Fail;
+                        }
+                        std::uint64_t vid = (std::uint64_t)MaxSize;
+                        for (int i = 0; i < m_index->GetNumSamples(); i++) {
+                            IOBINARY(ptr, WriteBinary, sizeof(std::uint64_t), (char*)(&vid));
+                        }
+                    }
+
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
                         LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
                         return ErrorCode::Fail;

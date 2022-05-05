@@ -14,7 +14,7 @@ using namespace SPTAG;
 
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<QuantizerOptions> options(new QuantizerOptions(10000, true, 1.0, SPTAG::QuantizerType::None, std::string(), -1, std::string()));
+    std::shared_ptr<QuantizerOptions> options(new QuantizerOptions(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string()));
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
