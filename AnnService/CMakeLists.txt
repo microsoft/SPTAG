@@ -28,7 +28,7 @@ add_library (DistanceUtils STATIC
     )
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -fPIC)
+    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -mavx512dq -fPIC)
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
