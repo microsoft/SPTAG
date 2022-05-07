@@ -82,8 +82,11 @@ namespace SPTAG
 #define ProcessPosting(vectorInfoSize) \
         for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
             int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
+            printf("vecotrID:%d\n", vectorID); \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
+            printf("calling distance...\n"); \
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
+            printf("Found distance2leaf:%f\n", distance2leaf); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
 
@@ -194,6 +197,15 @@ namespace SPTAG
                         request->m_readSize = 0;
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
+std::cout << "vectorInfoSize: " << vectorInfoSize << std::endl;
+        for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { 
+std::cout << "buffer: "  << *buffer << std::endl;
+std::cout << "pageOffset: " << listInfo->pageOffset << std::endl;
+std::cout << "test: " << *vectorInfo << std::endl;
+            int vectorID = *(reinterpret_cast<int*>(vectorInfo)); 
+            printf("vectorID:%d\n", vectorID);
+         }
+std::cout << "calling processPosting now!" << std::endl;
                         ProcessPosting(vectorInfoSize)
                     };
 #else

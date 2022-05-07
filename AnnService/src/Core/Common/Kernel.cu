@@ -118,3 +118,20 @@ __global__ void rebalance_nodes(int* node_ids, int N, float* frac_to_move, curan
   }
 }
 
+
+__global__ void print_level_device(int* node_sizes, float* split_keys, int level_size, LeafNode* leafs, int* leaf_points) {
+for(int i=0; i<100; ++i) {
+  printf("%d (%d), ", leafs[i].size, leafs[i].offset);
+}
+  printf("\n");
+for(int i=0; i<10; ++i) {
+  printf("%d, ", leaf_points[i]);
+}
+
+/*
+  for(int i=0; i<level_size; i++) {
+    printf("(%d) %0.2f, ", node_sizes[i], split_keys[i]);
+  }
+*/
+  printf("\n");
+}

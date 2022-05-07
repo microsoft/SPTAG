@@ -597,14 +597,18 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
 
             if (m_options.m_deleteHeadVectors) {
+printf("deleteHeadVectors true!\n");
                 if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) && 
                     remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0) {
                     LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
                 }
             }
 
+printf("workspacepool reset\n");
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
+printf("calling workspace init\n");
             m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+printf("done with buildIndexInternal\n");
             m_bReady = true;
             return ErrorCode::Success;
         }

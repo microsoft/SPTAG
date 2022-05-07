@@ -128,10 +128,13 @@ namespace SPTAG {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
                             }
 
+printf("A\n");
                             double startTime = threadws.getElapsedMs();
                             p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
+printf("B\n");
                             double endTime = threadws.getElapsedMs();
                             p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
+printf("C\n");
                             double exEndTime = threadws.getElapsedMs();
 
                             p_stats[index].m_exLatency = exEndTime - endTime;
@@ -159,6 +162,7 @@ namespace SPTAG {
             template <typename ValueType>
             void Search(SPANN::Index<ValueType>* p_index)
             {
+printf("in search!\n");
                 SPANN::Options& p_opts = *(p_index->GetOptions());
                 std::string outputFile = p_opts.m_searchResult;
                 std::string truthFile = p_opts.m_truthPath;
@@ -169,11 +173,12 @@ namespace SPTAG {
                     COMMON::DistanceUtils::Quantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
-                if (!p_opts.m_logFile.empty())
-                {
-                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
-                }
-                int numThreads = p_opts.m_iSSDNumberOfThreads;
+//                if (!p_opts.m_logFile.empty())
+//                {
+//                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+//                }
+//                int numThreads = p_opts.m_iSSDNumberOfThreads;
+                int numThreads = 1;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
