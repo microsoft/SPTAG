@@ -66,7 +66,7 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findRNG_strict(PointSet<T>* ps, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, int* results, DistMetric metric, size_t min_id, size_t max_id, T* rawData) {
+__global__ void findRNG_strict(PointSet<T>* ps, TPtree<T>* tptree, int KVAL, int* results, DistMetric metric, size_t min_id, size_t max_id, T* rawData) {
 
   extern __shared__ char sharememory[];
 
@@ -239,6 +239,7 @@ if(i==0) {
 }
 
 
+/*
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM, int QDIM>
 void run_TPT_quantized(Point<uint8_t,float,QDIM>** d_qpoints, GPU_PQQuantizer* d_quantizer, Point<DTYPE,SUMTYPE,MAX_DIM>** d_points, size_t dataSize, int** d_results, TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** tptrees, TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, int metric)
 {
@@ -285,9 +286,10 @@ void run_TPT_quantized(Point<uint8_t,float,QDIM>** d_qpoints, GPU_PQQuantizer* d
 printf("TODO - implement quantized batch!\n");
 
 }
+*/
 
 template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
-void run_TPT_batch(Point<DTYPE,SUMTYPE,MAX_DIM>** d_points, size_t dataSize, int** d_results, TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** tptrees, TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, int metric, PointSet<DTYPE>** d_pointset, DTYPE* rawData) 
+void run_TPT_batch(size_t dataSize, int** d_results, TPtree<DTYPE>** tptrees, TPtree<DTYPE>** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, int metric, PointSet<DTYPE>** d_pointset, DTYPE* rawData) 
 {
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
@@ -301,14 +303,14 @@ void run_TPT_batch(Point<DTYPE,SUMTYPE,MAX_DIM>** d_points, size_t dataSize, int
       CUDA_CHECK(cudaSetDevice(gpuNum));
       tptrees[gpuNum]->reset();
     }
-    create_tptree_multigpu<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor);
+    create_tptree_multigpu<DTYPE>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor);
     CUDA_CHECK(cudaDeviceSynchronize());
 
 
             // Copy TPTs to each GPU
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
       CUDA_CHECK(cudaSetDevice(gpuNum));
-      CUDA_CHECK(cudaMemcpy(d_tptrees[gpuNum], tptrees[gpuNum], sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
+      CUDA_CHECK(cudaMemcpy(d_tptrees[gpuNum], tptrees[gpuNum], sizeof(TPtree<DTYPE>), cudaMemcpyHostToDevice));
     }
 
     auto after_tpt = std::chrono::high_resolution_clock::now();
@@ -436,7 +438,7 @@ printf("alloc host struct\n");
   for(size_t i=0;  i<dataSize; i++) { // Initialize ids
     temp_points[i].id = i;
   }
-  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** tptrees = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
+  TPtree<DTYPE>** tptrees = new TPtree<DTYPE>*[NUM_GPUS];
 
 printf("create GPU structs\n");
   // GPU arrays / structures
@@ -446,7 +448,7 @@ printf("create GPU structs\n");
   int** d_results = new int*[NUM_GPUS];
   DTYPE** d_data_raw = new DTYPE*[NUM_GPUS];
   Point<DTYPE,SUMTYPE,MAX_DIM>** d_points = new Point<DTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
-  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>** d_tptrees = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>*[NUM_GPUS];
+  TPtree<DTYPE>** d_tptrees = new TPtree<DTYPE>*[NUM_GPUS];
   PointSet<DTYPE>** d_pointset = new PointSet<DTYPE>*[NUM_GPUS];
 
 printf("computing batch sizes\n");
@@ -540,9 +542,9 @@ for(int i=0; i< 5; i++) {
   for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
     CUDA_CHECK(cudaSetDevice(gpuNum));
 
-    CUDA_CHECK(cudaMalloc(&d_tptrees[gpuNum], sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
-    tptrees[gpuNum] = new TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>;
-    tptrees[gpuNum]->initialize(dataSize, levels);
+    CUDA_CHECK(cudaMalloc(&d_tptrees[gpuNum], sizeof(TPtree<DTYPE>)));
+    tptrees[gpuNum] = new TPtree<DTYPE>;
+    tptrees[gpuNum]->initialize(dataSize, levels, dim);
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "TPT structure initialized for %lu points, %d levels, leaf size:%d\n", dataSize, levels, leafSize);
 
     // Allocate results buffer on each GPU
@@ -587,7 +589,7 @@ for(int i=0; i< 5; i++) {
     CUDA_CHECK(cudaDeviceSynchronize());
 
     /***** Run batch on GPU (all TPT iters) *****/
-    run_TPT_batch<DTYPE, SUMTYPE, MAX_DIM>(d_points, dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, metric, d_pointset, d_data_raw[0]);
+    run_TPT_batch<DTYPE, SUMTYPE, MAX_DIM>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, metric, d_pointset, d_data_raw[0]);
 
 auto before_copy = std::chrono::high_resolution_clock::now();
     for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
