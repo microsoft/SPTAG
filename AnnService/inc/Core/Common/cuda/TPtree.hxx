@@ -34,7 +34,7 @@
 #include "params.h"
 #include "Distance.hxx"
 
-template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
+template<typename T>
 class TPtree;
 
 /************************************************************************************
@@ -51,9 +51,6 @@ class LeafNode {
  * Updates the node association for every points from one level to the next 
  * i.e., point associated with node k will become associated with 2k+1 or 2k+2
  ************************************************************************************/
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void update_node_assignments(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level);
-
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
 __global__ void update_node_assignments(PointSet<T>* ps, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level);
 
@@ -83,14 +80,9 @@ __global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, 
 /************************************************************************************
  * Set of functions to compute mean to pick dividing hyperplanes
  ************************************************************************************/
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level);
+template<typename T>
+__global__ void find_level_sum(PointSet<T>* points, KEYTYPE* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level);
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void find_level_sum(PointSet<T>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level);
-
-//template<typename KEY_T>
-//__global__ void compute_mean(KEY_T* split_keys, int* node_sizes, int num_nodes);
 
 /*****************************************************************************************
 * Convert sums to means for each split key
@@ -115,15 +107,16 @@ __global__ void print_level_device(int* node_sizes, float* split_keys, int level
  * Only contains the nodes and hyperplane definitions that partition the data, as well
  * as indexes into the point array.  Does not contain the data itself.
  **********************************************************************************/
-template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
+template<typename T>
 class TPtree {
   public:
 // for each level of the tree, contains the dimensions and weights that defines the hyperplane
     int* partition_dims;
-    KEY_T* weight_list;
+    KEYTYPE* weight_list;
+    int Dim;
 
 // for each node, defines the value of the partitioning hyperplane.  Laid out in breadth-first order
-    KEY_T* split_keys; 
+    KEYTYPE* split_keys; 
 
     int* node_ids; // For each point, store which node it belongs to (ends at id of leaf)
     int* node_sizes; // Stores the size (number of points) in each node
@@ -141,12 +134,13 @@ class TPtree {
     /************************************************************************************
      * Initialize the structure and allocated enough memory for everything
      **********************************************************************************/
-    __host__ void initialize(int N_, int levels_) {
+    __host__ void initialize(int N_, int levels_, int Dim_) {
 
       long long int tree_mem=0;
 
       N = N_;
       levels = levels_;
+      Dim = Dim_;
       num_leaves = pow(2,levels);
 
       CUDA_CHECK(cudaMalloc(&node_ids, (N)*sizeof(int)));
@@ -160,16 +154,16 @@ class TPtree {
       tree_mem+=Dim*sizeof(int);
 
       // Allocate memory for DIMS weights at each level
-      CUDA_CHECK(cudaMalloc(&weight_list, Dim*levels*sizeof(KEY_T)));
+      CUDA_CHECK(cudaMalloc(&weight_list, Dim*levels*sizeof(KEYTYPE)));
 
-      tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEY_T);
+      tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEYTYPE);
 
       tree_mem+= N*sizeof(int);
       CUDA_CHECK(cudaMallocManaged(&node_sizes, num_nodes*sizeof(int)));
       CUDA_CHECK(cudaMemset(node_sizes, 0, num_nodes*sizeof(int)));
 
-      CUDA_CHECK(cudaMallocManaged(&split_keys, num_internals*sizeof(KEY_T)));
-      tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEY_T);
+      CUDA_CHECK(cudaMallocManaged(&split_keys, num_internals*sizeof(KEYTYPE)));
+      tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEYTYPE);
 
       CUDA_CHECK(cudaMallocManaged(&leafs, num_leaves*sizeof(LeafNode)));
       tree_mem+=num_leaves*sizeof(LeafNode);
@@ -207,53 +201,6 @@ class TPtree {
 
 
     /************************************************************************************
-     * Construct the tree.  ** Assumes tree has been initialized and allocated **
-     * For each level of the tree, compute the mean for each node and set it as the split_key,
-     * then compute, for each element, which child node it belongs to (storing in node_ids)
-    ************************************************************************************/
-    __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points, int min_id, int max_id) {
-
-      int nodes_on_level=1;
-      for(int i=0; i<levels; ++i) {
-
-        find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level, i);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list, partition_dims, node_ids, split_keys, node_sizes, N, i);
-        CUDA_CHECK(cudaDeviceSynchronize());
-
-        nodes_on_level*=2;
-      }
-      count_leaf_sizes<<<BLOCKS,THREADS>>>(leafs, node_ids, N, num_nodes-num_leaves);
-      CUDA_CHECK(cudaDeviceSynchronize());
-
-
-      LeafNode* h_leafs = new LeafNode[num_leaves];
-
-      CUDA_CHECK(cudaMemcpy(h_leafs, leafs, num_leaves*sizeof(LeafNode), cudaMemcpyDeviceToHost));
-
-      h_leafs[0].offset=0;
-      for(int i=1; i<num_leaves; ++i) {
-        h_leafs[i].offset = h_leafs[i-1].offset+h_leafs[i-1].size;
-      } 
-
-      for(int i=0; i<num_leaves; ++i)
-        h_leafs[i].size=0;
-
-
-      CUDA_CHECK(cudaMemcpy(leafs, h_leafs, num_leaves*sizeof(LeafNode), cudaMemcpyHostToDevice));
-      delete[] h_leafs;
-
-      CUDA_CHECK(cudaDeviceSynchronize());
-      assign_leaf_points_in_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
-      CUDA_CHECK(cudaDeviceSynchronize());
-      assign_leaf_points_out_batch<<<BLOCKS,THREADS>>>(leafs, leaf_points, node_ids, N, num_nodes-num_leaves, min_id, max_id);
-    }
-
-    /************************************************************************************
     // For debugging purposes
     ************************************************************************************/
     __host__ void print_tree() {
@@ -275,26 +222,9 @@ class TPtree {
     }
 };
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void create_tptree(TPtree<T,KEY_T,SUMTYPE,Dim>* d_tree, Point<T,SUMTYPE,Dim>* points, int N, int MAX_LEVELS, int min_id, int max_id) {
-
-  KEY_T* h_weights = new KEY_T[d_tree->levels*Dim];
-  for(int i=0; i<d_tree->levels*Dim; ++i) {
-    h_weights[i] = ((rand()%2)*2)-1;
-  }
-
-
-  CUDA_CHECK(cudaMemcpy(d_tree->weight_list, h_weights, d_tree->levels*Dim*sizeof(KEY_T), cudaMemcpyHostToDevice));
-  
-  d_tree->construct_tree(points, min_id, max_id);
-
-  delete h_weights;
-}
-
-
 // Construct TPT on each GPU 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, PointSet<T>** ps, int N, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
+template<typename T>
+__host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, int N, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
     int nodes_on_level=1;
 
@@ -315,8 +245,7 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
-//            find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(points[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
-            find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
+            find_level_sum<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
 
         }
 
@@ -338,9 +267,9 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
-            compute_mean<KEY_T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
+            compute_mean<KEYTYPE><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
 
-            update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i);
+            update_node_assignments<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i);
         }
         nodes_on_level*=2;
 
@@ -386,10 +315,10 @@ __host__ void construct_trees_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Po
 }
 
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim>
-__host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, PointSet<T>** ps, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
+template<typename T>
+__host__ void create_tptree_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
-  KEY_T* h_weights = new KEY_T[d_trees[0]->levels*Dim];
+  KEYTYPE* h_weights = new KEYTYPE[d_trees[0]->levels*Dim];
   for(int i=0; i<d_trees[0]->levels*Dim; ++i) {
     h_weights[i] = ((rand()%2)*2)-1;
   }
@@ -402,7 +331,7 @@ __host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Poin
   }
 
   // Build TPT on each GPU  
-  construct_trees_multigpu<T,KEY_T,SUMTYPE,Dim>(d_trees, ps, N, NUM_GPUS, streams, balanceFactor);
+  construct_trees_multigpu<T>(d_trees, ps, N, NUM_GPUS, streams, balanceFactor);
 
   delete h_weights;
 }
@@ -411,6 +340,7 @@ __host__ void create_tptree_multigpu(TPtree<T,KEY_T,SUMTYPE,Dim>** d_trees, Poin
 /*****************************************************************************************
  * Helper function to calculated the porjected value of point onto the partitioning hyperplane
  *****************************************************************************************/
+/*
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
 __device__ KEY_T weighted_val(Point<T,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
   KEY_T val=0.0;
@@ -443,19 +373,21 @@ __device__ KEY_T weighted_val(Point<int8_t,SUMTYPE,Dim> point, KEY_T* weights, i
   }
   return val;
 }
+*/
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ KEY_T weighted_val(T* data, KEY_T* weights, int* dims) {
+template<typename T>
+__device__ KEY_T weighted_val(T* data, KEYTYPE* weights, int Dim) {
   KEY_T val=0.0;
 
-  for(int i=0; i<PART_DIMS; ++i) {
-    val += (weights[i] * (KEY_T)data[i]);
+  for(int i=0; i<Dim; ++i) {
+    val += (weights[i] * (KEYTYPE)data[i]);
   }
   return val;
 }
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ KEY_T weighted_val(T* data, KEY_T* weights, int* dims, bool print) {
+/*
+template<typename T>
+__device__ KEY_T weighted_val(T* data, KEYTYPE* weights, int Dims, bool print) {
   KEY_T val=0.0;
 
   printf("PART_DIMS:%d\n", PART_DIMS);
@@ -467,27 +399,15 @@ __device__ KEY_T weighted_val(T* data, KEY_T* weights, int* dims, bool print) {
   }
   return val;
 }
+*/
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
-  KEY_T val=0;
+template<typename T>
+__global__ void find_level_sum(PointSet<T>* ps, KEYTYPE* weights, int Dim, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
+  KEYTYPE val=0;
   int size = min(N, nodes_on_level*SAMPLES);
   int step = N/size;
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<size; i+=blockDim.x*gridDim.x) {
-    val = weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(points[i], &weights[level*Dim], partition_dims);
-    atomicAdd(&split_keys[node_ids[i]], val);
-    atomicAdd(&node_sizes[node_ids[i]], 1);
-  }
-}
-
-
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void find_level_sum(PointSet<T>* ps, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
-  KEY_T val=0;
-  int size = min(N, nodes_on_level*SAMPLES);
-  int step = N/size;
-  for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<size; i+=blockDim.x*gridDim.x) {
-    val = weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(ps->getVec(i), &weights[level*Dim], partition_dims);
+    val = weighted_val<T>(ps->getVec(i), &weights[level*Dim], Dim);
     atomicAdd(&split_keys[node_ids[i]], val);
     atomicAdd(&node_sizes[node_ids[i]], 1);
   }
@@ -499,29 +419,21 @@ __global__ void find_level_sum(PointSet<T>* ps, KEY_T* weights, int* partition_d
  * Assign each point to a node of the next level of the tree (either left child or right).
  *****************************************************************************************/
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void update_node_assignments(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level) {
-  
-  for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<N; i+=blockDim.x*gridDim.x) {
-    node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(points[i],&weights[level*Dim] ,partition_dims) > split_keys[node_ids[i]]);
-  }
-}
-
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
 __global__ void update_node_assignments(PointSet<T>* ps, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level) {
   
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<N; i+=blockDim.x*gridDim.x) {
-    node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(ps->getVec(i),&weights[level*Dim] ,partition_dims) > split_keys[node_ids[i]]);
+    node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T>(ps->getVec(i),&weights[level*Dim] , Dim) > split_keys[node_ids[i]]);
   }
 }
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ int searchForLeaf(TPtree<T,KEY_T,SUMTYPE,Dim>* tree, Point<T,SUMTYPE,Dim>* query) {
+template<typename T>
+__device__ int searchForLeaf(TPtree<T>* tree, T* query) {
     int nodeIdx = 0;
     KEY_T* weights;
     for(int i=0; i<tree->levels; i++) {
-        weights = &tree->weight_list[i*Dim];
+        weights = &tree->weight_list[i*tree->Dim];
 
-        if(weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(*query, weights, tree->partition_dims) <= tree->split_keys[nodeIdx]) {
+        if(weighted_val<T>(query, weights, tree->Dim) <= tree->split_keys[nodeIdx]) {
             nodeIdx = 2*nodeIdx+1;
         }
         else {
@@ -531,29 +443,23 @@ __device__ int searchForLeaf(TPtree<T,KEY_T,SUMTYPE,Dim>* tree, Point<T,SUMTYPE,
     return (nodeIdx - (tree->num_nodes - tree->num_leaves));
 }
 
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__device__ int searchForLeaf(TPtree<T,KEY_T,SUMTYPE,Dim>* tree, T* query) {
+
+template<typename T>
+__device__ int searchForLeaf(TPtree<T>* tree, T* query) {
     int nodeIdx = 0;
-    KEY_T* weights;
+    KEYTYPE* weights;
     for(int i=0; i<tree->levels; i++) {
-        weights = &tree->weight_list[i*Dim];
+        weights = &tree->weight_list[i*tree->Dim];
 
-//printf("before weighted_val\n");
-//float weight_temp = weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(query, weights, tree->partition_dims, true);
-//printf("weight_temp:%f\n", weight_temp);
-
-        if(weighted_val<T,KEY_T,SUMTYPE,Dim,PART_DIMS>(query, weights, tree->partition_dims) <= tree->split_keys[nodeIdx]) {
+        if(weighted_val<T>(query, weights, tree->Dims) <= tree->split_keys[nodeIdx]) {
             nodeIdx = 2*nodeIdx+1;
-//printf("left!\n");
         }
         else {
             nodeIdx = 2*nodeIdx+2;
-//printf("right!\n");
         }
     }
     return (nodeIdx - (tree->num_nodes - tree->num_leaves));
 }
-
 
 
 #endif

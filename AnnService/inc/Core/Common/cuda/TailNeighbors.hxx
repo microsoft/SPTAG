@@ -35,8 +35,8 @@ class QueryGroup {
 ***********************************************************************************/
 //template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 //__global__ void findTailRNG(Point<T,SUMTYPE,Dim>* headPoints, Point<T,SUMTYPE,Dim>* tailPoints, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, bool print) {
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int BLOCK_DIM>
-__global__ void findTailRNG(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,KEY_T,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, bool print) {
+template<typename T, typename SUMTYPE, int Dim>
+__global__ void findTailStatic(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,KEYTYPE,SUMTYPE,Dim>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, bool print) {
 
   extern __shared__ char sharememory[];
 
@@ -51,7 +51,8 @@ __global__ void findTailRNG(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,K
   }
 
 //  Point<T,SUMTYPE,Dim> query;
-  T* query;
+//  T* query;
+  T query[Dim];
   DistPair<SUMTYPE> target;
   DistPair<SUMTYPE> candidate;
   int leafId;
@@ -65,12 +66,15 @@ __global__ void findTailRNG(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,K
   size_t tailId;
   for(size_t orderIdx = blockIdx.x*blockDim.x + threadIdx.x; orderIdx < numTails; orderIdx += gridDim.x*blockDim.x) {
     tailId = groups->query_ids[orderIdx];  
-    query = tailPS->getVec(tailId);
-    leafId = searchForLeaf<T,KEY_T,SUMTYPE,Dim,Dim>(tptree, query);
+    for(int i=0; i<Dim; ++i) {
+      query[i] = tailPS->getVec(tailId)[i];
+    }
+    leafId = searchForLeaf<T,SUMTYPE,Dim>(tptree, query);
+if(tailId == 0) printf("leafId:%d, size:%d\n", leafId, tptree->leafs[leafId].size);
 #else
   for(size_t tailId = blockIdx.x*blockDim.x + threadIdx.x; tailId < numTails; tailId += gridDim.x*blockDim.x) {
     query = tailPS->getVec(tailId, true);
-    leafId = searchForLeaf<T,KEY_T,SUMTYPE,Dim,Dim>(tptree, query);
+    leafId = searchForLeaf<T,SUMTYPE,Dim>(tptree, query);
 #endif
 
     size_t leaf_offset = tptree->leafs[leafId].offset;
@@ -88,7 +92,11 @@ __global__ void findTailRNG(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,K
 //      candidate.dist = cosine(query, candidate_vec, headPS->dim);
       candidate.dist = cosine(query, candidate_vec, Dim);
 
-      if(candidate.dist < max_dist) { // If it is a candidate to be added to neighbor list
+      if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
+
+//if(tailId == 0) {
+//  printf("%d (%f)\n", candidate.idx, candidate.dist);
+//}
 
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
 //          if(violatesRNG_PS<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, headPS->dim)) {
@@ -136,6 +144,13 @@ __global__ void findTailRNG(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T,K
     for(int j=0; j<KVAL; j++) {
       results[(size_t)(tailId*KVAL)+j] = threadList[j];
     }
+//    if(tailId == 0) {
+//printf("results - ");
+//      for(int j=0; j<KVAL; ++j) {
+//        printf("%d, ", threadList[j].idx);
+//      }
+//printf("\n");
+//    }
   }
 }
 
@@ -149,8 +164,8 @@ __global__ void debug_warm_up_gpu() {
 
 // Search each query into the TPTree to get the number of queries for each leaf node. This just generates a histogram
 // for each leaf node so that we can compute offsets
-template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
-__global__ void compute_group_sizes(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem) {
+template<typename T, typename SUMTYPE, int MAX_DIM>
+__global__ void compute_group_sizes(QueryGroup* groups, TPtree<T,KEYTYPE,SUMTYPE,MAX_DIM>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem) {
   groups->init_mem(N, num_groups, queryMem);
 
 //  Point<T,SUMTYPE,MAX_DIM> query;
@@ -159,7 +174,7 @@ __global__ void compute_group_sizes(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,M
   
   for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
     query = queries->getVec(qidx);
-    leafId = searchForLeaf<T,KEY_T,SUMTYPE,MAX_DIM,MAX_DIM>(tptree, query);
+    leafId = searchForLeaf<T,SUMTYPE,MAX_DIM>(tptree, query);
     atomicAdd(&(groups->sizes[leafId]), 1);   
   }
 }
@@ -175,7 +190,7 @@ __global__ void assign_queries_to_group(QueryGroup* groups, TPtree<T,KEY_T,SUMTY
   
   for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
     query = queries->getVec(qidx);
-    leafId = searchForLeaf<T,KEY_T,SUMTYPE,MAX_DIM,MAX_DIM>(tptree, query);
+    leafId = searchForLeaf<T,SUMTYPE,MAX_DIM>(tptree, query);
     idx_in_leaf = atomicAdd(&(groups->sizes[leafId]), 1);   
     groups->query_ids[groups->offsets[leafId]+idx_in_leaf] = qidx;
   }
@@ -183,12 +198,12 @@ __global__ void assign_queries_to_group(QueryGroup* groups, TPtree<T,KEY_T,SUMTY
 
 // Gets the list of queries that are to be searched into each leaf.  The QueryGroup structure uses the memory
 // provided with queryMem, which is required to be allocated with size N + 2*num_groups.  
-template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
-__host__ void get_query_groups(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DIM>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem, int NUM_BLOCKS, int NUM_THREADS) {
+template<typename T, typename SUMTYPE, int Dim>
+__host__ void get_query_groups(QueryGroup* groups, TPtree<T,KEYTYPE,SUMTYPE,Dim>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem, int NUM_BLOCKS, int NUM_THREADS) {
 
   CUDA_CHECK(cudaMemset(queryMem, 0, (N+2*num_groups)*sizeof(int)));
 
-  compute_group_sizes<T,KEY_T,SUMTYPE,MAX_DIM><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups, queryMem);
+  compute_group_sizes<T,SUMTYPE,Dim><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups, queryMem);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   // Compute offsets based on sizes
@@ -203,7 +218,7 @@ __host__ void get_query_groups(QueryGroup* groups, TPtree<T,KEY_T,SUMTYPE,MAX_DI
   // Reset group sizes to use while assigning queires
   CUDA_CHECK(cudaMemset(queryMem, 0, num_groups*sizeof(int)));
 
-  assign_queries_to_group<T,KEY_T,SUMTYPE,MAX_DIM><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups);
+  assign_queries_to_group<T,KEYTYPE,SUMTYPE,Dim><<<NUM_BLOCKS,NUM_THREADS>>>(groups, tptree, queries, N, num_groups);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   delete[] h_sizes;
@@ -302,7 +317,6 @@ size_t extractAndCopyTailPoints(Point<T,SUMTYPE,MAX_DIM>* pointBuffer, T* vector
 }
 
 template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
-
 void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* headIndex, std::unordered_set<int>& headVectorIDS, int dim, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric, int NUM_GPUS, Edge* selections) {
 
     auto premem_t = std::chrono::high_resolution_clock::now();
@@ -513,11 +527,11 @@ for(int i=0; i<10; i++) {
   printf("%f, ", tptree[0]->split_keys[i]);
 }
 */
-printf("\nnum_leaves %d, num_nodes:%d, node sizes:\n", tptree[0]->num_leaves, tptree[0]->num_nodes);
-for(int i=0; i<10; i++) {
-  printf("%d, ", tptree[0]->leafs[i].size);
-}
-printf("\n");
+//printf("\nnum_leaves %d, num_nodes:%d, node sizes:\n", tptree[0]->num_leaves, tptree[0]->num_nodes);
+//for(int i=0; i<10; i++) {
+//  printf("%d, ", tptree[0]->leafs[i].size);
+//}
+//printf("\n");
 
 
             // Copy TPTs to each GPU
@@ -531,7 +545,7 @@ printf("\n");
             // Compute QuerySet lists based on TPT, which can then be used to improve locality/divergence during RNG search
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
                 CUDA_CHECK(cudaSetDevice(gpuNum));
-                get_query_groups<T,KEY_T,SUMTYPE,MAX_DIM>(d_queryGroups[gpuNum], d_tptree[gpuNum], d_tailPS[gpuNum], (int)(curr_batch_size[gpuNum]), (int)tptree[gpuNum]->num_leaves, d_queryMem[gpuNum], NUM_BLOCKS, NUM_THREADS);
+                get_query_groups<T,SUMTYPE,MAX_DIM>(d_queryGroups[gpuNum], d_tptree[gpuNum], d_tailPS[gpuNum], (int)(curr_batch_size[gpuNum]), (int)tptree[gpuNum]->num_leaves, d_queryMem[gpuNum], NUM_BLOCKS, NUM_THREADS);
             }
 #endif
 
@@ -546,20 +560,22 @@ temp_size = curr_batch_size[0];
 test_points = d_tailRaw[0];
 printf("size:%ld, TAIL points: %d (%f, %f, %f) - %d (%f, %f, %f) - %d (%f, %f, %f)\n", temp_size, 0, test_points[0], test_points[1], test_points[dim-1], 10000, test_points[10000*dim], test_points[10000*dim+1], test_points[10000*dim+dim-1], temp_size, test_points[(temp_size-1)*dim], test_points[(temp_size-1)*dim+1], test_points[temp_size*dim-1]);
 */
-
+/*
 printf("query group:\n");
 for(int k=0; k<10; k++) {
   printf("%d, ", d_queryGroups[0]->sizes[k]);
 }
 printf("\n");
-
+*/
 
 auto t2 = std::chrono::high_resolution_clock::now();
+
+printf("Calling findTailRNG with shared memory size:%d\n", sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS);
 
             // Call main kernel on each GPU
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
                 CUDA_CHECK(cudaSetDevice(gpuNum));
-                findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPS[gpuNum], d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, (size_t)curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], tree_id==0);
+                findTailStatic<T,SUMTYPE,MAX_DIM><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPS[gpuNum], d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, (size_t)curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], tree_id==0);
 //                findTailRNG<T,KEY_T,SUMTYPE,MAX_DIM,NUM_THREADS><<<1,1, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPS[gpuNum], d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, (size_t)curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], tree_id==0);
             }
 
@@ -588,6 +604,17 @@ LOG(SPTAG::Helper::LogLevel::LL_Debug, "gpu:%d, copying results size %lu to resu
                 if(curr_batch_size[gpuNum] - i < copy_size) copy_size = curr_batch_size[gpuNum] - i;
 
                 CUDA_CHECK(cudaMemcpy(results, d_results[gpuNum]+(i*RNG_SIZE), copy_size*RNG_SIZE*sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost));
+
+/*
+printf("final results for batch starting at %d, size:%ld\n",i, copy_size);
+for(int j=0; j<10; ++j) {
+  for(int k=0; k < RNG_SIZE; ++k) {
+    printf("%d (%0.2f), ", results[j*RNG_SIZE + k].idx, results[j*RNG_SIZE+k].dist);
+  }
+printf("\n");
+}
+printf("\n");
+*/
                 size_t fullIdx = GPUPointOffset[gpuNum]+offset[gpuNum]+i;
                 SizeType resIdx = 0;
                 //#pragma omp parallel for
