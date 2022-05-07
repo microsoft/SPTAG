@@ -179,7 +179,7 @@ namespace SPTAG
             paras.Set<bool>("saturate_graph", saturate_graph);
             paras.Set<unsigned>("num_threads", m_iNumberOfThreads);
 
-            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::Cosine) ? diskann::Metric::INNER_PRODUCT : diskann::Metric::L2;
+            diskann::Metric metric = (m_distCalcMethod == DistCalcMethod::L2) ? diskann::Metric::L2 : diskann::Metric::INNER_PRODUCT;
             m_index.reset(new diskann::Index<T>(metric, m_sDataPointsFilename.c_str()));
             auto s = std::chrono::high_resolution_clock::now();
             m_index->build(paras);

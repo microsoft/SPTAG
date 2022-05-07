@@ -104,20 +104,34 @@ index f143b88..028d839 100644
      diskann::build_merged_vamana_index<T>(
          data_file_to_use.c_str(), diskann::Metric::L2, L, R, p_val,
 diff --git a/src/index.cpp b/src/index.cpp
-index 38b58da..72a9af6 100644
+index 38b58da..56de6c4 100644
 --- a/src/index.cpp
 +++ b/src/index.cpp
-@@ -1029,7 +1029,8 @@ namespace diskann {
+@@ -1029,7 +1029,14 @@ namespace diskann {
    std::pair<uint32_t, uint32_t> Index<T, TagT>::search(const T *      query,
                                                         const size_t   K,
                                                         const unsigned L,
 -                                                       unsigned *     indices) {
 +                                                       unsigned *     indices,
 +                                                       float *distances) {
++    T *    aligned_query;
++    size_t allocSize = _aligned_dim * sizeof(T);
++    alloc_aligned(((void **) &aligned_query), allocSize, 8 * sizeof(T));
++    memset(aligned_query, 0, _aligned_dim * sizeof(T));
++    memcpy(aligned_query, query, _dim * sizeof(T));
++
      std::vector<unsigned>    init_ids;
      tsl::robin_set<unsigned> visited(10 * L);
      std::vector<Neighbor>    best_L_nodes, expanded_nodes_info;
-@@ -1045,6 +1046,7 @@ namespace diskann {
+@@ -1039,12 +1046,14 @@ namespace diskann {
+       init_ids.emplace_back(_ep);
+     }
+     auto retval =
+-        iterate_to_fixed_point(query, L, init_ids, expanded_nodes_info,
++        iterate_to_fixed_point(aligned_query, L, init_ids, expanded_nodes_info,
+                                expanded_nodes_ids, best_L_nodes);
++    aligned_free((void *)aligned_query);
+ 
      size_t pos = 0;
      for (auto it : best_L_nodes) {
        indices[pos] = it.id;
@@ -125,7 +139,7 @@ index 38b58da..72a9af6 100644
        pos++;
        if (pos == K)
          break;
-@@ -1086,7 +1088,8 @@ namespace diskann {
+@@ -1086,7 +1095,8 @@ namespace diskann {
        unsigned *indices_buffer) {
      const bool alloc = indices_buffer == NULL;
      auto       indices = alloc ? new unsigned[K] : indices_buffer;
@@ -135,7 +149,7 @@ index 38b58da..72a9af6 100644
      for (int i = 0; i < (int) K; ++i)
        tags[i] = _location_to_tag[indices[i]];
      if (alloc)
-@@ -1121,7 +1124,8 @@ namespace diskann {
+@@ -1121,7 +1131,8 @@ namespace diskann {
  
    template<typename T, typename TagT>
    void Index<T, TagT>::search_with_opt_graph(const T *query, size_t K, size_t L,
@@ -145,7 +159,7 @@ index 38b58da..72a9af6 100644
      DistanceFastL2<T> *dist_fast = (DistanceFastL2<T> *) _distance;
  
      std::vector<Neighbor> retset(L + 1);
-@@ -1215,6 +1219,7 @@ namespace diskann {
+@@ -1215,6 +1226,7 @@ namespace diskann {
      }
      for (size_t i = 0; i < K; i++) {
        indices[i] = retset[i].id;
