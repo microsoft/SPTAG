@@ -51,8 +51,8 @@ class LeafNode {
  * Updates the node association for every points from one level to the next 
  * i.e., point associated with node k will become associated with 2k+1 or 2k+2
  ************************************************************************************/
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void update_node_assignments(PointSet<T>* ps, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level);
+template<typename T>
+__global__ void update_node_assignments(PointSet<T>* ps, KEYTYPE* weights, int* node_ids, KEYTYPE* split_keys, int* node_sizes, int N, int level, int Dim);
 
 /************************************************************************************
  * Determine the sizes (number of points in) each leaf node and sets leafs.size
@@ -81,7 +81,7 @@ __global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, 
  * Set of functions to compute mean to pick dividing hyperplanes
  ************************************************************************************/
 template<typename T>
-__global__ void find_level_sum(PointSet<T>* points, KEYTYPE* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level);
+__global__ void find_level_sum(PointSet<T>* points, KEYTYPE* weights, int Dim, int* node_ids, KEYTYPE* split_keys, int* node_sizes, int N, int nodes_on_level, int level);
 
 
 /*****************************************************************************************
@@ -104,10 +104,6 @@ __global__ void print_level_device(int* node_sizes, float* split_keys, int level
 
 
 
-__global__ void print_level_device(int* node_sizes, float* split_keys, int level_size, LeafNode* leafs, int* leaf_points);
-
-
-
 /************************************************************************************
  * Definition of the GPU TPtree structure. 
  * Only contains the nodes and hyperplane definitions that partition the data, as well
@@ -117,7 +113,6 @@ template<typename T>
 class TPtree {
   public:
 // for each level of the tree, contains the dimensions and weights that defines the hyperplane
-    int* partition_dims;
     KEYTYPE* weight_list;
     int Dim;
 
@@ -251,7 +246,7 @@ __host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, in
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
-            find_level_sum<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
+            find_level_sum<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->Dim, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
 
         }
 
@@ -273,9 +268,9 @@ __host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, in
         for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
             cudaSetDevice(gpuNum);
 
-            compute_mean<KEYTYPE><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
+            compute_mean<<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, d_trees[gpuNum]->num_nodes);
 
-            update_node_assignments<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->partition_dims, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i);
+            update_node_assignments<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i, d_trees[gpuNum]->Dim);
         }
         nodes_on_level*=2;
 
@@ -324,8 +319,8 @@ __host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, in
 template<typename T>
 __host__ void create_tptree_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
-  KEYTYPE* h_weights = new KEYTYPE[d_trees[0]->levels*Dim];
-  for(int i=0; i<d_trees[0]->levels*Dim; ++i) {
+  KEYTYPE* h_weights = new KEYTYPE[d_trees[0]->levels*d_trees[0]->Dim];
+  for(int i=0; i<d_trees[0]->levels*d_trees[0]->Dim; ++i) {
     h_weights[i] = ((rand()%2)*2)-1;
   }
 
@@ -382,8 +377,8 @@ __device__ KEY_T weighted_val(Point<int8_t,SUMTYPE,Dim> point, KEY_T* weights, i
 */
 
 template<typename T>
-__device__ KEY_T weighted_val(T* data, KEYTYPE* weights, int Dim) {
-  KEY_T val=0.0;
+__device__ KEYTYPE weighted_val(T* data, KEYTYPE* weights, int Dim) {
+  KEYTYPE val=0.0;
 
   for(int i=0; i<Dim; ++i) {
     val += (weights[i] * (KEYTYPE)data[i]);
@@ -408,7 +403,7 @@ __device__ KEY_T weighted_val(T* data, KEYTYPE* weights, int Dims, bool print) {
 */
 
 template<typename T>
-__global__ void find_level_sum(PointSet<T>* ps, KEYTYPE* weights, int Dim, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
+__global__ void find_level_sum(PointSet<T>* ps, KEYTYPE* weights, int Dim, int* node_ids, KEYTYPE* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
   KEYTYPE val=0;
   int size = min(N, nodes_on_level*SAMPLES);
   int step = N/size;
@@ -424,8 +419,8 @@ __global__ void find_level_sum(PointSet<T>* ps, KEYTYPE* weights, int Dim, int* 
 /*****************************************************************************************
  * Assign each point to a node of the next level of the tree (either left child or right).
  *****************************************************************************************/
-template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
-__global__ void update_node_assignments(PointSet<T>* ps, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int level) {
+template<typename T>
+__global__ void update_node_assignments(PointSet<T>* ps, KEYTYPE* weights, int* node_ids, KEYTYPE* split_keys, int* node_sizes, int N, int level, int Dim) {
   
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<N; i+=blockDim.x*gridDim.x) {
     node_ids[i] = (2*node_ids[i])+1 + (weighted_val<T>(ps->getVec(i),&weights[level*Dim] , Dim) > split_keys[node_ids[i]]);
@@ -449,23 +444,6 @@ __device__ int searchForLeaf(TPtree<T>* tree, T* query) {
     return (nodeIdx - (tree->num_nodes - tree->num_leaves));
 }
 
-
-template<typename T>
-__device__ int searchForLeaf(TPtree<T>* tree, T* query) {
-    int nodeIdx = 0;
-    KEYTYPE* weights;
-    for(int i=0; i<tree->levels; i++) {
-        weights = &tree->weight_list[i*tree->Dim];
-
-        if(weighted_val<T>(query, weights, tree->Dims) <= tree->split_keys[nodeIdx]) {
-            nodeIdx = 2*nodeIdx+1;
-        }
-        else {
-            nodeIdx = 2*nodeIdx+2;
-        }
-    }
-    return (nodeIdx - (tree->num_nodes - tree->num_leaves));
-}
 
 
 #endif
