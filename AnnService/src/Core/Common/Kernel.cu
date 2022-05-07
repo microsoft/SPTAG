@@ -33,6 +33,19 @@
 #include "inc/Core/Common/cuda/TPtree.hxx"
 
 /*****************************************************************************************
+* Convert sums to means for each split key
+*****************************************************************************************/
+__global__ void compute_mean(KEYTYPE* split_keys, int* node_sizes, int num_nodes) {
+    for (int i = blockIdx.x*blockDim.x + threadIdx.x; i < num_nodes; i += blockDim.x*gridDim.x) {
+        if (node_sizes[i] > 0) {
+            split_keys[i] /= ((KEYTYPE)node_sizes[i]);
+            node_sizes[i] = 0;
+        }
+    }
+}
+
+
+/*****************************************************************************************
 * Count the number of points assigned to each leaf
 *****************************************************************************************/
 __global__ void count_leaf_sizes(LeafNode* leafs, int* node_ids, int N, int internal_nodes) {
