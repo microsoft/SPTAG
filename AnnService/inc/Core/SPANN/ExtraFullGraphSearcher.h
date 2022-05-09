@@ -18,7 +18,7 @@ namespace SPTAG
 {
     namespace SPANN
     {
-        extern std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO;
+        extern std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO;
 
         struct Selection {
             std::string m_tmpfile;
@@ -918,7 +918,7 @@ namespace SPTAG
 
             std::vector<std::vector<ListInfo>> m_listInfos;
 
-            std::vector<std::shared_ptr<Helper::DiskPriorityIO>> m_indexFiles;
+            std::vector<std::shared_ptr<Helper::DiskIO>> m_indexFiles;
 
             int m_vectorInfoSize = 0;
 

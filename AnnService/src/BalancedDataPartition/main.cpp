@@ -521,7 +521,7 @@ void Process(MPI_Datatype type) {
                 std::string vecfile = options.m_outdir + "/" + options.m_outfile + "." + std::to_string(i);
                 std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + std::to_string(i);
                 std::string metaindexfile = options.m_outdir + "/" + options.m_outmetaindexfile + "." + std::to_string(i);
-                std::shared_ptr<Helper::DiskPriorityIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
+                std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
                 if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out)) {
                     LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
                     exit(1);
@@ -903,7 +903,7 @@ void Partition() {
         std::string vecfile = options.m_outdir + "/" + options.m_outfile + "." + taskId + "." + std::to_string(i);
         std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + taskId + "." + std::to_string(i);
         std::string metaindexfile = options.m_outdir + "/" + options.m_outmetaindexfile + "." + taskId + "." + std::to_string(i);
-        std::shared_ptr<Helper::DiskPriorityIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
+        std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
         if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out)) {
             LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
             exit(1);

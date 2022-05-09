@@ -24,9 +24,9 @@ namespace SPTAG
 
 			void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
 
-			virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const;
+			virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const;
 
-			virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
+			virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
 			virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
@@ -92,7 +92,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		ErrorCode OPQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
+		ErrorCode OPQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const
 		{
 			QuantizerType qtype = QuantizerType::OPQQuantizer;
 			VectorValueType rtype = GetEnumValueType<T>();
@@ -108,7 +108,7 @@ namespace SPTAG
 		}
 		
 		template <typename T>
-		ErrorCode OPQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in)
+		ErrorCode OPQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
 		{
 			auto code = PQQuantizer<OPQMatrixType>::LoadQuantizer(p_in);
 			if (code != ErrorCode::Success)

@@ -23,7 +23,7 @@ std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper
 
 std::mt19937 SPTAG::rg;
 
-std::shared_ptr<Helper::DiskPriorityIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::SimpleFileIO()); };
+std::shared_ptr<Helper::DiskIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::SimpleFileIO()); };
 
 namespace SPTAG {
 
@@ -175,7 +175,7 @@ VectorIndex::LoadIndexConfig(Helper::IniReader& p_reader)
 
 
 ErrorCode
-VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
+VectorIndex::SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
 {
     if (nullptr != m_pMetadata)
     {
@@ -243,17 +243,17 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
 
     ErrorCode ret = ErrorCode::Success;
     {
-        std::shared_ptr<Helper::DiskPriorityIO> p_configStream(new Helper::SimpleBufferIO());
+        std::shared_ptr<Helper::DiskIO> p_configStream(new Helper::SimpleBufferIO());
         if (p_configStream == nullptr || !p_configStream->Initialize(nullptr, std::ios::out)) return ErrorCode::EmptyDiskIO;
         if ((ret = SaveIndexConfig(p_configStream)) != ErrorCode::Success) return ret;
         p_config.resize(p_configStream->TellP());
         IOBINARY(p_configStream, ReadBinary, p_config.size(), (char*)p_config.c_str(), 0);
     }
 
-    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams;
+    std::vector<std::shared_ptr<Helper::DiskIO>> p_indexStreams;
     for (size_t i = 0; i < p_indexBlobs.size(); i++)
     {
-        std::shared_ptr<Helper::DiskPriorityIO> ptr(new Helper::SimpleBufferIO());
+        std::shared_ptr<Helper::DiskIO> ptr(new Helper::SimpleBufferIO());
         if (ptr == nullptr || !ptr->Initialize((char*)p_indexBlobs[i].Data(), std::ios::binary | std::ios::out, p_indexBlobs[i].Length())) return ErrorCode::EmptyDiskIO;
         p_indexStreams.push_back(std::move(ptr));
     }
@@ -327,7 +327,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
     if (m_pQuantizer) {
         indexfiles->push_back(m_sQuantizerFile);
     }
-    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
+    std::vector<std::shared_ptr<Helper::DiskIO>> handles;
     for (std::string& f : *indexfiles) {
         std::string newfile = folderPath + f;
         if (!direxists(newfile.substr(0, newfile.find_last_of(FolderSep)).c_str())) mkdir(newfile.substr(0, newfile.find_last_of(FolderSep)).c_str());
@@ -375,7 +375,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     else {
         std::uint64_t blobs = CalculateBufferSize()->size();
         IOBINARY(fp, WriteBinary, sizeof(blobs), (char*)&blobs);
-        std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
+        std::vector<std::shared_ptr<Helper::DiskIO>> p_indexStreams(blobs, fp);
 
         if (NeedRefine())
         {
@@ -612,7 +612,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     if (iniReader.DoesSectionExist("Quantizer")) {
         indexfiles->push_back(p_vectorIndex->m_sQuantizerFile);
     }
-    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> handles;
+    std::vector<std::shared_ptr<Helper::DiskIO>> handles;
     for (std::string& f : *indexfiles) {
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::in)) {
@@ -664,7 +664,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
         std::vector<char> config(configSize + 1, '\0');
         IOBINARY(fp, ReadBinary, configSize, config.data());
 
-        std::shared_ptr<Helper::DiskPriorityIO> bufferhandle(new Helper::SimpleBufferIO());
+        std::shared_ptr<Helper::DiskIO> bufferhandle(new Helper::SimpleBufferIO());
         if (bufferhandle == nullptr || !bufferhandle->Initialize(config.data(), std::ios::in, configSize)) return ErrorCode::EmptyDiskIO;
         if (SPTAG::ErrorCode::Success != iniReader.LoadIni(bufferhandle)) return ErrorCode::FailedParseValue;
     }
@@ -681,7 +681,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
     std::uint64_t blobs;
     IOBINARY(fp, ReadBinary, sizeof(blobs), (char*)&blobs);
    
-    std::vector<std::shared_ptr<Helper::DiskPriorityIO>> p_indexStreams(blobs, fp);
+    std::vector<std::shared_ptr<Helper::DiskIO>> p_indexStreams(blobs, fp);
     if ((ret = p_vectorIndex->LoadIndexData(p_indexStreams)) != ErrorCode::Success) return ret;
 
     if (iniReader.DoesSectionExist("MetaData"))
@@ -715,7 +715,7 @@ ErrorCode
 VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>& p_indexBlobs, std::shared_ptr<VectorIndex>& p_vectorIndex)
 {
     SPTAG::Helper::IniReader iniReader;
-    std::shared_ptr<Helper::DiskPriorityIO> fp(new Helper::SimpleBufferIO());
+    std::shared_ptr<Helper::DiskIO> fp(new Helper::SimpleBufferIO());
     if (fp == nullptr || !fp->Initialize(p_config.c_str(), std::ios::in, p_config.size())) return ErrorCode::EmptyDiskIO;
     if (SPTAG::ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
 

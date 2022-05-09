@@ -28,7 +28,7 @@ public:
 
     virtual void Add(const ByteArray& data) = 0;
 
-    virtual ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut) = 0;
+    virtual ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut) = 0;
 
     virtual ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile) = 0;
  
@@ -36,7 +36,7 @@ public:
     
     virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<MetadataSet>& p_newMetadata, std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize) const;
 
-    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut) const;
+    virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut) const;
 
     virtual ErrorCode RefineMetadata(std::vector<SizeType>& indices, const std::string& p_metaFile, const std::string& p_metaindexFile) const;
 
@@ -64,7 +64,7 @@ public:
     
     void Add(const ByteArray& data);
 
-    ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut);
+    ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut);
 
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
@@ -75,7 +75,7 @@ private:
 
     SizeType m_count;
 
-    std::shared_ptr<Helper::DiskPriorityIO> m_fp = nullptr;
+    std::shared_ptr<Helper::DiskIO> m_fp = nullptr;
     
     std::vector<std::uint8_t> m_newdata;
 };
@@ -94,7 +94,7 @@ public:
     MemMetadataSet(const std::string& p_metafile, const std::string& p_metaindexfile, 
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
 
-    MemMetadataSet(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin, 
+    MemMetadataSet(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<Helper::DiskIO> p_metaindexin, 
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
 
     ~MemMetadataSet();
@@ -111,12 +111,12 @@ public:
 
     void Add(const ByteArray& data);
 
-    ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskPriorityIO> p_metaOut, std::shared_ptr<Helper::DiskPriorityIO> p_metaIndexOut);
+    ErrorCode SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::shared_ptr<Helper::DiskIO> p_metaIndexOut);
 
     ErrorCode SaveMetadata(const std::string& p_metaFile, const std::string& p_metaindexFile);
 
 private:
-    ErrorCode Init(std::shared_ptr<Helper::DiskPriorityIO> p_metain, std::shared_ptr<Helper::DiskPriorityIO> p_metaindexin,
+    ErrorCode Init(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<Helper::DiskIO> p_metaindexin,
         std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize);
 
     std::shared_ptr<void> m_lock;

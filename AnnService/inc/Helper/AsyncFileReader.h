@@ -132,7 +132,7 @@ namespace SPTAG
             HandleWrapper m_handle;
         };
 
-        class AsyncFileIO : public DiskPriorityIO
+        class AsyncFileIO : public DiskIO
         {
         public:
             AsyncFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
@@ -646,7 +646,7 @@ namespace SPTAG
             std::vector<aio_context_t> m_iocps;
         };
 #endif
-        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num);
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num);
     }
 }
 
