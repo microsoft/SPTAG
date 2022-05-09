@@ -517,7 +517,7 @@ namespace SPTAG
             std::unique_ptr<AsyncReadRequest* []> m_queue;
         };
 
-        class AsyncFileIO : public DiskPriorityIO
+        class AsyncFileIO : public DiskIO
         {
         public:
             AsyncFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}

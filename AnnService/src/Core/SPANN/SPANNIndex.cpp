@@ -674,7 +674,7 @@ namespace SPTAG
                 if (m_options.m_buildSsdIndex) {
                     if (!m_options.m_excludehead) {
                         LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
-                        std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
+                        std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
                         if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
                             LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s for overwrite\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                             return ErrorCode::Fail;

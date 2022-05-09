@@ -166,7 +166,7 @@ namespace SPTAG
                     }
 
 #ifndef BATCH_READ
-                    Helper::DiskPriorityIO* indexFile = m_indexFiles[fileid].get();
+                    Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
 #endif
 
                     diskRead += listInfo->listPageCount;
