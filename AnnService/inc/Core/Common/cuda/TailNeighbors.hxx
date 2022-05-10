@@ -34,7 +34,7 @@ class QueryGroup {
  * is already created and populated based on the head vectors.
 ***********************************************************************************/
 template<typename T, typename SUMTYPE, int Dim>
-__global__ void findTailStatic(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree<T>* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, int dim) {
+__global__ void findTailStatic(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, int dim) {
 
   extern __shared__ char sharememory[];
   
@@ -148,7 +148,7 @@ __global__ void debug_warm_up_gpu() {
 // Search each query into the TPTree to get the number of queries for each leaf node. This just generates a histogram
 // for each leaf node so that we can compute offsets
 template<typename T, typename SUMTYPE, int MAX_DIM>
-__global__ void compute_group_sizes(QueryGroup* groups, TPtree<T>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem) {
+__global__ void compute_group_sizes(QueryGroup* groups, TPtree* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem) {
   groups->init_mem(N, num_groups, queryMem);
 
   T* query;
@@ -164,7 +164,7 @@ __global__ void compute_group_sizes(QueryGroup* groups, TPtree<T>* tptree, Point
 // Given the offsets and sizes of queries assigned to each leaf node, writes the list of queries assigned
 // to each leaf.  The list of query_ids can then be used during neighborhood search to improve locality
 template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
-__global__ void assign_queries_to_group(QueryGroup* groups, TPtree<T>* tptree, PointSet<T>* queries, int N, int num_groups) {
+__global__ void assign_queries_to_group(QueryGroup* groups, TPtree* tptree, PointSet<T>* queries, int N, int num_groups) {
   T* query;
   int leafId;
   int idx_in_leaf;
@@ -180,7 +180,7 @@ __global__ void assign_queries_to_group(QueryGroup* groups, TPtree<T>* tptree, P
 // Gets the list of queries that are to be searched into each leaf.  The QueryGroup structure uses the memory
 // provided with queryMem, which is required to be allocated with size N + 2*num_groups.  
 template<typename T, typename SUMTYPE, int Dim>
-__host__ void get_query_groups(QueryGroup* groups, TPtree<T>* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem, int NUM_BLOCKS, int NUM_THREADS) {
+__host__ void get_query_groups(QueryGroup* groups, TPtree* tptree, PointSet<T>* queries, int N, int num_groups, int* queryMem, int NUM_BLOCKS, int NUM_THREADS) {
 
   CUDA_CHECK(cudaMemset(queryMem, 0, (N+2*num_groups)*sizeof(int)));
 
@@ -322,8 +322,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     PointSet<T>** d_tailPS = new PointSet<T>*[NUM_GPUS];
 
     DistPair<SUMTYPE>** d_results = new DistPair<SUMTYPE>*[NUM_GPUS];
-    TPtree<T>** tptree = new TPtree<T>*[NUM_GPUS];
-    TPtree<T>** d_tptree = new TPtree<T>*[NUM_GPUS];
+    TPtree** tptree = new TPtree*[NUM_GPUS];
+    TPtree** d_tptree = new TPtree*[NUM_GPUS];
 
     // memory on each GPU for QuerySet reordering structures
     std::vector<int*> d_queryMem(NUM_GPUS);
@@ -366,7 +366,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
             exit(1);
         }
         LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for head vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for tail vectors:%lu MiB, total tail vectors:%lu, batch size:%d, total batches:%d\n", headVecSize/1000000, treeSize/1000000, tailMemAvail/1000000, pointsPerGPU[gpuNum], BATCH_SIZE[gpuNum], (((BATCH_SIZE[gpuNum]-1)+pointsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum]));
-        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE[gpuNum]*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree<T>))/1000000, ((BATCH_SIZE[gpuNum]+headRows)*sizeof(Point<T,SUMTYPE,MAX_DIM>) + (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree<T>)))/1000000);
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE[gpuNum]*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree))/1000000, ((BATCH_SIZE[gpuNum]+headRows)*sizeof(Point<T,SUMTYPE,MAX_DIM>) + (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree)))/1000000);
 
         // Allocate needed memory on the GPU
         CUDA_CHECK(cudaMallocManaged(&d_headRaw[gpuNum], headRows*dim*sizeof(T)));
@@ -376,8 +376,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         CUDA_CHECK(cudaMalloc(&d_results[gpuNum], BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)));
 
         // Prepare memory for TPTs
-        CUDA_CHECK(cudaMalloc(&d_tptree[gpuNum], sizeof(TPtree<T>)));
-        tptree[gpuNum] = new TPtree<T>;
+        CUDA_CHECK(cudaMalloc(&d_tptree[gpuNum], sizeof(TPtree)));
+        tptree[gpuNum] = new TPtree;
         tptree[gpuNum]->initialize(headRows, TPTlevels, dim);
 
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "tpt structure initialized for %lu head vectors, %d levels, leaf size:%d\n", headRows, TPTlevels, LEAF_SIZE);
@@ -472,7 +472,7 @@ for(int i=0; i<10; i++) {
             // Copy TPTs to each GPU
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
                 CUDA_CHECK(cudaSetDevice(gpuNum));
-                CUDA_CHECK(cudaMemcpy(d_tptree[gpuNum], tptree[gpuNum], sizeof(TPtree<T>), cudaMemcpyHostToDevice));
+                CUDA_CHECK(cudaMemcpy(d_tptree[gpuNum], tptree[gpuNum], sizeof(TPtree), cudaMemcpyHostToDevice));
             }
 
 
