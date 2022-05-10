@@ -34,7 +34,6 @@
 #include "params.h"
 #include "Distance.hxx"
 
-template<typename T>
 class TPtree;
 
 /************************************************************************************
@@ -109,7 +108,6 @@ __global__ void print_level_device(int* node_sizes, float* split_keys, int level
  * Only contains the nodes and hyperplane definitions that partition the data, as well
  * as indexes into the point array.  Does not contain the data itself.
  **********************************************************************************/
-template<typename T>
 class TPtree {
   public:
 // for each level of the tree, contains the dimensions and weights that defines the hyperplane
@@ -225,7 +223,7 @@ class TPtree {
 
 // Construct TPT on each GPU 
 template<typename T>
-__host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, int N, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
+__host__ void construct_trees_multigpu(TPtree** d_trees, PointSet<T>** ps, int N, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
     int nodes_on_level=1;
 
@@ -317,7 +315,7 @@ __host__ void construct_trees_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, in
 
 
 template<typename T>
-__host__ void create_tptree_multigpu(TPtree<T>** d_trees, PointSet<T>** ps, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
+__host__ void create_tptree_multigpu(TPtree** d_trees, PointSet<T>** ps, int N, int MAX_LEVELS, int NUM_GPUS, cudaStream_t* streams, int balanceFactor) {
 
   KEYTYPE* h_weights = new KEYTYPE[d_trees[0]->levels*d_trees[0]->Dim];
   for(int i=0; i<d_trees[0]->levels*d_trees[0]->Dim; ++i) {
@@ -428,7 +426,7 @@ __global__ void update_node_assignments(PointSet<T>* ps, KEYTYPE* weights, int* 
 }
 
 template<typename T>
-__device__ int searchForLeaf(TPtree<T>* tree, T* query) {
+__device__ int searchForLeaf(TPtree* tree, T* query) {
     int nodeIdx = 0;
     KEYTYPE* weights;
     for(int i=0; i<tree->levels; i++) {
