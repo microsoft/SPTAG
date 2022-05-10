@@ -13,7 +13,7 @@
 #include <memory>
 #include <cassert>
 #include <cstring>
-
+#include <immintrin.h>
 
 namespace SPTAG
 {
@@ -86,7 +86,7 @@ namespace SPTAG
             std::unique_ptr<const float[]> m_L2DistanceTables;
 
         private:
-            float ADC_Dist_AVX512(float* table, std::uint8_t* indices) const;
+            float ADC_Dist_AVX512(float* table, const std::uint8_t* indices) const;
         };
 
         template <typename T>
@@ -122,20 +122,19 @@ namespace SPTAG
         {}
 
         template <typename T>
-        float PQQuantizer<T>::ADC_Dist_AVX512(float* table, std::uint8_t* indices) const
+        float PQQuantizer<T>::ADC_Dist_AVX512(float* table, const std::uint8_t* indices) const
         {
             constexpr int AVX512_NUM_FLOATS = 16;
-            constexpr __m512i block_shift = _mm512_set1_epi32(AVX512_NUM_FLOATS * 256);
+            constexpr int ENTRIES_PER_TABLE = 256;
 
-            __m512i ADCoffsets = _mm512_setr_epi32(256 * 15, 256 * 14, 256 * 13, 256 * 12, 256 * 11, 256 * 10, 256 * 9, 256 * 8, 256 * 7, 256 * 6, 256 * 5, 256 * 4, 256 * 3, 256 * 2, 256, 0);
+            const __m512i ADCoffsets = _mm512_setr_epi32(256 * 15, 256 * 14, 256 * 13, 256 * 12, 256 * 11, 256 * 10, 256 * 9, 256 * 8, 256 * 7, 256 * 6, 256 * 5, 256 * 4, 256 * 3, 256 * 2, 256, 0);
             float out = 0;
 
             for (int i = 0; i < m_NumSubvectors/AVX512_NUM_FLOATS; i++)
             {
-               __m512i addrs = _mm512_add_epi32(ADCoffsets, _mm512_cvtepu8_epi32(_mm_load_epi32(indices + (i * AVX512_NUM_FLOATS))));
-               __m512 dists = _mm512_i32gather_ps(addrs);
+               __m512i addrs = _mm512_add_epi32(ADCoffsets, _mm512_cvtepu8_epi32(_mm_loadu_epi32(indices + (i * AVX512_NUM_FLOATS))));
+               __m512 dists = _mm512_i32gather_ps(addrs, table + (AVX512_NUM_FLOATS*ENTRIES_PER_TABLE), 1);
                out += _mm512_reduce_add_ps(dists);
-               ADCoffsets = _mm512_add_epi32(ADCoffsets, block_shift);
             }
 
             return out;
