@@ -15,7 +15,7 @@ namespace SPTAG
         {
         public:
             MemoryVectorReader(std::shared_ptr<ReaderOptions> p_options, std::shared_ptr<VectorSet> p_vectors) :
-                VectorSetReader(std::move(p_options)), m_vectors(std::move(p_vectors))
+                VectorSetReader(p_options), m_vectors(p_vectors)
             {}
 
             virtual ~MemoryVectorReader() {}
