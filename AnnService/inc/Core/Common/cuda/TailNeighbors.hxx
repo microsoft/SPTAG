@@ -386,8 +386,8 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "tpt structure initialized for %lu head vectors, %d levels, leaf size:%d\n", headRows, TPTlevels, LEAF_SIZE);
 
         // Alloc memory for QuerySet structure
-        CUDA_CHECK(cudaMalloc(&d_queryMem[gpuNum], BATCH_SIZE[gpuNum]*sizeof(int) + 2*tptree[gpuNum]->num_leaves*sizeof(int)));
-        CUDA_CHECK(cudaMalloc(&d_queryGroups[gpuNum], sizeof(QueryGroup)));
+        CUDA_CHECK(cudaMallocManaged(&d_queryMem[gpuNum], BATCH_SIZE[gpuNum]*sizeof(int) + 2*tptree[gpuNum]->num_leaves*sizeof(int)));
+        CUDA_CHECK(cudaMallocManaged(&d_queryGroups[gpuNum], sizeof(QueryGroup)));
 
         // Copy head points to GPU
 
@@ -487,7 +487,28 @@ for(int i=0; i<10; i++) {
             }
 #endif
 
+
+/*
+T* test_points = d_headRaw[0];
+size_t temp_size;
+temp_size = headRows;
+printf("size:%ld, HEAD points: %d (%f, %f, %f) - %d (%f, %f, %f) - %d (%f, %f, %f)\n", temp_size, 0, test_points[0], test_points[1], test_points[dim-1], 10000, test_points[10000*dim], test_points[10000*dim+1], test_points[10000*dim+dim-1], temp_size, test_points[(temp_size-1)*dim], test_points[(temp_size-1)*dim+1], test_points[temp_size*dim-1]);
+
+temp_size = curr_batch_size[0];
+test_points = d_tailRaw[0];
+printf("size:%ld, TAIL points: %d (%f, %f, %f) - %d (%f, %f, %f) - %d (%f, %f, %f)\n", temp_size, 0, test_points[0], test_points[1], test_points[dim-1], 10000, test_points[10000*dim], test_points[10000*dim+1], test_points[10000*dim+dim-1], temp_size, test_points[(temp_size-1)*dim], test_points[(temp_size-1)*dim+1], test_points[temp_size*dim-1]);
+*/
+/*
+printf("query group:\n");
+for(int k=0; k<10; k++) {
+  printf("%d, ", d_queryGroups[0]->sizes[k]);
+}
+printf("\n");
+*/
+
 auto t2 = std::chrono::high_resolution_clock::now();
+
+printf("Calling findTailRNG with shared memory size:%d\n", sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS);
 
             // Call main kernel on each GPU
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {

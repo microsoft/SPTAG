@@ -7,7 +7,7 @@ namespace SPTAG
 {
     namespace COMMON
     {
-        std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
+      std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in) {
             QuantizerType quantizerType = QuantizerType::Undefined;
             VectorValueType reconstructType = VectorValueType::Undefined;
             std::shared_ptr<IQuantizer> ret = nullptr;

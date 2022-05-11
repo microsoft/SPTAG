@@ -41,7 +41,7 @@ __forceinline__ __device__ bool violatesRNG_PS(T* a, T* b, SUMTYPE dist, int dim
 }
 
 template<typename T, typename SUMTYPE, int Dim>
-__device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
+__device__ bool violatesRNG_PS2(T* a, T* b, SUMTYPE dist) {
   SUMTYPE between;
 
   if(metric == 0) {
@@ -81,6 +81,9 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
   size_t leaf_offset = tptree->leafs[leafIdx].offset;
 
   bool good;
+
+  T* temp_ptr;
+
 
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
