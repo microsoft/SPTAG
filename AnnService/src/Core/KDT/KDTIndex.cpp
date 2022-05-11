@@ -73,7 +73,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
@@ -92,7 +92,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
             auto workSpace = m_workSpacePool->Rent();
             m_iHashTableExp = workSpace->HashTableExponent();
@@ -109,7 +109,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
             if (p_indexStreams.size() < 4) return ErrorCode::LackOfInputs;
 
@@ -333,7 +333,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams, IAbortOperation* p_abort)
+        ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort)
         {
             std::lock_guard<std::mutex> lock(m_dataAddLock);
             std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);

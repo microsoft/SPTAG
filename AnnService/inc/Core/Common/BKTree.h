@@ -626,7 +626,7 @@ break;
                     sizeof(SizeType) + sizeof(BKTNode) * m_pTreeRoots.size();
             }
 
-            ErrorCode SaveTrees(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
+            ErrorCode SaveTrees(std::shared_ptr<Helper::DiskIO> p_out) const
             {
                 std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                 IOBINARY(p_out, WriteBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
@@ -663,7 +663,7 @@ break;
                 return ErrorCode::Success;
             }
 
-            ErrorCode LoadTrees(std::shared_ptr<Helper::DiskPriorityIO> p_input)
+            ErrorCode LoadTrees(std::shared_ptr<Helper::DiskIO> p_input)
             {
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
                 m_pTreeStart.resize(m_iTreeNumber);
