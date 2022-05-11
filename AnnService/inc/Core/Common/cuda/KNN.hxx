@@ -30,14 +30,6 @@
 #include "TPtree.hxx"
 #include "GPUQuantizer.hxx"
 
-template<typename T, typename SUMTYPE, int Dim>
-__device__ bool violatesRNG_PS2(T* a, T* b, SUMTYPE dist) {
-  SUMTYPE between;
-
-  between = cosine(a, b, Dim);
-
-  return between <= dist;
-}
 
 template<typename T, typename SUMTYPE>
 __forceinline__ __device__ bool violatesRNG_PS(T* a, T* b, SUMTYPE dist, int dim) {
@@ -68,13 +60,6 @@ __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farthe
 template<typename T, typename SUMTYPE>
 __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, DistMetric metric, size_t min_id, size_t max_id, T* query, DistPair<SUMTYPE>* threadList, int dim) {
 
-//  extern __shared__ char sharememory[];
-
-//  DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[KVAL*threadIdx.x]);
-//  T query[Dim];
-//  T* query = (&((T*)sharememory)[threadIdx.x*ps->dim]);
-//  T* smem_offset = (&((T*)sharememory)[blockDim.x*ps->dim]);
-
   SUMTYPE max_dist = INFTY<SUMTYPE>();
   DistPair<SUMTYPE> temp;
   int read_id, write_id;
@@ -83,7 +68,6 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
     threadList[i].dist = INFTY<SUMTYPE>();
   }
 
-//  Point<T,SUMTYPE,Dim> query;
   size_t queryId;
   T* candidate_vec;
 
@@ -98,31 +82,21 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 
   bool good;
 
-  T* temp_ptr;
-
-
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       queryId = tptree->leaf_points[leaf_offset + i];
-//printf("about to set query vector, id:%ld, Dim:%d\n", queryId, Dim);
-//__syncthreads();
+
       for(int j=0; j<ps->dim; ++j) {
         query[j] = ps->getVec(queryId)[j];
       }
-//      query = data[tptree->leaf_points[leaf_offset + i]];
-//__syncthreads();
-//printf("finished setting! first:%f, last:%f\n", query[0], query[Dim-1]);
-//__syncthreads();
 
       // Load results from previous iterations into shared memory heap
       // and re-compute distances since they are not stored in result set
       for(int j=0; j<KVAL; j++) {
-//        threadList[j].idx = results[(((long long int)(query.id-min_id))*(long long int)(KVAL))+j];
         threadList[j].idx = results[(((long long int)(queryId-min_id))*(long long int)(KVAL))+j];
         if(threadList[j].idx != -1) {
-//          threadList[j].dist = ps->dist(query, threadList[j].idx, metric);
-//          threadList[j].dist = ps->cosine(query, threadList[j].idx, false);
+
           threadList[j].dist = ps->cosine(query, threadList[j].idx);
 /*
           if(metric == 0) {
@@ -147,7 +121,6 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 //          candidate.dist = ps->dist(query, candidate.idx, metric);
 //          candidate.dist = ps->cosine(query, candidate.idx, (threadIdx.x==0 && blockIdx.x==0));
           candidate.dist = ps->cosine(query, candidate.idx);
-//if(i==0) printf("query:%ld, candidate:%ld, dist:%f\n", query, candidate.idx, candidate.dist);
 /*
           if(metric == 0) {
             candidate.dist = query.l2(&data[candidate.idx]);
@@ -158,9 +131,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 */
 
           if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
-//            for(int k=0; k<Dim; ++k) candidate_vec[k] = ps->getVec(candidate.idx)[k];
             candidate_vec = ps->getVec(candidate.idx);
-  // TODO: handle if two different points have same dist
 	    for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
               if(violatesRNG_PS<T, SUMTYPE>(candidate_vec, ps->getVec(threadList[read_id].idx),candidate.dist, ps->dim)) {
                 good = false;
@@ -200,19 +171,8 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
           }
         }
       }
-//if(i==0) {
-//  printf("maxDist:%f, idx:%d\n", max_dist, threadList[KVAL-1].idx);
-//}
-/*
-if(i==0) {
-  for(int j=0; j<KVAL; j++) {
-    printf("%d (%f), ", threadList[j].idx, threadList[j].dist);
-  }
-  printf("\n");
-}
-*/
+
       for(size_t j=0; j<KVAL; j++) {
-//        results[(size_t)(query.id-min_id)*KVAL+j] = threadList[j].idx;
         results[(size_t)(queryId-min_id)*KVAL+j] = threadList[j].idx;
       }
     } // End if within batch
@@ -293,32 +253,6 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
   // If dimension is larger than any static option
   T* query = dynamic_temp;
   findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-/*
-  if(dim <= SHAPES[0]) {
-    T query[SHAPES[0]];
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-  else if(dim <= SHAPES[1]) {
-    T query[SHAPES[1]];
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-  else if(dim <= SHAPES[2]) {
-    T query[SHAPES[2]];
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-  else if(dim <= SHAPES[3]) {
-    T query[SHAPES[3]];
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-  else if(dim <= SHAPES[4]) {
-    T query[SHAPES[4]];
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-  else {
-    T* query = dynamic_temp; // Use temp global memory for very large dimensions
-    findRNG(ps, tptree, KVAL, results, metric, min_id, max_id, query, threadList, dim);
-  }
-*/
 }
 
 
@@ -448,7 +382,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
 
 /**** Variables ****/
   int metric = (int)index->GetDistCalcMethod();
-  bool use_q = (COMMON::DistanceUtils::Quantizer != NULL); // Using quantization?
+  bool use_q = (index->m_pQuantizer != NULL); // Using quantization?
   int levels = (int)std::log2(dataSize/leafSize); // TPT levels
   size_t rawSize = dataSize*dim;
   cudaError_t resultErr;

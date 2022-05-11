@@ -109,7 +109,7 @@ namespace SPTAG
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-                if (COMMON::DistanceUtils::Quantizer) {
+                if (index->m_pQuantizer) {
 			printf("has quantizer!\n");
                     buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 			/*
