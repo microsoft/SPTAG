@@ -30,7 +30,7 @@ public:
 
     ErrorCode LoadIniFile(const std::string& p_iniFilePath);
 
-    ErrorCode LoadIni(std::shared_ptr<Helper::DiskPriorityIO> p_input);
+    ErrorCode LoadIni(std::shared_ptr<Helper::DiskIO> p_input);
 
     bool DoesSectionExist(const std::string& p_section) const;
 

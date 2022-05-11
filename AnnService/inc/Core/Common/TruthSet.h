@@ -13,7 +13,7 @@ namespace SPTAG
     {
         class TruthSet {
         public:
-            static void LoadTruthTXT(std::shared_ptr<SPTAG::Helper::DiskPriorityIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber)
+            static void LoadTruthTXT(std::shared_ptr<SPTAG::Helper::DiskIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber)
             {
                 std::size_t lineBufferSize = 20;
                 std::unique_ptr<char[]> currentLine(new char[lineBufferSize]);
@@ -40,7 +40,7 @@ namespace SPTAG
                 }
             }
 
-            static void LoadTruthXVEC(std::shared_ptr<SPTAG::Helper::DiskPriorityIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber)
+            static void LoadTruthXVEC(std::shared_ptr<SPTAG::Helper::DiskIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber)
             {
                 truth.clear();
                 truth.resize(p_iTruthNumber);
@@ -59,7 +59,7 @@ namespace SPTAG
                 }
             }
 
-            static void LoadTruthDefault(std::shared_ptr<SPTAG::Helper::DiskPriorityIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber) {
+            static void LoadTruthDefault(std::shared_ptr<SPTAG::Helper::DiskIO>& ptr, std::vector<std::set<SizeType>>& truth, int K, int& originalK, SizeType& p_iTruthNumber) {
                 if (ptr->TellP() == 0) {
                     int row;
                     if (ptr->ReadBinary(4, (char*)&row) != 4 || ptr->ReadBinary(4, (char*)&originalK) != 4) {
@@ -80,7 +80,7 @@ namespace SPTAG
                 }
             }
 
-            static void LoadTruth(std::shared_ptr<SPTAG::Helper::DiskPriorityIO>& ptr, std::vector<std::set<SizeType>>& truth, SizeType& NumQuerys, int& originalK, int K, TruthFileType type)
+            static void LoadTruth(std::shared_ptr<SPTAG::Helper::DiskIO>& ptr, std::vector<std::set<SizeType>>& truth, SizeType& NumQuerys, int& originalK, int K, TruthFileType type)
             {
                 if (type == TruthFileType::TXT)
                 {

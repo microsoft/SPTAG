@@ -105,7 +105,7 @@ namespace SPTAG
                     return b;
                 }
 
-                bool save(std::shared_ptr<Helper::DiskPriorityIO> out)
+                bool save(std::shared_ptr<Helper::DiskIO> out)
                 {
                     auto blockNum = (m_size >> m_blockSizeEx);
                     for (int i = 0; i < blockNum; i++)
@@ -116,7 +116,7 @@ namespace SPTAG
                     return true;
                 }
 
-                bool load(std::shared_ptr<Helper::DiskPriorityIO> in, size_t length)
+                bool load(std::shared_ptr<Helper::DiskIO> in, size_t length)
                 {
                     if (m_size + length > (m_blockSize + 1) * m_blocks.capacity()) return false;
 

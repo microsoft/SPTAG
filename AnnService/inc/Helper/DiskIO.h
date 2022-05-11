@@ -33,18 +33,18 @@ namespace SPTAG
             void* m_payload;
             bool m_success;
 
-            // Carry exension metadata needed by some DiskPriorityIO implementations
+            // Carry exension metadata needed by some DiskIO implementations
             void* m_extension;
 
             AsyncReadRequest() : m_offset(0), m_readSize(0), m_buffer(nullptr), m_status(0), m_payload(nullptr), m_success(false), m_extension(nullptr) {}
         };
 
-        class DiskPriorityIO
+        class DiskIO
         {
         public:
-            DiskPriorityIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
+            DiskIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
 
-            virtual ~DiskPriorityIO() {}
+            virtual ~DiskIO() {}
 
             virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
@@ -72,7 +72,7 @@ namespace SPTAG
             virtual void ShutDown() = 0; 
         };
 
-        class SimpleFileIO : public DiskPriorityIO
+        class SimpleFileIO : public DiskIO
         {
         public:
             SimpleFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
@@ -157,7 +157,7 @@ namespace SPTAG
             std::unique_ptr<std::fstream> m_handle;
         };
 
-        class SimpleBufferIO : public DiskPriorityIO
+        class SimpleBufferIO : public DiskIO
         {
         public:
             struct streambuf : public std::basic_streambuf<char>

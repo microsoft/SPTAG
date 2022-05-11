@@ -45,9 +45,9 @@ namespace SPTAG
 
             virtual std::uint64_t BufferSize() const;
 
-            virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const;
+            virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const;
 
-            virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in);
+            virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
             virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
@@ -246,7 +246,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode PQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
+        ErrorCode PQQuantizer<T>::SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const
         {
             QuantizerType qtype = QuantizerType::PQQuantizer;
             VectorValueType rtype = GetEnumValueType<T>();
@@ -261,7 +261,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskPriorityIO> p_in)
+        ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
         {
             LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);

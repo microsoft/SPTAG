@@ -526,7 +526,7 @@ break;
 
             template <typename T>
             ErrorCode RefineGraph(VectorIndex* index, std::vector<SizeType>& indices, std::vector<SizeType>& reverseIndices,
-                std::shared_ptr<Helper::DiskPriorityIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
+                std::shared_ptr<Helper::DiskIO> output, NeighborhoodGraph* newGraph, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
                 std::shared_ptr<NeighborhoodGraph> tmp;
                 if (newGraph == nullptr) {
@@ -598,7 +598,7 @@ break;
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
-            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            ErrorCode LoadGraph(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
                 ErrorCode ret = ErrorCode::Success;
                 if ((ret = m_pNeighborhoodGraph.Load(input, blockSize, capacity)) != ErrorCode::Success) return ret;
@@ -636,7 +636,7 @@ break;
                 return SaveGraph(ptr);
             }
 
-            ErrorCode SaveGraph(std::shared_ptr<Helper::DiskPriorityIO> output) const
+            ErrorCode SaveGraph(std::shared_ptr<Helper::DiskIO> output) const
             {
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&m_iGraphSize);
                 IOBINARY(output, WriteBinary, sizeof(DimensionType), (char*)&m_iNeighborhoodSize);

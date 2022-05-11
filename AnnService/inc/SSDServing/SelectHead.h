@@ -963,7 +963,7 @@ namespace SPTAG {
                 {
                     std::sort(selected.begin(), selected.end());
 
-                    std::shared_ptr<Helper::DiskPriorityIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
+                    std::shared_ptr<Helper::DiskIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
                     if (output == nullptr || outputIDs == nullptr ||
                         !output->Initialize(opts.m_headVectorFile.c_str(), std::ios::binary | std::ios::out) ||
                         !outputIDs->Initialize(opts.m_headIDFile.c_str(), std::ios::binary | std::ios::out)) {
