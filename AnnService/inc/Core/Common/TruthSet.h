@@ -22,17 +22,20 @@ namespace SPTAG
                 for (int i = 0; i < p_iTruthNumber; ++i)
                 {
                     truth[i].clear();
-                    for (int j = 0; j < K; ++j)
-                    {
-                        if (ptr->ReadString(lineBufferSize, currentLine, ' ') == 0) {
-                            LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
-                            exit(1);
-                        }
-                        truth[i].insert(std::atoi(currentLine.get()));
-                    }
                     if (ptr->ReadString(lineBufferSize, currentLine, '\n') == 0) {
                         LOG(Helper::LogLevel::LL_Error, "Truth number(%d) and query number(%d) are not match!\n", i, p_iTruthNumber);
                         exit(1);
+                    }
+                    char* tmp = strtok(currentLine.get(), " ");
+                    for (int j = 0; j < K; ++j)
+                    {
+                        if (tmp == nullptr) {
+                            LOG(Helper::LogLevel::LL_Error, "Truth number(%d, %d) and query number(%d) are not match!\n", i, j, p_iTruthNumber);
+                            exit(1);
+                        }
+                        int vid = std::atoi(tmp);
+                        if (vid >= 0) truth[i].insert(vid);
+                        tmp = strtok(nullptr, " ");
                     }
                 }
             }
@@ -217,13 +220,14 @@ namespace SPTAG
             }
 
             template <typename T>
-            static float CalculateRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, SizeType NumQuerys, std::ofstream* log = nullptr, bool debug = false)
+            static float CalculateRecall(VectorIndex* index, std::vector<QueryResult>& results, const std::vector<std::set<SizeType>>& truth, int K, int truthK, std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, SizeType NumQuerys, std::ofstream* log = nullptr, bool debug = false, float* MRR = nullptr)
             {
-                float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
+                float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0, meanmrr = 0;
                 std::vector<float> thisrecall(NumQuerys, 0);
                 std::unique_ptr<bool[]> visited(new bool[K]);
                 for (SizeType i = 0; i < NumQuerys; i++)
                 {
+                    int minpos = K - 1;
                     memset(visited.get(), 0, K * sizeof(bool));
                     for (SizeType id : truth[i])
                     {
@@ -235,6 +239,7 @@ namespace SPTAG
                             {
                                 thisrecall[i] += 1;
                                 visited[j] = true;
+                                if (j < minpos) minpos = j;
                                 break;
                             }
                             else if (vectorSet != nullptr) {
@@ -253,10 +258,11 @@ namespace SPTAG
                             }
                         }
                     }
-                    thisrecall[i] /= truthK;
+                    thisrecall[i] /= truth[i].size();
                     meanrecall += thisrecall[i];
                     if (thisrecall[i] < minrecall) minrecall = thisrecall[i];
                     if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
+                    meanmrr += 1.0f / (minpos + 1);
 
                     if (debug) {
                         std::string ll("recall:" + std::to_string(thisrecall[i]) + "\ngroundtruth:");
@@ -285,6 +291,7 @@ namespace SPTAG
                 }
                 stdrecall = std::sqrt(stdrecall / NumQuerys);
                 if (log) (*log) << meanrecall << " " << stdrecall << " " << minrecall << " " << maxrecall << std::endl;
+                if (MRR) *MRR = meanmrr / NumQuerys;
                 return meanrecall;
             }
 

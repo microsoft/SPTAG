@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.0-devel-ubuntu20.04
+FROM mcr.microsoft.com/oss/nvidia/k8s-device-plugin:v0.10.0
 WORKDIR /app
 
 ENV DEBIAN_FRONTEND=noninteractive

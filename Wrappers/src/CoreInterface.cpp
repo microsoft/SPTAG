@@ -31,7 +31,7 @@ AnnIndex::AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index)
       m_dimension(p_index->GetFeatureDim()),
       m_index(p_index)
 {
-    m_inputVectorSize = SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
+    m_inputVectorSize = p_index->m_pQuantizer ? p_index->m_pQuantizer->GetNumSubvectors() : SPTAG::GetValueTypeSize(m_inputValueType) * m_dimension;
 }
 
 
@@ -99,10 +99,12 @@ AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, 
     {
         return false;
     }
-
+    
+    auto vectorType = m_index->m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_inputValueType;
+    auto vectorSize = m_index->m_pQuantizer ? m_index->m_pQuantizer->GetNumSubvectors() : m_dimension;
     std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(p_data,
-        m_inputValueType,
-        static_cast<SPTAG::DimensionType>(m_dimension),
+        vectorType,
+        static_cast<SPTAG::DimensionType>(vectorSize),
         static_cast<SPTAG::SizeType>(p_num)));
 
     std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
@@ -137,12 +139,41 @@ AnnIndex::SetSearchParam(const char* p_name, const char* p_value, const char* p_
 }
 
 
+bool
+AnnIndex::LoadQuantizer(const char* p_quantizerFile)
+{
+    if (nullptr == m_index)
+    {
+        if (SPTAG::IndexAlgoType::Undefined == m_algoType ||
+            SPTAG::VectorValueType::Undefined == m_inputValueType)
+        {
+            return false;
+        }
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+
+    auto ret = (m_index->LoadQuantizer(p_quantizerFile) == SPTAG::ErrorCode::Success);
+    if (ret)
+    {
+        m_inputVectorSize = m_index->m_pQuantizer->QuantizeSize();
+    }
+    return ret;
+}
+
+
+void
+AnnIndex::SetQuantizerADC(bool p_adc)
+{
+    if (nullptr != m_index) return m_index->SetQuantizerADC(p_adc);
+}
+
+
 std::shared_ptr<QueryResult>
 AnnIndex::Search(ByteArray p_data, int p_resultNum)
 {
     std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_resultNum, false);
 
-    if (nullptr != m_index && p_data.Length() == m_inputVectorSize)
+    if (nullptr != m_index)
     {
         m_index->SearchIndex(*results);
     }
@@ -154,7 +185,7 @@ AnnIndex::SearchWithMetaData(ByteArray p_data, int p_resultNum)
 {
     std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_resultNum, true);
 
-    if (nullptr != m_index && p_data.Length() == m_inputVectorSize)
+    if (nullptr != m_index)
     {
         m_index->SearchIndex(*results);
     }
@@ -165,7 +196,7 @@ std::shared_ptr<QueryResult>
 AnnIndex::BatchSearch(ByteArray p_data, int p_vectorNum, int p_resultNum, bool p_withMetaData)
 {
     std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_vectorNum * p_resultNum, p_withMetaData);
-    if (nullptr != m_index && p_data.Length() == m_inputVectorSize * p_vectorNum)
+    if (nullptr != m_index)
     {
         m_index->SearchIndex(p_data.Data(), p_vectorNum, p_resultNum, p_withMetaData, results->GetResults());
     }

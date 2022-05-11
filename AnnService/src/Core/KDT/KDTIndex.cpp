@@ -127,6 +127,8 @@ namespace SPTAG
 #pragma region K-NN search
 
 #define Search(CheckDeleted) \
+        if (m_pQuantizer && !p_query.HasQuantizedTarget()) \
+        { p_query.SetTarget(p_query.GetTarget(), m_pQuantizer); } \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \

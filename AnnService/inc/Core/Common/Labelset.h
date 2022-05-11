@@ -95,6 +95,11 @@ namespace SPTAG
             {
                 m_data.SetR(num);
             }
+
+            inline SizeType R() const
+            {
+                return m_data.R();
+            }
         };
     }
 }

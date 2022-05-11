@@ -20,6 +20,7 @@
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
+#define BATCH_READ 1
 #else
 #define BATCH_READ 1
 #include <fcntl.h>
@@ -241,7 +242,6 @@ namespace SPTAG
                 std::vector<ResourceType*> waitResources;
                 for (std::uint32_t i = 0; i < requestCount; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (readRequest->m_readSize == 0) continue;
 
                     ResourceType* resource = GetResource();
                     DiskUtils::CallbackOverLapped& col = resource->m_col;

@@ -28,7 +28,7 @@ add_library (DistanceUtils STATIC
     )
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -fPIC)
+    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -mavx512dq -fPIC)
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
@@ -68,7 +68,12 @@ if (NOT LIBRARYONLY)
     add_executable (indexsearcher ${SEARCHER_FILES})
     target_link_libraries(indexsearcher ${Boost_LIBRARIES} SPTAGLibStatic)
     
-    install(TARGETS server client aggregator indexbuilder indexsearcher
+    file(GLOB QUANTIZER_HDR_FILES ${AnnService}/inc/Quantizer/*.h)
+    file(GLOB QUANTIZER_FILES ${AnnService}/src/Quantizer/*.cpp)
+    add_executable (quantizer ${QUANTIZER_FILES} ${QUANTIZER_HDR_FILES})
+    target_link_libraries(quantizer ${Boost_LIBRARIES} SPTAGLibStatic)
+
+    install(TARGETS server client aggregator indexbuilder indexsearcher quantizer
       RUNTIME DESTINATION bin
       ARCHIVE DESTINATION lib
       LIBRARY DESTINATION lib)

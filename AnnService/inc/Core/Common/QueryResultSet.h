@@ -7,6 +7,7 @@
 #include "../SearchQuery.h"
 #include "DistanceUtils.h"
 #include <algorithm>
+#include "IQuantizer.h"
 
 namespace SPTAG
 {
@@ -96,6 +97,11 @@ public:
         {
             return (T*)reinterpret_cast<const T*>(m_target);
         }
+    }
+
+    bool HasQuantizedTarget()
+    {
+        return m_quantizedTarget;
     }
 
     inline float worstDist() const

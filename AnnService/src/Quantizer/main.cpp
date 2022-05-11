@@ -56,6 +56,7 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader>& vectorRead
 int main(int argc, char* argv[])
 {
     std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string());
+
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
@@ -121,7 +122,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            quantizer->LoadIQuantizer(fp_load);
+            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
             if (!quantizer)
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
@@ -151,7 +152,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            quantizer->LoadIQuantizer(fp_load);
+            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
             if (!quantizer)
             {
                 LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");

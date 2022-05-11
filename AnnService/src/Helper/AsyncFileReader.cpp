@@ -18,7 +18,6 @@ namespace SPTAG {
             memset(myiocbs.data(), 0, num * sizeof(struct iocb));
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
-                if (readRequest->m_readSize == 0) continue;
 
                 channel = readRequest->m_status & 0xffff;
                 int fileid = (readRequest->m_status >> 16);
@@ -31,7 +30,6 @@ namespace SPTAG {
                 myiocb->aio_nbytes = readRequest->m_readSize;
                 myiocb->aio_offset = static_cast<std::int64_t>(readRequest->m_offset);
 
-                readRequest->m_readSize = 0;
                 iocbs[fileid].emplace_back(myiocb);
             }
             std::vector<struct io_event> events(totalToSubmit);
@@ -82,39 +80,46 @@ namespace SPTAG {
             }
         }
 #else
-        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        using BatchOp = bool (DiskPriorityIO::*)(AsyncReadRequest*, uint32_t);
+        void CallOnAppropriateBatch(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num, BatchOp f)
         {
-            
             if (handlers.size() == 1) {
-                handlers[0]->BatchReadFile(readRequests, num);
+                (handlers[0].get()->*f)(readRequests, num);
             }
-            else {            
+            else {
                 int currFileId = 0, currReqStart = 0;
                 for (int i = 0; i < num; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (readRequest->m_readSize == 0) continue;
 
                     int fileid = (readRequest->m_status >> 16);
                     if (fileid != currFileId) {
-                        handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        (handlers[currFileId].get()->*f)(readRequests + currReqStart, i - currReqStart);
                         currFileId = fileid;
                         currReqStart = i;
                     }
                 }
                 if (currReqStart < num) {
-                    handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                    (handlers[currFileId].get()->*f)(readRequests + currReqStart, num - currReqStart);
                 }
             }
+        }
+
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        {
+            
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskPriorityIO::BatchReadFile);
 
             for (int i = 0; i < num; i++) {
                 AsyncReadRequest* readRequest = &(readRequests[i]);
-                if (readRequest->m_readSize == 0) continue;
-                readRequest->m_readSize = 0;
-                if (readRequest->m_success)
+                
+                if (readRequest->m_success && readRequest->m_callback)
                 {
                     readRequest->m_callback(readRequest);
+                    readRequest->m_callback = nullptr;
                 }
             }
+
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskPriorityIO::BatchCleanRequests);
         }
 #endif
     }

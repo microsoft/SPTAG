@@ -24,6 +24,10 @@ public:
 
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
+    bool LoadQuantizer(const char* p_quantizerFile);
+
+    void SetQuantizerADC(bool p_adc);
+
     bool BuildSPANN(bool p_normalized);
 
     bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);

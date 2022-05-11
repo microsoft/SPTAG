@@ -17,8 +17,8 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
-        AddRequiredOption(m_outputMetadataFile, "-om", "--outputmeta", "Output metadata.");
-        AddRequiredOption(m_outputMetadataIndexFile, "-omi", "--outputmetaindex", "Output metadata index.");
+        AddOptionalOption(m_outputMetadataFile, "-om", "--outputmeta", "Output metadata.");
+        AddOptionalOption(m_outputMetadataIndexFile, "-omi", "--outputmetaindex", "Output metadata index.");
         AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
         AddOptionalOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
         AddOptionalOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");

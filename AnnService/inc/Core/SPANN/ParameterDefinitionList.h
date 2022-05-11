@@ -87,6 +87,7 @@ DefineSSDParameter(m_batches, int, 1, "Batches")
 DefineSSDParameter(m_tmpdir, std::string, std::string("."), "TmpDir")
 DefineSSDParameter(m_rngFactor, float, 1.0f, "RNGFactor")
 DefineSSDParameter(m_samples, int, 100, "RecallTestSampleNumber")
+DefineSSDParameter(m_excludehead, bool, true, "ExcludeHead")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

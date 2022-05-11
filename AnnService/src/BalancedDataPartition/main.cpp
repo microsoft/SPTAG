@@ -33,8 +33,8 @@ public:
         AddOptionalOption(m_lambda, "-l", "--lambda", "lambda for balanced size level.");
         AddOptionalOption(m_distMethod, "-m", "--dist", "Distance method (L2 or Cosine).");
         AddOptionalOption(m_outdir, "-o", "--outdir", "Output directory.");
-		AddOptionalOption(m_weightfile, "-w", "--weight", "vector weight file.");
-		AddOptionalOption(m_wlambda, "-lw", "--wlambda", "lambda for balanced weight level.");
+        AddOptionalOption(m_weightfile, "-w", "--weight", "vector weight file.");
+        AddOptionalOption(m_wlambda, "-lw", "--wlambda", "lambda for balanced weight level.");
         AddOptionalOption(m_seed, "-e", "--seed", "Random seed.");
         AddOptionalOption(m_initIter, "-x", "--init", "Number of iterations for initialization.");
         AddOptionalOption(m_clusterassign, "-a", "--assign", "Number of clusters to be assigned.");
@@ -55,12 +55,12 @@ public:
 
     std::string m_inputFiles;
     int m_clusterNum;
-    
+
     float m_stopDifference = 0.000001f;
     int m_maxIter = 100;
     int m_localSamples = 1000;
     float m_lambda = 0.00000f;
-	float m_wlambda = 0.00000f;
+    float m_wlambda = 0.00000f;
     int m_seed = -1;
     int m_initIter = 3;
     int m_clusterassign = 1;
@@ -78,7 +78,7 @@ public:
     std::string m_outfile = "vectors.bin";
     std::string m_outmetafile = "meta.bin";
     std::string m_outmetaindexfile = "metaindex.bin";
-	std::string m_weightfile = "-";
+    std::string m_weightfile = "-";
     std::string m_stage = "Clustering";
     std::string m_status = ".";
     std::string m_syncscript = "";
@@ -214,10 +214,10 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
     for (auto& thread : threads) { thread.join(); }
 
     for (int i = 1; i < args._T; i++) {
-		for (int k = 0; k < args._K; k++) {
-			args.newCounts[k] += args.newCounts[i*args._K + k];
-			args.newWeightedCounts[k] += args.newWeightedCounts[i*args._K + k];
-		}
+        for (int k = 0; k < args._K; k++) {
+            args.newCounts[k] += args.newCounts[i*args._K + k];
+            args.newWeightedCounts[k] += args.newWeightedCounts[i*args._K + k];
+        }
     }
 
     if (updateCenters) {
@@ -248,13 +248,13 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
 
 template <typename T>
 inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
-	std::vector<SizeType>& indices,
-	const SizeType first, const SizeType last, COMMON::KmeansArgs<T>& args, COMMON::Dataset<LabelType>& label, SizeType* mylimit, std::vector<float>& weights,
-	const int clusternum, const bool fill) {
-	float currDist = 0;
-	SizeType subsize = (last - first - 1) / args._T + 1;
+    std::vector<SizeType>& indices,
+    const SizeType first, const SizeType last, COMMON::KmeansArgs<T>& args, COMMON::Dataset<LabelType>& label, SizeType* mylimit, std::vector<float>& weights,
+    const int clusternum, const bool fill) {
+    float currDist = 0;
+    SizeType subsize = (last - first - 1) / args._T + 1;
 
-    std::unique_ptr<SPTAG::Edge[]> items(new SPTAG::Edge[last - first]);
+    SPTAG::Edge* items = new SPTAG::Edge[last - first];
 
     auto func1 = [&](int tid)
     {
@@ -292,7 +292,7 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
         for (auto& thread : threads) { thread.join(); }
     }
 
-    std::sort(items.get(), items.get() + last - first, g_edgeComparer);
+    std::sort(items, items + last - first, g_edgeComparer);
 
     for (int i = 0; i < args._T; i++) {
         for (int k = 0; k < args._K; k++) {
@@ -303,7 +303,7 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
     std::size_t startIdx = 0;
     for (int i = 0; i < args._K; ++i)
     {
-        std::size_t endIdx = std::lower_bound(items.get(), items.get() + last - first, i + 1, g_edgeComparer) - items.get();
+        std::size_t endIdx = std::lower_bound(items, items + last - first, i + 1, g_edgeComparer) - items;
         LOG(Helper::LogLevel::LL_Info, "cluster %d: avgdist:%f limit:%d, drop:%zu - %zu\n", items[startIdx].node, args.clusterDist[i] / (endIdx - startIdx), mylimit[i], startIdx + mylimit[i], endIdx);
         for (size_t dropID = startIdx + mylimit[i]; dropID < endIdx; ++dropID)
         {
@@ -312,7 +312,7 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
         startIdx = endIdx;
     }
 
-    auto func2 = [&](int tid)
+    auto func2 = [&, subsize](int tid)
     {
         SizeType istart = tid * subsize;
         SizeType iend = min((tid + 1) * subsize, last - first);
@@ -341,20 +341,21 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
     };
 
     {
-        std::vector<std::thread> threads;
-        for (int i = 0; i < args._T; i++) { threads.emplace_back(func2, i); }
-        for (auto& thread : threads) { thread.join(); }
+        std::vector<std::thread> threads2;
+        for (int i = 0; i < args._T; i++) { threads2.emplace_back(func2, i); }
+        for (auto& thread : threads2) { thread.join(); }
     }
+    delete[] items;
 
-	std::memset(args.counts, 0, sizeof(SizeType) * args._K);
-	std::memset(args.weightedCounts, 0, sizeof(float) * args._K);
-	for (int i = 0; i < args._T; i++) {
-		for (int k = 0; k < args._K; k++) {
-			args.counts[k] += args.newCounts[i*args._K + k];
-			args.weightedCounts[k] += args.newWeightedCounts[i*args._K + k];
-		}
-	}
-	return currDist;
+    std::memset(args.counts, 0, sizeof(SizeType) * args._K);
+    std::memset(args.weightedCounts, 0, sizeof(float) * args._K);
+    for (int i = 0; i < args._T; i++) {
+        for (int k = 0; k < args._K; k++) {
+            args.counts[k] += args.newCounts[i*args._K + k];
+            args.weightedCounts[k] += args.newWeightedCounts[i*args._K + k];
+        }
+    }
+    return currDist;
 }
 
 template <typename T>
@@ -375,42 +376,42 @@ void Process(MPI_Datatype type) {
     std::shared_ptr<MetadataSet> metas = vectorReader->GetMetadataSet();
     if (options.m_distMethod == DistCalcMethod::Cosine) vectors->Normalize(options.m_threadNum);
 
-	std::vector<float> weights(vectors->Count(), 0.0f);
-	if (options.m_weightfile.compare("-") != 0) {
-		options.m_weightfile = Helper::StrUtils::ReplaceAll(options.m_weightfile, "*", std::to_string(rank));
-		std::ifstream win(options.m_weightfile, std::ifstream::binary);
-		if (!win.is_open()) {
+    std::vector<float> weights(vectors->Count(), 0.0f);
+    if (options.m_weightfile.compare("-") != 0) {
+        options.m_weightfile = Helper::StrUtils::ReplaceAll(options.m_weightfile, "*", std::to_string(rank));
+        std::ifstream win(options.m_weightfile, std::ifstream::binary);
+        if (!win.is_open()) {
             LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read weight file %s.\n", rank, options.m_weightfile.c_str());
-			exit(1);
-		}
-		SizeType rows;
-		win.read((char*)&rows, sizeof(SizeType));
-		if (rows != vectors->Count()) {
-			win.close();
+            exit(1);
+        }
+        SizeType rows;
+        win.read((char*)&rows, sizeof(SizeType));
+        if (rows != vectors->Count()) {
+            win.close();
             LOG(Helper::LogLevel::LL_Error, "Number of weights (%d) is not equal to number of vectors (%d).\n", rows, vectors->Count());
-			exit(1);
-		}
-		win.read((char*)weights.data(), sizeof(float)*rows);
-		win.close();
-	}
+            exit(1);
+        }
+        win.read((char*)weights.data(), sizeof(float)*rows);
+        win.close();
+    }
     COMMON::Dataset<T> data(vectors->Count(), vectors->Dimension(), 1024*1024, vectors->Count() + 1, (T*)vectors->GetData());
     COMMON::KmeansArgs<T> args(options.m_clusterNum, vectors->Dimension(), vectors->Count(), options.m_threadNum, options.m_distMethod);
     COMMON::Dataset<LabelType> label(vectors->Count(), options.m_clusterassign, vectors->Count(), vectors->Count());
 
     std::vector<SizeType> localindices(data.R(), 0);
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
-	unsigned long long localCount = data.R(), totalCount;
+    unsigned long long localCount = data.R(), totalCount;
     MPI_Allreduce(&localCount, &totalCount, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
-	totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
+    totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
 
     if (rank == 0 && options.m_maxIter > 0 && options.m_lambda < -1e-6f) {
         float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
-        options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();    
+        options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
     }
     MPI_Bcast(&(options.m_lambda), 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-    LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n", 
+    LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n",
         rank, data.R(), data.C(), size, options.m_clusterNum, ((int)options.m_inputValueType), options.m_threadNum, options.m_lambda, options.m_localSamples, totalCount);
-    
+
     if (rank == 0) {
         LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
@@ -433,7 +434,7 @@ void Process(MPI_Datatype type) {
         args.ClearDists(-MaxDist);
         d = MultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
         MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-		MPI_Allreduce(args.newWeightedCounts, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(args.newWeightedCounts, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
         MPI_Allreduce(&d, &currDist, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
 
         if (currDist < minClusterDist) {
@@ -451,7 +452,7 @@ void Process(MPI_Datatype type) {
             LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
         } else
             MPI_Reduce(args.newCenters, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
-        
+
         iteration++;
         MPI_Bcast(&currDiff, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
     }
@@ -467,32 +468,32 @@ void Process(MPI_Datatype type) {
                 LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
     }
-	d = 0;
+    d = 0;
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
-	std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0) ? data.R() : (SizeType)(options.m_hardcut * totalCount / size));
-	std::memset(args.counts, 0, sizeof(SizeType)*args._K);
+    std::vector<SizeType> myLimit(args._K, (options.m_hardcut == 0) ? data.R() : (SizeType)(options.m_hardcut * totalCount / size));
+    std::memset(args.counts, 0, sizeof(SizeType)*args._K);
     args.ClearCounts();
     args.ClearDists(0);
-	for (int i = 0; i < options.m_clusterassign - 1; i++) {
-		d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
-		std::memcpy(myLimit.data(), args.counts, sizeof(SizeType)*args._K);
-		MPI_Allreduce(MPI_IN_PLACE, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-		MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-		if (rank == 0) {
-			LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
+    for (int i = 0; i < options.m_clusterassign - 1; i++) {
+        d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, i, false);
+        std::memcpy(myLimit.data(), args.counts, sizeof(SizeType)*args._K);
+        MPI_Allreduce(MPI_IN_PLACE, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+        if (rank == 0) {
+            LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
             for (int i = 0; i < args._K; i++)
                 LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
-		}
-		for (int k = 0; k < args._K; k++)
+        }
+        for (int k = 0; k < args._K; k++)
             if (totalCount > args.counts[k])
-			    myLimit[k] += (SizeType)((totalCount - args.counts[k]) / size);
-	}
-	d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
-	std::memcpy(args.newCounts, args.counts, sizeof(SizeType)*args._K);
-	MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-	MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
+                myLimit[k] += (SizeType)((totalCount - args.counts[k]) / size);
+    }
+    d += HardMultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, myLimit.data(), weights, options.m_clusterassign - 1, true);
+    std::memcpy(args.newCounts, args.counts, sizeof(SizeType)*args._K);
+    MPI_Allreduce(args.newCounts, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(&d, &currDist, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
-    
+
     if (label.Save(options.m_labels + "." + std::to_string(rank)) != ErrorCode::Success) {
         LOG(Helper::LogLevel::LL_Error, "Failed to save labels.\n");
         exit(1);
@@ -627,7 +628,7 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     if (!direxists(options.m_status.c_str())) mkdir(options.m_status.c_str());
     std::string folder = options.m_status + FolderSep + std::to_string(iteration);
     if (!direxists(folder.c_str())) mkdir(folder.c_str());
-    
+
     if (!direxists(folder.c_str())) {
         LOG(Helper::LogLevel::LL_Error, "Cannot create the folder %s.\n", folder.c_str());
         exit(1);
@@ -636,7 +637,7 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     if (rank == 0 && savecenters > 0) {
         SaveCenters(args.newTCenters, args._K, args._D, folder + FolderSep + "centers.bin", lambda, diff, mindist, noimprovement);
     }
-    
+
     std::string savePath = folder + FolderSep + "status." + std::to_string(iteration) + "." + std::to_string(rank);
     auto out = f_createIO();
     if (out == nullptr || !out->Initialize(savePath.c_str(), std::ios::binary | std::ios::out)) {
@@ -770,7 +771,7 @@ void ProcessWithoutMPI() {
     for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
     args.ClearCounts();
 
-    unsigned long long totalCount; 
+    unsigned long long totalCount;
     float currDiff = 1.0, d = 0.0, currDist, minClusterDist = MaxDist;
     int iteration = options.m_recoveriter;
     int noImprovement = 0;
@@ -805,7 +806,7 @@ void ProcessWithoutMPI() {
         args.ClearCounts();
         args.ClearDists(-MaxDist);
         d = MultipleClustersAssign<T>(data, localindices, 0, data.R(), args, label, true, (iteration == 0) ? 0.0f : options.m_lambda, weights, (iteration == 0) ? 0.0f : options.m_wlambda);
-        
+
         SyncSaveCenter(args, rank, iteration + 1, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0);
         if (rank == 0) {
             SyncLoadCenter(args, rank, iteration + 1, totalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
@@ -938,7 +939,7 @@ void Partition() {
             }
         }
         LOG(Helper::LogLevel::LL_Info, "part %s cluster %d: %d vectors, %llu bytes meta.\n", taskId.c_str(), i, records, offset);
-        
+
         if (metas != nullptr) CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char*)(&offset));
         CHECKIO(out, WriteBinary, sizeof(int), (char*)(&records), 0);
         CHECKIO(metaindexout, WriteBinary, sizeof(int), (char*)(&records), 0);
