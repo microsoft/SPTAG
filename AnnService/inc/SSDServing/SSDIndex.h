@@ -128,13 +128,10 @@ namespace SPTAG {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
                             }
 
-printf("A\n");
                             double startTime = threadws.getElapsedMs();
                             p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
-printf("B\n");
                             double endTime = threadws.getElapsedMs();
                             p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
-printf("C\n");
                             double exEndTime = threadws.getElapsedMs();
                             p_results[index].ClearTmp();
 
@@ -163,7 +160,6 @@ printf("C\n");
             template <typename ValueType>
             void Search(SPANN::Index<ValueType>* p_index)
             {
-printf("in search!\n");
                 SPANN::Options& p_opts = *(p_index->GetOptions());
                 std::string outputFile = p_opts.m_searchResult;
                 std::string truthFile = p_opts.m_truthPath;

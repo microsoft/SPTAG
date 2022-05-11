@@ -63,12 +63,14 @@ class GPU_PQQuantizer {
   public:
 
     __host__ GPU_PQQuantizer() {}
-    __host__ GPU_PQQuantizer(DistMetric metric) {
+    template<typename T>
+    __host__ GPU_PQQuantizer(std::shared_ptr<SPTAG::COMMON::PQQuantizer<T>> pQuantizer, DistMetric metric) {
       
 //      SPTAG::COMMON::PQQuantizer<int>* pq_quantizer = dynamic_cast<SPTAG::COMMON::PQQuantizer<int>*>(quantizer);
-      int numSubvectors = COMMON::DistanceUtils::Quantizer->GetNumSubvectors();
-      int ksPer = COMMON::DistanceUtils::Quantizer->GetKsPerSubvector();
-      int blockSize = COMMON::DistanceUtils::Quantizer->GetBlockSize();
+//      int numSubvectors = COMMON::DistanceUtils::Quantizer->GetNumSubvectors();
+      int numSubvectors = pQuantizer->GetNumSubvectors();
+      int ksPer = pQuantizer->GetKsPerSubvector();
+      int blockSize = pQuantizer->GetBlockSize();
       printf("ns:%d, ks:%d, bs:%d\n", numSubvectors, ksPer, blockSize);
     }
 
@@ -95,7 +97,6 @@ class GPU_PQQuantizer {
       }
       return out;
     }
-
 
 };
 

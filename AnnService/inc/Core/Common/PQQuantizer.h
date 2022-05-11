@@ -74,6 +74,8 @@ namespace SPTAG
                 return QuantizerType::PQQuantizer;
             }
 
+            float* GetCosineDistanceTables();
+
         protected:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;

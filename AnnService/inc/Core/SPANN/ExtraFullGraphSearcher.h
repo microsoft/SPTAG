@@ -82,11 +82,8 @@ namespace SPTAG
 #define ProcessPosting(vectorInfoSize) \
         for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { \
             int vectorID = *(reinterpret_cast<int*>(vectorInfo)); \
-            printf("vecotrID:%d\n", vectorID); \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            printf("calling distance...\n"); \
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + sizeof(int)); \
-            printf("Found distance2leaf:%f\n", distance2leaf); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
 
@@ -110,10 +107,17 @@ namespace SPTAG
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
 #ifndef _MSC_VER
 #ifdef BATCH_READ
+                        p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+#else
+                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+#endif
+/*
+#ifdef BATCH_READ
                         max(p_opt.m_searchInternalResultNum*m_vectorInfoSize, 1 << 12), 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
                         max(m_vectorInfoSize*(p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1), 1 << 12), 2, 2, p_opt.m_ioThreads
 #endif
+*/
 #else
                         (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, p_opt.m_ioThreads
 #endif
@@ -194,15 +198,6 @@ namespace SPTAG
                     {
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
-std::cout << "vectorInfoSize: " << vectorInfoSize << std::endl;
-        for (char *vectorInfo = buffer + listInfo->pageOffset, *vectorInfoEnd = vectorInfo + listInfo->listEleCount * vectorInfoSize; vectorInfo < vectorInfoEnd; vectorInfo += vectorInfoSize) { 
-std::cout << "buffer: "  << *buffer << std::endl;
-std::cout << "pageOffset: " << listInfo->pageOffset << std::endl;
-std::cout << "test: " << *vectorInfo << std::endl;
-            int vectorID = *(reinterpret_cast<int*>(vectorInfo)); 
-            printf("vectorID:%d\n", vectorID);
-         }
-std::cout << "calling processPosting now!" << std::endl;
                         ProcessPosting(vectorInfoSize)
                     };
 #else // async read
