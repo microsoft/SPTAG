@@ -10,6 +10,7 @@
 #include "Dataset.h"
 #include "FineGrainedLock.h"
 #include "QueryResultSet.h"
+#include "PQQuantizer.h"
 
 #include <chrono>
 #include <queue>
@@ -129,8 +130,14 @@ namespace SPTAG
             {
                 if (index->m_pQuantizer)
                 {
-                    switch (index->m_pQuantizer->GetReconstructType())
+                    if (index->m_pQuantizer->GetQuantizerType() == SPTAG::QuantizerType::OPQQuantizer)
                     {
+                        PartitionByTptreeCore<T, float>(index, indices, first, last, leaves);
+                    }
+                    else
+                    {
+                        switch (index->m_pQuantizer->GetReconstructType())
+                        {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
 PartitionByTptreeCore<T, Type>(index, indices, first, last, leaves); \
@@ -139,7 +146,8 @@ break;
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 
-                    default: break;
+                        default: break;
+                        }
                     }
                 }
                 else
@@ -176,7 +184,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            ((SPTAG::COMMON::PQQuantizer<R>*)index->m_pQuantizer.get())->PQQuantizer::ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
                             v = v_holder;
                         }
                         else
@@ -205,7 +213,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
+                            ((SPTAG::COMMON::PQQuantizer<R>*)index->m_pQuantizer.get())->PQQuantizer::ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
                             v = v_holder;
                         }
                         else
@@ -252,7 +260,7 @@ break;
                             R* v;
                             if (quantizer_exists)
                             {
-                                index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
+                                ((SPTAG::COMMON::PQQuantizer<R>*)index->m_pQuantizer.get())->PQQuantizer::ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
                                 v = v_holder;
                             }
                             else
@@ -291,7 +299,7 @@ break;
                         R* v;
                         if (quantizer_exists)
                         {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
+                            ((SPTAG::COMMON::PQQuantizer<R>*)index->m_pQuantizer.get())->PQQuantizer::ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
                             v = v_holder;
                         }
                         else
