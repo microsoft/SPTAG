@@ -40,6 +40,7 @@ __forceinline__ __device__ bool violatesRNG_PS(T* a, T* b, SUMTYPE dist, int dim
   return between <= dist;
 }
 
+/*
 template<typename T, typename SUMTYPE, int Dim>
 __device__ bool violatesRNG_PS2(T* a, T* b, SUMTYPE dist) {
   SUMTYPE between;
@@ -52,6 +53,7 @@ __device__ bool violatesRNG_PS2(T* a, T* b, SUMTYPE dist) {
   }
   return between <= farther.dist;
 }
+*/
 
 
 /*****************************************************************************************
