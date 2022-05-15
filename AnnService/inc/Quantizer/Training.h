@@ -3,6 +3,12 @@
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
 
+#include <inc/Core/Common/OPQQuantizer.h>
+#ifdef GPU
+#include <inc/Quantizer/OPQUpdate.hxx>
+#endif
+
+
 #include <memory>
 #include <inc/Core/VectorSet.h>
 #include "inc/Core/Common/BKTree.h"
@@ -25,6 +31,7 @@ public:
 
         // We also use this to determine batch size (max number of vectors to load at once)
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
+		AddOptionalOption(m_numIters, "-iters", "--num_iters", "Number of training iterations.");
         AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
         AddOptionalOption(m_outputFullVecFile, "-ofv", "--output_full", "Output Uncompressed vectors.");
@@ -48,7 +55,9 @@ public:
 
     SizeType m_trainingSamples;
 
-    SPTAG::QuantizerType m_quantizerType;
+	 SizeType m_numIters;
+	 
+	 SPTAG::QuantizerType m_quantizerType;
 
     bool m_debug;
 
@@ -101,10 +110,13 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
 
         }
 
-        for (int j = 0; j < numCentroids; j++) {
-            std::cout << kargs.counts[j] << '\t';
+        if (options->m_debug)
+        {
+            for (int j = 0; j < numCentroids; j++) {
+                std::cout << kargs.counts[j] << '\t';
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
 
         T* cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
         for (int i = 0; i < numCentroids; i++)
@@ -118,3 +130,108 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
 
     return codebooks;
 }
+
+template <typename T>
+std::shared_ptr<SPTAG::COMMON::IQuantizer> TrainOPQQuantizer(std::shared_ptr<QuantizerOptions> options, std::shared_ptr<VectorSet> raw_vectors, std::shared_ptr<VectorSet> quantized_vectors)
+{
+	 #ifdef GPU
+	 SizeType dim = raw_vectors->Dimension();
+
+     std::shared_ptr<VectorSet> BaseSet;
+     if (options->m_inputValueType != VectorValueType::Float)
+     {
+         auto base_points = ByteArray::Alloc(sizeof(float) * dim * raw_vectors->Count());
+         BaseSet = std::make_shared<BasicVectorSet>(base_points, VectorValueType::Float, dim, raw_vectors->Count());
+#pragma omp parallel for
+         for (int i = 0; i < raw_vectors->Count(); i++)
+         {
+             for (int j = 0; j < dim; j++)
+             {
+                 ((float*)BaseSet->GetVector(i))[j] = (float)((T*)raw_vectors->GetVector(i))[j];
+             }
+         }
+     }
+     else
+     {
+         BaseSet = raw_vectors;
+     }
+
+	 float* svd_matrix = new float[dim* dim];
+	 float* rotation_matrix = new float[dim* dim];
+	 auto rotated_points = ByteArray::Alloc(sizeof(float) * dim * raw_vectors->Count());
+	 std::shared_ptr<VectorSet> RotatedSet = std::make_shared<BasicVectorSet>(rotated_points, VectorValueType::Float, dim, raw_vectors->Count());
+	 float* reconstructed_points = new float[dim* raw_vectors->Count()];
+
+	 std::shared_ptr<SPTAG::COMMON::IQuantizer> out;
+
+	 for (int i = 0; i < dim; i++)
+	 {
+		  rotation_matrix[i*dim + i] = 1;
+	 }
+     auto baseQuan = std::make_shared<SPTAG::COMMON::PQQuantizer<float>>(options->m_quantizedDim, 256, dim / options->m_quantizedDim, false, TrainPQQuantizer<float>(options, BaseSet, quantized_vectors));
+#pragma omp parallel for
+	 for (int i = 0; i < raw_vectors->Count(); i++)
+	 {
+		  baseQuan->QuantizeVector(BaseSet->GetVector(i), (std::uint8_t*)quantized_vectors->GetVector(i));
+		  baseQuan->ReconstructVector((const std::uint8_t*)quantized_vectors->GetVector(i), ((void*)(&reconstructed_points[dim * i])));
+	 }
+
+	 for (int iter = 0; iter < options->m_numIters; iter++)
+	 {
+		  memset(svd_matrix, 0, sizeof(float)*dim*dim);
+#pragma omp parallel for
+		  for (int dim1 = 0; dim1 < dim; ++dim1)
+		  {
+			   for (int dim2 = 0; dim2 < dim; ++dim2)
+			   {
+					for (int point_id = 0; point_id < raw_vectors->Count(); ++point_id)
+					{
+						 svd_matrix[dim1*dim + dim2] += ((float*)BaseSet->GetVector(point_id))[dim1] * reconstructed_points[(point_id*dim) +dim2];
+					}
+			   }
+		  }
+
+		  
+		  OPQRotationUpdate(svd_matrix, rotation_matrix, dim);
+
+		  /* Update R'X*/
+#pragma omp parallel for
+		  for (int point_id = 0; point_id < raw_vectors->Count(); ++point_id)
+		  {
+			   for (int dim1 = 0; dim1 < dim; ++dim1)
+			   {
+					float ele = 0;
+					for (int dim2 = 0; dim2 < dim; ++dim2)
+					{
+						 ele += rotation_matrix[dim2*dim + dim1] * ((float*)BaseSet->GetVector(point_id))[dim2];
+					}
+					((float*)RotatedSet->GetVector(point_id))[dim1] = ele;
+			   }
+		  }
+		  auto codebooks = TrainPQQuantizer<float>(options, RotatedSet, quantized_vectors);
+		  std::unique_ptr<float[]> opq_rot = std::make_unique<float[]>(dim*dim);
+		  memcpy_s(opq_rot.get(), sizeof(float) * dim * dim, rotation_matrix, sizeof(float) * dim * dim);
+
+		  out = std::make_shared<SPTAG::COMMON::OPQQuantizer<T>>(options->m_quantizedDim, 256, dim/options->m_quantizedDim, false, std::move(codebooks), std::move(opq_rot));
+#pragma omp parallel for
+		  for (int i = 0; i < raw_vectors->Count(); i++)
+		  {
+			   out->QuantizeVector(BaseSet->GetVector(i), (std::uint8_t*) quantized_vectors->GetVector(i));
+			   out->ReconstructVector((const std::uint8_t*)quantized_vectors->GetVector(i), (void*) & (reconstructed_points[dim * i]));
+		  }
+		  
+	 }
+
+	 delete svd_matrix;
+	 delete reconstructed_points;
+	 delete rotation_matrix;
+	 delete reconstructed_points;
+	 
+	 return out;
+#else
+	 LOG(Helper::LogLevel::LL_Error, "CPU OPQ Training not supported.\n");
+	 exit(1);
+#endif
+
+}
+

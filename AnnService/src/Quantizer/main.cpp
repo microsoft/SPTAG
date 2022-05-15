@@ -55,7 +55,8 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader>& vectorRead
 
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string());
+    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, false, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string());
+
     if (!options->Parse(argc - 1, argv + 1))
     {
         exit(1);
@@ -89,56 +90,56 @@ int main(int argc, char* argv[])
     }
     case QuantizerType::PQQuantizer:
     {
-        std::shared_ptr<COMMON::IQuantizer> quantizer;
-        auto fp_load = SPTAG::f_createIO();
-        if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
-        {
-            auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
-            ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * set->Count());
-            std::shared_ptr<VectorSet> quantized_vectors = std::make_shared<BasicVectorSet>(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, set->Count());
-            LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Training a new one.\n");
+		 std::shared_ptr<COMMON::IQuantizer> quantizer;
+		 auto fp_load = SPTAG::f_createIO();
+		 if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
+		 {
+			  auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
+			  ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * set->Count());
+			  std::shared_ptr<VectorSet> quantized_vectors = std::make_shared<BasicVectorSet>(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, set->Count());
+			  LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Training a new one.\n");
 
-            switch (options->m_inputValueType)
-            {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, set, quantized_vectors))); \
-                        break;
+			  switch (options->m_inputValueType)
+			  {
+#define DefineVectorValueType(Name, Type)								\
+				   case VectorValueType::Name:							\
+                        quantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<Type>>(options->m_quantizedDim, 256, set->Dimension()/options->m_quantizedDim, false, TrainPQQuantizer<Type>(options, set, quantized_vectors)); \
+						break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
-            }
+			  }
 
-            auto ptr = SPTAG::f_createIO();
-            if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
-            {
-                if (ErrorCode::Success != quantizer->SaveQuantizer(ptr))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
-                    exit(1);
-                }
-            }
-        }
-        else
-        {
-            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
-            if (!quantizer)
-            {
-                LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
-                exit(1);
-            }
-            quantizer->SetEnableADC(false);
-        }
+			  auto ptr = SPTAG::f_createIO();
+			  if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
+			  {
+				   if (ErrorCode::Success != quantizer->SaveQuantizer(ptr))
+				   {
+						LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
+						exit(1);
+				   }
+			  }
+		 }
+		 else
+		 {
+			  quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
+			  if (!quantizer)
+			  {
+				   LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
+				   exit(1);
+			  }
+			  quantizer->SetEnableADC(false);
+		 }
 
-        QuantizeAndSave(vectorReader, options, quantizer);
+		 QuantizeAndSave(vectorReader, options, quantizer);
 
-        auto metadataSet = vectorReader->GetMetadataSet();
-        if (metadataSet)
-        {
-            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
-        }
+		 auto metadataSet = vectorReader->GetMetadataSet();
+		 if (metadataSet)
+		 {
+			  metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+		 }
         
-        break;
+		 break;
     }
     case QuantizerType::OPQQuantizer:
     {
@@ -146,16 +147,39 @@ int main(int argc, char* argv[])
         auto fp_load = SPTAG::f_createIO();
         if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
         {
-            LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Not supported for OPQ.\n");
-            exit(1);
+			 auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
+			 ByteArray OPQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * set->Count());
+			 std::shared_ptr<VectorSet> quantized_vectors = std::make_shared<BasicVectorSet>(OPQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, set->Count());
+			 LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Training a new one.\n");
+
+			 switch (options->m_inputValueType)
+			 {
+#define DefineVectorValueType(Name, Type)								\
+				  case VectorValueType::Name:							\
+					   quantizer = TrainOPQQuantizer<Type>(options, set, quantized_vectors); \
+					   break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+			 }
+
+			 auto ptr = SPTAG::f_createIO();
+			 if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
+			 {
+				  if (ErrorCode::Success != quantizer->SaveQuantizer(ptr))
+				  {
+					   LOG(Helper::LogLevel::LL_Error, "Failed to write quantizer file.\n");
+					   exit(1);
+				  }
+			 }
         }
         else
         {
-            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
-            if (!quantizer)
-            {
-                LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
-                exit(1);
+			 quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
+			 if (!quantizer)
+			 {
+				  LOG(Helper::LogLevel::LL_Error, "Failed to open existing quantizer file.\n");
+				  exit(1);
             }
             quantizer->SetEnableADC(false);
         }

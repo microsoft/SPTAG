@@ -18,34 +18,34 @@ namespace SPTAG
 
 			OPQQuantizer();
 
-			OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix);
+			 OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<OPQMatrixType[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix);
 
-			virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
+			 virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
 
-			void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
+			 void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
 
-			virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const;
+			 virtual ErrorCode SaveQuantizer(std::shared_ptr<Helper::DiskIO> p_out) const;
 
-			virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
+			 virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
-			virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
+			 virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
 
-			virtual SizeType ReconstructSize() const;
+			 virtual SizeType ReconstructSize() const;
 
-			virtual std::uint64_t BufferSize() const;
+			 virtual std::uint64_t BufferSize() const;
 
-			virtual int GetBase() const;
+			 virtual int GetBase() const;
 
 
-			QuantizerType GetQuantizerType() const 
-			{
-				return QuantizerType::OPQQuantizer;
-			}
+			 QuantizerType GetQuantizerType() const 
+				  {
+					   return QuantizerType::OPQQuantizer;
+				  }
 
-			VectorValueType GetReconstructType() const
-			{
-				return GetEnumValueType<T>();
-			}
+			 VectorValueType GetReconstructType() const
+				  {
+					   return GetEnumValueType<T>();
+				  }
 
 
 		protected:
@@ -67,7 +67,7 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks))
+		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<OPQMatrixType[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<OPQMatrixType>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks))
 		{
 		}
 
