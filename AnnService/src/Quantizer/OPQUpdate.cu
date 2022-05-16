@@ -87,7 +87,7 @@ int OPQRotationUpdate(float* svd_mat, float* rotation, SPTAG::SizeType dim)
   
   CUBLAS_CHECK(cublasSgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_N, dim, dim, dim, &h_one, d_U, dim, d_VT, dim, &h_zero, d_rot, dim));
 
-  CUDA_CHECK(cudaMemcpyAsync(rotation, d_rot, sizeof(float)*dim*dim, cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpyAsync(rotation, d_rot, sizeof(float)*dim*dim, cudaMemcpyDeviceToHost, stream));
 
   CUDA_CHECK(cudaStreamSynchronize(stream));
 

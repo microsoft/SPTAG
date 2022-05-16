@@ -186,11 +186,11 @@ std::shared_ptr<SPTAG::COMMON::IQuantizer> TrainOPQQuantizer(std::shared_ptr<Qua
 			   {
 					for (int point_id = 0; point_id < raw_vectors->Count(); ++point_id)
 					{
-						 svd_matrix[dim1*dim + dim2] += ((float*)BaseSet->GetVector(point_id))[dim1] * reconstructed_points[(point_id*dim) +dim2];
+                        // column-major order
+						 svd_matrix[dim2*dim + dim1] += ((float*)BaseSet->GetVector(point_id))[dim1] * reconstructed_points[(point_id*dim) +dim2];
 					}
 			   }
 		  }
-
 		  
 		  OPQRotationUpdate(svd_matrix, rotation_matrix, dim);
 
@@ -203,27 +203,43 @@ std::shared_ptr<SPTAG::COMMON::IQuantizer> TrainOPQQuantizer(std::shared_ptr<Qua
 					float ele = 0;
 					for (int dim2 = 0; dim2 < dim; ++dim2)
 					{
-						 ele += rotation_matrix[dim2*dim + dim1] * ((float*)BaseSet->GetVector(point_id))[dim2];
+                        // column-major
+						 ele += rotation_matrix[dim1*dim + dim2] * ((float*)BaseSet->GetVector(point_id))[dim2];
 					}
 					((float*)RotatedSet->GetVector(point_id))[dim1] = ele;
 			   }
 		  }
 		  auto codebooks = TrainPQQuantizer<float>(options, RotatedSet, quantized_vectors);
 		  std::unique_ptr<float[]> opq_rot = std::make_unique<float[]>(dim*dim);
-		  memcpy_s(opq_rot.get(), sizeof(float) * dim * dim, rotation_matrix, sizeof(float) * dim * dim);
 
-		  out = std::make_shared<SPTAG::COMMON::OPQQuantizer<T>>(options->m_quantizedDim, 256, dim/options->m_quantizedDim, false, std::move(codebooks), std::move(opq_rot));
+		  memcpy_s(opq_rot.get(), sizeof(float) * dim * dim, rotation_matrix, sizeof(float) * dim * dim);
+          /*for (int i = 0; i < dim; i++)
+          {
+              for (int j = 0; j < dim; j++)
+              {
+                  // column-major order means already transposed
+                  opq_rot[j * dim + i] = rotation_matrix[i * dim + j];
+              }
+          }*/
+
+          if (iter + 1 == options->m_numIters)
+          {
+              out = std::make_shared<SPTAG::COMMON::OPQQuantizer<T>>(options->m_quantizedDim, 256, dim / options->m_quantizedDim, false, std::move(codebooks), std::move(opq_rot));
+          }
+          else {
+              out = std::make_shared<SPTAG::COMMON::OPQQuantizer<float>>(options->m_quantizedDim, 256, dim / options->m_quantizedDim, false, std::move(codebooks), std::move(opq_rot));
 #pragma omp parallel for
-		  for (int i = 0; i < raw_vectors->Count(); i++)
-		  {
-			   out->QuantizeVector(BaseSet->GetVector(i), (std::uint8_t*) quantized_vectors->GetVector(i));
-			   out->ReconstructVector((const std::uint8_t*)quantized_vectors->GetVector(i), (void*) & (reconstructed_points[dim * i]));
-		  }
-		  
+              for (int i = 0; i < raw_vectors->Count(); i++)
+              {
+                  out->QuantizeVector(BaseSet->GetVector(i), (std::uint8_t*)quantized_vectors->GetVector(i));
+                  out->ReconstructVector((const std::uint8_t*)quantized_vectors->GetVector(i), (void*)&(reconstructed_points[dim * i]));
+              }
+          }
+
 	 }
 
 	 delete svd_matrix;
-	 delete reconstructed_points;
+	 //delete reconstructed_points;
 	 delete rotation_matrix;
 	 delete reconstructed_points;
 	 
