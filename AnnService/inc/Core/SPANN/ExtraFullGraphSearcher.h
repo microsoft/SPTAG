@@ -300,7 +300,7 @@ namespace SPTAG
                 Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
                 LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
                 std::vector<std::atomic_int> replicaCount(fullCount);
-                std::vector<std::atomic_int> postingListSize(headVectorIDS.size());
+                std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
                 for (auto& pls : postingListSize) pls = 0;
                 std::unordered_set<SizeType> emptySet;
                 SizeType batchSize = (fullCount + p_opt.m_batches - 1) / p_opt.m_batches;
