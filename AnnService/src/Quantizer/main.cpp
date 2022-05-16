@@ -106,9 +106,11 @@ int main(int argc, char* argv[])
                         quantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<Type>>(options->m_quantizedDim, 256, set->Dimension()/options->m_quantizedDim, false, TrainPQQuantizer<Type>(options, set, quantized_vectors)); \
 						break;
 
+
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 			  }
+
 
 			  auto ptr = SPTAG::f_createIO();
 			  if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))
@@ -147,6 +149,7 @@ int main(int argc, char* argv[])
         auto fp_load = SPTAG::f_createIO();
         if (fp_load == nullptr || !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
         {
+
 			 auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
 			 ByteArray OPQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * set->Count());
 			 std::shared_ptr<VectorSet> quantized_vectors = std::make_shared<BasicVectorSet>(OPQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, set->Count());

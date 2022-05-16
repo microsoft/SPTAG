@@ -250,4 +250,3 @@ std::shared_ptr<SPTAG::COMMON::IQuantizer> TrainOPQQuantizer(std::shared_ptr<Qua
 #endif
 
 }
-
