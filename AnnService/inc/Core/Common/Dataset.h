@@ -130,7 +130,7 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> p_out) const
+            ErrorCode Save(std::shared_ptr<Helper::DiskIO> p_out) const
             {
                 SizeType CR = R();
                 IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&CR);
@@ -155,7 +155,7 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> pInput, SizeType blockSize, SizeType capacity)
+            ErrorCode Load(std::shared_ptr<Helper::DiskIO> pInput, SizeType blockSize, SizeType capacity)
             {
                 IOBINARY(pInput, ReadBinary, sizeof(SizeType), (char*)&rows);
                 IOBINARY(pInput, ReadBinary, sizeof(DimensionType), (char*)&cols);
@@ -200,7 +200,7 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            ErrorCode Refine(const std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskPriorityIO> output) const
+            ErrorCode Refine(const std::vector<SizeType>& indices, std::shared_ptr<Helper::DiskIO> output) const
             {
                 SizeType R = (SizeType)(indices.size());
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&R);

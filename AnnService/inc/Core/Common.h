@@ -109,7 +109,7 @@ const int PageSizeEx = 12;
 
 extern std::mt19937 rg;
 
-extern std::shared_ptr<Helper::DiskPriorityIO>(*f_createIO)();
+extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
