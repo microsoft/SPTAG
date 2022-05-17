@@ -262,7 +262,7 @@ namespace SPTAG
                     meanrecall += thisrecall[i];
                     if (thisrecall[i] < minrecall) minrecall = thisrecall[i];
                     if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
-                    meanmrr += (minpos == K)? 0 : 1.0f / (minpos + 1);
+                    if (minpos < K) meanmrr += 1.0f / (minpos + 1);
 
                     if (debug) {
                         std::string ll("recall:" + std::to_string(thisrecall[i]) + "\ngroundtruth:");
