@@ -226,6 +226,13 @@
     <ClInclude Include="inc\Core\Common\TruthSet.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\gpu_KNN.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_params.h" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_ThreadHeap.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_TPtree.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\Kdtree.h" />
+    <ClInclude Include="inc\Core\Common\cuda\log.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\Point.hxx" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu">

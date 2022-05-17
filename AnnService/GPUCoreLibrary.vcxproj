@@ -15,6 +15,7 @@
     <RootNamespace>GPUCoreLibrary</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>GPUCoreLibrary</ProjectName>
+    <CudaToolkitCustomDir>$(CUDA_PATH_V11_6)</CudaToolkitCustomDir>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
@@ -33,7 +34,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.2.props" />
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.6.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -43,13 +44,14 @@
   </ImportGroup>
   <PropertyGroup>
     <IntDir>$(SolutionDir)obj\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(SolutionDir)\packages\cub-1.8.0;$(ProjectDir);$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)\packages\cub-1.8.0;$(ProjectDir);C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.6\include;$(IncludePath)</IncludePath>
     <OutDir>$(OutAppDir)</OutDir>
     <LibraryPath>$(OutLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <PublicIncludeDirectories>$(CudaToolkitIncludeDir);$(PublicIncludeDirectories)</PublicIncludeDirectories>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -74,6 +76,7 @@
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
       <FastMath>true</FastMath>
       <Optimization>InheritFromHost</Optimization>
+      <Include>$(CudaToolkitIncludeDir);%(Include)</Include>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -130,6 +133,13 @@
     <ClInclude Include="inc\Core\Common\cuda\TailNeighbors.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_KNN.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_params.h" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_ThreadHeap.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\gpu_TPtree.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\Kdtree.h" />
+    <ClInclude Include="inc\Core\Common\cuda\log.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\Point.hxx" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
@@ -193,7 +203,7 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.2.targets" />
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.6.targets" />
   </ImportGroup>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\boost.1.72.0.0\build\boost.targets" Condition="Exists('..\packages\boost.1.72.0.0\build\boost.targets')" />
