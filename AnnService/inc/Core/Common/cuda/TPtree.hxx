@@ -34,8 +34,8 @@
 #include "params.h"
 #include "Distance.hxx"
 
-template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
-class TPtree;
+//template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
+//class TPtree;
 
 /************************************************************************************
  * Structure that defines the memory locations where points/ids are for a leaf node

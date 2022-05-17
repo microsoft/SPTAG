@@ -6,7 +6,9 @@
 
 #include "../VectorIndex.h"
 #include "QueryResultSet.h"
+#if defined(GPU)
 #include "cuda/KNN.hxx"
+#endif
 
 namespace SPTAG
 {

@@ -163,9 +163,6 @@
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\cuda\KNN.hxx">
-      <Filter>Header Files\Core\Common\cuda</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Core\Common\cuda\params.h">
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
@@ -230,6 +227,9 @@
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
     <ClInclude Include="inc\Core\Common\cuda\Kdtree.hxx">
+      <Filter>Header Files\Core\Common\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\cuda\KNN.hxx">
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
   </ItemGroup>
