@@ -28,7 +28,7 @@
 
 #include<iostream>
 #include<queue>
-#include <cuda.h>
+//#include <cuda.h>
 #include <limits.h>
 #include <curand_kernel.h>
 #include "params.h"
