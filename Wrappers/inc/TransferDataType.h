@@ -4,10 +4,6 @@
 #ifndef _SPTAG_PW_TRANSFERDATATYPE_H_
 #define _SPTAG_PW_TRANSFERDATATYPE_H_
 
-#if defined(_MSC_VER) && defined(_DEBUG) && _MSC_VER >= 1930
-#include <corecrt.h>
-#endif
-
 #include "inc/Core/CommonDataStructure.h"
 #include "inc/Core/SearchQuery.h"
 #include "inc/Socket/RemoteSearchQuery.h"
