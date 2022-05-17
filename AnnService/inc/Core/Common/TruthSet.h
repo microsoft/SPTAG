@@ -6,7 +6,7 @@
 
 #include "../VectorIndex.h"
 #include "QueryResultSet.h"
-#include "cuda/gpu_KNN.hxx"
+#include "cuda/KNN.hxx"
 
 namespace SPTAG
 {
@@ -163,7 +163,7 @@ namespace SPTAG
 
 #if defined(GPU)
             template<typename T>
-            static void GenerateTruth(std::shared_ptr<VectorSet> querySet_obj, std::shared_ptr<VectorSet> vectorSet_obj, const std::string truthFile,
+            static void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
                 const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
                 if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
                 {
@@ -171,43 +171,49 @@ namespace SPTAG
                     exit(1);
                 }
 
+                if (T != VectorValueType::Float) {
+                    typedef int32_t SUMTYPE;
+                }
+                else {
+                    typedef float SUMTYPE;
+                }
                 //Convert VectorSet to 2d matrix as GPU KNN source code
-                LOG_INFO("Converting vector sets...");
-                std::vector< std::vector<T> > vectorSet = (const T*)(vectorSet_obj->GetData());
-                std::vector< std::vector<T> > querySet = (const T*)(vectorSet_obj->GetData());
+                //LOG_INFO("Converting vector sets...");
+                //std::vector< std::vector<T> > vectorSet = (const T*)(vectorSet_obj->GetData());
+                //std::vector< std::vector<T> > querySet = (const T*)(vectorSet_obj->GetData());
                 //truthset & distset save the ground truth for idx and dist
                 LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet_obj->Count(), querySet_obj->Dimension(), vectorSet->Count(), vectorSet->Dimension());
-                std::vector< std::vector<SPTAG::SizeType> > truthset(querySet_obj->Count(), std::vector<SPTAG::SizeType>(K, 0));
-                std::vector< std::vector<float> > distset(querySet_obj->Count(), std::vector<float>(K, 0));
+                std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
+                std::vector< std::vector<float> > distset(vectorSet->Count(), std::vector<float>(K, 0));
                 //Starts GPU KNN
-                int result_size = querySet.size();
-                int vector_size = vectorSet.size();
+                int result_size = querySet->Count();
+                int vector_size = vectorSet->Count();
                 int sub_vector_size = vector_size / NUM_GPUS;
-                int dim = querySet_obj->Dimension();
+                int dim = querySet->Dimension();
 
-                LOG_INFO("QueryDatatype: %s, Rows:%ld, Columns:%d\n", (STR(T)), querySet.size(), dim);
-                LOG_INFO("Datatype: %s, Rows:%ld, Columns:%d\n", (STR(T)), vectorSet.size(),dimD);
+                LOG_INFO("QueryDatatype: %s, Rows:%ld, Columns:%d\n", (STR(T)), result_size, dim);
+                LOG_INFO("Datatype: %s, Rows:%ld, Columns:%d\n", (STR(T)), vector_size,dim);
                 
                 LOG_INFO("Copying to Point array\n");
-                Point<T, dim>* points = convertMatrix<T, dim)>(querySet);
+                Point<T, SUMTYPE, dim>* points = convertMatrix<T, SUMTYPE, dim)>(querySet, result_size, dim);
                 //split vectorSet into NUM_GPUS chunks
                 LOG_INFO("Copying to Sub Point Array\n");
-                Point<T, dim>* sub_vectors_points[NUM_GPUS];
+                Point<T, SUMTYPE, dim>* sub_vectors_points[NUM_GPUS];
                 for (int i = 0; i < NUM_GPUS; i++) {
                     std::vector<std::vector<T>> sub_vector;
                     for (int idx = i * sub_vector_size; idx < (i + 1) * sub_vector_size; idx++) {
-                        sub_vector.emplace_back(vectorSet[idx]);
+                        sub_vector.emplace_back((const T*)(vectorSet.getVector(i)));
                     }
                     LOG_INFO("GPU%d has %ld vectors\n", i, sub_vector.size());
-                    sub_vectors_points[i] = convertMatrix<T, dim>(sub_vector);
+                    sub_vectors_points[i] = convertMatrix < T, SUMTYPE, dim) > (sub_vector, result_size/NUM_GPUS, dim);
                 }
 
                 int per_gpu_size = (result_size)*K;//Every gpu do brute force to subset assigned to it
 
-                DistPair* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
+                DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
                 for (int i = 0; i < NUM_GPUS; i++) {
                     cudaSetDevice(i);
-                    cudaMalloc(&d_results[i], per_gpu_size * sizeof(DistPair)); // Device memory on each GPU
+                    cudaMalloc(&d_results[i], per_gpu_size * sizeof(DistPair<SUMTYPE>)); // Device memory on each GPU
                 }
 
                 cudaStream_t streams[NUM_GPUS];
@@ -223,18 +229,18 @@ namespace SPTAG
 
                     cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
                     //Copy Queryvectors
-                    LOG_INFO("Alloc'ing Points on device: %ld bytes.\n", querySet.size() * sizeof(Point<T, dim>));
-                    Point<T, dim>* d_points;
-                    cudaMalloc(&d_points, querySet.size() * sizeof(Point<T, dim>));
+                    LOG_INFO("Alloc'ing Points on device: %ld bytes.\n", querySet.size() * sizeof(Point<T, SUMTYPE, dim>));
+                    Point<T, SUMTYPE, dim>* d_points;
+                    cudaMalloc(&d_points, querySet.size() * sizeof(Point<T, SUMTYPE, dim>));
                     LOG_INFO("Copying to device.\n");
-                    cudaMemcpyAsync(d_points, points, querySet.size() * sizeof(Point<T, dim>), cudaMemcpyHostToDevice, streams[i]);
+                    cudaMemcpyAsync(d_points, points, querySet.size() * sizeof(Point<T, SUMTYPE, dim>), cudaMemcpyHostToDevice, streams[i]);
 
                     //copy one chunk of vectorSet
-                    LOG_INFO("Alloc'ing Check_Points on device: %ld bytes.\n", vectorSet.size() * sizeof(Point<T, dim>) / NUM_GPUS);
-                    Point<T, dim>* d_check_points;
-                    cudaMalloc(&d_check_points, vectorSet.size() * sizeof(Point<T, dim>) / NUM_GPUS);
+                    LOG_INFO("Alloc'ing Check_Points on device: %ld bytes.\n", vectorSet.size() * sizeof(Point<T, SUMTYPE, dim>) / NUM_GPUS);
+                    Point<T, SUMTYPE, dim>* d_check_points;
+                    cudaMalloc(&d_check_points, vectorSet.size() * sizeof(Point<T, SUMTYPE, dim>) / NUM_GPUS);
                     LOG_INFO("Copying to device.\n");
-                    cudaMemcpyAsync(d_check_points, sub_vectors_points[i], vectorSet.size() * sizeof(Point<T, dim>) / NUM_GPUS, cudaMemcpyHostToDevice, streams[i]);
+                    cudaMemcpyAsync(d_check_points, sub_vectors_points[i], vectorSet.size() * sizeof(Point<T, SUMTYPE, dim>) / NUM_GPUS, cudaMemcpyHostToDevice, streams[i]);
 
                     LOG_INFO("Alloc'ing memory for results on device: %ld bytes.\n", querySet.size() * K * sizeof(int));
 
@@ -256,10 +262,10 @@ namespace SPTAG
                 LOG_ALL("Total GPU time (sec): %lf\n", (((double)(end_t - start_t)) / CLOCKS_PER_SEC));
                 LOG_INFO("GPU runtime (ms): %lf\n", (1000 * end.tv_sec + 1e-6 * end.tv_nsec) - (1000 * start.tv_sec + 1e-6 * start.tv_nsec));
 
-                DistPair* results = (DistPair*)malloc(mtx.size() * K * sizeof(DistPair) * NUM_GPUS);
+                DistPair<SUMTYPE>* results = (DistPair<SUMTYPE>*)malloc(mtx.size() * K * sizeof(DistPair<SUMTYPE>) * NUM_GPUS);
 
                 for (int i = 0; i < NUM_GPUS; i++) {
-                    cudaMemcpy(&results[(i * per_gpu_size)], d_results[i], per_gpu_size * sizeof(DistPair), cudaMemcpyDeviceToHost);
+                    cudaMemcpy(&results[(i * per_gpu_size)], d_results[i], per_gpu_size * sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost);
                 }
 
 

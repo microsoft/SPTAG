@@ -29,7 +29,7 @@
 #include <stdarg.h>
 using namespace std;
 
-#include "gpu_params.h"
+#include "params.h"
 
 enum log_level_t {
     LOG_NOTHING,

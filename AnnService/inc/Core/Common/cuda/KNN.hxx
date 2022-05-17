@@ -26,6 +26,7 @@
 #define _SPTAG_COMMON_CUDA_KNN_H_
 
 #include "Refine.hxx"
+#include "log.hxx"
 #include "ThreadHeap.hxx"
 #include "TPtree.hxx"
 
@@ -1058,6 +1059,76 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     LOG(SPTAG::Helper::LogLevel::LL_Error, "Selected datatype not currently supported.\n");
     exit(1);
   }
+}
+
+/************************************************************************************
+ * Brute-force K nearest neighbor kernel using shared memory (transposed to avoid conflicts)
+ * Each thread keeps a heap of K elements to determine K smallest distances found
+ * VAR data - linear matrix fo data
+ * VAR queries - linear matrix of query vectors
+ * RET results - linear vector of K pairs for each query vector
+************************************************************************************/
+template<typename T, int Dim, int KVAL, int BLOCK_DIM>
+__global__ void query_KNN(Point<T, SUMTYPE, dim>* querySet, Point<T, SUMTYPE, dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results) {
+    // Memory for a heap for each thread
+    __shared__ ThreadHeap<T, SUMTYPE, Dim, BLOCK_DIM> heapMem;
+
+    heapMem.initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
+
+    DistPair extra; // extra variable to store the largest distance/id for all KNN of the point
+
+    // Memory used to store a query point for each thread
+    __shared__ T transpose_mem[Dim * BLOCK_DIM];
+    TransposePoint<T, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
+    query.setMem(&transpose_mem[threadIdx.x]);
+
+#if LOG_LEVEL >= 5
+    int dSize = sizeof(T);
+#endif
+    DLOG_DEBUG("Shared memory per block - Queries:%d, Heaps:%d\n", Dim * BLOCK_DIM * dSize, BLOCK_DIM * KVAL * 4);
+
+    heapMem[threadIdx.x].initialize();
+
+    SUMTYPE dist;
+    // Loop through all query points
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
+
+        heapMem[threadIdx.x].initialize();
+        extra.dist = INFTY;
+        query.loadPoint(data[i]); // Load into shared memory
+
+        // Compare with all points in the dataset
+        for (int j = 0; j < dataSize; j++) {
+#if METRIC == 1 
+            dist = query.cosine(&data[j]);
+#else
+            dist = query.l2(&data[j]);
+#endif
+            if (dist < extra.dist) {
+                if (dist < heapMem[threadIdx.x].top()) {
+                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
+                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
+                    //When recording the index, remember the off_set to discriminate different subvectorSets
+                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
+                }
+                else {
+                    extra.dist = dist;
+                    extra.idx = j + idx_offset;
+                }
+            }
+        }
+
+        // Write KNN to result list in sorted order
+        results[(i + 1) * KVAL - 1].idx = extra.idx;
+        results[(i + 1) * KVAL - 1].dist = extra.dist;
+        for (int j = KVAL - 2; j >= 0; j--) {
+            results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
+            results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
+            heapMem[threadIdx.x].vals[0].dist = -1;
+            heapMem[threadIdx.x].heapify();
+
+        }
+    }
 }
 
 #endif

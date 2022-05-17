@@ -80,6 +80,10 @@ class Point {
     return *this;
   }
 
+  __host__ __device__ Point& operator>(const Point& other) {
+      return id > other.id;
+  }
+
   // Computes euclidean dist.  Uses 2 registers to increase pipeline efficiency and ILP
   __device__ __host__ SUMTYPE l2(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
@@ -436,5 +440,30 @@ __host__ void extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex,
         headPoints[i].id = i;
     }
 }
+
+/************************************************************************
+ * Wrapper around shared memory holding transposed points to avoid
+ * bank conflicts.
+ ************************************************************************/
+template<typename T, int Dim, int Stride, typename SUMTYPE>
+class TransposePoint {
+public:
+    T* dataPtr;
+
+    __device__ void setMem(T* ptr) {
+        dataPtr = ptr;
+    }
+
+    // Load regular point into memory transposed
+    __device__ void loadPoint(Point<T, SUMTYPE, Dim> p) {
+        for (int i = 0; i < Dim; i++) {
+            dataPtr[i * Stride] = p.coords[i];
+        }
+    }
+
+    // Return the idx-th coordinate of the transposed vector
+    __forceinline__ __device__ T getCoord(int idx) {
+        return dataPtr[idx * Stride];
+    }
 
 #endif
