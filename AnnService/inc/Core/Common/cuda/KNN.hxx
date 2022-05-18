@@ -1068,14 +1068,14 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
  * VAR queries - linear matrix of query vectors
  * RET results - linear vector of K pairs for each query vector
 ************************************************************************************/
-template<typename T, int Dim, int KVAL, int BLOCK_DIM>
-__global__ void query_KNN(Point<T, SUMTYPE, dim>* querySet, Point<T, SUMTYPE, dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results) {
+template<typename T, int Dim, int KVAL, int BLOCK_DIM, typename SUMTYPE>
+__global__ void query_KNN(Point<T, SUMTYPE, Dim>* querySet, Point<T, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results) {
     // Memory for a heap for each thread
     __shared__ ThreadHeap<T, SUMTYPE, Dim, BLOCK_DIM> heapMem;
 
-    heapMem.initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
+    heapMem.initialize(results);
 
-    DistPair extra; // extra variable to store the largest distance/id for all KNN of the point
+    DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
 
     // Memory used to store a query point for each thread
     __shared__ T transpose_mem[Dim * BLOCK_DIM];
