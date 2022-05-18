@@ -30,7 +30,7 @@
 #include <curand_kernel.h>
 #include <type_traits>
 
-#include "inc/Core/Common/TruthSet.h"
+//#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/cuda/params.h"
 #include "inc/Core/Common/cuda/TPtree.hxx"
 #include "inc/Core/Common/cuda/KNN.hxx"
@@ -123,13 +123,9 @@ __global__ void rebalance_nodes(int* node_ids, int N, float* frac_to_move, curan
 
 template <typename T>
 __global__ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
-    const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer) {
-    int NUM_GPUS = 1;
-    if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
-    {
-        LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
-        exit(1);
-    }
+    const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer,
+    std::vector< std::vector<SPTAG::SizeType> >truthset, std::vector< std::vector<float> > distset) {
+    int NUM_GPUS = 4;
 
     using SUMTYPE = std::conditional_t<std::is_same<T, float>::value, float, int32_t>;
 
@@ -138,9 +134,6 @@ __global__ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::share
     //std::vector< std::vector<T> > vectorSet = (const T*)(vectorSet_obj->GetData());
     //std::vector< std::vector<T> > querySet = (const T*)(vectorSet_obj->GetData());
     //truthset & distset save the ground truth for idx and dist
-    LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
-    std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
-    std::vector< std::vector<float> > distset(vectorSet->Count(), std::vector<float>(K, 0));
     //Starts GPU KNN
     int result_size = querySet->Count();
     int vector_size = vectorSet->Count();
@@ -250,30 +243,4 @@ __global__ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::share
         }
     }
 
-    LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
-    SPTAG::COMMON::TruthSet::writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
-
-    auto ptr = SPTAG::f_createIO();
-    if (ptr == nullptr || !ptr->Initialize((truthFile + ".dist.bin").c_str(), std::ios::out | std::ios::binary)) {
-        LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
-        exit(1);
-    }
-
-    int int32_queryNumber = (int)querySet->Count();
-    ptr->WriteBinary(4, (char*)&int32_queryNumber);
-    ptr->WriteBinary(4, (char*)&K);
-
-    for (size_t i = 0; i < int32_queryNumber; i++)
-    {
-        for (int k = 0; k < K; k++) {
-            if (ptr->WriteBinary(4, (char*)(&(truthset[i][k]))) != 4) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
-                exit(1);
-            }
-            if (ptr->WriteBinary(4, (char*)(&(distset[i][k]))) != 4) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
-                exit(1);
-            }
-        }
-    }
 }
