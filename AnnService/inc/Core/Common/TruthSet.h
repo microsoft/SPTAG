@@ -161,6 +161,8 @@ namespace SPTAG
 
 
 #if defined(GPU)
+#include "cuda/KNN.hxx"
+
             template<typename T>
             static void GenerateTruth(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
                 const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
@@ -174,7 +176,8 @@ namespace SPTAG
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
                 std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
 
-                GenerateTruthGPU<T>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+                //GenerateTruthGPU<T>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+                GenerateTruthGPU(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
 
                 LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
                 writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
