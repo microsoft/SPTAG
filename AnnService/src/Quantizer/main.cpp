@@ -77,6 +77,8 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
+    omp_set_num_threads(options->m_threadNum);
+
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
     {
