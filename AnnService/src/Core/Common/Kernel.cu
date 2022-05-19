@@ -33,7 +33,10 @@
 //#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/cuda/params.h"
 #include "inc/Core/Common/cuda/TPtree.hxx"
-#include "inc/Core/Common/cuda/KNN.hxx"
+
+#include "inc/Core/Common/cuda/ThreadHeap.hxx"
+#include "inc/Core/Common/cuda/log.hxx"
+//#include "inc/Core/Common/cuda/KNN.hxx"
 
 /*****************************************************************************************
 * Count the number of points assigned to each leaf
