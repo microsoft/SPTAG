@@ -30,17 +30,6 @@
 #include "TPtree.hxx"
 #include "GPUQuantizer.hxx"
 
-#include<boost/bind.hpp>
-
-
-template<typename T, typename SUMTYPE, int Dim>
-__forceinline__ __device__ bool violatesRNG_PS(T* a, T* b, SUMTYPE dist) {
-  SUMTYPE between;
-
-  between = cosine_sep<T,Dim>(a,b);
-
-  return between <= dist;
-}
 
 template<typename T, typename SUMTYPE>
 __forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist, float (*comp)(T*, T*)) {
@@ -267,7 +256,6 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
   } // End leaf node loop
 }
 
-
 #define MAX_SHAPE 1024
 
 #define RUN_KERNEL(size)          \
@@ -280,7 +268,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
       candidate_vec[i] = 0;       \
     }                             \
     float (*dist_comp)(T*,T*);    \
-    dist_comp = &cosine_sep<T,size>; \
+      dist_comp = &cosine<T,size>; \
     findRNG<T,SUMTYPE,size>(ps, tptree, KVAL, results, min_id, max_id, query, candidate_vec, threadList, dist_comp); \
     return; \
   } 
@@ -301,18 +289,16 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
   extern __shared__ char sharememory[];
 
   if(quantizer == NULL) {
-    RUN_KERNEL(64);
+//    RUN_KERNEL(64);
     RUN_KERNEL(100);
-    RUN_KERNEL(200);
-    RUN_KERNEL(768);
-    RUN_KERNEL(MAX_SHAPE);
+//    RUN_KERNEL(200);
+//    RUN_KERNEL(MAX_SHAPE);
     // TODO - Optimize version with even larger maximum dimension
   }
   else {
     RUN_KERNEL_QUANTIZED(20);
-    RUN_KERNEL_QUANTIZED(64);
-    RUN_KERNEL_QUANTIZED(100);
-    RUN_KERNEL_QUANTIZED(200);
+//    RUN_KERNEL_QUANTIZED(64);
+//    RUN_KERNEL_QUANTIZED(100);
   }
 
 }
@@ -344,7 +330,7 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
       CUDA_CHECK(cudaSetDevice(gpuNum));
       // Compute the STRICT RNG for each leaf node
       findRNG_selector<DTYPE, SUMTYPE>
-                    <<<KNN_blocks,32, sizeof(DistPair<SUMTYPE>)*KVAL*THREADS>>>
+                    <<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>)*KVAL*THREADS>>>
                     (d_pointset[gpuNum], d_tptrees[gpuNum], KVAL, d_results[gpuNum], 
                     (DistMetric)metric, batch_min[gpuNum], batch_max[gpuNum], dim, quantizer);
     }
