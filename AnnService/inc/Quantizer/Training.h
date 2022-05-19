@@ -35,6 +35,7 @@ public:
         AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
         AddOptionalOption(m_outputFullVecFile, "-ofv", "--output_full", "Output Uncompressed vectors.");
+        AddOptionalOption(m_outputReconstructVecFile, "-orv", "--output_reconstructed", "Output reconstructed vectors.");
     }
 
     ~QuantizerOptions() {}
@@ -50,6 +51,8 @@ public:
     std::string m_outputMetadataIndexFile;
 
     std::string m_outputQuantizerFile;
+
+    std::string m_outputReconstructVecFile;
 
     DimensionType m_quantizedDim;
 

@@ -50,6 +50,22 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader>& vectorRead
                 exit(1);
             }
         }
+        if (!options->m_outputReconstructVecFile.empty())
+        {
+            ByteArray reconstruct_vector_array = ByteArray::Alloc(set->PerVectorDataSize() * set->Count());
+            std::shared_ptr<VectorSet> reconstructed_vectors = std::make_shared<BasicVectorSet>(reconstruct_vector_array, set->GetValueType(), set->Dimension(), set->Count());
+#pragma omp parallel for
+            for (int i = 0; i < set->Count(); i++)
+            {
+                quantizer->ReconstructVector((uint8_t*)quantized_vectors->GetVector(i), reconstructed_vectors->GetVector(i));
+            }
+
+            if (ErrorCode::Success != reconstructed_vectors->AppendSave(options->m_outputReconstructVecFile))
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to save reconstructed vectors.\n");
+                exit(1);
+            }
+        }
     }
 }
 
