@@ -164,6 +164,7 @@ class ThreadHeap {
       heapifyAt(idx);
     }
 
+/*
     // Load a sorted set of vectors into the heap
     __device__ void load_mem_sorted(Point<T, SUMTYPE,Dim>* data, int* mem, Point<T,SUMTYPE,Dim> query, int metric) {
       for(int i=0; i<=KVAL-1; i++) {
@@ -186,6 +187,7 @@ class ThreadHeap {
     __device__ SUMTYPE top() {
       return vals[0].dist;
     }
+*/
 };
 
 #endif

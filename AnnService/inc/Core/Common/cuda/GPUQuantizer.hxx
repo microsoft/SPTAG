@@ -50,14 +50,6 @@ using namespace SPTAG;
 
 enum DistMetric { L2, Cosine };
 
-/*
-class GPU_Quantizer {
-  public:
-    virtual __device__ float dist(uint8_t* pX, uint8_t* pY) = 0;
-
-};
-*/
-
 class GPU_PQQuantizer {
 
 //  private:
@@ -84,13 +76,10 @@ class GPU_PQQuantizer {
       m_KsPerSubvector = pq_quantizer->GetKsPerSubvector();
       m_BlockSize = pq_quantizer->GetBlockSize();
 
-      printf("subv:%d, ks:%ld, bs:%d, allocing size:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_BlockSize * m_NumSubvectors * sizeof(float));
-
       CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
 
       if(metric == DistMetric::Cosine) {
         CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
- printf("copied talbes to GPU\n");
       }
 
     }
@@ -101,7 +90,7 @@ class GPU_PQQuantizer {
     }
 
     // TODO - Optimize quantized distance comparator
-    __device__ float dist(uint8_t* pX, uint8_t* pY) {
+    __forceinline__ __device__ float dist(uint8_t* pX, uint8_t* pY) {
       float out = 0;
       for(int i = 0; i < m_NumSubvectors; ++i) {
         out += m_DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];

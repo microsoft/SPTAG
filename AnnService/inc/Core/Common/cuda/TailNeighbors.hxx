@@ -83,12 +83,12 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
       good = true;
       candidate.idx = tptree->leaf_points[leaf_offset+j];
       candidate_vec = headPS->getVec(candidate.idx);
-      candidate.dist = cosine(query, candidate_vec, headPS->dim);
+      candidate.dist = cosine<T,100>(query, candidate_vec);
 
       if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
 
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
-          if(violatesRNG_PS<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+          if(violatesRNG<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
             good = false;
           }
         }
@@ -100,7 +100,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
           threadList[read_id] = candidate;
           read_id++;
           for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
-            if(!violatesRNG_PS<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+            if(!violatesRNG<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
               if(read_id == write_id) {
                 temp = threadList[read_id];
                 threadList[write_id] = target;
@@ -390,7 +390,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
             exit(1);
         }
         LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for head vectors:%lu MiB, Memory for TP trees:%lu MiB, Memory left for tail vectors:%lu MiB, total tail vectors:%lu, batch size:%d, total batches:%d\n", headVecSize/1000000, treeSize/1000000, tailMemAvail/1000000, pointsPerGPU[gpuNum], BATCH_SIZE[gpuNum], (((BATCH_SIZE[gpuNum]-1)+pointsPerGPU[gpuNum]) / BATCH_SIZE[gpuNum]));
-        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE[gpuNum]*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (headRows*sizeof(Point<T,SUMTYPE,MAX_DIM>))/1000000, (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree))/1000000, ((BATCH_SIZE[gpuNum]+headRows)*sizeof(Point<T,SUMTYPE,MAX_DIM>) + (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree)))/1000000);
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE[gpuNum]*sizeof(T))/1000000, (headRows*sizeof(T))/1000000, (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree))/1000000, ((BATCH_SIZE[gpuNum]+headRows)*sizeof(T) + (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree)))/1000000);
 
         // Allocate needed memory on the GPU
         CUDA_CHECK(cudaMallocManaged(&d_headRaw[gpuNum], headRows*dim*sizeof(T)));
