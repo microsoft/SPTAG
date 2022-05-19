@@ -88,7 +88,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
       if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
 
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
-          if(violatesRNG_PS<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, headPS->dim)) {
+          if(violatesRNG_PS<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
             good = false;
           }
         }
@@ -100,7 +100,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
           threadList[read_id] = candidate;
           read_id++;
           for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
-            if(!violatesRNG_PS<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, headPS->dim)) {
+            if(!violatesRNG_PS<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
               if(read_id == write_id) {
                 temp = threadList[read_id];
                 threadList[write_id] = target;

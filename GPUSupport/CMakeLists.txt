@@ -36,6 +36,7 @@ if (CUDA_FOUND)
         ${AnnService}/inc/Core/Common/DistanceUtils.h
         ${AnnService}/inc/Core/Common/InstructionUtils.h
         ${AnnService}/inc/Core/Common/CommonUtils.h
+        ${AnnService}/inc/Core/Common/cuda/cuda_unit_tests.cu
     )
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp

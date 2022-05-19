@@ -245,7 +245,6 @@ __host__ void construct_trees_multigpu(TPtree** d_trees, PointSet<T>** ps, int N
             cudaSetDevice(gpuNum);
 
             find_level_sum<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->Dim, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
-
         }
 
 /* TODO - fix rebalancing
@@ -305,6 +304,7 @@ __host__ void construct_trees_multigpu(TPtree** d_trees, PointSet<T>** ps, int N
     }
 
     delete[] h_leafs;
+
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         cudaSetDevice(gpuNum);

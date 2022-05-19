@@ -35,12 +35,12 @@
 
 #include "params.h"
 #include "inc/Core/VectorIndex.h"
+#include "GPUQuantizer.hxx"
 
 using namespace std;
 
 using namespace SPTAG;
 
-enum DistMetric { L2, Cosine };
 
 // Templated infinity value
 template<typename T> __host__ __device__ T INFTY() {}
@@ -50,8 +50,19 @@ template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_
 //template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
+/*
 template<typename T, int Dim>
-__forceinline__ __device__ float cosine(T* a, T* b) {
+__forceinline__ __device__ float cosine_sep(T* a, T* b) {
+    float total[2]={0,0};
+    for(int i=0; i<Dim; i+=2) {
+      total[0] += ((float)((float)a[i] * (float)b[i]));
+      total[1] += ((float)((float)a[i+1] * (float)b[i+1]));
+    }
+    return 1-(total[0]+total[1]);
+}
+*/
+template<typename T, int Dim>
+__forceinline__ __device__ float cosine_sep(T* a, T* b) {
     float total[2]={0,0};
 //#pragma unroll
     for(int i=0; i<Dim; i+=2) {
@@ -62,8 +73,19 @@ __forceinline__ __device__ float cosine(T* a, T* b) {
 //      if(i >= dim) break;
     }
 //printf("dim:%d, Dim:%d, tot1:%f, tot2:%f\n", dim, Dim, total[0], total[1]);
-    return (total[0]+total[1]);
+    return 1-(total[0]+total[1]);
 //    return (total[0]+total[1]+total[2]+total[3]);
+}
+
+
+template<typename T, int Dim>
+__forceinline__ __device__ float l2(T* aVec, T* bVec) {
+  float total[2]={0,0};
+  for(int i=0; i<Dim; i+=2) {
+    total[0] += (aVec[i]-bVec[i])*(aVec[i]-bVec[i]);
+    total[1] += (aVec[i+1]-bVec[i+1])*(aVec[i+1]-bVec[i+1]);
+  }
+  return total[0]+total[1];
 }
 
 template<typename T>
@@ -87,86 +109,25 @@ __forceinline__ __device__ float cosine(T* a, T* b, int dim) {
 */
 //  if(dim == 100) total = cosine<T,100>(a, b);
 
-  total = cosine<T,100>(a, b);
-/*
-  if(dim <= 64) {
-    total = cosine<T,64>(a, b, dim);
-  }
-  else if(dim <= 100) {
-    total = cosine<T,100>(a, b, dim);
-  }
-  else if(dim <= 128) {
-    total = cosine<T,128>(a, b, dim);
-  }
-  else if(dim <= 200) {
-    total = cosine<T,200>(a, b, dim);
-  }
-  else if(dim <= 768) {
-    total = cosine<T,768>(a, b, dim);
-  }
-*/
-/*
-  if(total == 0.0) {
-    printf("total dist %f!\na: ");
-    for(int i=0; i<dim; ++i) {
-      printf("%f, ", a[i]);
-    }
-    printf("\nb: ");
-    for(int i=0; i<dim; ++i) {
-      printf("%f, ", a[i]);
-    }
-    printf("\n");
-//    int* undef;
-//    printf("blah :%d\n", undef[1]);
+  total = cosine_sep<T,100>(a, b);
+  return total;
 
-  }
-*/
-
-  return 1.0 - total;
-
-/*
-    float total[4]={0,0,0,0};
-
-    int idx=0;
-#pragma unroll
-    for(int i=0; i<dim; i+=4) {
-      total[0] += ((float)((float)a[i] * (float)b[i]));
-      total[1] += ((float)((float)a[i+1] * (float)b[i+1]));
-      total[2] += ((float)((float)a[i+2] * (float)b[i+2]));
-      total[3] += ((float)((float)a[i+3] * (float)b[i+3]));
-    }
-    return 1.0 - (total[0]+total[1]+total[2]+total[3]);
-*/
 }
 
-
-template<typename T>
-__device__ float cosine(T* a, T* b, int dim, bool print) {
-  float dist = cosine(a, b, dim);
-  return dist;
-}
 
 template<typename T>
 class PointSet {
   public:
     int dim;
     T* data;
+    DistMetric metric;
 
   __forceinline__ __device__ T* getVec(size_t idx) {
     return &(data[idx*dim]);
   }
 
-  __forceinline__ __device__ T* getVec(size_t idx, bool print) {
-//    printf("getVec returning data at idx:%lu\n", idx*dim);
-    return &(data[idx*dim]);
-  }
-
-  __device__ float l2(size_t a, size_t b) {
+  __device__ float l2(T* aVec, T* bVec) {
     float total[2]={0,0};
-
-    T* aVec = getVec(a);
-    T* bVec = getVec(b);
-
     for(int i=0; i<dim; i+=2) {
       total[0] += (aVec[i]-bVec[i])*(aVec[i]-bVec[i]);
       total[1] += (aVec[i+1]-bVec[i+1])*(aVec[i+1]-bVec[i+1]);
@@ -174,46 +135,71 @@ class PointSet {
     return total[0]+total[1];
   }
 
-  __forceinline__ __device__ float cosine(size_t a, size_t b, bool print) {
-    float total[2]={0,0};
-    T* aVec = getVec(a);
+  __device__ float l2(T* aVec, size_t b) {
     T* bVec = getVec(b);
-
-    for(int i=0; i<dim; i+=2) {
-      total[0] += ((float)((float)aVec[i] * (float)bVec[i]));
-      total[1] += ((float)((float)aVec[i+1] * (float)bVec[i+1]));
-
-    }
-    return 1.0 - (total[0]+total[1]);
+    return l2(aVec, bVec);
   }
 
-  __forceinline__ __device__ float cosine(T* aVec, size_t b) {
-    float total[2]={0,0};
-    T* bVec = getVec(b);
-//printf("in cosine!, aVec[0]:%f, b:%ld\n", aVec[0], b);
-//__syncthreads();
+  template<int Dim>
+  __forceinline__ __device__ float cosine(T* a, T* b);
 
-    for(int i=0; i<dim; i+=2) {
-      total[0] += ((float)((float)aVec[i] * (float)bVec[i]));
-      total[1] += ((float)((float)aVec[i+1] * (float)bVec[i+1]));
+  template<int Dim>
+  __forceinline__ __device__ bool violatesRNG(T* aVec, T* bVec, float distance);
 
-    }
-//__syncthreads();
-//printf("Finished cosine!\n");
-//__syncthreads();
-    return 1.0 - (total[0]+total[1]);
-  }
-
-  __forceinline__ __device__ float dist(size_t a, size_t b, DistMetric metric) {
-    if(metric == DistMetric::L2) {
-      return l2(a, b);
-    }
-    else {
-      return cosine(a, b);
-    }
-  }
 
 };
+
+template<typename T>
+template<int Dim>
+float __forceinline__ __device__ PointSet<T>::cosine(T* a, T* b) {
+  float total[2]={0,0};
+    
+  for(int i=0; i<Dim; i+=2) {
+    total[0] += ((float)((float)a[i] * (float)b[i]));
+    total[1] += ((float)((float)a[i+1] * (float)b[i+1]));
+
+  }
+  return 1-(total[0]+total[1]);
+}
+
+template<typename T>
+template<int Dim>
+bool __forceinline__ __device__ PointSet<T>::violatesRNG(T* a, T* b, float distance) {
+  float between;
+  between = cosine<T,Dim>(a, b);
+  return between <= distance;
+}
+
+
+/*
+template<typename T>
+class QPointSet : PointSet<T> {
+
+  GPU_PQQuantizer* m_quantizer;
+
+  template<int Dim>
+  __forceinline__ __device__ float cosine(uint8_t* a, uint8_t* b);
+
+  template<typename SUMTYPE, int Dim>
+  __forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist);
+  
+};
+
+template<typename T>
+template<int Dim>
+__forceinline__ __device__ float QPointSet<T>::cosine(uint8_t* a, uint8_t* b) {
+  return m_quantizer->dist(a, b);
+}
+
+template<typename T>
+template<typename SUMTYPE, int Dim>
+__forceinline__ __device__ bool QPointSet<T>::violatesRNG(T* a, T* b, SUMTYPE dist) {
+  SUMTYPE between = m_quantizer->dist(a, b);
+  return between <= dist;
+}
+*/
+
+
 
 /*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate

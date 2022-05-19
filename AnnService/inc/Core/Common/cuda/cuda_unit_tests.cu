@@ -1,61 +1,137 @@
-/*
-#include "Refine.hxx"
+#include "Distance.hxx"
+#include "KNN.hxx"
+#include "params.h"
+#include <cstdlib>
+#include <chrono>
 
-#define T_BLOCKS 1
-#define T_THREADS 64
 
-__device__ void printList(ListElt<int>* list, int size) {
-  if(threadIdx.x==0 && blockIdx.x==0) {
-    printf("size:%d\n", size);
-  for(int i=0; i<size; i++) {
-    printf("%d, %d, %d\n", list[i].id, list[i].dist, list[i].checkedFlag);
-  }
-  printf("\n");
-  }
-  __syncthreads();
+float* create_dataset(size_t rows, int dim) {
+
+  srand(0);
+  float* data = new float[rows*dim];
+  for(size_t i=0; i<rows*dim; ++i) {
+    data[i] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+  } 
+  return data;
 }
 
-__global__ void test_removeDuplicates(ListElt<int>* listMem) {
-  ListElt<int>* list = &listMem[blockIdx.x*LISTSIZE*2];
+template<typename T, typename SUMTYPE, int Dim>
+__global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
 
-  typedef cub::BlockRadixSort<int, T_THREADS, LISTCAP/T_THREADS, ListElt<int>> BlockRadixSortT;
-__shared__ typename BlockRadixSortT::TempStorage temp_storage;
-__shared__ int border_vals[T_THREADS];
+  extern __shared__ char sharememory[];
+  DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[K*threadIdx.x]);
+
+  T query[Dim];
+  T candidate_vec[Dim];
+
+  DistPair<SUMTYPE> target;
+  DistPair<SUMTYPE> candidate;
+  DistPair<SUMTYPE> temp;
+
+  bool good;
+  float max_dist = INFTY<float>();
+  int read_id, write_id;
 
 
-  for(int i=threadIdx.x; i<LISTSIZE; i+=blockDim.x) {
-    list[i].id = i;
-    list[i+LISTSIZE].id = i;
-    list[i].dist = -i;
-    list[i+LISTSIZE].dist = -i;
-    list[i].checkedFlag=true;
-    list[i+LISTSIZE].checkedFlag=false;
+  for(size_t i=blockIdx.x*blockDim.x + threadIdx.x; i<rows; i+=blockDim.x*gridDim.x) {
+    for(int j=0; j<Dim; ++j) {
+      query[j] = ps->getVec(i)[j];
+
+      for(int k=0; k<K; k++) {
+        threadList[k].dist=INFTY<float>();
+      }
+    }
+
+    for(size_t j=0; j<rows; ++j) {
+      good = true;
+      candidate.idx = j;
+      candidate.dist = cosine_sep<T,Dim>(query, ps->getVec(i));
+
+      
+      if(candidate.dist < max_dist) {
+        for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
+          if(violatesRNG_PS<T,SUMTYPE,Dim>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist)) {
+            good = false;
+          }
+        }
+        if(good) {
+          target = threadList[read_id];
+          threadList[read_id] = candidate;
+          read_id++;
+          for(write_id = read_id; read_id < K && threadList[read_id].idx != -1; read_id++) {
+            if(!violatesRNG_PS<T, SUMTYPE,Dim>(ps->getVec(threadList[read_id].idx), candidate_vec, threadList[read_id].dist)) {
+              if(read_id == write_id) {
+                temp = threadList[read_id];
+                threadList[write_id] = target;
+                target = temp;
+              }
+              else {
+                threadList[write_id] = target;
+                target = threadList[read_id];
+              }
+              write_id++;
+            }
+          }
+          if(write_id < K) {
+            threadList[write_id] = target;
+            write_id++;
+          }
+          for(int k=write_id; k<K && threadList[k].idx != -1; k++) {
+            threadList[k].dist = INFTY<SUMTYPE>();
+            threadList[k].idx = -1;
+          }
+          max_dist = threadList[K-1].dist;
+        }
+
+      }
+
+    }
+    for(size_t j=0; j<K; j++) {
+      results[(size_t)(i)*K+j] = threadList[j].idx;
+    }
   }
-  __syncthreads();
-
-
-  int listSize = LISTSIZE*2;
-
-  __syncthreads();
-  printList(list, listSize);
-  __syncthreads();
-
-  sortListById<int, int, 0, T_THREADS>(list, &listSize, &temp_storage);
-
-  removeDuplicatesAndCompact<int, int, 0, T_THREADS>(list, &listSize, &temp_storage, border_vals);
-
-
-  printList(list, listSize);
 }
 
+int main() {
 
-int main(int argc, char* argv[]) {
+  int dim=100;
+  int rows = 100000;
+  int K = 10;
 
-  ListElt<int>* listMem;
-  cudaMalloc(&listMem, T_BLOCKS*LISTSIZE*2*sizeof(ListElt<int>));
+  float* data = create_dataset(rows, dim);
+  float* d_data;
+for(int i=0; i<100; i++) printf("%f, ", data[i]);
+printf("\n");
+  CUDA_CHECK(cudaMalloc(&d_data, dim*rows*sizeof(float)));
+  CUDA_CHECK(cudaMemcpy(d_data, data, dim*rows*sizeof(float), cudaMemcpyHostToDevice));
 
-  test_removeDuplicates<<<T_BLOCKS, T_THREADS>>>(listMem);
-  printf("Error: %d\n", cudaDeviceSynchronize());
+  int* d_results;
+  CUDA_CHECK(cudaMalloc(&d_results, rows*K*sizeof(int)));
+
+
+
+  PointSet<float> h_ps;
+  h_ps.dim = dim;
+  h_ps.data = d_data;
+
+  PointSet<float>* d_ps;
+  
+  CUDA_CHECK(cudaMalloc(&d_ps, sizeof(PointSet<float>)));
+  CUDA_CHECK(cudaMemcpy(d_ps, &h_ps, sizeof(PointSet<float>), cudaMemcpyHostToDevice));
+
+  auto start_t = std::chrono::high_resolution_clock::now();
+
+  test_KNN<float,float,100><<<1024, 64, K*THREADS*sizeof(DistPair<float>)>>>(d_ps, d_results, rows, K);
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  auto end_t = std::chrono::high_resolution_clock::now();
+
+  printf("Total time: %0.2lf\n", GET_CHRONO_TIME(start_t, end_t));
+  
+  int* h_results = new int[K*rows];
+  CUDA_CHECK(cudaMemcpy(h_results, d_results, rows*K*sizeof(int), cudaMemcpyDeviceToHost));
+  for(int i=0; i<100; ++i) printf("%d, ", h_results[i*100]);
+  printf("%d, %d, ..., %d\n", h_results[0], h_results[1], h_results[rows*K-1]);
+
+  return 0;
 }
-
-*/
