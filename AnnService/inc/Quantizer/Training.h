@@ -117,7 +117,7 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     return codebooks;
 }
 
-ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskPriorityIO> fp, const std::shared_ptr<COMMON::IQuantizer>& quantizer)
+ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskIO> fp, const std::shared_ptr<COMMON::IQuantizer>& quantizer)
 {
 	SizeType cnt = vectors->Count();
 	DimensionType dim = quantizer->GetNumSubvectors();

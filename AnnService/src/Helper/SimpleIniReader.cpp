@@ -23,7 +23,7 @@ IniReader::~IniReader()
 }
 
 
-ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskPriorityIO> p_input)
+ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
 {
     std::uint64_t c_bufferSize = 1 << 16;
 

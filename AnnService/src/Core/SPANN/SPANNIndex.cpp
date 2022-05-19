@@ -17,7 +17,7 @@ namespace SPTAG
         std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
 
-        std::function<std::shared_ptr<Helper::DiskPriorityIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskPriorityIO> { return std::shared_ptr<Helper::DiskPriorityIO>(new Helper::AsyncFileIO()); };
+        std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO()); };
 
         template <typename T>
         bool Index<T>::CheckHeadIndexType() {
@@ -115,7 +115,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
+        ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
             m_index->SetQuantizer(m_pQuantizer);
             if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
@@ -147,7 +147,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskPriorityIO> p_configOut)
+        ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
             IOSTRING(p_configOut, WriteString, "[Base]\n");
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -185,7 +185,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskPriorityIO>>& p_indexStreams)
+        ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
             if (m_index == nullptr || m_vectorTranslateMap == nullptr) return ErrorCode::EmptyIndex;
             
@@ -540,7 +540,7 @@ namespace SPTAG
             {
                 std::sort(selected.begin(), selected.end());
 
-                std::shared_ptr<Helper::DiskPriorityIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
+                std::shared_ptr<Helper::DiskIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
                 if (output == nullptr || outputIDs == nullptr ||
                     !output->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str(), std::ios::binary | std::ios::out) ||
                     !outputIDs->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
@@ -674,7 +674,7 @@ namespace SPTAG
                 if (m_options.m_buildSsdIndex) {
                     if (!m_options.m_excludehead) {
                         LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
-                        std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
+                        std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
                         if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
                             LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s for overwrite\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                             return ErrorCode::Fail;
@@ -696,7 +696,7 @@ namespace SPTAG
                 }
 
                 m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
-                std::shared_ptr<Helper::DiskPriorityIO> ptr = SPTAG::f_createIO();
+                std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
                     LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                     return ErrorCode::Fail;

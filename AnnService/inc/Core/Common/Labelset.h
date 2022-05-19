@@ -44,7 +44,7 @@ namespace SPTAG
                 return true;
             }
 
-            inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
+            inline ErrorCode Save(std::shared_ptr<Helper::DiskIO> output)
             {
                 SizeType deleted = m_inserted.load();
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
@@ -59,7 +59,7 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);

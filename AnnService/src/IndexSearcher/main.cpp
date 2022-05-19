@@ -103,7 +103,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         dataVectors = dataReader->GetVectorSet();
     }
 
-    std::shared_ptr<Helper::DiskPriorityIO> ftruth;
+    std::shared_ptr<Helper::DiskIO> ftruth;
     int truthDim = 0;
     if (options->m_truthFile != "")
     {
