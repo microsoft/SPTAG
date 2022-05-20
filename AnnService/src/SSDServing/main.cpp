@@ -107,7 +107,7 @@ namespace SPTAG {
 
 			SPANN::Options* opts = nullptr;
 
-			VectorValueTypeDispatch(opts->m_valueType, [&](auto t) { opts = ((SPANN::Index<decltype(t)>*)index.get())->GetOptions(); });
+			VectorValueTypeDispatch(index->GetVectorValueType(), [&](auto t) { opts = ((SPANN::Index<decltype(t)>*)index.get())->GetOptions(); });
 
 
 			if (opts == nullptr) {
