@@ -330,17 +330,10 @@ int main(int argc, char** argv)
 
     vecIndex->UpdateIndex();
 
-    switch (options->m_inputValueType)
-    {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        Process<Type>(options, *(vecIndex.get())); \
-        break; \
+    VectorValueTypeDispatch(options->m_inputValueType, [&](auto t)
+        {
+            Process<decltype(t)>(options, *(vecIndex.get()));
+        });
 
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-    default: break;
-    }
     return 0;
 }

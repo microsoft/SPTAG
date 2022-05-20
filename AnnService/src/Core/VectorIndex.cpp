@@ -540,45 +540,18 @@ VectorIndex::CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype)
     {
         return nullptr;
     }
-
+    std::shared_ptr<VectorIndex> out;
     if (p_algo == IndexAlgoType::BKT) {
-        switch (p_valuetype)
-        {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        return std::shared_ptr<VectorIndex>(new BKT::Index<Type>); \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-        default: break;
-        }
+        VectorValueTypeDispatch(p_valuetype, [&](auto t) {out.reset(new BKT::Index<decltype(t)>); });
+        return out;
     }
     else if (p_algo == IndexAlgoType::KDT) {
-        switch (p_valuetype)
-        {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        return std::shared_ptr<VectorIndex>(new KDT::Index<Type>); \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-        default: break;
-        }
+        VectorValueTypeDispatch(p_valuetype, [&](auto t) {out.reset(new KDT::Index<decltype(t)>); });
+        return out;
     }
     else if (p_algo == IndexAlgoType::SPANN) {
-        switch (p_valuetype)
-        {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        return std::shared_ptr<VectorIndex>(new SPANN::Index<Type>); \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-        default: break;
-        }
+        VectorValueTypeDispatch(p_valuetype, [&](auto t) {out.reset(new SPANN::Index<decltype(t)>); });
+        return out;
     }
     return nullptr;
 }
@@ -930,16 +903,11 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
                     {
                         reconstructed_vector = ALIGN_ALLOC(m_pQuantizer->ReconstructSize());
                         m_pQuantizer->ReconstructVector((const uint8_t*)fullVectors->GetVector(fullID), reconstructed_vector);
-                        switch (m_pQuantizer->GetReconstructType()) {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        (*((COMMON::QueryResultSet<Type>*)&resultSet)).SetTarget(reinterpret_cast<Type*>(reconstructed_vector), m_pQuantizer); \
-                        break;
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                    default:
-                        LOG(Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s", Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
-                        }
+                        VectorValueTypeDispatch(m_pQuantizer->GetReconstructType(), [&](auto t) 
+                            {
+                                using Type = decltype(t);
+                                (*((COMMON::QueryResultSet<Type>*) & resultSet)).SetTarget(reinterpret_cast<Type*>(reconstructed_vector), m_pQuantizer);
+                            });
                     }
                     else
                     {

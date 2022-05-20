@@ -153,19 +153,46 @@ enum class DistCalcMethod : std::uint8_t
 };
 static_assert(static_cast<std::uint8_t>(DistCalcMethod::Undefined) != 0, "Empty DistCalcMethod!");
 
-
 enum class VectorValueType : std::uint8_t
 {
-    Int8,
-    UInt8,
-    Int16,
-    Float,
+#define DefineVectorValueType(Name, Type) Name,
+#include "DefinitionList.h"
+#undef DefineVectorValueType
     Undefined
 };
 static_assert(static_cast<std::uint8_t>(VectorValueType::Undefined) != 0, "Empty VectorValueType!");
 
-using VectorValueTypeTuple = std::tuple<std::int8_t, std::uint8_t, std::int16_t, std::float_t>;
+// remove_last is by Vladimir Reshetnikov, https://stackoverflow.com/a/51805324
+template<class Tuple>
+struct remove_last;
 
+template<>
+struct remove_last<std::tuple<>>; // Define as you wish or leave undefined
+
+template<class... Args>
+struct remove_last<std::tuple<Args...>>
+{
+private:
+    using Tuple = std::tuple<Args...>;
+
+    template<std::size_t... n>
+    static std::tuple<std::tuple_element_t<n, Tuple>...>
+        extract(std::index_sequence<n...>);
+
+public:
+    using type = decltype(extract(std::make_index_sequence<sizeof...(Args) - 1>()));
+};
+
+template<class Tuple>
+using remove_last_t = typename remove_last<Tuple>::type;
+
+using VectorValueTypeTuple = remove_last_t<std::tuple<
+#define DefineVectorValueType(Name, Type) Type,
+#include "DefinitionList.h"
+#undef DefineVectorValueType
+void>>;
+
+// Dispatcher is based on https://stackoverflow.com/a/34046180
 template <typename T, typename F>
 std::function<void()> call_with_default(F&& f)
 {
@@ -179,47 +206,22 @@ void VectorValueTypeDispatch(VectorValueType vectorType, F&& f, std::index_seque
         call_with_default<std::tuple_element_t<Is, VectorValueTypeTuple>>(f)...
     };
     fs[static_cast<int>(vectorType)]();
+    
 }
 
 template <typename F>
 void VectorValueTypeDispatch(VectorValueType vectorType, F f)
 {
-    if (vectorType == VectorValueType::Undefined) throw std::exception("VectorValueTypeDispatch on Undefined type");
     constexpr auto VectorCount = std::tuple_size<VectorValueTypeTuple>::value;
-    VectorValueTypeDispatch(vectorType, f, std::make_index_sequence<VectorCount>{});
-}
-
-
-/*template <VectorValueType> struct VectorValueTypeMap_t {};
-template <> struct VectorValueTypeMap_t<Int8> 
-{ 
-    using type = std::int8_t; 
-};
-template <> struct VectorValueTypeMap_t<UInt8> {
-    using type = std::uint8_t;
-};
-template <> struct VectorValueTypeMap_t<Int16> {
-    using type = std::int16_t;
-};
-template <> struct VectorValueTypeMap_t<Float> {
-    using type = std::float_t;
-};
-
-template <VectorValueType T> 
-using VectorValueTypeMap = VectorValueTypeMap_t<T>::type;
-
-template <class Functor>
-static void VectorValueTypeDispatch(VectorValueType t)
-{
-    constexpr for (int i = 0; i < VectorValueType::Undefined; i++)
+    if ((int)vectorType < VectorCount)
     {
-        if ((VectorValueType)i == t)
-        {
-            Functor.template operator() < VectorValueTypeMap<i> > ();
-        }
+        VectorValueTypeDispatch(vectorType, f, std::make_index_sequence<VectorCount>{});
     }
-}*/
-
+    else
+    {
+        throw std::exception();
+    }
+}
 
 enum class IndexAlgoType : std::uint8_t
 {
@@ -271,20 +273,10 @@ constexpr VectorValueType GetEnumValueType<Type>() \
 
 inline std::size_t GetValueTypeSize(VectorValueType p_valueType)
 {
-    switch (p_valueType)
-    {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        return sizeof(Type); \
+    std::size_t out = 0;
+    VectorValueTypeDispatch(p_valueType, [&](auto t) { out = sizeof(decltype(t)); });
 
-#include "DefinitionList.h"
-#undef DefineVectorValueType
-
-    default:
-        break;
-    }
-
-    return 0;
+    return out;
 }
 
 enum class QuantizerType : std::uint8_t
