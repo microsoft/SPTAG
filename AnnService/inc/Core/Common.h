@@ -14,6 +14,7 @@
 #include <cmath>
 #include "inc/Helper/Logging.h"
 #include "inc/Helper/DiskIO.h"
+#include <tuple>
 
 #ifndef _MSC_VER
 #include <stdio.h>
@@ -155,13 +156,68 @@ static_assert(static_cast<std::uint8_t>(DistCalcMethod::Undefined) != 0, "Empty 
 
 enum class VectorValueType : std::uint8_t
 {
-#define DefineVectorValueType(Name, Type) Name,
-#include "DefinitionList.h"
-#undef DefineVectorValueType
-
+    Int8,
+    UInt8,
+    Int16,
+    Float,
     Undefined
 };
 static_assert(static_cast<std::uint8_t>(VectorValueType::Undefined) != 0, "Empty VectorValueType!");
+
+using VectorValueTypeTuple = std::tuple<std::int8_t, std::uint8_t, std::int16_t, std::float_t>;
+
+template <typename T, typename F>
+std::function<void()> call_with_default(F&& f)
+{
+    return [f]() {f(T{}); };
+}
+
+template <typename F, std::size_t...Is>
+void VectorValueTypeDispatch(VectorValueType vectorType, F&& f, std::index_sequence<Is...>)
+{
+    std::function<void()> fs[] = {
+        call_with_default<std::tuple_element_t<Is, VectorValueTypeTuple>>(f)...
+    };
+    fs[static_cast<int>(vectorType)]();
+}
+
+template <typename F>
+void VectorValueTypeDispatch(VectorValueType vectorType, F f)
+{
+    constexpr auto VectorCount = std::tuple_size<VectorValueTypeTuple>::value;
+    VectorValueTypeDispatch(vectorType, f, std::make_index_sequence<VectorCount>{});
+}
+
+
+/*template <VectorValueType> struct VectorValueTypeMap_t {};
+template <> struct VectorValueTypeMap_t<Int8> 
+{ 
+    using type = std::int8_t; 
+};
+template <> struct VectorValueTypeMap_t<UInt8> {
+    using type = std::uint8_t;
+};
+template <> struct VectorValueTypeMap_t<Int16> {
+    using type = std::int16_t;
+};
+template <> struct VectorValueTypeMap_t<Float> {
+    using type = std::float_t;
+};
+
+template <VectorValueType T> 
+using VectorValueTypeMap = VectorValueTypeMap_t<T>::type;
+
+template <class Functor>
+static void VectorValueTypeDispatch(VectorValueType t)
+{
+    constexpr for (int i = 0; i < VectorValueType::Undefined; i++)
+    {
+        if ((VectorValueType)i == t)
+        {
+            Functor.template operator() < VectorValueTypeMap<i> > ();
+        }
+    }
+}*/
 
 
 enum class IndexAlgoType : std::uint8_t

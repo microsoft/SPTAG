@@ -222,29 +222,23 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 		size_t vectorSize;
 		SizeType vectorDimension = 0;
 		std::vector<BasicResult> servers;
-		switch (context->GetSettings()->m_valueType)
-		{
-#define DefineVectorValueType(Name, Type) \
-        case VectorValueType::Name: \
-            if (!queryParser.GetVectorElements().empty()) { \
-			    Service::ConvertVectorFromString<Type>(queryParser.GetVectorElements(), vector, vectorDimension); \
-			} else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0) { \
-                vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length())); \
-                Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(), vectorSize); \
-                vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType)); \
-            } \
-            for (int i = 0; i < context->GetCenters()->Count(); i++) { \
-                servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance((Type*)vector.Data(), \
-                    (Type*)context->GetCenters()->GetVector(i), vectorDimension, context->GetSettings()->m_distMethod))); \
-			} \
-            break; \
+        VectorValueTypeDispatch(context->GetSettings()->m_valueType, [](auto t) 
+            {
+                using Type = decltype(t);
+                if (!queryParser.GetVectorElements().empty()) {
+                        Service::ConvertVectorFromString<Type>(queryParser.GetVectorElements(), vector, vectorDimension); 
+                }
+                else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0) {
+                        vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length())); 
+                        Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(), vectorSize); 
+                        vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType)); 
+                } 
+                    for (int i = 0; i < context->GetCenters()->Count(); i++) {
+                            servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance((Type*)vector.Data(), 
+                                (Type*)context->GetCenters()->GetVector(i), vectorDimension, context->GetSettings()->m_distMethod))); 
+                    } 
+            });
 
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-		default:
-			break;
-		}
 		std::sort(servers.begin(), servers.end(), [](const BasicResult& a, const BasicResult& b) { return a.Dist < b.Dist; });
 		for (int i = 0; i < context->GetSettings()->m_topK; i++) {
 			auto& server = context->GetRemoteServers().at(servers[i].VID);

@@ -101,16 +101,9 @@ SizeType BasicVectorSet::PerVectorDataSize() const
 void
 BasicVectorSet::Normalize(int p_threads) 
 {
-    switch (m_valueType)
-    {
-#define DefineVectorValueType(Name, Type) \
-case SPTAG::VectorValueType::Name: \
-SPTAG::COMMON::Utils::BatchNormalize<Type>(reinterpret_cast<Type *>(m_data.Data()), m_vectorCount, m_dimension, SPTAG::COMMON::Utils::GetBase<Type>(), p_threads); \
-break; \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-    default:
-        break;
-    }
+    VectorValueTypeDispatch(m_valueType, [&](auto t)
+        {
+            using Type = decltype(t);
+            SPTAG::COMMON::Utils::BatchNormalize<Type>(reinterpret_cast<Type*>(m_data.Data()), m_vectorCount, m_dimension, SPTAG::COMMON::Utils::GetBase<Type>(), p_threads);
+        });
 }

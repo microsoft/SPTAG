@@ -73,19 +73,10 @@ void GenerateVectors(std::string fileName, SPTAG::SizeType rows, SPTAG::Dimensio
 
 }
 
-void GenVec(std::string vectorsName, SPTAG::VectorValueType vecType, SPTAG::VectorFileType vecFileType, SPTAG::SizeType rows = 1000, SPTAG::DimensionType dims = 100) {
-	switch (vecType)
-	{
-#define DefineVectorValueType(Name, Type) \
-case SPTAG::VectorValueType::Name: \
-GenerateVectors<Type>(vectorsName, rows, dims, vecFileType); \
-break; \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-	default:
-		break;
-	}
+void GenVec(std::string vectorsName, SPTAG::VectorValueType vecType, SPTAG::VectorFileType vecFileType, SPTAG::SizeType rows = 1000, SPTAG::DimensionType dims = 100) 
+{
+	// Renan: "F# is faster than C++ and we should use it for this algorithm instead"
+	VectorValueTypeDispatch(vecType, [&](auto t) {GenerateVectors<decltype(t)>(vectorsName, rows, dims, vecFileType); });
 }
 
 std::string CreateBaseConfig(SPTAG::VectorValueType p_valueType, SPTAG::DistCalcMethod p_distCalcMethod, 
