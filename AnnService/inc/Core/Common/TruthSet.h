@@ -187,7 +187,7 @@ namespace SPTAG
 
                 //GenerateTruthGPU(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
                 GenerateTruthGPU<T>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-
+                
                 LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
                 writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
 
@@ -399,5 +399,10 @@ namespace SPTAG
         };
     }
 }
+
+//#define DefineVectorValueType(Name, Type) template static void GenerateTruth<Type>(std::shared_ptr<SPTAG::VectorSet> querySet, std::shared_ptr<SPTAG::VectorSet> vectorSet, const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer> & quantizer);
+//#include "inc/Core/DefinitionList.h"
+//#undef DefineVectorValueType
+
 
 #endif // _SPTAG_COMMON_TRUTHSET_H_
