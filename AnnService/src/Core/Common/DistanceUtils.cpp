@@ -193,6 +193,8 @@ inline __m256 _mm256_sqdf_ps(__m256 X, __m256 Y)
     return _mm256_mul_ps(d, d);
 }
 
+// Do not use intrinsics not supported by old MS compiler version
+#if (!defined _MSC_VER) || (_MSC_VER >= 1920)
 inline __m512 _mm512_mul_epi8(__m512i X, __m512i Y)
 {
     __m512i zero = _mm512_setzero_si512();
@@ -290,6 +292,7 @@ inline __m512 _mm512_sqdf_ps(__m512 X, __m512 Y)
     __m512 d = _mm512_sub_ps(X, Y);
     return _mm512_mul_ps(d, d);
 }
+#endif
 
 
 #define REPEAT(type, ctype, delta, load, exec, acc, result) \
@@ -360,6 +363,9 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::int8_t* pX, const std::int
 
 float DistanceUtils::ComputeL2Distance_AVX512(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::int8_t* pEnd64 = pX + ((length >> 6) << 6);
     const std::int8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::int8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -390,6 +396,7 @@ float DistanceUtils::ComputeL2Distance_AVX512(const std::int8_t* pX, const std::
         float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
     }
     return diff;
+#endif
 }
 
 float DistanceUtils::ComputeL2Distance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
@@ -452,6 +459,9 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::uint8_t* pX, const std::ui
 
 float DistanceUtils::ComputeL2Distance_AVX512(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::uint8_t* pEnd64 = pX + ((length >> 6) << 6);
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -482,6 +492,7 @@ float DistanceUtils::ComputeL2Distance_AVX512(const std::uint8_t* pX, const std:
         float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
     }
     return diff;
+#endif
 }
 
 float DistanceUtils::ComputeL2Distance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
@@ -546,6 +557,9 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::int16_t* pX, const std::in
 
 float DistanceUtils::ComputeL2Distance_AVX512(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::int16_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::int16_t* pEnd16 = pX + ((length >> 4) << 4);
     const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
@@ -577,6 +591,7 @@ float DistanceUtils::ComputeL2Distance_AVX512(const std::int16_t* pX, const std:
         float c1 = ((float)(*pX++) - (float)(*pY++)); diff += c1 * c1;
     }
     return diff;
+#endif
 }
 
 float DistanceUtils::ComputeL2Distance_SSE(const float* pX, const float* pY, DimensionType length)
@@ -632,6 +647,9 @@ float DistanceUtils::ComputeL2Distance_AVX(const float* pX, const float* pY, Dim
 
 float DistanceUtils::ComputeL2Distance_AVX512(const float* pX, const float* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const float* pEnd16 = pX + ((length >> 4) << 4);
     const float* pEnd4 = pX + ((length >> 2) << 2);
     const float* pEnd1 = pX + length;
@@ -653,6 +671,7 @@ float DistanceUtils::ComputeL2Distance_AVX512(const float* pX, const float* pY, 
         float c1 = (*pX++) - (*pY++); diff += c1 * c1;
     }
     return diff;
+#endif
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
@@ -713,6 +732,9 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::int8_t* pX, const std:
 
 float DistanceUtils::ComputeCosineDistance_AVX512(const std::int8_t* pX, const std::int8_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::int8_t* pEnd64 = pX + ((length >> 6) << 6);
     const std::int8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::int8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -742,6 +764,7 @@ float DistanceUtils::ComputeCosineDistance_AVX512(const std::int8_t* pX, const s
     }
     while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
     return 16129 - diff;
+#endif
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
@@ -802,6 +825,9 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::uint8_t* pX, const std
 
 float DistanceUtils::ComputeCosineDistance_AVX512(const std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::uint8_t* pEnd64 = pX + ((length >> 6) << 6);
     const std::uint8_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
@@ -831,6 +857,7 @@ float DistanceUtils::ComputeCosineDistance_AVX512(const std::uint8_t* pX, const 
     }
     while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
     return 65025 - diff;
+#endif
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
@@ -893,6 +920,9 @@ float DistanceUtils::ComputeCosineDistance_AVX(const std::int16_t* pX, const std
 
 float DistanceUtils::ComputeCosineDistance_AVX512(const std::int16_t* pX, const std::int16_t* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const std::int16_t* pEnd32 = pX + ((length >> 5) << 5);
     const std::int16_t* pEnd16 = pX + ((length >> 4) << 4);
     const std::int16_t* pEnd8 = pX + ((length >> 3) << 3);
@@ -923,6 +953,7 @@ float DistanceUtils::ComputeCosineDistance_AVX512(const std::int16_t* pX, const 
 
     while (pX < pEnd1) diff += ((float)(*pX++) * (float)(*pY++));
     return  1073676289 - diff;
+#endif
 }
 
 float DistanceUtils::ComputeCosineDistance_SSE(const float* pX, const float* pY, DimensionType length)
@@ -974,6 +1005,9 @@ float DistanceUtils::ComputeCosineDistance_AVX(const float* pX, const float* pY,
 
 float DistanceUtils::ComputeCosineDistance_AVX512(const float* pX, const float* pY, DimensionType length)
 {
+#if (defined _MSC_VER) && (_MSC_VER < 1920)
+    throw std::exception("AVX-512 not supported");
+#else
     const float* pEnd16 = pX + ((length >> 4) << 4);
     const float* pEnd4 = pX + ((length >> 2) << 2);
     const float* pEnd1 = pX + length;
@@ -993,4 +1027,5 @@ float DistanceUtils::ComputeCosineDistance_AVX512(const float* pX, const float* 
 
     while (pX < pEnd1) diff += (*pX++) * (*pY++);
     return 1 - diff;
+#endif
 }
