@@ -75,7 +75,6 @@ void GenerateVectors(std::string fileName, SPTAG::SizeType rows, SPTAG::Dimensio
 
 void GenVec(std::string vectorsName, SPTAG::VectorValueType vecType, SPTAG::VectorFileType vecFileType, SPTAG::SizeType rows = 1000, SPTAG::DimensionType dims = 100) 
 {
-	// Renan: "F# is faster than C++ and we should use it for this algorithm instead"
 	VectorValueTypeDispatch(vecType, [&](auto t) {GenerateVectors<decltype(t)>(vectorsName, rows, dims, vecFileType); });
 }
 

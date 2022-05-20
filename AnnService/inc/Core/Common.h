@@ -184,6 +184,7 @@ void VectorValueTypeDispatch(VectorValueType vectorType, F&& f, std::index_seque
 template <typename F>
 void VectorValueTypeDispatch(VectorValueType vectorType, F f)
 {
+    if (vectorType == VectorValueType::Undefined) throw std::exception("VectorValueTypeDispatch on Undefined type");
     constexpr auto VectorCount = std::tuple_size<VectorValueTypeTuple>::value;
     VectorValueTypeDispatch(vectorType, f, std::make_index_sequence<VectorCount>{});
 }

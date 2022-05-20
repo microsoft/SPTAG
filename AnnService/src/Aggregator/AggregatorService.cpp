@@ -222,7 +222,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 		size_t vectorSize;
 		SizeType vectorDimension = 0;
 		std::vector<BasicResult> servers;
-        VectorValueTypeDispatch(context->GetSettings()->m_valueType, [](auto t) 
+        VectorValueTypeDispatch(context->GetSettings()->m_valueType, [&](auto t) 
             {
                 using Type = decltype(t);
                 if (!queryParser.GetVectorElements().empty()) {
