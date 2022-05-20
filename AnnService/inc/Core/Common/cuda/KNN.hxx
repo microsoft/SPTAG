@@ -1065,9 +1065,75 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 * Define the function in Kernel.cu like this
 __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes);
 ***********************************************************************************/
+/************************************************************************************
+ * Brute-force K nearest neighbor kernel using shared memory (transposed to avoid conflicts)
+ * Each thread keeps a heap of K elements to determine K smallest distances found
+ * VAR data - linear matrix fo data
+ * VAR queries - linear matrix of query vectors
+ * RET results - linear vector of K pairs for each query vector
+************************************************************************************/
 template<typename T, int Dim, int KVAL, int BLOCK_DIM, typename SUMTYPE>
-__global__ void query_KNN(Point<T, SUMTYPE, Dim>* querySet, Point<T, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results);
+__global__ void query_KNN(Point<T, SUMTYPE, Dim>* querySet, Point<T, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results) {
+    // Memory for a heap for each thread
+    __shared__ ThreadHeap<T, SUMTYPE, Dim, BLOCK_DIM> heapMem;
 
+    heapMem.initialize(results);
+
+    DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
+
+    // Memory used to store a query point for each thread
+    __shared__ T transpose_mem[Dim * BLOCK_DIM];
+    TransposePoint<T, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
+    query.setMem(&transpose_mem[threadIdx.x]);
+
+#if LOG_LEVEL >= 5
+    int dSize = sizeof(T);
+#endif
+    DLOG_DEBUG("Shared memory per block - Queries:%d, Heaps:%d\n", Dim * BLOCK_DIM * dSize, BLOCK_DIM * KVAL * 4);
+
+    heapMem[threadIdx.x].initialize();
+
+    SUMTYPE dist;
+    // Loop through all query points
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
+
+        heapMem[threadIdx.x].initialize();
+        extra.dist = INFTY;
+        query.loadPoint(data[i]); // Load into shared memory
+
+        // Compare with all points in the dataset
+        for (int j = 0; j < dataSize; j++) {
+#if METRIC == 1 
+            dist = query.cosine(&data[j]);
+#else
+            dist = query.l2(&data[j]);
+#endif
+            if (dist < extra.dist) {
+                if (dist < heapMem[threadIdx.x].top()) {
+                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
+                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
+                    //When recording the index, remember the off_set to discriminate different subvectorSets
+                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
+                }
+                else {
+                    extra.dist = dist;
+                    extra.idx = j + idx_offset;
+                }
+            }
+        }
+
+        // Write KNN to result list in sorted order
+        results[(i + 1) * KVAL - 1].idx = extra.idx;
+        results[(i + 1) * KVAL - 1].dist = extra.dist;
+        for (int j = KVAL - 2; j >= 0; j--) {
+            results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
+            results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
+            heapMem[threadIdx.x].vals[0].dist = -1;
+            heapMem[threadIdx.x].heapify();
+
+        }
+    }
+}
 
 template <typename T>
 __global__ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
