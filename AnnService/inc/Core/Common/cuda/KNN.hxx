@@ -274,7 +274,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
       candidate_vec[i] = 0;       \
     }                             \
     float (*dist_comp)(T*,T*);    \
-      dist_comp = &cosine<T,size>; \
+    dist_comp = &dist<T,size, (int)metric>;  \
     findRNG<T,SUMTYPE,size>(ps, tptree, KVAL, results, min_id, max_id, query, candidate_vec, threadList, dist_comp); \
     return; \
   } 
@@ -289,8 +289,8 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
   } 
 
 
-template<typename T, typename SUMTYPE>
-__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, DistMetric metric, size_t min_id, size_t max_id, int dim, GPU_PQQuantizer* quantizer) {
+template<typename T, typename SUMTYPE, int metric>
+__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_PQQuantizer* quantizer) {
 
   extern __shared__ char sharememory[];
 
@@ -310,8 +310,8 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 }
 
 
-template<typename DTYPE, typename SUMTYPE>
-void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, int metric, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer) 
+template<typename DTYPE, typename SUMTYPE, int metric>
+void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer) 
 {
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
@@ -335,10 +335,10 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
     for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
       CUDA_CHECK(cudaSetDevice(gpuNum));
       // Compute the STRICT RNG for each leaf node
-      findRNG_selector<DTYPE, SUMTYPE>
+      findRNG_selector<DTYPE, SUMTYPE, metric>
                     <<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>)*KVAL*THREADS>>>
                     (d_pointset[gpuNum], d_tptrees[gpuNum], KVAL, d_results[gpuNum], 
-                    (DistMetric)metric, batch_min[gpuNum], batch_max[gpuNum], dim, quantizer);
+                    batch_min[gpuNum], batch_max[gpuNum], dim, quantizer);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -463,7 +463,12 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
     CUDA_CHECK(cudaDeviceSynchronize());
 
     /***** Run batch on GPU (all TPT iters) *****/
-    run_TPT_batch_multigpu<DTYPE, SUMTYPE>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, metric, d_pointset, dim, d_quantizer);
+    if(metric == (int)DistMetric::Cosine) {
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+    }
+    else {
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::L2>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+    }
 
     auto before_copy = std::chrono::high_resolution_clock::now();
     for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {

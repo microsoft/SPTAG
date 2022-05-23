@@ -56,7 +56,6 @@ __forceinline__ __device__ float cosine(T* a, T* b) {
     for(int i=0; i<Dim; i+=2) {
       total[0] += ((float)((float)a[i] * (float)b[i]));
       total[1] += ((float)((float)a[i+1] * (float)b[i+1]));
-//      if(i >= dim) break;
     }
     return 1-(total[0]+total[1]);
 }
@@ -70,6 +69,16 @@ __forceinline__ __device__ float l2(T* aVec, T* bVec) {
     total[1] += (aVec[i+1]-bVec[i+1])*(aVec[i+1]-bVec[i+1]);
   }
   return total[0]+total[1];
+}
+
+template<typename T, int Dim, int metric>
+__forceinline__ __device__ float dist(T* a, T* b) {
+  if(metric == (int)DistMetric::Cosine) {
+    return cosine<T,Dim>(a, b);
+  }
+  else {
+    return l2<T,Dim>(a,b);
+  }
 }
 
 
@@ -113,7 +122,6 @@ __host__ void copyRawDataToMultiGPU(SPTAG::VectorIndex* index, T** d_data, size_
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
       CUDA_CHECK(cudaSetDevice(gpuNum));
       CUDA_CHECK(cudaMemcpy(d_data[gpuNum]+(batch_start*dim), temp, copy_size*dim * sizeof(T), cudaMemcpyHostToDevice));
-//      CUDA_CHECK(cudaMemcpyAsync(d_data[gpuNum]+(batch_start*dim), temp, copy_size*dim * sizeof(T), cudaMemcpyHostToDevice, streams[gpuNum]));
     }
   }
   for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
