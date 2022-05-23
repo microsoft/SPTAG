@@ -1,6 +1,6 @@
-#include "Distance.hxx"
-#include "KNN.hxx"
-#include "params.h"
+#include "../Distance.hxx"
+#include "../KNN.hxx"
+#include "../params.h"
 #include <cstdlib>
 #include <chrono>
 
@@ -32,6 +32,7 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
   float max_dist = INFTY<float>();
   int read_id, write_id;
 
+  float (*dist_comp)(T*,T*) = cosine<T,Dim>;
 
   for(size_t i=blockIdx.x*blockDim.x + threadIdx.x; i<rows; i+=blockDim.x*gridDim.x) {
     for(int j=0; j<Dim; ++j) {
@@ -45,12 +46,12 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
     for(size_t j=0; j<rows; ++j) {
       good = true;
       candidate.idx = j;
-      candidate.dist = cosine_sep<T,Dim>(query, ps->getVec(i));
+      candidate.dist = dist_comp(query, ps->getVec(i));
 
       
       if(candidate.dist < max_dist) {
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
-          if(violatesRNG_PS<T,SUMTYPE,Dim>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist)) {
+          if(violatesRNG<T,SUMTYPE>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
             good = false;
           }
         }
@@ -59,7 +60,7 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
           threadList[read_id] = candidate;
           read_id++;
           for(write_id = read_id; read_id < K && threadList[read_id].idx != -1; read_id++) {
-            if(!violatesRNG_PS<T, SUMTYPE,Dim>(ps->getVec(threadList[read_id].idx), candidate_vec, threadList[read_id].dist)) {
+            if(!violatesRNG<T, SUMTYPE>(ps->getVec(threadList[read_id].idx), candidate_vec, threadList[read_id].dist, dist_comp)) {
               if(read_id == write_id) {
                 temp = threadList[read_id];
                 threadList[write_id] = target;
