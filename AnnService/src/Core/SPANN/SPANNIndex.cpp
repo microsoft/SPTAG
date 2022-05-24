@@ -229,7 +229,7 @@ namespace SPTAG
                 }
 
                 p_queryResults->Reverse();
-                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr, m_options.m_enableDataCompression);
+                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr, m_options.m_enableDeltaEncoding, m_options.m_enableDataCompression);
                 p_queryResults->SortResult();
                 m_workSpacePool->Return(workSpace);
             }
@@ -286,7 +286,7 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, m_options.m_enableDataCompression, truth, found);
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, m_options.m_enableDeltaEncoding, m_options.m_enableDataCompression, truth, found);
             }
             
             m_workSpacePool->Return(auto_ws);

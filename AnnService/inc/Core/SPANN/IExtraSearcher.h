@@ -166,6 +166,7 @@ namespace SPTAG {
                 QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
                 SearchStats* p_stats,
+                bool m_enableDeltaEncoding = false,
                 bool m_enableDataCompression = false,
                 std::set<int>* truth = nullptr,
                 std::map<int, std::set<int>>* found = nullptr) = 0;
