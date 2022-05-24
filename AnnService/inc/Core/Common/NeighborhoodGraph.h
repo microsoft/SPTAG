@@ -179,7 +179,7 @@ break;
                         localindices[i] = i;
                         if (quantizer_exists)
                         {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first+i]), indices_vectors->GetVector(i));
+                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + i]), indices_vectors->GetVector(i));
                         }
                         else
                         {
@@ -280,8 +280,8 @@ break;
                             }
                         }
                     }
-                    SizeType i = first;
-                    SizeType j = last;
+                    SizeType i = 0;
+                    SizeType j = count - 1;
                     // decide which child one point belongs
                     while (i <= j)
                     {
@@ -298,15 +298,19 @@ break;
                         }
                         else
                         {
-                            std::swap(indices[i], indices[j]);
+                            std::swap(indices[first + i], indices[first + j]);
                             std::swap(localindices[i], localindices[j]);
                             j--;
                         }
                     }
                     // if all the points in the node are equal,equally split the node into 2
-                    if ((i == first) || (i == last + 1))
+                    if ((i == 0) || (i == count))
                     {
                         i = (first + last + 1) / 2;
+                    }
+                    else
+                    {
+                        i = i + first;
                     }
 
                     Mean.clear();
