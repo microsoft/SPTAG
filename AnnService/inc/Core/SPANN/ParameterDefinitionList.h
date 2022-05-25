@@ -79,6 +79,7 @@ DefineSSDParameter(m_buildSsdIndex, bool, false, "BuildSsdIndex")
 DefineSSDParameter(m_iSSDNumberOfThreads, int, 16, "NumberOfThreads")
 DefineSSDParameter(m_enableDeltaEncoding, bool, false, "EnableDeltaEncoding")
 DefineSSDParameter(m_enableDataCompression, bool, false, "EnableDataCompression")
+DefineSSDParameter(m_zstdCompressLevel, int, 0, "ZstdCompressLevel")
 
 // Building
 DefineSSDParameter(m_internalResultNum, int, 64, "InternalResultNum")

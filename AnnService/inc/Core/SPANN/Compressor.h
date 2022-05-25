@@ -13,9 +13,9 @@ namespace SPTAG {
         class Compressor
         {
         public:
-            Compressor()
+            Compressor(int level=0)
             {
-                compress_level = 1;
+                compress_level = level;
             }
 
             virtual ~Compressor(){}
@@ -26,7 +26,7 @@ namespace SPTAG {
                 std::string buffer{};
                 buffer.resize(est_comp_size); // TODO: reuse buffer
                 size_t compressed_size = ZSTD_compress((void*)buffer.data(), est_comp_size,
-                    src.data(), src.size(), 1); // TODO: change compress level
+                    src.data(), src.size(), compress_level);
                 buffer.resize(compressed_size);
                 buffer.shrink_to_fit();
 

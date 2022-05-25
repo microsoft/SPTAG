@@ -156,6 +156,7 @@ namespace SPTAG
 #endif
 
                 bool oneContext = (m_indexFiles.size() == 1);
+                std::unique_ptr<Compressor> m_pCompressor = std::make_unique<Compressor>(); // no need compress level info for decompress
                 for (uint32_t pi = 0; pi < postingListCount; ++pi)
                 {
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
@@ -192,9 +193,8 @@ namespace SPTAG
 
 #ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
-                    std::shared_ptr<Compressor> m_pCompressor; //TODO: reuse
 
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, m_enableDeltaEncoding, curPostingID, m_enableDataCompression, m_pCompressor](Helper::AsyncReadRequest* request)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, m_enableDeltaEncoding, curPostingID, m_enableDataCompression, &m_pCompressor](Helper::AsyncReadRequest* request)
                     {
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
@@ -550,9 +550,10 @@ namespace SPTAG
                 if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
                 
                 // get compressed size of each posting list
-                LOG(Helper::LogLevel::LL_Info, "EnableDeltaEncoding: %s\n", p_opt.m_enableDataCompression ? "true" : "false");
                 LOG(Helper::LogLevel::LL_Info, "EnableDeltaEncoding: %s\n", p_opt.m_enableDeltaEncoding ? "true" : "false");
+                LOG(Helper::LogLevel::LL_Info, "EnableDataCompression: %s, ZstdCompressLevel: %d\n", p_opt.m_enableDataCompression ? "true" : "false", p_opt.m_zstdCompressLevel);
                 std::vector<size_t> postingListBytes(headVectorIDS.size());
+                std::unique_ptr<Compressor> m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel);
                 if (p_opt.m_enableDataCompression)
                 {
                     LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
@@ -612,6 +613,7 @@ namespace SPTAG
                     OutputSSDIndexFile((i == 0) ? outputFile : outputFile + "_" + std::to_string(i),
                         p_opt.m_enableDeltaEncoding,
                         p_opt.m_enableDataCompression,
+                        m_pCompressor,
                         vectorInfoSize,
                         curPostingListSizes,
                         curPostingListBytes,
@@ -864,6 +866,7 @@ namespace SPTAG
             void OutputSSDIndexFile(const std::string& p_outputFile,
                 bool p_enableDeltaEncoding,
                 bool p_enableDataCompression,
+                const std::unique_ptr<Compressor>& m_pCompressor,
                 size_t p_spacePerVector,
                 const std::vector<int>& p_postingListSizes,
                 const std::vector<size_t>& p_postingListBytes,
@@ -1104,8 +1107,6 @@ namespace SPTAG
             std::vector<std::vector<ListInfo>> m_listInfos;
 
             std::vector<std::shared_ptr<Helper::DiskIO>> m_indexFiles;
-
-            std::unique_ptr<Compressor> m_pCompressor; // TOOD: not initialized
 
             int m_vectorInfoSize = 0;
 
