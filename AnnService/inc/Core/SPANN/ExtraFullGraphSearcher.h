@@ -344,6 +344,7 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                         p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
+                        LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
 
                         for (SizeType j = start; j < end; j++) {
                             replicaCount[j] = 0;
