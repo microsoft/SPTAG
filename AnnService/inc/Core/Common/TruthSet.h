@@ -227,7 +227,7 @@ namespace SPTAG
                 std::unique_ptr<bool[]> visited(new bool[K]);
                 for (SizeType i = 0; i < NumQuerys; i++)
                 {
-                    int minpos = K - 1;
+                    int minpos = K;
                     memset(visited.get(), 0, K * sizeof(bool));
                     for (SizeType id : truth[i])
                     {
@@ -262,7 +262,7 @@ namespace SPTAG
                     meanrecall += thisrecall[i];
                     if (thisrecall[i] < minrecall) minrecall = thisrecall[i];
                     if (thisrecall[i] > maxrecall) maxrecall = thisrecall[i];
-                    meanmrr += 1.0f / (minpos + 1);
+                    if (minpos < K) meanmrr += 1.0f / (minpos + 1);
 
                     if (debug) {
                         std::string ll("recall:" + std::to_string(thisrecall[i]) + "\ngroundtruth:");

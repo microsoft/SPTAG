@@ -32,34 +32,20 @@ namespace SPTAG
             return true;
         }
 
-        template <>
-        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
-        {
-            m_pQuantizer = quantizer;
-            if (m_pQuantizer)
-            {
-                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
-            }
-            else
-            {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
-            }  
-            if (m_index)
-            {
-                m_index->SetQuantizer(quantizer);
-            }
-        }
-
         template <typename T>
         void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
         {
             m_pQuantizer = quantizer;
-            if (quantizer)
+            if (m_pQuantizer)
             {
-                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
             }
+            else
+            {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
+            }  
             if (m_index)
             {
                 m_index->SetQuantizer(quantizer);
@@ -80,6 +66,12 @@ namespace SPTAG
                     SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
                 }
             }
+
+            if (m_pQuantizer)
+            {
+                m_pQuantizer->SetEnableADC(m_options.m_enableADC);
+            }
+
             return ErrorCode::Success;
         }
 

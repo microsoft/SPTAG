@@ -22,6 +22,8 @@ public:
         AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
         AddOptionalOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
         AddOptionalOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
+
+        // We also use this to determine batch size (max number of vectors to load at once)
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
         AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
@@ -115,22 +117,4 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     }
 
     return codebooks;
-}
-
-ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskIO> fp, const std::shared_ptr<COMMON::IQuantizer>& quantizer)
-{
-	SizeType cnt = vectors->Count();
-	DimensionType dim = quantizer->GetNumSubvectors();
-	SizeType qvec_size = quantizer->QuantizeSize();
-	IOBINARY(fp, WriteBinary, sizeof(SizeType), (char*)&cnt);
-	IOBINARY(fp, WriteBinary, sizeof(DimensionType), (char*)&dim);
-
-	uint8_t* qvec = (uint8_t*)ALIGN_ALLOC(qvec_size);
-	for (int i = 0; i < cnt; i++)
-	{
-		quantizer->QuantizeVector(vectors->GetVector(i), qvec);
-		IOBINARY(fp, WriteBinary, qvec_size, (char*)qvec);
-	}
-    ALIGN_FREE(qvec);
-	
 }

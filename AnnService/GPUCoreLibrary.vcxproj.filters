@@ -299,5 +299,8 @@
     <ClCompile Include="src\Core\Common\IQuantizer.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
+    <ClCompile Include="src\Helper\AsyncFileReader.cpp">
+      <Filter>Source Files\Helper</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

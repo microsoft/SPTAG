@@ -42,13 +42,13 @@ std::shared_ptr<VectorSetReader>
 VectorSetReader::CreateInstance(std::shared_ptr<ReaderOptions> p_options)
 {
     if (p_options->m_inputFileType == VectorFileType::DEFAULT) {
-        return std::shared_ptr<VectorSetReader>(new DefaultVectorReader(std::move(p_options)));
+        return std::make_shared<DefaultVectorReader>(p_options);
     }
     else if (p_options->m_inputFileType == VectorFileType::TXT) {
-        return std::shared_ptr<VectorSetReader>(new TxtVectorReader(std::move(p_options)));
+        return std::make_shared<TxtVectorReader>(p_options);
     }
     else if (p_options->m_inputFileType == VectorFileType::XVEC) {
-        return std::shared_ptr<VectorSetReader>(new XvecVectorReader(std::move(p_options)));
+        return std::make_shared<XvecVectorReader>(p_options);
     }
     return nullptr;
 }
