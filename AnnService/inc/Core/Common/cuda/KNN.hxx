@@ -262,7 +262,6 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
   } // End leaf node loop
 }
 
-#define MAX_SHAPE 1024
 
 #define RUN_KERNEL(size)          \
   if(dim <= size) {               \
@@ -288,6 +287,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
     return; \
   } 
 
+#define MAX_SHAPE 1024
 
 template<typename T, typename SUMTYPE, int metric>
 __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_PQQuantizer* quantizer) {
@@ -297,12 +297,12 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
   if(quantizer == NULL) {
 //    RUN_KERNEL(64);
     RUN_KERNEL(100);
-//    RUN_KERNEL(200);
+    RUN_KERNEL(200);
 //    RUN_KERNEL(MAX_SHAPE);
-    // TODO - Optimize version with even larger maximum dimension
   }
   else {
-    RUN_KERNEL_QUANTIZED(20);
+    RUN_KERNEL_QUANTIZED(25);
+    RUN_KERNEL_QUANTIZED(50);
 //    RUN_KERNEL_QUANTIZED(64);
 //    RUN_KERNEL_QUANTIZED(100);
   }

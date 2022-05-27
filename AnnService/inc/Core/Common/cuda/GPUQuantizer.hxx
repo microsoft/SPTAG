@@ -91,15 +91,16 @@ class GPU_PQQuantizer {
 
     // TODO - Optimize quantized distance comparator
     __forceinline__ __device__ float dist(uint8_t* pX, uint8_t* pY) {
-      float out = 0;
-      for(int i = 0; i < m_NumSubvectors; ++i) {
-        out += m_DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+      float totals[2]; totals[0]=0; totals[1]=0;
+      for(int i = 0; i < m_NumSubvectors; i+=2) {
+        totals[0] += m_DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+        totals[1] += m_DistanceTables[m_DistIndexCalc(i+1, pX[i+1], pY[i+1])];
       } 
 
 //      if(metric == DistMetric::Cosine) {
 //        out = 1 - out;
 //      }
-      return 1 - out;
+      return 1 - (totals[0]+totals[1]);
     }
 
     __device__ bool violatesRNG(uint8_t* a, uint8_t* b, float distance) {
