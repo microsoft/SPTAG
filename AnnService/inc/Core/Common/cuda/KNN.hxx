@@ -837,15 +837,16 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, size_t dataSize, size_t KVAL
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum));
 
-    LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s\n", gpuNum, prop.name);
-
     size_t freeMem, totalMem;
     CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+
+    LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s free:%lu MB, total:%lu MB prop.total:%lu MB\n", gpuNum, prop.name, freeMem / 1000000, totalMem / 1000000, prop.totalGlobalMem / 1000000);
 
     // Auto-compute batch size based on available memory on the GPU
     size_t dataPointSize = dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>);
     size_t treeSize = 20*dataSize;
-    size_t resMemAvail = (freeMem*0.9) - (dataPointSize+treeSize); // Only use 90% of total memory to be safe
+    size_t resMemAvail = 0;
+    if (freeMem * 0.9 > dataPointSize + treeSize) resMemAvail = (freeMem * 0.9) - (dataPointSize + treeSize); // Only use 90% of total memory to be safe
     int maxEltsPerBatch = resMemAvail / (sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>) + KVAL*sizeof(int));
     batchSize[gpuNum] = min(maxEltsPerBatch, (int)(resPerGPU[gpuNum]));
 

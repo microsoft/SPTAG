@@ -8,7 +8,7 @@ using namespace SPTAG;
 using namespace SPTAG::Helper;
 
 DefaultVectorReader::DefaultVectorReader(std::shared_ptr<ReaderOptions> p_options)
-    : VectorSetReader(std::move(p_options))
+    : VectorSetReader(p_options)
 {
     m_vectorOutput = "";
     m_metadataConentOutput = "";
@@ -67,10 +67,10 @@ DefaultVectorReader::GetVectorSet(SizeType start, SizeType end) const
             exit(1);
         }
     }
-    return std::shared_ptr<VectorSet>(new BasicVectorSet(vectorSet,
-                                                         m_options->m_inputValueType,
-                                                         col,
-                                                         end - start));
+    return std::make_shared<BasicVectorSet>(vectorSet,
+                                            m_options->m_inputValueType,
+                                            col,
+                                            end - start);
 }
 
 
