@@ -49,7 +49,6 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
     threadList[i].dist = INFTY<float>();
   }
 
-//  Point<T,SUMTYPE,Dim> query;
   size_t queryId;
 
   DistPair<float> target;
@@ -140,7 +139,6 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
         }
       }
       for(size_t j=0; j<KVAL; j++) {
-//        results[(size_t)(query.id-min_id)*KVAL+j] = threadList[j].idx;
         results[(size_t)(queryId-min_id)*KVAL+j] = threadList[j].idx;
       }
     } // End if within batch

@@ -153,7 +153,10 @@ __global__ void compute_group_sizes(QueryGroup* groups, TPtree* tptree, PointSet
   int leafId;
   
   for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
-    query = queries->getVec(qidx);
+    for(int j=0; j<queries->dim;++j) {
+      query[j] = queries->getVec(qidx)[j];
+    }
+//    query = queries->getVec(qidx);
     leafId = searchForLeaf<T>(tptree, query);
     atomicAdd(&(groups->sizes[leafId]), 1);   
   }
@@ -172,7 +175,9 @@ __global__ void assign_queries_to_group(QueryGroup* groups, TPtree* tptree, Poin
   int idx_in_leaf;
   
   for(int qidx = blockDim.x*blockIdx.x + threadIdx.x; qidx < N; qidx += blockDim.x*gridDim.x) {
-    query = queries->getVec(qidx);
+    for(int j=0; j<queries->dim;++j) {
+      query[j] = queries->getVec(qidx)[j];
+    }
     leafId = searchForLeaf<T>(tptree, query);
     idx_in_leaf = atomicAdd(&(groups->sizes[leafId]), 1);   
     groups->query_ids[groups->offsets[leafId]+idx_in_leaf] = qidx;
@@ -393,9 +398,9 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
         LOG(SPTAG::Helper::LogLevel::LL_Debug, "Allocating GPU memory: tail points:%lu MiB, head points:%lu MiB, results:%lu MiB, TPT:%lu MiB, Total:%lu MiB\n", (BATCH_SIZE[gpuNum]*sizeof(T))/1000000, (headRows*sizeof(T))/1000000, (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>))/1000000, (sizeof(TPtree))/1000000, ((BATCH_SIZE[gpuNum]+headRows)*sizeof(T) + (BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)) + (sizeof(TPtree)))/1000000);
 
         // Allocate needed memory on the GPU
-        CUDA_CHECK(cudaMallocManaged(&d_headRaw[gpuNum], headRows*dim*sizeof(T)));
+        CUDA_CHECK(cudaMalloc(&d_headRaw[gpuNum], headRows*dim*sizeof(T)));
         CUDA_CHECK(cudaMalloc(&d_headPS[gpuNum], sizeof(PointSet<T>)));
-        CUDA_CHECK(cudaMallocManaged(&d_tailRaw[gpuNum], BATCH_SIZE[gpuNum]*dim*sizeof(T)));
+        CUDA_CHECK(cudaMalloc(&d_tailRaw[gpuNum], BATCH_SIZE[gpuNum]*dim*sizeof(T)));
         CUDA_CHECK(cudaMalloc(&d_tailPS[gpuNum], sizeof(PointSet<T>)));
         CUDA_CHECK(cudaMalloc(&d_results[gpuNum], BATCH_SIZE[gpuNum]*RNG_SIZE*sizeof(DistPair<SUMTYPE>)));
 
