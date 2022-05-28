@@ -68,18 +68,14 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
   for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       queryId = tptree->leaf_points[leaf_offset + i];
+
       for(int j=0; j<Dim; ++j) {
         query[j] = ps->getVec(queryId)[j];
       }
-//      query = data[tptree->leaf_points[leaf_offset + i]];
-//__syncthreads();
-//printf("finished setting! first:%f, last:%f\n", query[0], query[Dim-1]);
-//__syncthreads();
 
       // Load results from previous iterations into shared memory heap
       // and re-compute distances since they are not stored in result set
       for(int j=0; j<KVAL; j++) {
-//        threadList[j].idx = results[(((long long int)(query.id-min_id))*(long long int)(KVAL))+j];
         threadList[j].idx = results[(((long long int)(queryId-min_id))*(long long int)(KVAL))+j];
         if(threadList[j].idx != -1) {
           threadList[j].dist = quantizer->dist(query, ps->getVec(threadList[j].idx));
@@ -360,7 +356,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
 
 /**** Variables ****/
   int metric = (int)index->GetDistCalcMethod();
-  bool use_q = (COMMON::DistanceUtils::Quantizer != NULL); // Using quantization?
+  bool use_q = (index->m_pQuantizer != NULL); // Using quantization?
   int levels = (int)std::log2(dataSize/leafSize); // TPT levels
   size_t rawSize = dataSize*dim;
   cudaError_t resultErr;
@@ -512,7 +508,6 @@ auto end_t = std::chrono::high_resolution_clock::now();
 template<typename T>
 void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int NUM_GPUS, int balanceFactor) {
 
-  int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
   size_t dataSize = (size_t)m_iGraphSize;
   int KVAL = m_iNeighborhoodSize;
@@ -538,9 +533,6 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
   }
   LOG(SPTAG::Helper::LogLevel::LL_Info, "Building Head graph with %d GPUs...\n", NUM_GPUS);
   LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
-
-  Point<T,SUMTYPE,Dim> query;
-  int neighbor;
 
 /**** Compute result batch sizes for each GPU ****/
   std::vector<size_t> batchSize(NUM_GPUS);
