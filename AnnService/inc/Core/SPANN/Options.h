@@ -81,6 +81,7 @@ namespace SPTAG {
             int m_iSSDNumberOfThreads;
             bool m_enableDeltaEncoding;
             bool m_enableDataCompression;
+            bool m_enableDictTraining;
             int m_zstdCompressLevel;
 
             // Building
