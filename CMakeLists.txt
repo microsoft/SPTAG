@@ -90,20 +90,11 @@ else()
     message (FATAL_ERROR "Could not find Boost >= 1.67!")
 endif()
 
-find_package(zstd)
-if (zstd_FOUND)
-    include_directories (${zstd_INCLUDE_DIR})
-    link_directories (${zstd_LIBRARY_DIR})
-    message (STATUS "Found zstd.")
-    message (STATUS "Include Path: ${zstd_INCLUDE_DIR}")
-    message (STATUS "Library Path: ${zstd_LIBRARY_DIR}")
-    message (STATUS "Library: ${zstd_LIBRARIES}")
-else()
-    message (FATAL_ERROR "Could not find zstd")
-endif()
-
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
+
+add_subdirectory (ThirdParty/zstd/build/cmake)
+
 add_subdirectory (AnnService)
 add_subdirectory (Test)
 add_subdirectory (GPUSupport)

@@ -14,9 +14,6 @@ COPY AnnService ./AnnService/
 COPY Test ./Test/
 COPY Wrappers ./Wrappers/
 COPY GPUSupport ./GPUSupport/
-
-# install zstd
 COPY ThirdParty ./ThirdParty/
-RUN cd ThirdParty/zstd/build/cmake && rm -rf builddir && mkdir builddir && cd builddir && cmake .. && make -j$(nproc) && make install
 
 RUN mkdir build && cd build && cmake .. && make -j$(nproc)
