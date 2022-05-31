@@ -601,7 +601,7 @@ namespace SPTAG
                     std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
                     LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
 
-                    // TODO: omp parallel
+#pragma omp parallel for schedule(dynamic)
                     for (int i = 0; i < postingListSize.size(); i++) {
                         // do not compress if no data
                         if (postingListSize[i] == 0) {
