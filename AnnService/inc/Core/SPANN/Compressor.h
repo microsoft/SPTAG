@@ -15,38 +15,7 @@ namespace SPTAG
     {
         class Compressor
         {
-        public:
-            Compressor(int level = 0, int bufferCapacity = 102400)
-            {
-                compress_level = level;
-                dictBufferCapacity = bufferCapacity;
-            }
-
-            virtual ~Compressor() {}
-
-            void TrainDict(std::string samplesBuffer, const size_t *samplesSizes, unsigned nbSamples)
-            {
-                dictBuffer.resize(dictBufferCapacity);
-                size_t dictSize = ZDICT_trainFromBuffer((void *)dictBuffer.data(), dictBufferCapacity, (void *)samplesBuffer.data(), &samplesSizes[0], nbSamples);
-                if (ZDICT_isError(dictSize))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "ZDICT_trainFromBuffer() failed: %s \n", ZDICT_getErrorName(dictSize));
-                    exit(1);
-                }
-                dictBuffer.resize(dictSize);
-                dictBuffer.shrink_to_fit();
-            }
-
-            std::string GetDictBuffer()
-            {
-                return dictBuffer;
-            }
-
-            void SetDictBuffer(std::string buffer)
-            {
-                dictBuffer = buffer;
-            }
-
+        private:
             void CreateCDict()
             {
                 cdict = ZSTD_createCDict((void *)dictBuffer.data(), dictBuffer.size(), compress_level);
@@ -152,7 +121,6 @@ namespace SPTAG
                     exit(1);
                 }
                 std::string dst{};
-                est_decomp_size *= 10;
                 dst.resize(est_decomp_size);
                 size_t const decomp_size = ZSTD_decompress(
                     (void *)dst.data(), est_decomp_size, src, srcSize);
@@ -165,6 +133,43 @@ namespace SPTAG
                 dst.shrink_to_fit();
 
                 return dst;
+            }
+
+        public:
+            Compressor(int level = 0, int bufferCapacity = 102400)
+            {
+                compress_level = level;
+                dictBufferCapacity = bufferCapacity;
+            }
+
+            virtual ~Compressor() {}
+
+            std::size_t TrainDict(std::string samplesBuffer, const size_t *samplesSizes, unsigned nbSamples)
+            {
+                dictBuffer.resize(dictBufferCapacity);
+                size_t dictSize = ZDICT_trainFromBuffer((void *)dictBuffer.data(), dictBufferCapacity, (void *)samplesBuffer.data(), &samplesSizes[0], nbSamples);
+                if (ZDICT_isError(dictSize))
+                {
+                    LOG(Helper::LogLevel::LL_Error, "ZDICT_trainFromBuffer() failed: %s \n", ZDICT_getErrorName(dictSize));
+                    exit(1);
+                }
+                dictBuffer.resize(dictSize);
+                dictBuffer.shrink_to_fit();
+
+                CreateCDict();
+
+                return dictSize;
+            }
+
+            std::string GetDictBuffer()
+            {
+                return dictBuffer;
+            }
+
+            void SetDictBuffer(std::string buffer)
+            {
+                dictBuffer = buffer;
+                CreateDDict();
             }
 
             std::string Compress(const std::string &src, const bool useDict)

@@ -83,6 +83,8 @@ namespace SPTAG {
             bool m_enablePostingListRearrange;
             bool m_enableDataCompression;
             bool m_enableDictTraining;
+            int m_minDictTraingBufferSize;
+            int m_dictBufferCapacity;
             int m_zstdCompressLevel;
 
             // Building

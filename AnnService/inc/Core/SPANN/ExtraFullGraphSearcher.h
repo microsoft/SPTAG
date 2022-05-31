@@ -572,7 +572,7 @@ namespace SPTAG
                 LOG(Helper::LogLevel::LL_Info, "EnableDeltaEncoding: %s\n", p_opt.m_enableDeltaEncoding ? "true" : "false");
                 LOG(Helper::LogLevel::LL_Info, "EnableDataCompression: %s, ZstdCompressLevel: %d\n", p_opt.m_enableDataCompression ? "true" : "false", p_opt.m_zstdCompressLevel);
                 std::vector<size_t> postingListBytes(headVectorIDS.size());
-                m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel);
+                m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
                 if (p_opt.m_enableDataCompression)
                 {
                     LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
@@ -582,9 +582,7 @@ namespace SPTAG
                     std::string samplesBuffer("");
                     std::vector<size_t> samplesSizes;
                     for (int i = 0; i < postingListSize.size(); i++) {
-                        // do not compress if no data
                         if (postingListSize[i] == 0) {
-                            postingListBytes[i] = 0;
                             continue;
                         }
                         ValueType* headVector = nullptr;
@@ -597,12 +595,11 @@ namespace SPTAG
 
                         samplesBuffer += postingListFullData;
                         samplesSizes.push_back(postingListFullData.size());
-                        if (samplesBuffer.size() > 102400) break;
+                        if (samplesBuffer.size() > p_opt.m_minDictTraingBufferSize) break;
                     }
                     LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
-                    m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
-                    m_pCompressor->CreateCDict();
-                    LOG(Helper::LogLevel::LL_Info, "Dictionary trained.\n");
+                    std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
+                    LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
 
                     // TODO: omp parallel
                     for (int i = 0; i < postingListSize.size(); i++) {
@@ -842,7 +839,6 @@ namespace SPTAG
                     }
                     m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
                     delete[] dictBuffer;
-                    m_pCompressor->CreateDDict();
                 }
 
                 LOG(Helper::LogLevel::LL_Info,

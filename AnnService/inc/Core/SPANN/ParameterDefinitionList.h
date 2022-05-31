@@ -81,6 +81,8 @@ DefineSSDParameter(m_enableDeltaEncoding, bool, false, "EnableDeltaEncoding")
 DefineSSDParameter(m_enablePostingListRearrange, bool, false, "EnablePostingListRearrange")
 DefineSSDParameter(m_enableDataCompression, bool, false, "EnableDataCompression")
 DefineSSDParameter(m_enableDictTraining, bool, true, "EnableDictTraining")
+DefineSSDParameter(m_minDictTraingBufferSize, int, 10240000, "MinDictTrainingBufferSize")
+DefineSSDParameter(m_dictBufferCapacity, int, 204800, "DictBufferCapacity")
 DefineSSDParameter(m_zstdCompressLevel, int, 0, "ZstdCompressLevel")
 
 // Building
