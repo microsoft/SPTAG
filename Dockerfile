@@ -16,4 +16,4 @@ COPY Wrappers ./Wrappers/
 COPY GPUSupport ./GPUSupport/
 COPY ThirdParty ./ThirdParty/
 
-RUN mkdir build && cd build && cmake .. && make -j$(nproc)
+RUN mkdir build && cd build && cmake .. && make -j$(nproc) && cd ..

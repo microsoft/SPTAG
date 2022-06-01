@@ -270,7 +270,7 @@ namespace SPTAG
                 }
 #endif
 #endif
-                if (truth) { // TODO: check truth
+                if (truth) {
                     for (uint32_t pi = 0; pi < postingListCount; ++pi)
                     {
                         auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
@@ -292,8 +292,6 @@ namespace SPTAG
                         for (size_t i = 0; i < listInfo->listEleCount; ++i) {
                             uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i; \
                             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID)); \
-                            LOG(Helper::LogLevel::LL_Info, "vectorID: %d\n", vectorID);
-
                             if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
                         }
                     }
