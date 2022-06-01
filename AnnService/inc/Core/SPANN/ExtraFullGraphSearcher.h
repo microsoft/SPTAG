@@ -278,21 +278,20 @@ namespace SPTAG
                         ListInfo* listInfo = &(m_listInfos[curPostingID / m_listPerFile][curPostingID % m_listPerFile]);
                         char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
 
-                        char* p_postingListFullData;
+                        char* p_postingListFullData = buffer + listInfo->pageOffset;
+                        std::string postingListFullData("");
                         if (m_enableDataCompression)
                         {
-                            std::string postingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, m_enableDictTraining);
-                            p_postingListFullData = const_cast<char*>(postingListFullData.c_str());
-                        }
-                        else
-                        {
-                            p_postingListFullData = buffer + listInfo->pageOffset;
+                            if (listInfo->listEleCount != 0)
+                            {
+                                postingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, m_enableDictTraining);
+                            }
+                            p_postingListFullData = &postingListFullData[0];
                         }
 
                         for (size_t i = 0; i < listInfo->listEleCount; ++i) {
-                            char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
-                            int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-
+                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i; \
+                            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID)); \
                             LOG(Helper::LogLevel::LL_Info, "vectorID: %d\n", vectorID);
 
                             if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
@@ -578,7 +577,6 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
 
                     LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
-                    unsigned nbSamples = 0;
                     std::string samplesBuffer("");
                     std::vector<size_t> samplesSizes;
                     for (int i = 0; i < postingListSize.size(); i++) {
