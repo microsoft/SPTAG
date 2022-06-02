@@ -50,25 +50,25 @@ template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_
 //template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
-template<typename T, int Dim>
-__forceinline__ __device__ float cosine(T* a, T* b) {
-    float total[2]={0,0};
+template<typename T, typename SUMTYPE, int Dim>
+__forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
+    SUMTYPE total[2]={0,0};
     for(int i=0; i<Dim; i+=2) {
-      total[0] += ((float)((float)a[i] * (float)b[i]));
-      total[1] += ((float)((float)a[i+1] * (float)b[i+1]));
+      total[0] += ((SUMTYPE)(a[i] * b[i]));
+      total[1] += ((SUMTYPE)(a[i+1] * b[i+1]));
     }
     return 1-(total[0]+total[1]);
 }
 
-
-template<typename T, int Dim>
-__forceinline__ __device__ float l2(T* aVec, T* bVec) {
-  float total[2]={0,0};
+template<typename T, typename SUMTYPE, int Dim>
+__forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
+  SUMTYPE total[2]={0,0};
   for(int i=0; i<Dim; i+=2) {
     total[0] += (aVec[i]-bVec[i])*(aVec[i]-bVec[i]);
     total[1] += (aVec[i+1]-bVec[i+1])*(aVec[i+1]-bVec[i+1]);
   }
   return total[0]+total[1];
+
 }
 
 template<typename T, int Dim, int metric>
@@ -86,6 +86,13 @@ template<typename T, typename SUMTYPE, int Dim>
 __forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist) {
   SUMTYPE between;
   between = cosine<T,Dim>(a, b);
+  return between <= dist;
+}
+
+template<typename T, typename SUMTYPE>
+__forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist, SUMTYPE (*comp)(T*, T*)) {
+  SUMTYPE between;
+  between = comp(a, b);
   return between <= dist;
 }
 

@@ -81,6 +81,9 @@ class GPU_PQQuantizer {
       if(metric == DistMetric::Cosine) {
         CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
       }
+      else {
+        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+      }
 
     }
 
@@ -100,7 +103,8 @@ class GPU_PQQuantizer {
 //      if(metric == DistMetric::Cosine) {
 //        out = 1 - out;
 //      }
-      return 1 - (totals[0]+totals[1]);
+//      return 1 - (totals[0]+totals[1]);
+      return totals[0]+totals[1];
     }
 
     __device__ bool violatesRNG(uint8_t* a, uint8_t* b, float distance) {

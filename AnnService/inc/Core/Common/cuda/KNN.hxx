@@ -31,13 +31,6 @@
 #include "GPUQuantizer.hxx"
 
 
-template<typename T, typename SUMTYPE>
-__forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist, float (*comp)(T*, T*)) {
-  SUMTYPE between;
-  between = comp(a, b);
-  return between <= dist;
-}
-
 template<int Dim>
 __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, uint8_t* query, uint8_t* candidate_vec, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
 
@@ -151,7 +144,7 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename SUMTYPE, int Dim>
-__device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, T* query, T* candidate_vec, DistPair<SUMTYPE>* threadList, float (*dist_comp)(T*,T*)) {
+__device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, T* query, T* candidate_vec, DistPair<SUMTYPE>* threadList, SUMTYPE (*dist_comp)(T*,T*)) {
 
   SUMTYPE max_dist = INFTY<SUMTYPE>();
   DistPair<SUMTYPE> temp;
@@ -266,8 +259,8 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
       query[i] = 0;               \
       candidate_vec[i] = 0;       \
     }                             \
-    float (*dist_comp)(T*,T*);    \
-    dist_comp = &dist<T,size, (int)metric>;  \
+    SUMTYPE (*dist_comp)(T*,T*);    \
+    dist_comp = &l2_test<T,SUMTYPE,size>;  \
     findRNG<T,SUMTYPE,size>(ps, tptree, KVAL, results, min_id, max_id, query, candidate_vec, threadList, dist_comp); \
     return; \
   } 
@@ -295,7 +288,7 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 //    RUN_KERNEL(MAX_SHAPE);
   }
   else {
-    RUN_KERNEL_QUANTIZED(25);
+//    RUN_KERNEL_QUANTIZED(25);
     RUN_KERNEL_QUANTIZED(50);
 //    RUN_KERNEL_QUANTIZED(64);
 //    RUN_KERNEL_QUANTIZED(100);
@@ -382,6 +375,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   GPU_PQQuantizer* h_quantizer = NULL; 
 
   if(use_q) {
+printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric == DistMetric::L2);
     h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
     CUDA_CHECK(cudaMallocManaged(&d_quantizer, sizeof(GPU_PQQuantizer)));
     CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));

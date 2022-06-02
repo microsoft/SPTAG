@@ -59,6 +59,8 @@ namespace SPTAG
 
 
             virtual float* GetCosineDistanceTables() = 0;
+
+            virtual float* GetL2DistanceTables() = 0;
         };
     }
 }

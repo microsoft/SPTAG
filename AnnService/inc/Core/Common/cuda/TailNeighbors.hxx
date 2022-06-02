@@ -34,8 +34,8 @@ class QueryGroup {
  * Kernel to update the RNG list for each tail vector in the batch.  Assumes TPT 
  * is already created and populated based on the head vectors.
 ***********************************************************************************/
-template<typename T, typename SUMTYPE>
-__device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, int dim, T* query, DistPair<SUMTYPE>* threadList) {
+template<typename T, typename SUMTYPE, int Dim>
+__device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t numTails, int numHeads, QueryGroup* groups, T* query, DistPair<SUMTYPE>* threadList, SUMTYPE(*dist_comp)(T*,T*)) {
 
   SUMTYPE max_dist = INFTY<SUMTYPE>();
   DistPair<SUMTYPE> temp;
@@ -46,8 +46,6 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
     threadList[i].idx = -1;
   }
 
-//  T* query;
-//  T query[Dim];
   DistPair<SUMTYPE> target;
   DistPair<SUMTYPE> candidate;
   int leafId;
@@ -61,7 +59,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
   size_t tailId;
   for(size_t orderIdx = blockIdx.x*blockDim.x + threadIdx.x; orderIdx < numTails; orderIdx += gridDim.x*blockDim.x) {
     tailId = groups->query_ids[orderIdx];  
-    for(int i=0; i<dim; ++i) {
+    for(int i=0; i<Dim; ++i) {
       query[i] = tailPS->getVec(tailId)[i];
     }
     leafId = searchForLeaf<T>(tptree, query);
@@ -83,12 +81,12 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
       good = true;
       candidate.idx = tptree->leaf_points[leaf_offset+j];
       candidate_vec = headPS->getVec(candidate.idx);
-      candidate.dist = cosine<T,100>(query, candidate_vec);
+      candidate.dist = dist_comp(query, candidate_vec);
 
       if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
 
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
-          if(violatesRNG<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+          if(violatesRNG<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
             good = false;
           }
         }
@@ -100,7 +98,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
           threadList[read_id] = candidate;
           read_id++;
           for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
-            if(!violatesRNG<T, SUMTYPE,100>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+            if(!violatesRNG<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
               if(read_id == write_id) {
                 temp = threadList[read_id];
                 threadList[write_id] = target;
@@ -133,6 +131,109 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
   }
 }
 
+/***********************************************************************************
+ * Kernel to update the RNG list for each tail vector in the batch.  Assumes TPT 
+ * is already created and populated based on the head vectors.
+ *          *** Uses Quantizer ***
+***********************************************************************************/
+template<int Dim>
+__device__ void findTailNeighbors_PQ(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t numTails, int numHeads, QueryGroup* groups, uint8_t* query, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+
+  float max_dist = INFTY<float>();
+  DistPair<float> temp;
+  int read_id, write_id;
+
+  for(int i=0; i<KVAL; i++) {
+    threadList[i].dist = INFTY<float>();
+    threadList[i].idx = -1;
+  }
+
+  DistPair<float> target;
+  DistPair<float> candidate;
+  int leafId;
+  bool good;
+  uint8_t* candidate_vec;
+
+// If the queries were re-ordered, use the QueryGroup object to determine order to perform queries
+// NOTE: Greatly improves locality and thread divergence
+
+#if REORDER
+  size_t tailId;
+  for(size_t orderIdx = blockIdx.x*blockDim.x + threadIdx.x; orderIdx < numTails; orderIdx += gridDim.x*blockDim.x) {
+    tailId = groups->query_ids[orderIdx];  
+    for(int i=0; i<Dim; ++i) {
+      query[i] = tailPS->getVec(tailId)[i];
+    }
+    leafId = searchForLeaf<uint8_t>(tptree, query);
+#else
+  for(size_t tailId = blockIdx.x*blockDim.x + threadIdx.x; tailId < numTails; tailId += gridDim.x*blockDim.x) {
+    query = tailPS->getVec(tailId, true);
+    leafId = searchForLeaf<uint8_t>(tptree, query);
+#endif
+
+    size_t leaf_offset = tptree->leafs[leafId].offset;
+
+    // Load results from previous iterations into shared memory heap
+    for(int j=0; j<KVAL; j++) {
+      threadList[j] = results[(tailId*KVAL)+j];
+    }
+    max_dist = threadList[KVAL-1].dist;
+
+    for(size_t j=0; j<tptree->leafs[leafId].size; ++j) {
+      good = true;
+      candidate.idx = tptree->leaf_points[leaf_offset+j];
+      candidate_vec = headPS->getVec(candidate.idx);
+      candidate.dist = quantizer->dist(query, candidate_vec);
+
+      if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
+
+        for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
+          if(quantizer->violatesRNG(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+            good = false;
+          }
+        }
+        if(candidate.idx == threadList[read_id].idx)  // Ignore duplicates
+          good = false;
+
+        if(good) { // candidate should be in RNG list
+          target = threadList[read_id];
+          threadList[read_id] = candidate;
+          read_id++;
+          for(write_id = read_id; read_id < KVAL && threadList[read_id].idx != -1; read_id++) {
+            if(!quantizer->violatesRNG(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist)) {
+              if(read_id == write_id) {
+                temp = threadList[read_id];
+                threadList[write_id] = target;
+                target = temp;
+              }
+              else {
+                threadList[write_id] = target;
+                target = threadList[read_id];
+              }
+              write_id++;
+            }
+          }
+          if(write_id < KVAL) {
+            threadList[write_id] = target;
+            write_id++;
+          }
+
+          for(int k=write_id; k<KVAL && threadList[k].idx != -1; k++) {
+            threadList[k].dist = INFTY<float>();
+            threadList[k].idx = -1;
+          }
+          max_dist = threadList[KVAL-1].dist;
+        }
+      }
+
+    }
+    for(int j=0; j<KVAL; j++) {
+      results[(size_t)(tailId*KVAL)+j] = threadList[j];
+    }
+  }
+}
+
+
 __global__ void debug_warm_up_gpu() {
   unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
   float ia, ib;
@@ -156,7 +257,6 @@ __global__ void compute_group_sizes(QueryGroup* groups, TPtree* tptree, PointSet
     for(int j=0; j<queries->dim;++j) {
       query[j] = queries->getVec(qidx)[j];
     }
-//    query = queries->getVec(qidx);
     leafId = searchForLeaf<T>(tptree, query);
     atomicAdd(&(groups->sizes[leafId]), 1);   
   }
@@ -164,12 +264,11 @@ __global__ void compute_group_sizes(QueryGroup* groups, TPtree* tptree, PointSet
 
 // Given the offsets and sizes of queries assigned to each leaf node, writes the list of queries assigned
 // to each leaf.  The list of query_ids can then be used during neighborhood search to improve locality
-template<typename T, typename KEY_T, typename SUMTYPE>
+template<typename T, typename SUMTYPE>
 __global__ void assign_queries_to_group(QueryGroup* groups, TPtree* tptree, PointSet<T>* queries, int N, int num_groups, int dim) {
 
   extern __shared__ char sharememory[];
   T* query = (&((T*)sharememory)[threadIdx.x*dim]);
-//  T query[MAX_DIM];
 
   int leafId;
   int idx_in_leaf;
@@ -206,7 +305,7 @@ __host__ void get_query_groups(QueryGroup* groups, TPtree* tptree, PointSet<T>* 
   // Reset group sizes to use while assigning queires
   CUDA_CHECK(cudaMemset(queryMem, 0, num_groups*sizeof(int)));
 
-  assign_queries_to_group<T,KEYTYPE,SUMTYPE><<<NUM_BLOCKS,NUM_THREADS, dim*NUM_THREADS*sizeof(T)>>>(groups, tptree, queries, N, num_groups, dim);
+  assign_queries_to_group<T,SUMTYPE><<<NUM_BLOCKS,NUM_THREADS, dim*NUM_THREADS*sizeof(T)>>>(groups, tptree, queries, N, num_groups, dim);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   delete[] h_sizes;
@@ -217,15 +316,30 @@ __host__ void get_query_groups(QueryGroup* groups, TPtree* tptree, PointSet<T>* 
 
 #define MAX_SHAPE 1024
 
-#define RUN_TAIL_KERNEL(size)                              \
-  if(dim <= size) {                                        \
-    T query[size];                                         \
-    findTailNeighbors<T,SUMTYPE>(headPS, tailPS, tptree,   \
-                 KVAL, results, metric, curr_batch_size,   \
-                 numHeads, groups, dim, query, threadList);\
-    return;                                                \
+#define RUN_TAIL_KERNEL(size)                                     \
+  if(dim <= size) {                                               \
+    T query[size];                                                \
+    SUMTYPE (*dist_comp)(T*,T*);                                    \
+    if(metric == (int)DistMetric::L2) {                           \
+      dist_comp = &l2<T,SUMTYPE,size>;                                    \
+    }                                                             \
+    else {                                                        \
+      dist_comp = &cosine<T,SUMTYPE,size>;                                \
+    }                                                             \
+    findTailNeighbors<T,SUMTYPE,size>(headPS, tailPS, tptree,     \
+                 KVAL, results, metric, curr_batch_size,          \
+                 numHeads, groups, query, threadList, dist_comp); \
+    return;                                                       \
   }                                                        
 
+#define RUN_TAIL_KERNEL_PQ(size)                              \
+  if(dim <= size) {                                        \
+    uint8_t query[size];                                         \
+    findTailNeighbors_PQ<size>(headPS, tailPS, tptree,   \
+                 KVAL, results, curr_batch_size,   \
+                 numHeads, groups, query, threadList, quantizer);\
+    return;                                                \
+  }                                                        
 
 template<typename T, typename SUMTYPE>
 __global__ void findTailNeighbors_selector(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree* tptree, int KVAL, DistPair<SUMTYPE>* results, int metric, size_t curr_batch_size, size_t numHeads, QueryGroup* groups, int dim) {
@@ -237,7 +351,17 @@ __global__ void findTailNeighbors_selector(PointSet<T>* headPS, PointSet<T>* tai
   RUN_TAIL_KERNEL(100)
   RUN_TAIL_KERNEL(200)
   RUN_TAIL_KERNEL(768)
-  RUN_TAIL_KERNEL(MAX_SHAPE)
+//  RUN_TAIL_KERNEL(MAX_SHAPE)
+
+}
+
+__global__ void findTailNeighbors_PQ_selector(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t curr_batch_size, size_t numHeads, QueryGroup* groups, int dim, GPU_PQQuantizer* quantizer) {
+
+  extern __shared__ char sharememory[];
+  DistPair<float>* threadList = (&((DistPair<float>*)sharememory)[KVAL*threadIdx.x]);
+
+  RUN_TAIL_KERNEL_PQ(50)
+  RUN_TAIL_KERNEL_PQ(100)
 
 }
 
@@ -293,7 +417,7 @@ void extractAndCopyTailRaw_multi(T* dataBuffer, T* vectors, T** d_tailRaw, size_
 }
 
 
-template<typename T, typename KEY_T, typename SUMTYPE, int MAX_DIM>
+template<typename T, typename SUMTYPE>
 void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* headIndex, std::unordered_set<int>& headVectorIDS, int dim, int RNG_SIZE, int numThreads, int NUM_TREES, int LEAF_SIZE, int metric, int NUM_GPUS, Edge* selections) {
 
     auto premem_t = std::chrono::high_resolution_clock::now();
@@ -310,6 +434,7 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Total of %d GPU devices on system, using %d of them.\n", numDevicesOnHost, NUM_GPUS);
 
 /***** General variables *****/
+    bool use_q = (headIndex->m_pQuantizer != NULL); // Using quantization?
     int resultErr;
     size_t headRows;
     headRows = headIndex->GetNumSamples();
@@ -357,6 +482,16 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     // memory on each GPU for QuerySet reordering structures
     std::vector<int*> d_queryMem(NUM_GPUS);
     std::vector<QueryGroup*> d_queryGroups(NUM_GPUS);
+
+    // Quantizer structures only used if quantization is enabled
+    GPU_PQQuantizer* d_quantizer = NULL; 
+    GPU_PQQuantizer* h_quantizer = NULL;
+
+    if(use_q) {
+      h_quantizer = new GPU_PQQuantizer(headIndex->m_pQuantizer, (DistMetric)metric);
+      CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
+      CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
+    }
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Setting up each of the %d GPUs...\n", NUM_GPUS);
 
@@ -503,7 +638,13 @@ auto t2 = std::chrono::high_resolution_clock::now();
 
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
               CUDA_CHECK(cudaSetDevice(gpuNum));
-              findTailNeighbors_selector<T,SUMTYPE><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPS[gpuNum], d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], dim);
+
+              if(!use_q) {
+                findTailNeighbors_selector<T,SUMTYPE><<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<SUMTYPE>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>(d_headPS[gpuNum], d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, d_results[gpuNum], metric, curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], dim);
+              }
+              else {
+                findTailNeighbors_PQ_selector<<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<float>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>((PointSet<uint8_t>*)d_headPS[gpuNum], (PointSet<uint8_t>*)d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, (DistPair<float>*)d_results[gpuNum], curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], dim, d_quantizer);
+              }
             }
 
             CUDA_CHECK(cudaDeviceSynchronize());
