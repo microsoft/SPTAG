@@ -32,7 +32,7 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
   float max_dist = INFTY<float>();
   int read_id, write_id;
 
-  float (*dist_comp)(T*,T*) = cosine<T,Dim>;
+  float (*dist_comp)(T*,T*) = cosine<T,SUMTYPE,Dim>;
 
   for(size_t i=blockIdx.x*blockDim.x + threadIdx.x; i<rows; i+=blockDim.x*gridDim.x) {
     for(int j=0; j<Dim; ++j) {

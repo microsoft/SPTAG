@@ -32,7 +32,10 @@
 
 
 template<int Dim>
-__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, uint8_t* query, uint8_t* candidate_vec, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+
+  uint8_t query[Dim];
+  uint8_t candidate_vec[Dim];
 
   float max_dist = INFTY<float>();
   DistPair<float> temp;
@@ -144,7 +147,9 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
  * Perform the brute-force graph construction on each leaf node, while STRICTLY maintaining RNG properties.  May end up with less than K neighbors per vector.
  *****************************************************************************************/
 template<typename T, typename SUMTYPE, int Dim>
-__device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, T* query, T* candidate_vec, DistPair<SUMTYPE>* threadList, SUMTYPE (*dist_comp)(T*,T*)) {
+__device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<SUMTYPE>* threadList, SUMTYPE (*dist_comp)(T*,T*)) {
+
+  T query[Dim];
 
   SUMTYPE max_dist = INFTY<SUMTYPE>();
   DistPair<SUMTYPE> temp;
@@ -166,6 +171,8 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
   size_t leaf_offset = tptree->leafs[leafIdx].offset;
 
   bool good;
+
+  T candidate_vec[Dim];
 
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
@@ -197,8 +204,9 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 
           for(int k=0; k<Dim; ++k) {
             candidate_vec[k] = ps->getVec(candidate.idx)[k];
-            if(k >= ps->dim) break;
+//            if(k >= ps->dim) break;
           }
+//          candidate_vec = ps->getVec(candidate.idx);
 
           candidate.dist = dist_comp(query, candidate_vec);
 
@@ -252,25 +260,17 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 
 #define RUN_KERNEL(size)          \
   if(dim <= size) {               \
-    T query[size];                \
-    T candidate_vec[size];        \
     DistPair<SUMTYPE>* threadList = (&((DistPair<SUMTYPE>*)sharememory)[KVAL*threadIdx.x]); \
-    for(int i=0; i<size; i++) {   \
-      query[i] = 0;               \
-      candidate_vec[i] = 0;       \
-    }                             \
     SUMTYPE (*dist_comp)(T*,T*);    \
-    dist_comp = &l2_test<T,SUMTYPE,size>;  \
-    findRNG<T,SUMTYPE,size>(ps, tptree, KVAL, results, min_id, max_id, query, candidate_vec, threadList, dist_comp); \
+    dist_comp = &dist<T,SUMTYPE,size,metric>;  \
+    findRNG<T,SUMTYPE,size>(ps, tptree, KVAL, results, min_id, max_id, threadList, dist_comp); \
     return; \
   } 
 
 #define RUN_KERNEL_QUANTIZED(size) \
   if(dim <= size) {\
-    uint8_t query[size]; \
-    uint8_t candidate_vec[size]; \
     DistPair<float>* threadList = (&((DistPair<float>*)sharememory)[KVAL*threadIdx.x]); \
-    findRNG_PQ<size>((PointSet<uint8_t>*)ps, tptree, KVAL, results, min_id, max_id, query, candidate_vec, threadList, quantizer); \
+    findRNG_PQ<size>((PointSet<uint8_t>*)ps, tptree, KVAL, results, min_id, max_id, threadList, quantizer); \
     return; \
   } 
 
@@ -291,7 +291,7 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 //    RUN_KERNEL_QUANTIZED(25);
     RUN_KERNEL_QUANTIZED(50);
 //    RUN_KERNEL_QUANTIZED(64);
-//    RUN_KERNEL_QUANTIZED(100);
+    RUN_KERNEL_QUANTIZED(100);
   }
 
 }

@@ -831,6 +831,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 #define DefineVectorValueType(Name, Type) \
         case VectorValueType::Name: \
             getTailNeighborsTPT<Type, SUMTYPE>((Type*)fullVectors->GetData(), fullVectors->Count(), this, exceptIDS, fullVectors->Dimension(), replicaCount, numThreads, numTrees, leafSize, metric, numGPUs, selections); \
+            break; 
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType

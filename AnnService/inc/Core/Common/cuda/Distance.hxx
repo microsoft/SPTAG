@@ -71,13 +71,13 @@ __forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
 
 }
 
-template<typename T, int Dim, int metric>
-__forceinline__ __device__ float dist(T* a, T* b) {
+template<typename T, typename SUMTYPE, int Dim, int metric>
+__device__ SUMTYPE dist(T* a, T* b) {
   if(metric == (int)DistMetric::Cosine) {
-    return cosine<T,Dim>(a, b);
+    return cosine<T,SUMTYPE,Dim>(a, b);
   }
   else {
-    return l2<T,Dim>(a,b);
+    return l2<T,SUMTYPE,Dim>(a,b);
   }
 }
 

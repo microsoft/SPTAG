@@ -158,16 +158,16 @@ class TPtree {
       tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEYTYPE);
 
       tree_mem+= N*sizeof(int);
-      CUDA_CHECK(cudaMallocManaged(&node_sizes, num_nodes*sizeof(int)));
+      CUDA_CHECK(cudaMalloc(&node_sizes, num_nodes*sizeof(int)));
       CUDA_CHECK(cudaMemset(node_sizes, 0, num_nodes*sizeof(int)));
 
       CUDA_CHECK(cudaMalloc(&split_keys, num_internals*sizeof(KEYTYPE)));
       tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEYTYPE);
 
-      CUDA_CHECK(cudaMallocManaged(&leafs, num_leaves*sizeof(LeafNode)));
+      CUDA_CHECK(cudaMalloc(&leafs, num_leaves*sizeof(LeafNode)));
       tree_mem+=num_leaves*sizeof(LeafNode);
 
-      CUDA_CHECK(cudaMallocManaged(&leaf_points, N*sizeof(int)));
+      CUDA_CHECK(cudaMalloc(&leaf_points, N*sizeof(int)));
       tree_mem+=N*sizeof(int);
 
     }
