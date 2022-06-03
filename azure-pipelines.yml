@@ -17,6 +17,8 @@ phases:
     name: SPTAGBuild
 
   steps:
+  - checkout : self
+    submodules: true
 
   - script: |  
        mkdir build
@@ -53,6 +55,8 @@ phases:
 
 
   steps:
+  - checkout : self
+    submodules: true
 
   - task: NuGetToolInstaller@0
 
