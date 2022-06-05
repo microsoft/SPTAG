@@ -140,11 +140,13 @@ namespace SPTAG
             {
                 compress_level = level;
                 dictBufferCapacity = bufferCapacity;
+                cdict = nullptr;
+                ddict = nullptr;
             }
 
             virtual ~Compressor() {}
 
-            std::size_t TrainDict(std::string samplesBuffer, const size_t *samplesSizes, unsigned nbSamples)
+            std::size_t TrainDict(const std::string &samplesBuffer, const size_t *samplesSizes, unsigned nbSamples)
             {
                 dictBuffer.resize(dictBufferCapacity);
                 size_t dictSize = ZDICT_trainFromBuffer((void *)dictBuffer.data(), dictBufferCapacity, (void *)samplesBuffer.data(), &samplesSizes[0], nbSamples);
@@ -166,7 +168,7 @@ namespace SPTAG
                 return dictBuffer;
             }
 
-            void SetDictBuffer(std::string buffer)
+            void SetDictBuffer(const std::string &buffer)
             {
                 dictBuffer = buffer;
                 CreateDDict();
