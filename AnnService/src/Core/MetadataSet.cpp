@@ -94,7 +94,10 @@ bool MetadataSet::GetMetadataOffsets(const std::uint8_t* p_meta, const std::uint
     if ((char)(p_meta[p_metaLength - 1]) != p_delimiter && current < p_offsetLength)
         p_offsets[current++] = p_metaLength;
 
-    if (current < p_offsetLength) return false;
+    if (current < p_offsetLength) {
+        LOG(Helper::LogLevel::LL_Error, "The metadata(%d) and vector(%d) numbers are not match! Check whether it is unicode encoding issue.\n", current-1, p_offsetLength-1);
+        return false;
+    }
     return true;
 }
 
