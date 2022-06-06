@@ -179,7 +179,7 @@ class TPtree {
 
       cudaMemset(node_ids, 0, N*sizeof(int));
       cudaMemset(node_sizes, 0, num_nodes*sizeof(int));
-      cudaMemset(split_keys, 0.0, num_nodes*sizeof(float));
+      cudaMemset(split_keys, 0, num_nodes*sizeof(float));
 
       LeafNode* h_leafs = new LeafNode[num_leaves];
       for(int i=0; i<num_leaves; ++i) {

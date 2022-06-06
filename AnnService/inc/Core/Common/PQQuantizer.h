@@ -392,16 +392,11 @@ namespace SPTAG
 
 	template <typename T>
         float* PQQuantizer<T>::GetCosineDistanceTables() {
-		printf("Getting pointer to cosine distance tables...\n");
-		// SEG FAULTS HERE, HOW CAN WE ACCESS THIS?
-		printf("Example values: %f, %f, %f\n", m_CosineDistanceTables[0], m_CosineDistanceTables[1], m_CosineDistanceTables[2]);
           return (float*)(m_CosineDistanceTables.get());
 	}
 
 	template <typename T>
         float* PQQuantizer<T>::GetL2DistanceTables() {
-		printf("Getting pointer to L2 distance tables...\n");
-		printf("Example values: %f, %f, %f\n", m_L2DistanceTables[0], m_L2DistanceTables[1], m_L2DistanceTables[2]);
           return (float*)(m_L2DistanceTables.get());
 	}
     }

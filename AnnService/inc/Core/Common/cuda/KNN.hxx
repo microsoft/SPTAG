@@ -35,7 +35,7 @@ template<int Dim>
 __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
 
   uint8_t query[Dim];
-  uint8_t candidate_vec[Dim];
+  uint8_t* candidate_vec;
 
   float max_dist = INFTY<float>();
   DistPair<float> temp;
@@ -86,12 +86,7 @@ __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int*
         if(j!=i) {
           good = true;
 	  candidate.idx = tptree->leaf_points[leaf_offset+j];
-
-          for(int k=0; k<Dim; ++k) {
-            candidate_vec[k] = ps->getVec(candidate.idx)[k];
-            if(k >= ps->dim) break;
-          }
-
+          candidate_vec = ps->getVec(candidate.idx);
           candidate.dist = quantizer->dist(query, candidate_vec);
 
           if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
@@ -172,7 +167,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 
   bool good;
 
-  T candidate_vec[Dim];
+  T* candidate_vec;
 
   // Each point in the leaf is handled by a separate thread
   for(int i=thread_id_in_leaf; leafIdx < tptree->num_leaves && i<tptree->leafs[leafIdx].size; i+=threads_per_leaf) {
@@ -201,13 +196,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
         if(j!=i) {
           good = true;
 	  candidate.idx = tptree->leaf_points[leaf_offset+j];
-
-          for(int k=0; k<Dim; ++k) {
-            candidate_vec[k] = ps->getVec(candidate.idx)[k];
-//            if(k >= ps->dim) break;
-          }
-//          candidate_vec = ps->getVec(candidate.idx);
-
+          candidate_vec = ps->getVec(candidate.idx);
           candidate.dist = dist_comp(query, candidate_vec);
 
           if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
@@ -377,7 +366,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   if(use_q) {
 printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric == DistMetric::L2);
     h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
-    CUDA_CHECK(cudaMallocManaged(&d_quantizer, sizeof(GPU_PQQuantizer)));
+    CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
     CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
 
 
@@ -394,6 +383,7 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
   }
 
   copyRawDataToMultiGPU<DTYPE>(index, d_data_raw, dataSize, dim, NUM_GPUS, streams.data());
+
 
 // Allocate and copy structures ofr each GPU
   for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
@@ -491,7 +481,13 @@ auto end_t = std::chrono::high_resolution_clock::now();
   delete[] tptrees;
   delete[] d_results;
   delete[] d_tptrees;
-  
+  delete[] d_data_raw;
+  delete[] d_pointset;
+
+  if(use_q) {
+    delete h_quantizer;
+  }
+
 }
 
 /***************************************************************************************

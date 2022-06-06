@@ -51,7 +51,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
   DistPair<SUMTYPE> candidate;
   int leafId;
   bool good;
-  T candidate_vec[Dim];
+  T* candidate_vec;
 
 // If the queries were re-ordered, use the QueryGroup object to determine order to perform queries
 // NOTE: Greatly improves locality and thread divergence
@@ -81,9 +81,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
     for(size_t j=0; j<tptree->leafs[leafId].size; ++j) {
       good = true;
       candidate.idx = tptree->leaf_points[leaf_offset+j];
-      for(int k=0; k<Dim; ++k) {
-        candidate_vec[k] = headPS->getVec(candidate.idx)[k];
-      }
+      candidate_vec = headPS->getVec(candidate.idx);
       candidate.dist = dist_comp(query, candidate_vec);
 
       if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list

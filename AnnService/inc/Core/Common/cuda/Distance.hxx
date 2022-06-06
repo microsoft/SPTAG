@@ -50,6 +50,10 @@ template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_
 //template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
+template<typename T> __device__ T BASE() {}
+template<> __forceinline__ __device__ float BASE<float>() {return 1;}
+template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 16384;}
+
 template<typename T, typename SUMTYPE, int Dim>
 __forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
     SUMTYPE total[2]={0,0};
@@ -57,7 +61,7 @@ __forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
       total[0] += ((SUMTYPE)(a[i] * b[i]));
       total[1] += ((SUMTYPE)(a[i+1] * b[i+1]));
     }
-    return 1-(total[0]+total[1]);
+    return BASE<SUMTYPE>()-(total[0]+total[1]);
 }
 
 template<typename T, typename SUMTYPE, int Dim>
@@ -79,14 +83,6 @@ __device__ SUMTYPE dist(T* a, T* b) {
   else {
     return l2<T,SUMTYPE,Dim>(a,b);
   }
-}
-
-
-template<typename T, typename SUMTYPE, int Dim>
-__forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist) {
-  SUMTYPE between;
-  between = cosine<T,Dim>(a, b);
-  return between <= dist;
 }
 
 template<typename T, typename SUMTYPE>
