@@ -38,6 +38,7 @@ public:
         AddOptionalOption(m_genTruth, "-g", "--gentruth", "Generate truth file.");
         AddOptionalOption(m_debugQuery, "-q", "--debugquery", "Debug query number.");
         AddOptionalOption(m_enableADC, "-adc", "--adc", "Enable ADC Distance computation");
+        AddOptionalOption(m_outputformat, "-of", "--ouputformat", "0: TXT 1: BINARY.");
     }
 
     ~SearcherOptions() {}
@@ -69,6 +70,8 @@ public:
     int m_debugQuery = -1;
 
     bool m_enableADC = false;
+
+    int m_outputformat = 0;
 };
 
 template <typename T>
@@ -129,13 +132,27 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
 
-    std::ofstream fp;
+    std::shared_ptr<Helper::DiskIO> fp;
     if (options->m_resultFile != "")
     {
-        fp.open(options->m_resultFile);
-        if (!fp.is_open())
-        {
+        fp = SPTAG::f_createIO();
+        if (fp == nullptr || !fp->Initialize(options->m_resultFile.c_str(), std::ios::out | std::ios::binary)) {
             LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_resultFile.c_str());
+        }
+
+        if (options->m_outputformat == 1) {
+            LOG(Helper::LogLevel::LL_Info, "Using output format binary...");
+
+            int32_t i32Val = queryVectors->Count();
+            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                exit(1);
+            }
+            i32Val = options->m_K;
+            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                exit(1);
+            }
         }
     }
 
@@ -237,37 +254,76 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             totalLatency[mc] += batchLatency;
         }
 
-        if (fp.is_open())
+        if (fp != nullptr)
         {
-            fp << std::setprecision(3) << std::fixed;
-            for (SizeType i = 0; i < numQuerys; i++)
-            {
-                if (queryMetas != nullptr) {
-                    ByteArray qmeta = queryMetas->GetMetadata(startQuery + i);
-                    fp.write((const char*)qmeta.Data(), qmeta.Length());
-                }
-                else {
-                    fp << i;
-                }
-                fp << ":";
-                for (int j = 0; j < options->m_K; j++)
+            if (options->m_outputformat == 0) {
+                for (SizeType i = 0; i < numQuerys; i++)
                 {
-                    if (results[i].GetResult(j)->VID < 0) {
-                        fp << results[i].GetResult(j)->Dist << "@NULL" << std::endl;
-                        continue;
-                    }
-
-                    if (!options->m_withMeta) {
-                        fp << (results[i].GetResult(j)->Dist / baseSquare) << "@" << results[i].GetResult(j)->VID << std::endl;
+                    if (queryMetas != nullptr) {
+                        ByteArray qmeta = queryMetas->GetMetadata(startQuery + i);
+                        if (fp->WriteBinary(qmeta.Length(), (const char*)qmeta.Data()) != qmeta.Length()) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot write qmeta %d bytes!\n", qmeta.Length());
+                            exit(1);
+                        }
                     }
                     else {
-                        ByteArray vm = index.GetMetadata(results[i].GetResult(j)->VID);
-                        fp << (results[i].GetResult(j)->Dist / baseSquare) << "@";
-                        fp.write((const char*)vm.Data(), vm.Length());
+                        std::string qid = std::to_string(i);
+                        if (fp->WriteBinary(qid.length(), qid.c_str()) != qid.length()) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot write qid %d bytes!\n", qid.length());
+                            exit(1);
+                        }
                     }
-                    fp << "|";
+                    fp->WriteString(":");
+                    for (int j = 0; j < options->m_K; j++)
+                    {
+                        std::string sd = std::to_string(results[i].GetResult(j)->Dist / baseSquare);
+                        if (fp->WriteBinary(sd.length(), sd.c_str()) != sd.length()) {
+                            LOG(Helper::LogLevel::LL_Error, "Cannot write dist %d bytes!\n", sd.length());
+                            exit(1);
+                        }
+                        fp->WriteString("@");
+                        if (results[i].GetResult(j)->VID < 0) {
+                            fp->WriteString("NULL|");
+                            continue;
+                        }
+
+                        if (!options->m_withMeta) {
+                            std::string vid = std::to_string(results[i].GetResult(j)->VID);
+                            if (fp->WriteBinary(vid.length(), vid.c_str()) != vid.length()) {
+                                LOG(Helper::LogLevel::LL_Error, "Cannot write vid %d bytes!\n", sd.length());
+                                exit(1);
+                            }
+                        }
+                        else {
+                            ByteArray vm = index.GetMetadata(results[i].GetResult(j)->VID);
+                            if (fp->WriteBinary(vm.Length(), (const char*)vm.Data()) != vm.Length()) {
+                                LOG(Helper::LogLevel::LL_Error, "Cannot write vmeta %d bytes!\n", vm.Length());
+                                exit(1);
+                            }
+                        }
+                        fp->WriteString("|");
+                    }
+                    fp->WriteString("\n");
                 }
-                fp << std::endl;
+            }
+            else {
+                for (SizeType i = 0; i < numQuerys; ++i)
+                {
+                    for (int j = 0; j < options->m_K; ++j)
+                    {
+                        SizeType i32Val = results[i].GetResult(j)->VID;
+                        if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                            LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                            exit(1);
+                        }
+
+                        float fVal = results[i].GetResult(j)->Dist;
+                        if (fp->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
+                            LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                            exit(1);
+                        }
+                    }
+                }
             }
         }
     }
@@ -276,7 +332,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
     LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
-    fp.close();
+    if (fp != nullptr) fp->ShutDown();
     log.close();
     return 0;
 }

@@ -405,6 +405,8 @@ ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
 {
+    LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
+
     bool valueMatches = p_vectorSet->GetValueType() == GetVectorValueType();
     bool quantizerMatches = ((bool)m_pQuantizer) && (p_vectorSet->GetValueType() == SPTAG::VectorValueType::UInt8);
     if (nullptr == p_vectorSet || !(valueMatches || quantizerMatches))
@@ -414,6 +416,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     m_pMetadata = std::move(p_metadataSet);
     if (p_withMetaIndex && m_pMetadata != nullptr)
     {
+        LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
         BuildMetaMapping(false);
     }
     BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized);
