@@ -97,6 +97,10 @@ namespace SPTAG
         public:
             ExtraFullGraphSearcher()
             {
+                m_enableDeltaEncoding = false;
+                m_enablePostingListRearrange = false;
+                m_enableDataCompression = false;
+                m_enableDictTraining = false;
             }
 
             virtual ~ExtraFullGraphSearcher()
@@ -125,7 +129,7 @@ namespace SPTAG
 
                     m_indexFiles.emplace_back(curIndexFile);
                     m_listInfos.emplace_back(0);
-                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back());
+                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back(), p_opt.m_withDataCompressionFeatures);
 
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
@@ -708,7 +712,7 @@ namespace SPTAG
                 std::uint16_t pageOffset = 0;
             };
 
-            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& m_listInfos)
+            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& m_listInfos, bool m_withDataCompressionFeatures)
             {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
@@ -756,9 +760,12 @@ namespace SPTAG
                 int pageNum;
                 for (int i = 0; i < m_listCount; ++i)
                 {
-                    if (ptr->ReadBinary(sizeof(m_listInfos[i].listTotalBytes), reinterpret_cast<char*>(&(m_listInfos[i].listTotalBytes))) != sizeof(m_listInfos[i].listTotalBytes)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                        exit(1);
+                    if (m_withDataCompressionFeatures)
+                    {
+                        if (ptr->ReadBinary(sizeof(m_listInfos[i].listTotalBytes), reinterpret_cast<char*>(&(m_listInfos[i].listTotalBytes))) != sizeof(m_listInfos[i].listTotalBytes)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                            exit(1);
+                        }
                     }
                     if (ptr->ReadBinary(sizeof(pageNum), reinterpret_cast<char*>(&(pageNum))) != sizeof(pageNum)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
@@ -776,10 +783,12 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
+                    if (!m_withDataCompressionFeatures)
+                    {
+                        m_listInfos[i].listTotalBytes = m_listInfos[i].listEleCount * m_vectorInfoSize;
+                    }
 
                     m_listInfos[i].listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
-                    // m_listInfos[i].listEleCount = min(m_listInfos[i].listEleCount, (min(static_cast<int>(m_listInfos[i].listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
-                    // m_listInfos[i].listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * m_listInfos[i].listEleCount + m_listInfos[i].pageOffset) * 1.0 / (1 << PageSizeEx)));
                     totalListElementCount += m_listInfos[i].listEleCount;
                     int pageCount = m_listInfos[i].listPageCount;
 
@@ -799,42 +808,54 @@ namespace SPTAG
                     }
                 }
 
-                if (ptr->ReadBinary(sizeof(m_enableDeltaEncoding), reinterpret_cast<char *>(&m_enableDeltaEncoding)) != sizeof(m_enableDeltaEncoding))
+                if (m_withDataCompressionFeatures)
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    exit(1);
-                }
-                if (ptr->ReadBinary(sizeof(m_enablePostingListRearrange), reinterpret_cast<char *>(&m_enablePostingListRearrange)) != sizeof(m_enablePostingListRearrange))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    exit(1);
-                }
-                if (ptr->ReadBinary(sizeof(m_enableDataCompression), reinterpret_cast<char *>(&m_enableDataCompression)) != sizeof(m_enableDataCompression))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    exit(1);
-                }
-                if (ptr->ReadBinary(sizeof(m_enableDictTraining), reinterpret_cast<char *>(&m_enableDictTraining)) != sizeof(m_enableDictTraining))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    exit(1);
-                }
-
-                if (m_enableDataCompression && m_enableDictTraining)
-                {
-                    size_t dictBufferSize;
-
-                    if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
+                    if (ptr->ReadBinary(sizeof(m_enableDeltaEncoding), reinterpret_cast<char*>(&m_enableDeltaEncoding)) != sizeof(m_enableDeltaEncoding))
+                    {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    char* dictBuffer = new char[dictBufferSize];
-                    if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
+                    if (ptr->ReadBinary(sizeof(m_enablePostingListRearrange), reinterpret_cast<char*>(&m_enablePostingListRearrange)) != sizeof(m_enablePostingListRearrange))
+                    {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
-                    delete[] dictBuffer;
+                    if (ptr->ReadBinary(sizeof(m_enableDataCompression), reinterpret_cast<char*>(&m_enableDataCompression)) != sizeof(m_enableDataCompression))
+                    {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        exit(1);
+                    }
+                    if (ptr->ReadBinary(sizeof(m_enableDictTraining), reinterpret_cast<char*>(&m_enableDictTraining)) != sizeof(m_enableDictTraining))
+                    {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        exit(1);
+                    }
+
+                    if (m_enableDataCompression && m_enableDictTraining)
+                    {
+                        size_t dictBufferSize;
+
+                        if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                            exit(1);
+                        }
+                        char* dictBuffer = new char[dictBufferSize];
+                        if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                            exit(1);
+                        }
+                        m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
+                        delete[] dictBuffer;
+                    }
+                }
+                
+                if (!m_enableDataCompression)
+                {
+                    for (int i = 0; i < m_listCount; ++i)
+                    {
+                        m_listInfos[i].listEleCount = min(m_listInfos[i].listEleCount, (min(static_cast<int>(m_listInfos[i].listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
+                        m_listInfos[i].listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * m_listInfos[i].listEleCount + m_listInfos[i].pageOffset) * 1.0 / (1 << PageSizeEx)));
+                    }
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
@@ -1079,7 +1100,7 @@ namespace SPTAG
                         exit(1);
                     }
                 }
-                // m_enableDeltaEncoding,
+
                 if (ptr->WriteBinary(sizeof(m_enableDeltaEncoding), reinterpret_cast<char *>(&m_enableDeltaEncoding)) != sizeof(m_enableDeltaEncoding))
                 {
                     LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
