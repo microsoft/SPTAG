@@ -102,7 +102,6 @@ DefineSSDParameter(m_gpuSSDLeafSize, int, 200, "GPUSSDLeafSize")
 DefineSSDParameter(m_numGPUs, int, 1, "NumGPUs")
 
 // Searching
-DefineSSDParameter(m_withDataCompressionFeatures, bool, false, "WithDataCompressionFeatures")
 DefineSSDParameter(m_searchResult, std::string, std::string(""), "SearchResult")
 DefineSSDParameter(m_logFile, std::string, std::string(""), "LogFile")
 DefineSSDParameter(m_qpsLimit, int, 0, "QpsLimit")

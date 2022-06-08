@@ -104,7 +104,6 @@ namespace SPTAG {
             int m_numGPUs;
 
             // Searching
-            bool m_withDataCompressionFeatures;
             std::string m_searchResult;
             std::string m_logFile;
             int m_qpsLimit;

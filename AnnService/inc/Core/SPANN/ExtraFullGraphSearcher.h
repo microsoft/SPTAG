@@ -100,7 +100,7 @@ namespace SPTAG
                 m_enableDeltaEncoding = false;
                 m_enablePostingListRearrange = false;
                 m_enableDataCompression = false;
-                m_enableDictTraining = false;
+                m_enableDictTraining = true;
             }
 
             virtual ~ExtraFullGraphSearcher()
@@ -129,7 +129,11 @@ namespace SPTAG
 
                     m_indexFiles.emplace_back(curIndexFile);
                     m_listInfos.emplace_back(0);
-                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back(), p_opt.m_withDataCompressionFeatures);
+                    m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
+                    m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
+                    m_enableDataCompression = p_opt.m_enableDataCompression;
+                    m_enableDictTraining = p_opt.m_enableDictTraining;
+                    m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back());
 
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
@@ -570,12 +574,11 @@ namespace SPTAG
                 if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
                 
                 // get compressed size of each posting list
-                LOG(Helper::LogLevel::LL_Info, "EnableDeltaEncoding: %s\n", p_opt.m_enableDeltaEncoding ? "true" : "false");
-                LOG(Helper::LogLevel::LL_Info, "EnableDataCompression: %s, ZstdCompressLevel: %d\n", p_opt.m_enableDataCompression ? "true" : "false", p_opt.m_zstdCompressLevel);
                 std::vector<size_t> postingListBytes(headVectorIDS.size());
-                m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
+                
                 if (p_opt.m_enableDataCompression)
                 {
+                    m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
                     LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
 
                     LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
@@ -712,7 +715,7 @@ namespace SPTAG
                 std::uint16_t pageOffset = 0;
             };
 
-            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& m_listInfos, bool m_withDataCompressionFeatures)
+            int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& m_listInfos)
             {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
@@ -760,7 +763,7 @@ namespace SPTAG
                 int pageNum;
                 for (int i = 0; i < m_listCount; ++i)
                 {
-                    if (m_withDataCompressionFeatures)
+                    if (m_enableDataCompression)
                     {
                         if (ptr->ReadBinary(sizeof(m_listInfos[i].listTotalBytes), reinterpret_cast<char*>(&(m_listInfos[i].listTotalBytes))) != sizeof(m_listInfos[i].listTotalBytes)) {
                             LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
@@ -783,7 +786,7 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    if (!m_withDataCompressionFeatures)
+                    if (!m_enableDataCompression)
                     {
                         m_listInfos[i].listTotalBytes = m_listInfos[i].listEleCount * m_vectorInfoSize;
                     }
@@ -808,45 +811,20 @@ namespace SPTAG
                     }
                 }
 
-                if (m_withDataCompressionFeatures)
+                if (m_enableDataCompression && m_enableDictTraining)
                 {
-                    if (ptr->ReadBinary(sizeof(m_enableDeltaEncoding), reinterpret_cast<char*>(&m_enableDeltaEncoding)) != sizeof(m_enableDeltaEncoding))
-                    {
+                    size_t dictBufferSize;
+                    if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    if (ptr->ReadBinary(sizeof(m_enablePostingListRearrange), reinterpret_cast<char*>(&m_enablePostingListRearrange)) != sizeof(m_enablePostingListRearrange))
-                    {
+                    char* dictBuffer = new char[dictBufferSize];
+                    if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    if (ptr->ReadBinary(sizeof(m_enableDataCompression), reinterpret_cast<char*>(&m_enableDataCompression)) != sizeof(m_enableDataCompression))
-                    {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                        exit(1);
-                    }
-                    if (ptr->ReadBinary(sizeof(m_enableDictTraining), reinterpret_cast<char*>(&m_enableDictTraining)) != sizeof(m_enableDictTraining))
-                    {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                        exit(1);
-                    }
-
-                    if (m_enableDataCompression && m_enableDictTraining)
-                    {
-                        size_t dictBufferSize;
-
-                        if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                            exit(1);
-                        }
-                        char* dictBuffer = new char[dictBufferSize];
-                        if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                            exit(1);
-                        }
-                        m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
-                        delete[] dictBuffer;
-                    }
+                    m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
+                    delete[] dictBuffer;
                 }
                 
                 if (!m_enableDataCompression)
@@ -1002,9 +980,13 @@ namespace SPTAG
                 // meta size of global info
                 std::uint64_t listOffset = sizeof(int) * 4;
                 // meta size of the posting lists
-                listOffset += (sizeof(size_t) + sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t)) * p_postingListSizes.size();
+                listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t)) * p_postingListSizes.size();
+                // write listTotalBytes only when enabled data compression
+                if (m_enableDataCompression)
+                {
+                    listOffset += sizeof(size_t) * p_postingListSizes.size();
+                }
 
-                listOffset += sizeof(bool) * 4;
                 // compression dict
                 if (m_enableDataCompression && m_enableDictTraining)
                 {
@@ -1074,8 +1056,8 @@ namespace SPTAG
                             ++listPageCount;
                         }
                     }
-                    // Total bytes of the posting list
-                    if (ptr->WriteBinary(sizeof(postingListByte), reinterpret_cast<char*>(&postingListByte)) != sizeof(postingListByte)) {
+                    // Total bytes of the posting list, write only when enabled data compression
+                    if (m_enableDataCompression && ptr->WriteBinary(sizeof(postingListByte), reinterpret_cast<char*>(&postingListByte)) != sizeof(postingListByte)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         exit(1);
                     }
@@ -1099,27 +1081,6 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         exit(1);
                     }
-                }
-
-                if (ptr->WriteBinary(sizeof(m_enableDeltaEncoding), reinterpret_cast<char *>(&m_enableDeltaEncoding)) != sizeof(m_enableDeltaEncoding))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    exit(1);
-                }
-                if (ptr->WriteBinary(sizeof(m_enablePostingListRearrange), reinterpret_cast<char *>(&m_enablePostingListRearrange)) != sizeof(m_enablePostingListRearrange))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    exit(1);
-                }
-                if (ptr->WriteBinary(sizeof(m_enableDataCompression), reinterpret_cast<char *>(&m_enableDataCompression)) != sizeof(m_enableDataCompression))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    exit(1);
-                }
-                if (ptr->WriteBinary(sizeof(m_enableDictTraining), reinterpret_cast<char *>(&m_enableDictTraining)) != sizeof(m_enableDictTraining))
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    exit(1);
                 }
                 // compression dict
                 if (m_enableDataCompression && m_enableDictTraining)
