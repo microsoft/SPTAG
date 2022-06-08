@@ -164,7 +164,6 @@ namespace SPTAG
 #endif
 
                 bool oneContext = (m_indexFiles.size() == 1);
-                
                 for (uint32_t pi = 0; pi < postingListCount; ++pi)
                 {
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
@@ -394,7 +393,6 @@ namespace SPTAG
 
                 int numThreads = p_opt.m_iSSDNumberOfThreads;
                 int candidateNum = p_opt.m_internalResultNum;
-                // get headVectorIDs
                 std::unordered_set<SizeType> headVectorIDS;
                 if (p_opt.m_headIDFile.empty()) {
                     LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
@@ -652,10 +650,9 @@ namespace SPTAG
                 
                 // iterate over files
                 for (int i = 0; i < p_opt.m_ssdIndexFileNum; i++) {
-                    // postingFileSize: number of posting lists in the file
-                    // postingListSize: number of vectors in the posting list, type vector<int>
                     size_t curPostingListOffSet = i * postingFileSize;
                     size_t curPostingListEnd = min(postingListSize.size(), (i + 1) * postingFileSize);
+                    // postingListSize: number of vectors in the posting list, type vector<int>
                     std::vector<int> curPostingListSizes(
                         postingListSize.begin() + curPostingListOffSet,
                         postingListSize.begin() + curPostingListEnd);
@@ -671,7 +668,6 @@ namespace SPTAG
 
                     // LoadBatch: select vectors for each posting list
                     if (p_opt.m_ssdIndexFileNum > 1) selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]);
-                    // write one file
                     OutputSSDIndexFile((i == 0) ? outputFile : outputFile + "_" + std::to_string(i),
                         p_opt.m_enableDeltaEncoding,
                         p_opt.m_enablePostingListRearrange,
@@ -797,12 +793,13 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
+                    m_listInfos[i].listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
                     if (!m_enableDataCompression)
                     {
                         m_listInfos[i].listTotalBytes = m_listInfos[i].listEleCount * m_vectorInfoSize;
+                        m_listInfos[i].listEleCount = min(m_listInfos[i].listEleCount, (min(static_cast<int>(m_listInfos[i].listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
+                        m_listInfos[i].listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * m_listInfos[i].listEleCount + m_listInfos[i].pageOffset) * 1.0 / (1 << PageSizeEx)));
                     }
-
-                    m_listInfos[i].listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
                     totalListElementCount += m_listInfos[i].listEleCount;
                     int pageCount = m_listInfos[i].listPageCount;
 
@@ -842,15 +839,6 @@ namespace SPTAG
                         exit(1);
                     }
                     delete[] dictBuffer;
-                }
-                
-                if (!m_enableDataCompression)
-                {
-                    for (int i = 0; i < m_listCount; ++i)
-                    {
-                        m_listInfos[i].listEleCount = min(m_listInfos[i].listEleCount, (min(static_cast<int>(m_listInfos[i].listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
-                        m_listInfos[i].listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * m_listInfos[i].listEleCount + m_listInfos[i].pageOffset) * 1.0 / (1 << PageSizeEx)));
-                    }
                 }
 
                 LOG(Helper::LogLevel::LL_Info,
