@@ -213,11 +213,18 @@ namespace SPTAG
                             p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
-                                std::size_t sizePostingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * vectorInfoSize, m_enableDictTraining);
+                                std::size_t sizePostingListFullData;
+                                try {
+                                    sizePostingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * vectorInfoSize, m_enableDictTraining);
+                                }
+                                catch (std::runtime_error &err) {
+                                    LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", curPostingID, err.what());
+                                    return;
+                                }
                                 if (sizePostingListFullData != listInfo->listEleCount * vectorInfoSize)
                                 {
-                                    LOG(Helper::LogLevel::LL_Info, "postingListFullData size not match! %zu, %d, \n", sizePostingListFullData, listInfo->listEleCount * vectorInfoSize);
-                                    exit(1);
+                                    LOG(Helper::LogLevel::LL_Error, "PostingList %d decompressed size not match! %zu, %d, \n", curPostingID, sizePostingListFullData, listInfo->listEleCount * vectorInfoSize);
+                                    return;
                                 }
                             }
                         }
@@ -291,7 +298,13 @@ namespace SPTAG
                             p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
-                                m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);
+                                try {
+                                    m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);
+                                }
+                                catch (std::runtime_error& err) {
+                                    LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", curPostingID, err.what());
+                                    continue;
+                                }
                             }
                         }
 
@@ -821,7 +834,13 @@ namespace SPTAG
                         LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         exit(1);
                     }
-                    m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
+                    try {
+                        m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
+                    }
+                    catch (std::runtime_error& err) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file: %s \n", err.what());
+                        exit(1);
+                    }
                     delete[] dictBuffer;
                 }
                 

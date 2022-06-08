@@ -32,7 +32,7 @@ namespace SPTAG
                 if (ddict == NULL)
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD_createDDict() failed! \n");
-                    exit(1);
+                    throw std::runtime_error("ZSTD_createDDict() failed!");
                 }
             }
 
@@ -67,14 +67,14 @@ namespace SPTAG
                 if (dctx == NULL)
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD_createDCtx() failed! \n");
-                    exit(1);
+                    throw std::runtime_error("ZSTD_createDCtx() failed!");
                 }
                 std::size_t const decomp_size = ZSTD_decompress_usingDDict(dctx,
                     (void*)dst, dstCapacity, src, srcSize, ddict);
                 if (ZSTD_isError(decomp_size))
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD decompress error %s, \n", ZSTD_getErrorName(decomp_size));
-                    exit(1);
+                    throw std::runtime_error("ZSTD decompress failed.");
                 }
                 ZSTD_freeDCtx(dctx);
                 return decomp_size;
@@ -105,7 +105,7 @@ namespace SPTAG
                 if (ZSTD_isError(decomp_size))
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD decompress error %s, \n", ZSTD_getErrorName(decomp_size));
-                    exit(1);
+                    throw std::runtime_error("ZSTD decompress failed.");
                 }
 
                 return decomp_size;
