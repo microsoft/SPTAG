@@ -123,7 +123,6 @@ namespace SPTAG {
                 m_diskRequests.resize(p_internalResultNum);
                 m_enableDataCompression = enableDataCompression;
                 if (enableDataCompression) {
-
                     m_decompressBuffers.resize(p_internalResultNum);
                     for (int pi = 0; pi < p_internalResultNum; pi++) {
                         m_decompressBuffers[pi].ReservePageBuffer(p_maxPages);
@@ -136,7 +135,7 @@ namespace SPTAG {
                 int hashExp = va_arg(arg, int);
                 int internalResultNum = va_arg(arg, int);
                 int maxPages = va_arg(arg, int);
-                int enableDataCompression = va_arg(arg, bool);
+                bool enableDataCompression = bool(va_arg(arg, int));
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages, enableDataCompression);
             }
 
