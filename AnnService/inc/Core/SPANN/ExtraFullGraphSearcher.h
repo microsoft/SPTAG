@@ -201,26 +201,25 @@ namespace SPTAG
 #ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
 
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor](Helper::AsyncReadRequest *request)
+                    request.m_callback = [&p_exWorkSpace, pi, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor](Helper::AsyncReadRequest *request)
                     {
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
 
                         // decompress posting list
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
-                        std::string postingListFullData("");
                         if (m_enableDataCompression)
                         {
+                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
-                                postingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, m_enableDictTraining);
+                                std::size_t sizePostingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * vectorInfoSize, m_enableDictTraining);
+                                if (sizePostingListFullData != listInfo->listEleCount * vectorInfoSize)
+                                {
+                                    LOG(Helper::LogLevel::LL_Info, "postingListFullData size not match! %zu, %d, \n", sizePostingListFullData, listInfo->listEleCount * vectorInfoSize);
+                                    exit(1);
+                                }
                             }
-                            if (postingListFullData.size() != listInfo->listEleCount * vectorInfoSize)
-                            {
-                                LOG(Helper::LogLevel::LL_Info, "postingListFullData size not match! %zu, %d, \n", postingListFullData.size(), listInfo->listEleCount * vectorInfoSize);
-                                exit(1);
-                            }
-                            p_postingListFullData = &postingListFullData[0];
                         }
 
                         // delta encoding
@@ -287,14 +286,13 @@ namespace SPTAG
                         char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
 
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
-                        std::string postingListFullData("");
                         if (m_enableDataCompression)
                         {
+                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
-                                postingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, m_enableDictTraining);
+                                m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);
                             }
-                            p_postingListFullData = &postingListFullData[0];
                         }
 
                         for (size_t i = 0; i < listInfo->listEleCount; ++i) {

@@ -108,11 +108,11 @@ namespace SPTAG {
             ~ExtraWorkSpace() {}
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
-                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()));
+                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_enableDataCompression);
                 m_spaceID = g_spaceCount++;
             }
 
-            void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages) {
+            void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
                 m_postingIDs.reserve(p_internalResultNum);
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 m_processIocp.reset(p_internalResultNum);
@@ -121,6 +121,14 @@ namespace SPTAG {
                     m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
                 }
                 m_diskRequests.resize(p_internalResultNum);
+                m_enableDataCompression = enableDataCompression;
+                if (enableDataCompression) {
+
+                    m_decompressBuffers.resize(p_internalResultNum);
+                    for (int pi = 0; pi < p_internalResultNum; pi++) {
+                        m_decompressBuffers[pi].ReservePageBuffer(p_maxPages);
+                    }
+                }
             }
 
             void Initialize(va_list& arg) {
@@ -128,7 +136,8 @@ namespace SPTAG {
                 int hashExp = va_arg(arg, int);
                 int internalResultNum = va_arg(arg, int);
                 int maxPages = va_arg(arg, int);
-                Initialize(maxCheck, hashExp, internalResultNum, maxPages);
+                int enableDataCompression = va_arg(arg, bool);
+                Initialize(maxCheck, hashExp, internalResultNum, maxPages, enableDataCompression);
             }
 
             static void Reset() { g_spaceCount = 0; }
@@ -140,6 +149,9 @@ namespace SPTAG {
             Helper::RequestQueue m_processIocp;
 
             std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
+
+            bool m_enableDataCompression;
+            std::vector<PageBuffer<std::uint8_t>> m_decompressBuffers;
 
             std::vector<Helper::AsyncReadRequest> m_diskRequests;
 
@@ -154,7 +166,6 @@ namespace SPTAG {
             IExtraSearcher()
             {
             }
-
 
             virtual ~IExtraSearcher()
             {
