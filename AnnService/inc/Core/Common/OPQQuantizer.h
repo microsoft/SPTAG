@@ -179,10 +179,10 @@ namespace SPTAG
 			{
 				OPQMatrixType* typed_vec;
 				auto f_dot = SPTAG::COMMON::DistanceCalcSelector<OPQMatrixType>(SPTAG::DistCalcMethod::Cosine);
-				auto base = GetBase<OPQMatrixType>() * GetBase<OPQMatrixType>();
+				auto base = COMMON::Utils::GetBase<OPQMatrixType>() * COMMON::Utils::GetBase<OPQMatrixType>();
 				if constexpr (std::is_same_v<I, OPQMatrixType>)
 				{
-					typed_vec = vec;
+					typed_vec = const_cast<OPQMatrixType*>(vec);
 				}
 				else
 				{
