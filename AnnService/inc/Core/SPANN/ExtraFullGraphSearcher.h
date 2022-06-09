@@ -81,8 +81,14 @@ namespace SPTAG
             }
         };
 
-#define ProcessPosting(p_postingListFullData, vectorInfoSize, m_enablePostingListRearrange) \
+#define ProcessPosting(p_postingListFullData, vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector) \
         for (int i = 0; i < listInfo->listEleCount; i++) { \
+            if (m_enableDeltaEncoding) { \
+                ValueType* leaf = m_enablePostingListRearrange ? reinterpret_cast<ValueType*>(p_postingListFullData + (vectorInfoSize - sizeof(int)) * i) : reinterpret_cast<ValueType*>(p_postingListFullData + vectorInfoSize * i + sizeof(int)); \
+                for (auto i = 0; i < p_index->GetFeatureDim(); i++) { \
+                    leaf[i] += headVector[i]; \
+                } \
+            } \
             uint64_t offsetVectorID = m_enablePostingListRearrange ? (vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : vectorInfoSize * i; \
             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
@@ -200,7 +206,7 @@ namespace SPTAG
 #ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
 
-                    request.m_callback = [&p_exWorkSpace, pi, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor](Helper::AsyncReadRequest *request)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor](Helper::AsyncReadRequest *request)
                     {
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
@@ -209,7 +215,7 @@ namespace SPTAG
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
                         if (m_enableDataCompression)
                         {
-                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
+                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffer.GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
                                 std::size_t sizePostingListFullData;
@@ -229,20 +235,13 @@ namespace SPTAG
                         }
 
                         // delta encoding
+                        ValueType* headVector = nullptr;
                         if (m_enableDeltaEncoding)
                         {
-                            ValueType *headVector = (ValueType *)p_index->GetSample(curPostingID);
-                            for (int i = 0; i < listInfo->listEleCount; i++)
-                            {
-                                ValueType *leaf = m_enablePostingListRearrange ? reinterpret_cast<ValueType *>(p_postingListFullData + (vectorInfoSize - sizeof(int)) * i) : reinterpret_cast<ValueType *>(p_postingListFullData + vectorInfoSize * i + sizeof(int));
-                                for (auto i = 0; i < p_index->GetFeatureDim(); i++)
-                                {
-                                    leaf[i] += headVector[i];
-                                }
-                            }
+                            headVector = (ValueType*)p_index->GetSample(curPostingID);
                         }
 
-                        ProcessPosting(const_cast<char *>(p_postingListFullData), vectorInfoSize, m_enablePostingListRearrange);
+                        ProcessPosting(const_cast<char *>(p_postingListFullData), vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector);
                     };
 #else // async read
                     request.m_callback = [&p_exWorkSpace](Helper::AsyncReadRequest* request)
@@ -294,7 +293,7 @@ namespace SPTAG
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
                         if (m_enableDataCompression)
                         {
-                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffers[pi].GetBuffer();
+                            p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffer.GetBuffer();
                             if (listInfo->listEleCount != 0)
                             {
                                 try {

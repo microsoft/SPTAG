@@ -123,10 +123,7 @@ namespace SPTAG {
                 m_diskRequests.resize(p_internalResultNum);
                 m_enableDataCompression = enableDataCompression;
                 if (enableDataCompression) {
-                    m_decompressBuffers.resize(p_internalResultNum);
-                    for (int pi = 0; pi < p_internalResultNum; pi++) {
-                        m_decompressBuffers[pi].ReservePageBuffer(p_maxPages);
-                    }
+                    m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
             }
 
@@ -150,7 +147,7 @@ namespace SPTAG {
             std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
 
             bool m_enableDataCompression;
-            std::vector<PageBuffer<std::uint8_t>> m_decompressBuffers;
+            PageBuffer<std::uint8_t> m_decompressBuffer;
 
             std::vector<Helper::AsyncReadRequest> m_diskRequests;
 
