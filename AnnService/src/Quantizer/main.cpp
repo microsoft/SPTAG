@@ -50,12 +50,25 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader>& vectorRead
                 exit(1);
             }
         }
+        if (!options->m_outputReconstructVecFile.empty())
+        {
+#pragma omp parallel for
+            for (int i = 0; i < set->Count(); i++)
+            {
+                quantizer->ReconstructVector((uint8_t*)quantized_vectors->GetVector(i), set->GetVector(i));
+            }
+            if (ErrorCode::Success != set->AppendSave(options->m_outputReconstructVecFile))
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed to save uncompressed vectors.\n");
+                exit(1);
+            }
+        }
     }
 }
 
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string());
+    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string(), std::string());
 
     if (!options->Parse(argc - 1, argv + 1))
     {
