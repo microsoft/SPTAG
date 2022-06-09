@@ -102,7 +102,7 @@ namespace SPTAG
            
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -134,7 +134,7 @@ namespace SPTAG
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -286,7 +286,7 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);    
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
             }
             
             m_workSpacePool->Return(auto_ws);
@@ -714,7 +714,7 @@ namespace SPTAG
             }
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -766,7 +766,7 @@ namespace SPTAG
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 

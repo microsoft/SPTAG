@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -26,6 +26,9 @@
     <ClInclude Include="inc\SSDServing\SelectHead.h" />
     <ClInclude Include="inc\SSDServing\SSDIndex.h" />
     <ClInclude Include="inc\SSDServing\Utils.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
@@ -177,6 +180,7 @@
     <Import Project="..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets" Condition="Exists('..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets')" />
     <Import Project="..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets" Condition="Exists('..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets')" />
     <Import Project="..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets" Condition="Exists('..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets')" />
+    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -189,5 +193,6 @@
     <Error Condition="!Exists('..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets'))" />
     <Error Condition="!Exists('..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc142.1.72.0.0\build\boost_thread-vc142.targets'))" />
     <Error Condition="!Exists('..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc142.1.72.0.0\build\boost_wserialization-vc142.targets'))" />
+    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>
 </Project>
