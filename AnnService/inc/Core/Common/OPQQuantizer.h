@@ -75,7 +75,7 @@ namespace SPTAG
 		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
 		{
 			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
-			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec, true);
+			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec);
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
 			ALIGN_FREE(mat_vec);
 		}
@@ -86,7 +86,7 @@ namespace SPTAG
 			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
-			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout);
+			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout, true);
 
 			ALIGN_FREE(pre_mat_vec);
 		}
@@ -162,21 +162,49 @@ namespace SPTAG
 		template <typename I, typename O>
 		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose) const
 		{
-			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
+			if (transpose)
 			{
-				OPQMatrixType tmp = 0;
-				for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
+#pragma omp parallel for
+				for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 				{
-					if (transpose)
+					OPQMatrixType tmp = 0;
+					for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
 					{
 						tmp += mat[m_MatrixIndexCalc(j, i)] * vec[j];
 					}
-					else
+					mat_vec[i] = (O)tmp;
+				}
+			}
+			else
+			{
+				OPQMatrixType* typed_vec;
+				auto f_dot = SPTAG::COMMON::DistanceCalcSelector<OPQMatrixType>(SPTAG::DistCalcMethod::Cosine);
+				auto base = GetBase<OPQMatrixType>() * GetBase<OPQMatrixType>();
+				if constexpr (std::is_same_v<I, OPQMatrixType>)
+				{
+					typed_vec = vec;
+				}
+				else
+				{
+					typed_vec = (OPQMatrixType*)ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
+					for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
 					{
-						tmp += mat[m_MatrixIndexCalc(i, j)] * vec[j];
+						typed_vec[i] = (OPQMatrixType)vec[i];
 					}
 				}
-				mat_vec[i] = (O) tmp;
+
+
+#pragma omp parallel for
+				for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
+				{
+					mat_vec[i] = (O) (base - f_dot(typed_vec, &mat[i * (m_NumSubvectors * m_DimPerSubvector)], m_NumSubvectors * m_DimPerSubvector));
+				}
+
+				if constexpr (!std::is_same_v<I, OPQMatrixType>)
+				{
+					ALIGN_FREE(typed_vec);
+				}
+
 			}
 		}
 
