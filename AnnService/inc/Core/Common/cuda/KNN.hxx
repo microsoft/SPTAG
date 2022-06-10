@@ -1075,7 +1075,8 @@ __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_
 template<typename DTYPE, int Dim, int BLOCK_DIM, typename SUMTYPE>
 __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL) {
     // Memory for a heap for each thread
-    __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
+    __shared__ ThreadHeap<DTYPE,SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
+    //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM];
 
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
 
@@ -1089,48 +1090,49 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 #endif
     DLOG_DEBUG("Shared memory per block - Queries:%d, Heaps:%d\n", Dim * BLOCK_DIM * dSize, BLOCK_DIM * KVAL * 4);
 
-    heapMem[threadIdx.x].initialize();
+    //heapMem[threadIdx.x].initialize(heapMem[threadIdx.x].vals, KVAL-1);
+    //heapMem[threadIdx.x].initialize();
 
-    SUMTYPE dist;
-    // Loop through all query points
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
-
-        heapMem[threadIdx.x].initialize();
-        extra.dist = INFTY<DTYPE>();
-        query.loadPoint(data[i]); // Load into shared memory
-
-        // Compare with all points in the dataset
-        for (int j = 0; j < dataSize; j++) {
-#if METRIC == 1 
-            dist = query.cosine(&data[j]);
-#else
-            dist = query.l2(&data[j]);
-#endif
-            if (dist < extra.dist) {
-                if (dist < heapMem[threadIdx.x].top()) {
-                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
-                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
-                    //When recording the index, remember the off_set to discriminate different subvectorSets
-                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
-                }
-                else {
-                    extra.dist = dist;
-                    extra.idx = j + idx_offset;
-                }
-            }
-        }
-
-        // Write KNN to result list in sorted order
-        results[(i + 1) * KVAL - 1].idx = extra.idx;
-        results[(i + 1) * KVAL - 1].dist = extra.dist;
-        for (int j = KVAL - 2; j >= 0; j--) {
-            results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
-            results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
-            heapMem[threadIdx.x].vals[0].dist = -1;
-            heapMem[threadIdx.x].heapify();
-
-        }
-    }
+//    SUMTYPE dist;
+//    // Loop through all query points
+//    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
+//
+//        heapMem[threadIdx.x].initialize();
+//        extra.dist = INFTY<DTYPE>();
+//        query.loadPoint(data[i]); // Load into shared memory
+//
+//        // Compare with all points in the dataset
+//        for (int j = 0; j < dataSize; j++) {
+//#if METRIC == 1 
+//            dist = query.cosine(&data[j]);
+//#else
+//            dist = query.l2(&data[j]);
+//#endif
+//            if (dist < extra.dist) {
+//                if (dist < heapMem[threadIdx.x].top()) {
+//                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
+//                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
+//                    //When recording the index, remember the off_set to discriminate different subvectorSets
+//                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
+//                }
+//                else {
+//                    extra.dist = dist;
+//                    extra.idx = j + idx_offset;
+//                }
+//            }
+//        }
+//
+//        //// Write KNN to result list in sorted order
+//        //results[(i + 1) * KVAL - 1].idx = extra.idx;
+//        //results[(i + 1) * KVAL - 1].dist = extra.dist;
+//        //for (int j = KVAL - 2; j >= 0; j--) {
+//        //    results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
+//        //    results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
+//        //    heapMem[threadIdx.x].vals[0].dist = -1;
+//        //    heapMem[threadIdx.x].heapify();
+//
+//        //}
+//    }
 }
 
 template <typename DTYPE, typename SUMTYPE, int MAX_DIM>
