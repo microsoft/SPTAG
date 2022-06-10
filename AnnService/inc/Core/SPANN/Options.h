@@ -79,6 +79,13 @@ namespace SPTAG {
             bool m_enableSSD;
             bool m_buildSsdIndex;
             int m_iSSDNumberOfThreads;
+            bool m_enableDeltaEncoding;
+            bool m_enablePostingListRearrange;
+            bool m_enableDataCompression;
+            bool m_enableDictTraining;
+            int m_minDictTraingBufferSize;
+            int m_dictBufferCapacity;
+            int m_zstdCompressLevel;
 
             // Building
             int m_replicaCount;

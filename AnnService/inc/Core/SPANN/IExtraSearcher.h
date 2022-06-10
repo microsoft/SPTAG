@@ -108,11 +108,11 @@ namespace SPTAG {
             ~ExtraWorkSpace() {}
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
-                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()));
+                Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_enableDataCompression);
                 m_spaceID = g_spaceCount++;
             }
 
-            void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages) {
+            void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
                 m_postingIDs.reserve(p_internalResultNum);
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 m_processIocp.reset(p_internalResultNum);
@@ -121,6 +121,10 @@ namespace SPTAG {
                     m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
                 }
                 m_diskRequests.resize(p_internalResultNum);
+                m_enableDataCompression = enableDataCompression;
+                if (enableDataCompression) {
+                    m_decompressBuffer.ReservePageBuffer(p_maxPages);
+                }
             }
 
             void Initialize(va_list& arg) {
@@ -128,7 +132,8 @@ namespace SPTAG {
                 int hashExp = va_arg(arg, int);
                 int internalResultNum = va_arg(arg, int);
                 int maxPages = va_arg(arg, int);
-                Initialize(maxCheck, hashExp, internalResultNum, maxPages);
+                bool enableDataCompression = bool(va_arg(arg, int));
+                Initialize(maxCheck, hashExp, internalResultNum, maxPages, enableDataCompression);
             }
 
             static void Reset() { g_spaceCount = 0; }
@@ -140,6 +145,9 @@ namespace SPTAG {
             Helper::RequestQueue m_processIocp;
 
             std::vector<PageBuffer<std::uint8_t>> m_pageBuffers;
+
+            bool m_enableDataCompression;
+            PageBuffer<std::uint8_t> m_decompressBuffer;
 
             std::vector<Helper::AsyncReadRequest> m_diskRequests;
 
@@ -155,7 +163,6 @@ namespace SPTAG {
             {
             }
 
-
             virtual ~IExtraSearcher()
             {
             }
@@ -165,7 +172,9 @@ namespace SPTAG {
             virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
-                SearchStats* p_stats, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) = 0;
+                SearchStats* p_stats,
+                std::set<int>* truth = nullptr,
+                std::map<int, std::set<int>>* found = nullptr) = 0;
 
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
