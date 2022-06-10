@@ -114,6 +114,7 @@
     <CudaCompile Include="src\Core\MetadataSet.cpp" />
     <CudaCompile Include="src\Core\VectorIndex.cpp" />
     <CudaCompile Include="src\Core\VectorSet.cpp" />
+    <CudaCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <CudaCompile Include="src\Helper\ArgumentsParser.cpp" />
     <CudaCompile Include="src\Helper\Base64Encode.cpp" />
     <CudaCompile Include="src\Helper\CommonHelper.cpp" />
@@ -121,6 +122,8 @@
     <CudaCompile Include="src\Helper\SimpleIniReader.cpp" />
     <CudaCompile Include="src\Helper\VectorSetReader.cpp" />
     <CudaCompile Include="src\Helper\VectorSetReaders\DefaultReader.cpp" />
+    <CudaCompile Include="src\SSDServing\main.cpp" />
+    <CudaCompile Include="src\IndexSearcher\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -191,7 +194,7 @@
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
-    <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
+    <!--<ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />-->
     <ClCompile Include="src\Helper\AsyncFileReader.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />

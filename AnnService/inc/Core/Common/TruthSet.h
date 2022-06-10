@@ -185,7 +185,6 @@ namespace SPTAG
                 std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
                 std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
 
-                //GenerateTruthGPU(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
                 GenerateTruthGPU<T>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
                 
                 LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");

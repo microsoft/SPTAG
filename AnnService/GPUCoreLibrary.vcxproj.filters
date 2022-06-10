@@ -276,6 +276,15 @@
     <CudaCompile Include="src\Helper\VectorSetReader.cpp">
       <Filter>Source Files\Helper</Filter>
     </CudaCompile>
+    <CudaCompile Include="src\Core\SPANN\SPANNIndex.cpp">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\SSDServing\main.cpp">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\IndexSearcher\main.cpp">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -295,9 +304,6 @@
     </ClCompile>
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp">
-      <Filter>Source Files\Core\SPANN</Filter>
     </ClCompile>
     <ClCompile Include="src\Core\Common\CommonUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>

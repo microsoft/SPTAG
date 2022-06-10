@@ -465,6 +465,19 @@ public:
     __forceinline__ __device__ T getCoord(int idx) {
         return dataPtr[idx * Stride];
     }
+
+/******************************************************************************************
+* Main L2 distance metric used by approx-KNN application.
+******************************************************************************************/
+    __forceinline__ __device__ __host__ SUMTYPE l2(Point<T, SUMTYPE, Dim>* other) {
+        SUMTYPE total = 0;
+#pragma unroll
+        for (int i = 0; i < Dim; ++i) {
+            total += ((getCoord(i) - other->coords[i]) * (getCoord(i) - other->coords[i]));
+        }
+
+        return total;
+    }
 };
 
 #endif
