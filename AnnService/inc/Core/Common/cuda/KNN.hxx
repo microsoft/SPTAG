@@ -1076,10 +1076,13 @@ template<typename DTYPE, int Dim, int BLOCK_DIM, typename SUMTYPE>
 __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL) {
     // Memory for a heap for each thread
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
+    //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM]; in KNN Source Code
+    //template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
 
     // Memory used to store a query point for each thread
+    //__shared__ DTYPE transpose_mem[100 * BLOCK_DIM];
     __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
     TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
     query.setMem(&transpose_mem[threadIdx.x]);
@@ -1215,7 +1218,6 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         LOG_INFO("Alloc'ing memory for results on device: %ld bytes.\n", querySet->Count() * K * sizeof(int));
 
         int KNN_blocks = querySet->Count() / THREADS;
-
         // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets 
         query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS >> > (d_points, d_check_points, vector_size / NUM_GPUS, i * (vector_size / NUM_GPUS), result_size, d_results[i], K);
     }
@@ -1282,21 +1284,21 @@ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<Vecto
     else if (m_iFeatureDim <= 128) {
         GenerateTruthGPUCore<T, SUMTYPE, 128>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
     }
-    else if (m_iFeatureDim <= 200) {
-        GenerateTruthGPUCore<T, SUMTYPE, 200>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+    else if (m_iFeatureDim <= 184) {
+        GenerateTruthGPUCore<T, SUMTYPE, 184>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
     }
-    else if (m_iFeatureDim <= 768) {
-        GenerateTruthGPUCore<T, SUMTYPE, 768>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-    }
-    else if (m_iFeatureDim <= 1024) {
-        GenerateTruthGPUCore<T, SUMTYPE, 1024>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-    }
-    else if (m_iFeatureDim <= 2048) {
-        GenerateTruthGPUCore<T, SUMTYPE, 2048>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-    }
-    else if (m_iFeatureDim <= 4096) {
-        GenerateTruthGPUCore<T, SUMTYPE, 4096>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-    }
+    //else if (m_iFeatureDim <= 768) {
+    //    GenerateTruthGPUCore<T, SUMTYPE, 768>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+    //}
+    //else if (m_iFeatureDim <= 1024) {
+    //    GenerateTruthGPUCore<T, SUMTYPE, 1024>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+    //}
+    //else if (m_iFeatureDim <= 2048) {
+    //    GenerateTruthGPUCore<T, SUMTYPE, 2048>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+    //}
+    //else if (m_iFeatureDim <= 4096) {
+    //    GenerateTruthGPUCore<T, SUMTYPE, 4096>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+    //}
     else {
         LOG(SPTAG::Helper::LogLevel::LL_Error, "%d dimensions not currently supported for GPU generate Truth.\n");
         exit(1);
