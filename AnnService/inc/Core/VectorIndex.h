@@ -166,9 +166,9 @@ protected:
     std::shared_ptr<void> m_pMetaToVec;
 
 public:
-    int m_iDataBlockSize;
-    int m_iDataCapacity;
-    int m_iMetaRecordSize;
+    int m_iDataBlockSize = 1024 * 1024;
+    int m_iDataCapacity = MaxSize;
+    int m_iMetaRecordSize = 10;
     std::shared_ptr<SPTAG::COMMON::IQuantizer> m_pQuantizer = nullptr;
 };
 
