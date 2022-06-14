@@ -478,6 +478,24 @@ public:
 
         return total;
     }
+
+/******************************************************************************************
+* Cosine distance metric comparison operation.  Requires that the SUMTYPE is floating point,
+* regardless of the datatype T, because it requires squareroot.
+******************************************************************************************/
+    __forceinline__ __device__ __host__ SUMTYPE cosine(Point < T, SUMTYPE, Dim > * other) {
+        SUMTYPE prod = 0;
+        SUMTYPE a = 0;
+        SUMTYPE b = 0;
+#pragma unroll
+        for (int i = 0; i < Dim; ++i) {
+            a += getCoord(i) * getCoord(i);
+            b += other->coords[i] * other->coords[i];
+            prod += getCoord(i) * other->coords[i];
+        }
+
+        return 1 - (prod / (sqrt(a * b)));
+    }
 };
 
 #endif

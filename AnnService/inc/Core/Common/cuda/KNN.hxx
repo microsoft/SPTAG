@@ -1080,7 +1080,7 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     //template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
-
+    DistPair<SUMTYPE> vals[9];
     // Memory used to store a query point for each thread
     //__shared__ DTYPE transpose_mem[100 * BLOCK_DIM];
     __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
@@ -1092,7 +1092,8 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 #endif
     DLOG_DEBUG("Shared memory per block - Queries:%d, Heaps:%d\n", Dim * BLOCK_DIM * dSize, BLOCK_DIM * KVAL * 4);
 
-    heapMem[threadIdx.x].initialize();
+    //heapMem[threadIdx.x].KVAL = KVAL;
+    heapMem[threadIdx.x].initialize(vals, KVAL-1);
 
     SUMTYPE dist;
     // Loop through all query points
@@ -1100,15 +1101,15 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 
         heapMem[threadIdx.x].initialize();
         extra.dist = INFTY<DTYPE>();
-        query.loadPoint(data[i]); // Load into shared memory
+        query.loadPoint(querySet[i]); // Load into shared memory
 
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
-#if METRIC == 1 
+//#if METRIC == 1 
             dist = query.cosine(&data[j]);
-#else
-            dist = query.l2(&data[j]);
-#endif
+//#else
+//            dist = query.l2(&data[j]);
+//#endif
             if (dist < extra.dist) {
                 if (dist < heapMem[threadIdx.x].top()) {
                     extra.dist = heapMem[threadIdx.x].vals[0].dist;
@@ -1139,8 +1140,8 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 template <typename DTYPE, typename SUMTYPE, int MAX_DIM>
 __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
     const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer,
-    std::vector< std::vector<SPTAG::SizeType> >truthset, std::vector< std::vector<float> > distset) {
-    const int NUM_GPUS = 4;
+    std::vector< std::vector<SPTAG::SizeType> >&truthset, std::vector< std::vector<float> >&distset) {
+    const int NUM_GPUS = 1;
 
     //using SUMTYPE = std::conditional_t<std::is_same<T, float>::value, float, int32_t>;
 
@@ -1154,7 +1155,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     int vector_size = vectorSet->Count();
     int sub_vector_size = vector_size / NUM_GPUS;
     int dim = querySet->Dimension();
-
+    auto vectors = (DTYPE*)vectorSet->GetData();
     LOG_INFO("QueryDatatype: %s, Rows:%ld, Columns:%d\n", (STR(DTYPE)), result_size, dim);
     LOG_INFO("Datatype: %s, Rows:%ld, Columns:%d\n", (STR(DTYPE)), vector_size, dim);
 
@@ -1173,12 +1174,15 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         //LOG_INFO("GPU%d has %ld vectors\n", i, sub_vector.size());
         int start = sub_vector_size * i;
         int end = min(start + sub_vector_size, vector_size);
-        //auto sub_vector = querySet->GetVectorSet(start, end);
-        std::shared_ptr<VectorSet> sub_vector = std::shared_ptr<VectorSet>(new BasicVectorSet(ByteArray((std::uint8_t*)(querySet->GetVector(start)), (end - start) * querySet->PerVectorDataSize(), false),
-            querySet->GetValueType(),
-            querySet->Dimension(),
-            end - start));
-        sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >((DTYPE*)sub_vector->GetData(), result_size / NUM_GPUS, dim);
+        int curr_sub_size = end - start;
+    //origin
+        //std::shared_ptr<VectorSet> sub_vector = std::shared_ptr<VectorSet>(new BasicVectorSet(ByteArray((std::uint8_t*)(querySet->GetVector(start)), (end - start) * querySet->PerVectorDataSize(), false),
+        //    querySet->GetValueType(),
+        //    querySet->Dimension(),
+        //    end - start));
+        //sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >((DTYPE*)sub_vector->GetData(), (end-start), dim);
+        //& vectors[(GPUPointOffset[gpuNum] + offset[gpuNum]) * dim]
+        sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start*dim], curr_sub_size, dim);
     }
 
     int per_gpu_size = (result_size)*K;//Every gpu do brute force to subset assigned to it
@@ -1190,13 +1194,11 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     }
 
     cudaStream_t streams[NUM_GPUS];
-    /*
+    
     LOG_INFO("Starting KNN Kernel timer\n");
-    struct timespec start, end;
-    time_t start_t, end_t;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    start_t = clock();
-    */
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    
     for (int i = 0; i < NUM_GPUS; i++) {
         cudaSetDevice(i);
 
@@ -1227,16 +1229,20 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         cudaDeviceSynchronize();
     }
 
-    /*
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    end_t = clock();
+    
 
-    LOG_ALL("Total GPU time (sec): %lf\n", (((double)(end_t - start_t)) / CLOCKS_PER_SEC));
-    LOG_INFO("GPU runtime (ms): %lf\n", (1000 * end.tv_sec + 1e-6 * end.tv_nsec) - (1000 * start.tv_sec + 1e-6 * start.tv_nsec));
-    */
+    auto t2 = std::chrono::high_resolution_clock::now();
+    double gpuRunTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
 
+    LOG_ALL("Total GPU time (sec): %lf\n", gpuRunTime);
+    //LOG_INFO("GPU runtime (ms): %lf\n", (1000 * end.tv_sec + 1e-6 * end.tv_nsec) - (1000 * start.tv_sec + 1e-6 * start.tv_nsec));
+    
+
+    //DistPair* results = (DistPair*)malloc(mtx.size() * K * sizeof(DistPair) * NUM_GPUS);
+    //for (int i = 0; i < NUM_GPUS; i++) {
+    //    cudaMemcpy(&results[(i * per_gpu_size)], d_results[i], per_gpu_size * sizeof(DistPair), cudaMemcpyDeviceToHost);
+    //}
     DistPair<SUMTYPE>* results = (DistPair<SUMTYPE>*)malloc(per_gpu_size * sizeof(DistPair<SUMTYPE>) * NUM_GPUS);
-
     for (int i = 0; i < NUM_GPUS; i++) {
         cudaMemcpy(&results[(i * per_gpu_size)], d_results[i], per_gpu_size * sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost);
     }
@@ -1251,7 +1257,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         //For each result, there should be writer pointer, four reader pointers
         // reader ptr is assigned to i+gpu_idx*(result_size*K)/4
         for (int gpu_idx = 0; gpu_idx < NUM_GPUS; gpu_idx++) {
-            reader_ptrs[gpu_idx] = i * K + gpu_idx * (result_size * K) / 4;
+            reader_ptrs[gpu_idx] = i * K + gpu_idx * (result_size * K);
         }
         for (int writer_ptr = i * K; writer_ptr < (i + 1) * K; writer_ptr++) {
             int selected = 0;
@@ -1261,7 +1267,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                     selected = gpu_idx;
                 }
             }
-            truthset[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]++].idx;
+            truthset[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]].idx;
             distset[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]++].dist;
         }
     }
@@ -1271,7 +1277,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 template <typename T>
 void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile,
     const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer,
-    std::vector< std::vector<SPTAG::SizeType> >truthset, std::vector< std::vector<float> > distset) {
+    std::vector< std::vector<SPTAG::SizeType> > &truthset, std::vector< std::vector<float> > &distset) {
     using SUMTYPE = std::conditional_t<std::is_same<T, float>::value, float, int32_t>;
     int m_iFeatureDim = querySet->Dimension();
 
@@ -1304,7 +1310,7 @@ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<Vecto
         exit(1);
     }
 }
-#define DefineVectorValueType(Name, Type) template void GenerateTruthGPU<Type>(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer, std::vector< std::vector<SPTAG::SizeType> >truthset, std::vector< std::vector<float> > distset);
+#define DefineVectorValueType(Name, Type) template void GenerateTruthGPU<Type>(std::shared_ptr<VectorSet> querySet, std::shared_ptr<VectorSet> vectorSet, const std::string truthFile, const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<SPTAG::COMMON::IQuantizer>& quantizer, std::vector< std::vector<SPTAG::SizeType> > &truthset, std::vector< std::vector<float> > &distset);
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 
