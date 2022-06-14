@@ -1074,6 +1074,7 @@ __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_
 ************************************************************************************/
 template<typename DTYPE, int Dim, int BLOCK_DIM, typename SUMTYPE>
 __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL) {
+    //auto t1 = std::chrono::high_resolution_clock::now();
     // Memory for a heap for each thread
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
     //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM]; in KNN Source Code
@@ -1098,7 +1099,7 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     SUMTYPE dist;
     // Loop through all query points
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
-
+        LOG_ALL("Tread: %d. Start.\n", i);
         heapMem[threadIdx.x].initialize();
         extra.dist = INFTY<DTYPE>();
         query.loadPoint(querySet[i]); // Load into shared memory
@@ -1134,7 +1135,9 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
             heapMem[threadIdx.x].heapify();
 
         }
+        LOG_ALL("Tread: %d. Done.\n", i);
     }
+
 }
 
 template <typename DTYPE, typename SUMTYPE, int MAX_DIM>
