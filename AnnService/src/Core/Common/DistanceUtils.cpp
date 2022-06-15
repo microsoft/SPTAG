@@ -1078,15 +1078,7 @@ void DistanceUtils::ComputeSum_AVX(std::int8_t* pX, const std::int8_t* pY, Dimen
         pX += 16;
         pY += 16;
     }
-    // const std::int8_t* pEnd32 = pX + ((length >> 5) << 5);
-    //  while (pX < pEnd32) {
-    //     __m256i x_part = _mm256_loadu_si256((__m256i*) pX);
-    //     __m256i y_part = _mm256_loadu_si256((__m256i*) pY);
-    //     x_part = _mm_add_epi8(x_part, y_part);
-    //     _mm_storeu_si256((__m256i*) pX, x_part);
-    //     pX += 32;
-    //     pY += 32;
-    // }
+
     while (pX < pEnd1) {
         *pX++ += *pY++;
     }
@@ -1096,6 +1088,63 @@ void DistanceUtils::ComputeSum_AVX512(std::int8_t* pX, const std::int8_t* pY, Di
 {
     const std::int8_t* pEnd16 = pX + ((length >> 4) << 4);
     const std::int8_t* pEnd1 = pX + length;
+
+    while (pX < pEnd16) {
+        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
+        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
+        x_part = _mm_add_epi8(x_part, y_part);
+        _mm_storeu_si128((__m128i*) pX, x_part);
+        pX += 16;
+        pY += 16;
+    }
+
+    while (pX < pEnd1) {
+        *pX++ += *pY++;
+    }
+}
+
+void DistanceUtils::ComputeSum_SSE(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
+    const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
+    const std::uint8_t* pEnd1 = pX + length;
+
+    while (pX < pEnd16) {
+        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
+        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
+        x_part = _mm_add_epi8(x_part, y_part);
+        _mm_storeu_si128((__m128i*) pX, x_part);
+        pX += 16;
+        pY += 16;
+    }
+
+    while (pX < pEnd1) {
+        *pX++ += *pY++;
+    }
+}
+
+void DistanceUtils::ComputeSum_AVX(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
+    const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
+    const std::uint8_t* pEnd1 = pX + length;
+
+    while (pX < pEnd16) {
+        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
+        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
+        x_part = _mm_add_epi8(x_part, y_part);
+        _mm_storeu_si128((__m128i*) pX, x_part);
+        pX += 16;
+        pY += 16;
+    }
+
+    while (pX < pEnd1) {
+        *pX++ += *pY++;
+    }
+}
+
+void DistanceUtils::ComputeSum_AVX512(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length)
+{
+     const std::uint8_t* pEnd16 = pX + ((length >> 4) << 4);
+    const std::uint8_t* pEnd1 = pX + length;
 
     while (pX < pEnd16) {
         __m128i x_part = _mm_loadu_si128((__m128i*) pX);
@@ -1174,10 +1223,10 @@ void DistanceUtils::ComputeSum_SSE(float* pX, const float* pY, DimensionType len
     const float* pEnd1 = pX + length;
 
     while (pX < pEnd4) {
-        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
-        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
-        x_part = _mm_add_epi32(x_part, y_part);
-        _mm_storeu_si128((__m128i*) pX, x_part);
+        __m128 x_part = _mm_loadu_ps(pX);
+        __m128 y_part = _mm_loadu_ps(pY);
+        x_part = _mm_add_ps(x_part, y_part);
+        _mm_storeu_ps(pX, x_part);
         pX += 4;
         pY += 4;
     }
@@ -1193,16 +1242,16 @@ void DistanceUtils::ComputeSum_AVX(float* pX, const float* pY, DimensionType len
     const float* pEnd1 = pX + length;
 
     while (pX < pEnd4) {
-        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
-        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
-        x_part = _mm_add_epi32(x_part, y_part);
-        _mm_storeu_si128((__m128i*) pX, x_part);
+        __m128 x_part = _mm_loadu_ps(pX);
+        __m128 y_part = _mm_loadu_ps(pY);
+        x_part = _mm_add_ps(x_part, y_part);
+        _mm_storeu_ps(pX, x_part);
         pX += 4;
         pY += 4;
     }
 
     while (pX < pEnd1) {
-       *pX++ += *pY++;
+        *pX++ += *pY++;
     }
 }
 
@@ -1212,10 +1261,10 @@ void DistanceUtils::ComputeSum_AVX512(float* pX, const float* pY, DimensionType 
     const float* pEnd1 = pX + length;
 
     while (pX < pEnd4) {
-        __m128i x_part = _mm_loadu_si128((__m128i*) pX);
-        __m128i y_part = _mm_loadu_si128((__m128i*) pY);
-        x_part = _mm_add_epi32(x_part, y_part);
-        _mm_storeu_si128((__m128i*) pX, x_part);
+        __m128 x_part = _mm_loadu_ps(pX);
+        __m128 y_part = _mm_loadu_ps(pY);
+        x_part = _mm_add_ps(x_part, y_part);
+        _mm_storeu_ps(pX, x_part);
         pX += 4;
         pY += 4;
     }

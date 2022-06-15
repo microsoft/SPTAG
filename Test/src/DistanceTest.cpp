@@ -61,7 +61,7 @@ void test(int high) {
     ComputeSum(X, Y, dimension);
     SPTAG::COMMON::DistanceUtils::ComputeSum(X_copy, Y, dimension);
     for (SPTAG::DimensionType i = 0; i < dimension; i++) {
-        BOOST_CHECK_CLOSE_FRACTION(float(X[i]), float(X_copy[i]), 1e-5);
+        BOOST_CHECK_CLOSE_FRACTION(double(X[i]), double(X_copy[i]), 1e-5);
     }
 
     delete[] X;

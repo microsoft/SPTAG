@@ -21,7 +21,7 @@ namespace SPTAG
         inline DistanceCalcReturn<T> DistanceCalcSelector(SPTAG::DistCalcMethod p_method);
 
         template <typename T>
-        using SumCalcReturn = void(*)(const T*, const T*, DimensionType);
+        using SumCalcReturn = void(*)(T*, const T*, DimensionType);
         template<typename T>
         inline SumCalcReturn<T> SumCalcSelector();
 
@@ -101,7 +101,7 @@ namespace SPTAG
             static float ComputeCosineDistance_AVX512(const float* pX, const float* pY, DimensionType length);
 
             template <typename T>
-            static void ComputeSum(T* pX, const T* pY, DimensionType length)
+            static void ComputeSum_Naive(T* pX, const T* pY, DimensionType length)
             {
                 const T* pEnd1 = pX + length;
                 while (pX < pEnd1) {
@@ -112,6 +112,10 @@ namespace SPTAG
             static void ComputeSum_SSE(std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static void ComputeSum_AVX(std::int8_t* pX, const std::int8_t* pY, DimensionType length);
             static void ComputeSum_AVX512(std::int8_t* pX, const std::int8_t* pY, DimensionType length);
+
+            static void ComputeSum_SSE(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static void ComputeSum_AVX(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
+            static void ComputeSum_AVX512(std::uint8_t* pX, const std::uint8_t* pY, DimensionType length);
 
             static void ComputeSum_SSE(std::int16_t* pX, const std::int16_t* pY, DimensionType length);
             static void ComputeSum_AVX(std::int16_t* pX, const std::int16_t* pY, DimensionType length);
@@ -129,7 +133,7 @@ namespace SPTAG
             }
 
              template<typename T>
-            static inline void ComputeSum(const T* p1, const T* p2, DimensionType length)
+            static inline void ComputeSum(T* p1, const T* p2, DimensionType length)
             {
                 auto func = SumCalcSelector<T>();
                 return func(p1, p2, length);
@@ -211,7 +215,7 @@ namespace SPTAG
             {
                 return &(DistanceUtils::ComputeSum_SSE);
             }
-            return &(DistanceUtils::ComputeSum);
+            return &(DistanceUtils::ComputeSum_Naive);
         }
     }
 }
