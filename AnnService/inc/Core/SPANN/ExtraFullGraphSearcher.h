@@ -85,9 +85,7 @@ namespace SPTAG
         for (int i = 0; i < listInfo->listEleCount; i++) { \
             if (m_enableDeltaEncoding) { \
                 ValueType* leaf = m_enablePostingListRearrange ? reinterpret_cast<ValueType*>(p_postingListFullData + (vectorInfoSize - sizeof(int)) * i) : reinterpret_cast<ValueType*>(p_postingListFullData + vectorInfoSize * i + sizeof(int)); \
-                for (auto i = 0; i < p_index->GetFeatureDim(); i++) { \
-                    leaf[i] += headVector[i]; \
-                } \
+                COMMON::DistanceUtils::ComputeSum(leaf, headVector, p_index->GetFeatureDim());\
             } \
             uint64_t offsetVectorID = m_enablePostingListRearrange ? (vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : vectorInfoSize * i; \
             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
