@@ -556,8 +556,7 @@ namespace SPTAG
                         if (abort && abort->ShouldAbort()) return;
 
                         BKTStackItem item = ss.top(); ss.pop();
-                        SizeType newBKTid = (SizeType)m_pTreeRoots.size();
-                        m_pTreeRoots[item.index].childStart = newBKTid;
+                        m_pTreeRoots[item.index].childStart = (SizeType)m_pTreeRoots.size();
                         if (item.last - item.first <= m_iBKTLeafSize) {
                             for (SizeType j = item.first; j < item.last; j++) {
                                 SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
@@ -590,7 +589,7 @@ namespace SPTAG
                                     if (args.counts[k] == 0) continue;
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
                                     m_pTreeRoots.emplace_back(cid);
-                                    if (args.counts[k] > 1) ss.push(BKTStackItem(newBKTid++, item.first, item.first + args.counts[k] - 1, item.debug && (args.counts[k] == maxCount)));
+                                    if (args.counts[k] > 1) ss.push(BKTStackItem((SizeType)(m_pTreeRoots.size() - 1), item.first, item.first + args.counts[k] - 1, item.debug && (args.counts[k] == maxCount)));
                                     item.first += args.counts[k];
                                 }
                             }

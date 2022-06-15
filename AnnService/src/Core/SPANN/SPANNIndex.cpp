@@ -32,34 +32,20 @@ namespace SPTAG
             return true;
         }
 
-        template <>
-        void Index<std::uint8_t>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
-        {
-            m_pQuantizer = quantizer;
-            if (m_pQuantizer)
-            {
-                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
-            }
-            else
-            {
-                m_fComputeDistance = COMMON::DistanceCalcSelector<std::uint8_t>(m_options.m_distCalcMethod);
-                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
-            }  
-            if (m_index)
-            {
-                m_index->SetQuantizer(quantizer);
-            }
-        }
-
         template <typename T>
         void Index<T>::SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer)
         {
             m_pQuantizer = quantizer;
-            if (quantizer)
+            if (m_pQuantizer)
             {
-                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+                m_fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? m_pQuantizer->GetBase() * m_pQuantizer->GetBase() : 1;
             }
+            else
+            {
+                m_fComputeDistance = COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod);
+                m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<std::uint8_t>() * COMMON::Utils::GetBase<std::uint8_t>() : 1;
+            }  
             if (m_index)
             {
                 m_index->SetQuantizer(quantizer);
@@ -80,6 +66,12 @@ namespace SPTAG
                     SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
                 }
             }
+
+            if (m_pQuantizer)
+            {
+                m_pQuantizer->SetEnableADC(m_options.m_enableADC);
+            }
+
             return ErrorCode::Success;
         }
 
@@ -110,7 +102,7 @@ namespace SPTAG
            
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -142,7 +134,7 @@ namespace SPTAG
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -294,7 +286,7 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);    
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
             }
             
             m_workSpacePool->Return(auto_ws);
@@ -307,6 +299,8 @@ namespace SPTAG
 
         template <typename T>
         void Index<T>::SelectHeadAdjustOptions(int p_vectorCount) {
+            LOG(Helper::LogLevel::LL_Info, "Begin Adjust Parameters...\n");
+
             if (m_options.m_headVectorCount != 0) m_options.m_ratio = m_options.m_headVectorCount * 1.0 / p_vectorCount;
             int headCnt = static_cast<int>(std::round(m_options.m_ratio * p_vectorCount));
             if (headCnt == 0)
@@ -479,6 +473,8 @@ namespace SPTAG
             std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized())
                 vectorset->Normalize(m_options.m_iSelectHeadNumberOfThreads);
+            LOG(Helper::LogLevel::LL_Info, "Begin initial data (%d,%d)...\n", vectorset->Count(), vectorset->Dimension());
+
             COMMON::Dataset<InternalDataType> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (InternalDataType*)vectorset->GetData());
             
             auto t1 = std::chrono::high_resolution_clock::now();
@@ -590,6 +586,7 @@ namespace SPTAG
                 }
             }
 
+            LOG(Helper::LogLevel::LL_Info, "Begin Select Head...\n");
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
                 omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
@@ -611,6 +608,7 @@ namespace SPTAG
             double selectHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
             LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
 
+            LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
             if (m_options.m_buildHead) {
                 auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
                 auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
@@ -648,6 +646,7 @@ namespace SPTAG
             double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
             LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs\n", selectHeadTime, buildHeadTime);
 
+            LOG(Helper::LogLevel::LL_Info, "Begin Build SSDIndex...\n");
             if (m_options.m_enableSSD) {
                 omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
 
@@ -715,7 +714,7 @@ namespace SPTAG
             }
 
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -724,7 +723,7 @@ namespace SPTAG
         {
             SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             SizeType dim = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
-            std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter, p_normalized));
+            std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, p_normalized));
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
             if (m_options.m_vectorPath.empty())
             {
@@ -767,7 +766,7 @@ namespace SPTAG
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx);
+            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 

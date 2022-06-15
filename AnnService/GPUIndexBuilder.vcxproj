@@ -68,7 +68,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
-      <CodeGeneration>compute_70,sm_70</CodeGeneration>
+      <CodeGeneration>compute_70,sm_70;compute_75,sm_75;compute_80,sm_80</CodeGeneration>
       <Defines>WIN32;%(Defines)</Defines>
       <Runtime>MTd</Runtime>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
@@ -95,7 +95,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
-      <CodeGeneration>compute_70,sm_70</CodeGeneration>
+      <CodeGeneration>compute_70,sm_70;compute_75,sm_75;compute_80,sm_80</CodeGeneration>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
       <FastMath>true</FastMath>
       <Optimization>O2</Optimization>

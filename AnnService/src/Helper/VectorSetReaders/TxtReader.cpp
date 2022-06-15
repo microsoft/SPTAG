@@ -11,7 +11,7 @@ using namespace SPTAG;
 using namespace SPTAG::Helper;
 
 TxtVectorReader::TxtVectorReader(std::shared_ptr<ReaderOptions> p_options)
-    : VectorSetReader(std::move(p_options)),
+    : VectorSetReader(p_options),
     m_subTaskBlocksize(0)
 {
     omp_set_num_threads(m_options->m_threadNum);
