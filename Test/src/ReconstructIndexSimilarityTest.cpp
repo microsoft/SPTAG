@@ -165,7 +165,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
             BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
         }
-        quantizer->LoadIQuantizer(ptr);
+        quantizer = COMMON::IQuantizer::LoadIQuantizer(ptr);
         BOOST_ASSERT(quantizer);
 
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
@@ -247,7 +247,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
             BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
         }
-        quantizer->LoadIQuantizer(ptr);
+        quantizer = COMMON::IQuantizer::LoadIQuantizer(ptr);
         BOOST_ASSERT(quantizer);
 
         rec_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * n * m), GetEnumValueType<R>(), m, n));

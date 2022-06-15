@@ -99,16 +99,11 @@ int main(int argc, char* argv[])
             std::shared_ptr<VectorSet> quantized_vectors = std::make_shared<BasicVectorSet>(PQ_vector_array, VectorValueType::UInt8, options->m_quantizedDim, set->Count());
             LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Training a new one.\n");
 
-            switch (options->m_inputValueType)
-            {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension/options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, set, quantized_vectors))); \
-                        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-            }
+            VectorValueTypeDispatch(options->m_inputValueType, [&](auto t)
+                {
+                    using Type = decltype(t);
+                    quantizer.reset(new COMMON::PQQuantizer<Type>(options->m_quantizedDim, 256, (DimensionType)(options->m_dimension / options->m_quantizedDim), false, TrainPQQuantizer<Type>(options, set, quantized_vectors)));
+                });
 
             auto ptr = SPTAG::f_createIO();
             if (ptr != nullptr && ptr->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out))

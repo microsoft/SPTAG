@@ -20,31 +20,11 @@ namespace SPTAG
             case QuantizerType::Undefined:
                 break;
             case QuantizerType::PQQuantizer:
-                switch (reconstructType) {
-                    #define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        ret.reset(new PQQuantizer<Type>()); \
-                        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                default: break;
-                }
-                
+                VectorValueTypeDispatch(reconstructType, [&](auto t) {ret.reset(new PQQuantizer<decltype(t)>()); });
                 if (ret->LoadQuantizer(p_in) != ErrorCode::Success) ret.reset();
                 return ret;
             case QuantizerType::OPQQuantizer:
-                switch (reconstructType) {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        ret.reset(new OPQQuantizer<Type>()); \
-                        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                default: break;
-                }
+                VectorValueTypeDispatch(reconstructType, [&](auto t) {ret.reset(new OPQQuantizer<decltype(t)>()); });
                 if (ret->LoadQuantizer(p_in) != ErrorCode::Success) ret.reset();
                 return ret;
             }
@@ -68,31 +48,11 @@ namespace SPTAG
             case QuantizerType::Undefined:
                 return ret;
             case QuantizerType::PQQuantizer:
-                switch (reconstructType) {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        ret.reset(new PQQuantizer<Type>()); \
-                        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                default: break;
-                }
-
+                VectorValueTypeDispatch(reconstructType, [&](auto t) {ret.reset(new PQQuantizer<decltype(t)>()); });
                 if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
                 return ret;
             case QuantizerType::OPQQuantizer:
-                switch (reconstructType) {
-#define DefineVectorValueType(Name, Type) \
-                    case VectorValueType::Name: \
-                        ret.reset(new OPQQuantizer<Type>()); \
-                        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-                default: break;
-                }
-
+                VectorValueTypeDispatch(reconstructType, [&](auto t) {ret.reset(new PQQuantizer<decltype(t)>()); });
                 if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
                 return ret;
             }

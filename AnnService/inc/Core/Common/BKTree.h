@@ -421,18 +421,7 @@ namespace SPTAG
                 float CountStd;
                 if (args.m_pQuantizer)
                 {
-                    switch (args.m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-CountStd = TryClustering<T, Type>(data, indices, first, last, args, samples, lambdaFactor, true); \
-break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
+                    VectorValueTypeDispatch(args.m_pQuantizer->GetReconstructType(), [&](auto t) { CountStd = TryClustering<T, decltype(t)>(data, indices, first, last, args, samples, lambdaFactor, true); });
                 }
                 else
                 {
@@ -469,18 +458,11 @@ break;
             
             if (args.m_pQuantizer)
             {
-                switch (args.m_pQuantizer->GetReconstructType())
-                {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-TryClustering<T, Type>(data, indices, first, last, args, samples, lambdaFactor, debug, abort); \
-break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                default: break;
-                }
+                VectorValueTypeDispatch(args.m_pQuantizer->GetReconstructType(), [&](auto t)
+                    {
+                        using Type = decltype(t);
+                        TryClustering<T, Type>(data, indices, first, last, args, samples, lambdaFactor, debug, abort);
+                    });
             }
             else
             {

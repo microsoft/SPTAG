@@ -129,18 +129,11 @@ namespace SPTAG
             {
                 if (index->m_pQuantizer)
                 {
-                    switch (index->m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-PartitionByTptreeCore<T, Type>(index, indices, first, last, leaves); \
-break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
+                    return VectorValueTypeDispatch(index->m_pQuantizer->GetReconstructType(), [&](auto t)
+                        {
+                            using Type = decltype(t);
+                            PartitionByTptreeCore<T, Type>(index, indices, first, last, leaves);
+                        });
                 }
                 else
                 {

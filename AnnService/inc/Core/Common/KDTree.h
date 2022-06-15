@@ -63,18 +63,11 @@ namespace SPTAG
             {
                 if (m_pQuantizer)
                 {
-                    switch (m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-BuildTreesCore<T, Type>(data, numOfThreads, indices, abort); \
-break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
+                    VectorValueTypeDispatch(m_pQuantizer->GetReconstructType(), [&](auto t)
+                        {
+                            using Type = decltype(t);
+                            BuildTreesCore<T, Type>(data, numOfThreads, indices, abort);
+                        });
                 }
                 else
                 {
@@ -236,17 +229,11 @@ break;
             {
                 if (m_pQuantizer)
                 {
-                    switch (m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, distBound);
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
+                    return VectorValueTypeDispatch(m_pQuantizer->GetReconstructType(), [&](auto t)
+                        {
+                            using Type = decltype(t);
+                            KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, distBound);
+                        });
                 }
                 else
                 {

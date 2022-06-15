@@ -222,20 +222,11 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         }
 
         bool parseSuccess = false;
-        switch (m_options->m_inputValueType)
-        {
-#define DefineVectorValueType(Name, Type) \
-        case VectorValueType::Name: \
-            parseSuccess = TranslateVector(currentLine.get() + tabIndex + 1, reinterpret_cast<Type*>(vector.get())); \
-            break; \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-        default:
-            parseSuccess = false;
-            break;
-        }
+        VectorValueTypeDispatch(m_options->m_inputValueType, [&](auto t)
+            {
+                using Type = decltype(t);
+                parseSuccess = TranslateVector(currentLine.get() + tabIndex + 1, reinterpret_cast<Type*>(vector.get()));
+            });
 
         if (!parseSuccess)
         {

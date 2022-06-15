@@ -82,19 +82,12 @@ SearchExecutionContext::ExtractVector(VectorValueType p_targetType)
 {
     if (!m_queryParser.GetVectorElements().empty())
     {
-        switch (p_targetType)
-        {
-#define DefineVectorValueType(Name, Type) \
-        case VectorValueType::Name: \
-            return ConvertVectorFromString<Type>(m_queryParser.GetVectorElements(), m_vector, m_vectorDimension); \
-            break; \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-        default:
-            break;
-        }
+        ErrorCode err;
+        VectorValueTypeDispatch(p_targetType, [&](auto t)
+            {
+                err = ConvertVectorFromString<decltype(t)>(m_queryParser.GetVectorElements(), m_vector, m_vectorDimension);
+            });
+        return err;
     }
     else if (m_queryParser.GetVectorBase64() != nullptr
              && m_queryParser.GetVectorBase64Length() != 0)

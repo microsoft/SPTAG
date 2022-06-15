@@ -107,13 +107,8 @@ namespace SPTAG {
 
 			SPANN::Options* opts = nullptr;
 
-#define DefineVectorValueType(Name, Type) \
-	if (index->GetVectorValueType() == VectorValueType::Name) { \
-		opts = ((SPANN::Index<Type>*)index.get())->GetOptions(); \
-	} \
+			VectorValueTypeDispatch(index->GetVectorValueType(), [&](auto t) { opts = ((SPANN::Index<decltype(t)>*)index.get())->GetOptions(); });
 
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
 
 			if (opts == nullptr) {
 				LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
@@ -149,26 +144,25 @@ namespace SPTAG {
 
 				omp_set_num_threads(opts->m_iSSDNumberOfThreads);
 
-#define DefineVectorValueType(Name, Type) \
-	if (opts->m_valueType == VectorValueType::Name) { \
-		COMMON::TruthSet::GenerateTruth<Type>(querySet, vectorSet, opts->m_truthPath, \
-			distCalcMethod, opts->m_resultNum, opts->m_truthType, index->m_pQuantizer); \
-	} \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
+				VectorValueTypeDispatch(opts->m_valueType, [&](auto t) 
+				{
+						COMMON::TruthSet::GenerateTruth<decltype(t)>(querySet,
+							vectorSet,
+							opts->m_truthPath,
+							distCalcMethod, 
+							opts->m_resultNum, 
+							opts->m_truthType, 
+							index->m_pQuantizer);
+				});
 
 				LOG(Helper::LogLevel::LL_Info, "End generating truth.\n");
 			}
 
 			if (searchSSD) {
-#define DefineVectorValueType(Name, Type) \
-	if (opts->m_valueType == VectorValueType::Name) { \
-        SSDIndex::Search((SPANN::Index<Type>*)(index.get())); \
-	} \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
+				VectorValueTypeDispatch(opts->m_valueType, [&](auto t)
+					{
+						SSDIndex::Search((SPANN::Index<decltype(t)>*)(index.get()));
+					});
 			}
 			return 0;
 		}
