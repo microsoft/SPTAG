@@ -123,8 +123,15 @@ namespace SPTAG
 #ifdef BATCH_READ
                         p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
+                        p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+#endif
+/*
+#ifdef BATCH_READ
+                        max(p_opt.m_searchInternalResultNum*m_vectorInfoSize, 1 << 12), 2, 2, p_opt.m_iSSDNumberOfThreads
+#else
                         p_opt.m_searchInternalResultNum* p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
 #endif
+*/
 #else
                         (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, p_opt.m_ioThreads
 #endif

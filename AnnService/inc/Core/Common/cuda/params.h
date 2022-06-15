@@ -48,4 +48,8 @@
     }                                                                          \
   } while (0)
 
+#define GET_CHRONO_TIME(start,end)                                             \
+  ((double)std::chrono::duration_cast<std::chrono::seconds>(end-start).count()) + (((double)std::chrono::duration_cast<std::chrono::milliseconds>(end-start).count())/1000)
+
 #endif
+
