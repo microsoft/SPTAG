@@ -48,6 +48,7 @@
     <file src="AnnService\inc\Core\SPANN\ExtraFullGraphSearcher.h" target="build\native\inc\Core\SPANN\ExtraFullGraphSearcher.h" />
     <file src="AnnService\inc\Core\SPANN\IExtraSearcher.h" target="build\native\inc\Core\SPANN\IExtraSearcher.h" />
     <file src="AnnService\inc\Core\SPANN\Index.h" target="build\native\inc\Core\SPANN\Index.h" />
+    <file src="AnnService\inc\Core\SPANN\Compressor.h" target="build\native\inc\Core\SPANN\Compressor.h" />
     <file src="AnnService\inc\Core\SPANN\Options.h" target="build\native\inc\Core\SPANN\Options.h" />
     <file src="AnnService\inc\Core\SPANN\ParameterDefinitionList.h" target="build\native\inc\Core\SPANN\ParameterDefinitionList.h" />
     <file src="AnnService\inc\Core\Common.h" target="build\native\inc\Core\Common.h" />

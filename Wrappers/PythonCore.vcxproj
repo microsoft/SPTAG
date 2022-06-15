@@ -117,6 +117,7 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
     <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -python -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)CoreInterface_pwrap.cpp inc\PythonCore.i" />
@@ -130,5 +131,6 @@
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
     <Error Condition="!Exists('..\packages\python.3.9.11.1\build\native\python.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python.3.9.11.1\build\native\python.props'))" />
+    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>
 </Project>
