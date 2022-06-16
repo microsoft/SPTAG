@@ -1,6 +1,5 @@
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/DistanceUtils.h"
-#include "inc/Core/Common/SIMDUtils.h"
 
 using namespace SPTAG;
 using namespace SPTAG::COMMON;
