@@ -81,7 +81,7 @@ namespace SPTAG
             }
         };
 
-#define ProcessPosting(p_postingListFullData, vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector) \
+#define ProcessPosting(p_postingListFullData, vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector, m_iDataDimension) \
         for (int i = 0; i < listInfo->listEleCount; i++) { \
             uint64_t offsetVectorID, offsetVector;\
             if (m_enablePostingListRearrange) { \
@@ -94,7 +94,7 @@ namespace SPTAG
             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
             if (m_enableDeltaEncoding){\
-                COMMON::SIMDUtils::ComputeSum(reinterpret_cast<ValueType*>(p_postingListFullData + offsetVector), headVector, p_index->GetFeatureDim());\
+                COMMON::SIMDUtils::ComputeSum(reinterpret_cast<ValueType*>(p_postingListFullData + offsetVector), headVector, m_iDataDimension);\
             }\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
@@ -216,7 +216,7 @@ namespace SPTAG
 #ifdef BATCH_READ // async batch read
                     auto vectorInfoSize = m_vectorInfoSize;
 
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor](Helper::AsyncReadRequest *request)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, vectorInfoSize, curPostingID, m_enableDeltaEncoding = m_enableDeltaEncoding, m_enablePostingListRearrange = m_enablePostingListRearrange, m_enableDictTraining = m_enableDictTraining, m_enableDataCompression = m_enableDataCompression, &m_pCompressor = m_pCompressor, m_iDataDimension = m_iDataDimension](Helper::AsyncReadRequest *request)
                     {
                         char* buffer = request->m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request->m_payload);
@@ -251,7 +251,7 @@ namespace SPTAG
                             headVector = (ValueType*)p_index->GetSample(curPostingID);
                         }
 
-                        ProcessPosting(const_cast<char *>(p_postingListFullData), vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector);
+                        ProcessPosting(const_cast<char *>(p_postingListFullData), vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector, m_iDataDimension);
                     };
 #else // async read
                     request.m_callback = [&p_exWorkSpace](Helper::AsyncReadRequest* request)
@@ -742,7 +742,6 @@ namespace SPTAG
 
                 int m_listCount;
                 int m_totalDocumentCount;
-                int m_iDataDimension;
                 int m_listPageOffset;
 
                 if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
@@ -1250,6 +1249,7 @@ namespace SPTAG
             bool m_enableDictTraining;
 
             int m_vectorInfoSize = 0;
+            int m_iDataDimension = 0;
 
             int m_totalListCount = 0;
 
