@@ -28,6 +28,7 @@ namespace SPTAG {
 			const char* dataFilePath, 
 			const char* indexFilePath) {
 
+
 			bool searchSSD = false;
 			std::string QuantizerFilePath = "";
 			if (forANNIndexTestTool) {
@@ -107,6 +108,7 @@ namespace SPTAG {
 
 			SPANN::Options* opts = nullptr;
 
+
 #define DefineVectorValueType(Name, Type) \
 	if (index->GetVectorValueType() == VectorValueType::Name) { \
 		opts = ((SPANN::Index<Type>*)index.get())->GetOptions(); \
@@ -119,6 +121,8 @@ namespace SPTAG {
 				LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
 				exit(1);
 			}
+
+printf("in BootProgram! genreateTruth:%d\n", opts->m_generateTruth);
 
 			if (opts->m_generateTruth)
 			{
