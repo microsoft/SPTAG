@@ -28,6 +28,7 @@
     <file src="AnnService\inc\Core\Common\CommonUtils.h" target="build\native\inc\Core\Common\CommonUtils.h" />
     <file src="AnnService\inc\Core\Common\Dataset.h" target="build\native\inc\Core\Common\Dataset.h" />
     <file src="AnnService\inc\Core\Common\DistanceUtils.h" target="build\native\inc\Core\Common\DistanceUtils.h" />
+    <file src="AnnService\inc\Core\Common\SIMDUtils.h" target="build\native\inc\Core\Common\SIMDUtils.h" />
     <file src="AnnService\inc\Core\Common\FineGrainedLock.h" target="build\native\inc\Core\Common\FineGrainedLock.h" />
     <file src="AnnService\inc\Core\Common\Heap.h" target="build\native\inc\Core\Common\Heap.h" />
     <file src="AnnService\inc\Core\Common\InstructionUtils.h" target="build\native\inc\Core\Common\InstructionUtils.h" />
