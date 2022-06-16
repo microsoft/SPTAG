@@ -28,15 +28,6 @@ static float ComputeL2Distance(const T *pX, const T *pY, SPTAG::DimensionType le
 }
 
 template<typename T>
-static void ComputeSum(T *pX, const T *pY, SPTAG::DimensionType length)
-{
-    const T* pEnd1 = pX + length;
-    while (pX < pEnd1) {
-        *pX++ += *pY++;
-    }
-}
-
-template<typename T>
 T random(int high = RAND_MAX, int low = 0)   // Generates a random value.
 {
     return (T)(low + float(high - low)*(std::rand()/static_cast<float>(RAND_MAX + 1.0)));
@@ -53,20 +44,9 @@ void test(int high) {
     }
     BOOST_CHECK_CLOSE_FRACTION(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5);
     BOOST_CHECK_CLOSE_FRACTION(high * high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5);
-    
-    T *X_copy = new T[dimension];
-    for (SPTAG::DimensionType i = 0; i < dimension; i++) {
-        X_copy[i] = X[i];
-    }
-    ComputeSum(X, Y, dimension);
-    SPTAG::COMMON::DistanceUtils::ComputeSum(X_copy, Y, dimension);
-    for (SPTAG::DimensionType i = 0; i < dimension; i++) {
-        BOOST_CHECK_CLOSE_FRACTION(double(X[i]), double(X_copy[i]), 1e-5);
-    }
 
     delete[] X;
     delete[] Y;
-    delete[] X_copy;
 }
 
 template <typename T>
