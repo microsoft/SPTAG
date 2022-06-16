@@ -83,12 +83,18 @@ namespace SPTAG
 
 #define ProcessPosting(p_postingListFullData, vectorInfoSize, m_enablePostingListRearrange, m_enableDeltaEncoding, headVector) \
         for (int i = 0; i < listInfo->listEleCount; i++) { \
-            uint64_t offsetVectorID = m_enablePostingListRearrange ? (vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : vectorInfoSize * i; \
+            uint64_t offsetVectorID, offsetVector;\
+            if (m_enablePostingListRearrange) { \
+                offsetVectorID = (vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i; \
+                offsetVector = (vectorInfoSize - sizeof(int)) * i; \
+            } else {\
+                offsetVectorID = vectorInfoSize * i; \
+                offsetVector = offsetVectorID + sizeof(int);\
+            }\
             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            uint64_t offsetVector = m_enablePostingListRearrange ? (vectorInfoSize - sizeof(int)) * i : offsetVectorID + sizeof(int); \
             if (m_enableDeltaEncoding){\
-                COMMON::DistanceUtils::ComputeSum(reinterpret_cast<ValueType*>(p_postingListFullData + offsetVector), headVector, p_index->GetFeatureDim());\
+                COMMON::SIMDUtils::ComputeSum(reinterpret_cast<ValueType*>(p_postingListFullData + offsetVector), headVector, p_index->GetFeatureDim());\
             }\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
