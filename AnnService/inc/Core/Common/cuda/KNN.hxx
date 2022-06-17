@@ -1070,18 +1070,19 @@ __global__ void assign_leaf_points(LeafNode* leafs, int* leaf_points, int* node_
  * Each thread keeps a heap of K elements to determine K smallest distances found
  * VAR data - linear matrix fo data
  * VAR queries - linear matrix of query vectors
- * RET results - linear vector of K pairs for each query vector
+ * RET results - linear vector of K pairs Thank  for each query vector
 ************************************************************************************/
 template<typename DTYPE, int Dim, int BLOCK_DIM, typename SUMTYPE>
 __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL) {
     //auto t1 = std::chrono::high_resolution_clock::now();
     // Memory for a heap for each thread
+    extern __shared__ char sharememory[];
+    //DistPair<SUMTYPE> vals[9];
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
     //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM]; in KNN Source Code
     //template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
-    DistPair<SUMTYPE> vals[9];
     // Memory used to store a query point for each thread
     //__shared__ DTYPE transpose_mem[100 * BLOCK_DIM];
     __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
@@ -1094,16 +1095,15 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     DLOG_DEBUG("Shared memory per block - Queries:%d, Heaps:%d\n", Dim * BLOCK_DIM * dSize, BLOCK_DIM * KVAL * 4);
 
     //heapMem[threadIdx.x].KVAL = KVAL;
-    heapMem[threadIdx.x].initialize(vals, KVAL-1);
+    //heapMem[threadIdx.x].initialize(vals, KVAL-1);
+    heapMem[threadIdx.x].initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
 
     SUMTYPE dist;
     // Loop through all query points
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
-        LOG_ALL("Tread: %d. Start.\n", i);
-        heapMem[threadIdx.x].initialize();
+        heapMem[threadIdx.x].reset();
         extra.dist = INFTY<DTYPE>();
         query.loadPoint(querySet[i]); // Load into shared memory
-
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
 //#if METRIC == 1 
@@ -1124,7 +1124,6 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
                 }
             }
         }
-
         // Write KNN to result list in sorted order
         results[(i + 1) * KVAL - 1].idx = extra.idx;
         results[(i + 1) * KVAL - 1].dist = extra.dist;
@@ -1135,7 +1134,6 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
             heapMem[threadIdx.x].heapify();
 
         }
-        LOG_ALL("Tread: %d. Done.\n", i);
     }
 
 }
