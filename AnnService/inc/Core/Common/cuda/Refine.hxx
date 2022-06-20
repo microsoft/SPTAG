@@ -19,7 +19,7 @@
 #define REFINE_THREADS 64
 #define REFINE_BLOCKS 1024
 
-
+/*
 using namespace SPTAG;
 using namespace std;
 
@@ -88,15 +88,12 @@ __device__ void sortListById( ListElt<SUMTYPE>* listMem, int* listSize, void* te
    ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
   int sortKeys[LISTCAP/NUM_THREADS];
 
-/* Sort list by ID to remove duplicates */
-  /* Load list into registers to sort */
   loadRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
 
   for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
     sortKeys[i] = sortMem[i].id;
   }
   __syncthreads();
-  /* Sort by ID in registers */
   typedef cub::BlockRadixSort<int, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSort;
   BlockRadixSort(*(static_cast<typename BlockRadixSort::TempStorage*>(temp_storage))).SortBlockedToStriped(sortKeys, sortMem);
 
@@ -116,15 +113,12 @@ __device__ void sortListByDist( ListElt<SUMTYPE>* listMem, int* listSize, void* 
    ListElt<SUMTYPE> sortMem[LISTCAP/NUM_THREADS];
   SUMTYPE sortKeys[LISTCAP/NUM_THREADS];
 
-/* Sort list by ID to remove duplicates */
-  /* Load list into registers to sort */
   loadRegisters<SUMTYPE,LISTCAP/NUM_THREADS, NUM_THREADS>(sortMem, listMem, listSize);
 
   for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
     sortKeys[i] = sortMem[i].dist;
   }
 
-  /* Sort by ID in registers */
   typedef cub::BlockRadixSort<SUMTYPE, NUM_THREADS, LISTCAP/NUM_THREADS, ListElt<SUMTYPE>> BlockRadixSort;
   BlockRadixSort(*(static_cast<typename BlockRadixSort::TempStorage*>(temp_storage))).SortBlockedToStriped(sortKeys, sortMem);
   __syncthreads();
@@ -134,7 +128,6 @@ __device__ void sortListByDist( ListElt<SUMTYPE>* listMem, int* listSize, void* 
 }
 
 
-/* Remove duplicates and compact list with prefix sums */
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __device__ void removeDuplicatesAndCompact( ListElt<SUMTYPE>* listMem, int* listSize, void *temp_storage, int* borderVals, int src) {
 
@@ -148,7 +141,6 @@ __device__ void removeDuplicatesAndCompact( ListElt<SUMTYPE>* listMem, int* list
   }
 
   __syncthreads();
-  /* Copy weather is duplicate or not into registers */
 
   for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
     sortMem[i] = listMem[threadIdx.x*(LISTCAP/NUM_THREADS) + i];
@@ -171,7 +163,6 @@ __device__ void removeDuplicatesAndCompact( ListElt<SUMTYPE>* listMem, int* list
   for(int i=0; i<LISTCAP/NUM_THREADS; i++) {
     listMem[threadIdx.x*(LISTCAP/NUM_THREADS)+i] = sortMem[i];
   }
-  /* Share boarders of prefix sums */
   borderVals[threadIdx.x] = sortKeys[LISTCAP/NUM_THREADS - 1];
 
   __syncthreads();
@@ -194,7 +185,6 @@ __device__ void removeDuplicatesAndCompact( ListElt<SUMTYPE>* listMem, int* list
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __device__ void checkClosestNeighbors(Point<T,SUMTYPE,MAX_DIM>* d_points, int src, int* d_graph,  ListElt<SUMTYPE>* listMem, int* listSize, int KVAL, int metric) {
 
-/* Maximum number of vertices to check before list fills up*/
 //  int max_check = min(MAX_CHECK_COUNT, (LISTCAP-*listSize)/KVAL);
   int max_check = (LISTCAP-*listSize)/KVAL;
 
@@ -229,7 +219,6 @@ __syncthreads();
 }
 
 
-/* Sequential version for testing */
 template<typename T, typename SUMTYPE, int MAX_DIM, int NUM_THREADS>
 __device__ void shrinkListRNG_sequential(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int src, ListElt<SUMTYPE>* listMem, int listSize, int KVAL, int metric) {
 
@@ -285,7 +274,6 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
 
     if(metric == 0) {
       for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
-        /* If it violates RNG */
         if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].l2(&d_points[listMem[j].id])) {
           good=false;
         }
@@ -293,7 +281,6 @@ __device__ void shrinkListRNG(Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, 
     }
     else {
       for(int j=threadIdx.x; j<write_idx && good; j+=NUM_THREADS) {
-        /* If it violates RNG */
         if(listMem[read_idx].dist >= d_points[listMem[read_idx].id].cosine(&d_points[listMem[j].id])) {
           good=false;
         }
@@ -395,7 +382,6 @@ __global__ void refineBatch_kernel(Point<T,SUMTYPE,MAX_DIM>* d_points, int batch
 
 }
 
-/* Refine the KNN graph into a RNG graph using the GPU */
 template<typename T, typename SUMTYPE, int MAX_DIM>
 void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_points, int* d_graph, int dataSize, int KVAL, int candidatesPerVector, int refineDepth, int refines, int metric) {
 
@@ -440,5 +426,6 @@ void refineGraphGPU(SPTAG::VectorIndex* index, Point<T,SUMTYPE,MAX_DIM>* d_point
   cudaFree(d_candidates);
   free(candidates);
 }
+*/
 
 #endif

@@ -9,6 +9,7 @@
 
 #include "../Common/CommonUtils.h"
 #include "../Common/DistanceUtils.h"
+#include "../Common/SIMDUtils.h"
 #include "../Common/QueryResultSet.h"
 #include "../Common/BKTree.h"
 #include "../Common/WorkSpacePool.h"

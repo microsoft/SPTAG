@@ -11,21 +11,25 @@ file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
 
 list(REMOVE_ITEM HDR_FILES
-    ${AnnService}/inc/Core/Common/DistanceUtils.h 
+    ${AnnService}/inc/Core/Common/DistanceUtils.h
+    ${AnnService}/inc/Core/Common/SIMDUtils.h 
     ${AnnService}/inc/Core/Common/InstructionUtils.h
     ${AnnService}/inc/Core/Common/CommonUtils.h
     )
 
 list(REMOVE_ITEM SRC_FILES
     ${AnnService}/src/Core/Common/DistanceUtils.cpp
+    ${AnnService}/src/Core/Common/SIMDUtils.cpp
     ${AnnService}/src/Core/Common/InstructionUtils.cpp
     )
 
 add_library (DistanceUtils STATIC 
-    inc/Core/Common/DistanceUtils.h 
+    inc/Core/Common/DistanceUtils.h
+    inc/Core/Common/SIMDUtils.h
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
     src/Core/Common/DistanceUtils.cpp
+    src/Core/Common/SIMDUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )
 
@@ -83,6 +87,15 @@ endif()
 
 file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
 file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
+#if(NOT WIN32)
+#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+#            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
+#            )
+#elseif(WIN32)
+#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+#            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
+#            )
+#endif()
 
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})

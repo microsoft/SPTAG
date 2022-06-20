@@ -31,12 +31,16 @@
 #include<climits>
 #include<float.h>
 #include<unordered_set>
+#include<chrono>
 
+#include "params.h"
 #include "inc/Core/VectorIndex.h"
+#include "GPUQuantizer.hxx"
 
 using namespace std;
 
 using namespace SPTAG;
+
 
 // Templated infinity value
 template<typename T> __host__ __device__ T INFTY() {}
@@ -46,16 +50,104 @@ template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_
 //template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
+template<typename T> __device__ T BASE() {}
+template<> __forceinline__ __device__ float BASE<float>() {return 1;}
+template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 16384;}
+
+template<typename T, typename SUMTYPE, int Dim>
+__forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
+    SUMTYPE total[2]={0,0};
+    for(int i=0; i<Dim; i+=2) {
+      total[0] += ((SUMTYPE)(a[i] * b[i]));
+      total[1] += ((SUMTYPE)(a[i+1] * b[i+1]));
+    }
+    return BASE<SUMTYPE>()-(total[0]+total[1]);
+}
+
+template<typename T, typename SUMTYPE, int Dim>
+__forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
+  SUMTYPE total[2]={0,0};
+  for(int i=0; i<Dim; i+=2) {
+    total[0] += (aVec[i]-bVec[i])*(aVec[i]-bVec[i]);
+    total[1] += (aVec[i+1]-bVec[i+1])*(aVec[i+1]-bVec[i+1]);
+  }
+  return total[0]+total[1];
+
+}
+
+template<typename T, typename SUMTYPE, int Dim, int metric>
+__device__ SUMTYPE dist(T* a, T* b) {
+  if(metric == (int)DistMetric::Cosine) {
+    return cosine<T,SUMTYPE,Dim>(a, b);
+  }
+  else {
+    return l2<T,SUMTYPE,Dim>(a,b);
+  }
+}
+
+template<typename T, typename SUMTYPE>
+__forceinline__ __device__ bool violatesRNG(T* a, T* b, SUMTYPE dist, SUMTYPE (*comp)(T*, T*)) {
+  SUMTYPE between;
+  between = comp(a, b);
+  return between <= dist;
+}
+
+template<typename T>
+class PointSet {
+  public:
+    int dim;
+    T* data;
+    DistMetric metric;
+
+  __forceinline__ __device__ T* getVec(size_t idx) {
+    return &(data[idx*dim]);
+  }
+
+};
+
+#define COPY_BATCH_SIZE 10000
+template<typename T>
+__host__ void copyRawDataToMultiGPU(SPTAG::VectorIndex* index, T** d_data, size_t dataSize, int dim, int NUM_GPUS, cudaStream_t* streams) {
+  T* samplePtr;
+  T* temp = new T[COPY_BATCH_SIZE*dim];
+  size_t copy_size=COPY_BATCH_SIZE;
+
+  for(size_t batch_start = 0; batch_start < dataSize; batch_start += COPY_BATCH_SIZE) {
+    if(batch_start + copy_size > dataSize) {
+      copy_size = dataSize - batch_start;
+    }
+    for(int i=0; i<copy_size; ++i) {
+      samplePtr = (T*)(index->GetSample(batch_start + i));
+      for(int j=0; j<dim; ++j) {
+        temp[i*dim+j] = samplePtr[j];
+      }
+    }
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+      CUDA_CHECK(cudaSetDevice(gpuNum));
+      CUDA_CHECK(cudaMemcpy(d_data[gpuNum]+(batch_start*dim), temp, copy_size*dim * sizeof(T), cudaMemcpyHostToDevice));
+    }
+  }
+  for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+    CUDA_CHECK(cudaStreamSynchronize(streams[gpuNum]));
+  }
+  delete temp;
+}
+
+/*********************************************************************
+* DEPRICATED CODE - Old data structures used before code restructure
+*********************************************************************/
+
 /*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
 * represented by a element of datatype T
 * NOTE: Dim must be templated so that we can store coordinate values in registers
 *********************************************************************/
+/*
 template<typename T, typename SUMTYPE, int Dim>
 class Point {
   public:
     int id;
-    T coords[Dim];
+    T* coords;
 
   __host__ void load(vector<T> data) {
     for(int i=0; i<Dim; i++) {
@@ -124,7 +216,6 @@ class Point {
     if(metric == 0) return l2(other);
     else return cosine(other);
   }
-
 };
 
 // Less-than operator between two points.
@@ -140,7 +231,8 @@ template<typename SUMTYPE, int Dim>
 class Point<uint8_t, SUMTYPE, Dim> {
   public:
     int id;
-    uint32_t coords[Dim/4];
+//    uint32_t* coords;
+    uint8_t* coords;
 
   __host__ void load(vector<uint8_t> data) {
     for(int i=0; i<Dim/4; i++) {
@@ -170,6 +262,22 @@ class Point<uint8_t, SUMTYPE, Dim> {
     }
     id = other.id;
     return *this;
+  }
+
+  __host__ uint8_t getVal(int idx) {
+    if(idx % 4 == 0) {
+      return (uint8_t)(coords[idx/4] & 0x000000FF);
+    }
+    else if(idx % 4 == 1) {
+      return (uint8_t)((coords[idx/4] & 0x0000FF00)>>8);
+    }
+    else if(idx % 4 == 2) {
+      return (uint8_t)((coords[idx/4] & 0x00FF0000)>>16);
+    }
+    else if(idx % 4 == 3) {
+      return (uint8_t)((coords[idx/4])>>24);
+    }
+    return 0;
   }
 
   __device__ __host__ SUMTYPE l2_block(Point<uint8_t,SUMTYPE,Dim>* other) {return 0;}
@@ -249,7 +357,8 @@ template<typename SUMTYPE, int Dim>
 class Point<int8_t, SUMTYPE, Dim> {
   public:
     int id;
-    uint32_t coords[Dim/4];
+//    uint32_t* coords;
+    int8_t* coords;
 
   __host__ void load(vector<int8_t> data) {
 
@@ -368,13 +477,28 @@ class Point<int8_t, SUMTYPE, Dim> {
   }
 
 };
+*/
 
 /*********************************************************************
  * Create an array of Point structures out of an input array
  ********************************************************************/
+/*
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T, SUMTYPE, Dim>* assignCoords(T* d_data, int rows, int dim) {
+  Point<T,SUMTYPE,Dim>* pointArray = new Point<T,SUMTYPE,Dim>[rows];
+
+  for(size_t i=0; i<rows; ++i) {
+    pointArray[i].coords = d_data+(i*dim);  // d_data points to data in device memory
+    pointArray[i].id = i;
+  }
+  return pointArray;
+}
+
+
 template<typename T, typename SUMTYPE, int Dim>
 __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim) {
-  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+//  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+  Point<T,SUMTYPE,Dim>* pointArray = new Point<T,SUMTYPE,Dim>[rows];
   for(int i=0; i<rows; i++) {
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
   }
@@ -383,12 +507,15 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
 
 template<typename T, typename SUMTYPE, int Dim>
 __host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t rows, int exact_dim) {
-  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+//  Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
+  Point<T,SUMTYPE,Dim>* pointArray = new Point<T,SUMTYPE,Dim>[rows];
+  printf("allocated %d points in convertMatrix\n");
 
   T* data;
 
   for(int i=0; i<rows; i++) {
     data = (T*)index->GetSample(i);
+
     pointArray[i].loadChunk(data, exact_dim);
   }
   return pointArray;
@@ -436,5 +563,7 @@ __host__ void extractHeadPointsFromIndex(T* data, SPTAG::VectorIndex* headIndex,
         headPoints[i].id = i;
     }
 }
+
+*/
 
 #endif

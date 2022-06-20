@@ -33,6 +33,19 @@
 #include "inc/Core/Common/cuda/TPtree.hxx"
 
 /*****************************************************************************************
+* Convert sums to means for each split key
+*****************************************************************************************/
+__global__ void compute_mean(KEYTYPE* split_keys, int* node_sizes, int num_nodes) {
+    for (int i = blockIdx.x*blockDim.x + threadIdx.x; i < num_nodes; i += blockDim.x*gridDim.x) {
+        if (node_sizes[i] > 0) {
+            split_keys[i] /= ((KEYTYPE)node_sizes[i]);
+            node_sizes[i] = 0;
+        }
+    }
+}
+
+
+/*****************************************************************************************
 * Count the number of points assigned to each leaf
 *****************************************************************************************/
 __global__ void count_leaf_sizes(LeafNode* leafs, int* node_ids, int N, int internal_nodes) {
@@ -118,3 +131,20 @@ __global__ void rebalance_nodes(int* node_ids, int N, float* frac_to_move, curan
   }
 }
 
+
+__global__ void print_level_device(int* node_sizes, float* split_keys, int level_size, LeafNode* leafs, int* leaf_points) {
+for(int i=0; i<100; ++i) {
+  printf("%d (%d), ", leafs[i].size, leafs[i].offset);
+}
+  printf("\n");
+for(int i=0; i<10; ++i) {
+  printf("%d, ", leaf_points[i]);
+}
+
+/*
+  for(int i=0; i<level_size; i++) {
+    printf("(%d) %0.2f, ", node_sizes[i], split_keys[i]);
+  }
+*/
+  printf("\n");
+}

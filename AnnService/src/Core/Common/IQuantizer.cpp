@@ -20,6 +20,7 @@ namespace SPTAG
             case QuantizerType::Undefined:
                 break;
             case QuantizerType::PQQuantizer:
+		printf("Resetting Quantizer to type PQQuantizer!\n");
                 switch (reconstructType) {
                     #define DefineVectorValueType(Name, Type) \
                     case VectorValueType::Name: \
