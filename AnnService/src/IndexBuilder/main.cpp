@@ -15,10 +15,10 @@ class BuilderOptions : public Helper::ReaderOptions
 {
 public:
     BuilderOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
-    {
-        AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
+    {        
         AddRequiredOption(m_outputFolder, "-o", "--outputfolder", "Output folder.");
         AddRequiredOption(m_indexAlgoType, "-a", "--algo", "Index Algorithm type.");
+        AddOptionalOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddOptionalOption(m_builderConfigFile, "-c", "--config", "Config file for builder.");
         AddOptionalOption(m_quantizerFile, "-pq", "--quantizer", "Quantizer File");
         AddOptionalOption(m_metaMapping, "-m", "--metaindex", "Enable delete vectors through metadata");
@@ -95,14 +95,16 @@ int main(int argc, char* argv[])
     }
     
     ErrorCode code;
-    if (fileexists(options->m_inputFiles.c_str())) {
+    std::shared_ptr<VectorSet> vecset;
+    if (options->m_inputFiles != "") {
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
         {
             LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
             exit(1);
         }
-        code = indexBuilder->BuildIndex(vectorReader->GetVectorSet(), vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized);
+        vecset = vectorReader->GetVectorSet();
+        code = indexBuilder->BuildIndex(vecset, vectorReader->GetMetadataSet(), options->m_metaMapping, options->m_normalized, true);
     }
     else {
         indexBuilder->SetQuantizerFileName(options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));

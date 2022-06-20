@@ -742,15 +742,25 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
-            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
-                COMMON::Utils::BatchNormalize((T*)p_data, p_vectorNum, p_dimension, COMMON::Utils::GetBase<T>(), m_options.m_iSSDNumberOfThreads);
+            std::shared_ptr<VectorSet> vectorSet;
+            if (p_shareOwnership) {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
             }
-            std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
-                GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            else {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            }
+
+
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
+                vectorSet->Normalize(m_options.m_iSSDNumberOfThreads);
+            }
             SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
                 vectorSet));

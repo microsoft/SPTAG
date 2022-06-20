@@ -53,12 +53,17 @@ namespace SPTAG
 			using PQQuantizer<OPQMatrixType>::m_DimPerSubvector;
 			using PQQuantizer<OPQMatrixType>::m_KsPerSubvector;
 			using PQQuantizer<OPQMatrixType>::m_codebooks;
-			inline SizeType m_MatrixIndexCalc(SizeType i, SizeType j) const;
+			DimensionType m_matrixDim;
+			const std::function<float(const OPQMatrixType*, const OPQMatrixType*, DimensionType)> m_fdot = SPTAG::COMMON::DistanceCalcSelector<OPQMatrixType>(SPTAG::DistCalcMethod::Cosine);;
+			const int m_base = COMMON::Utils::GetBase<OPQMatrixType>() * COMMON::Utils::GetBase<OPQMatrixType>();
+
+			void m_InitMatrixTranspose();
 
 			template <typename I, typename O>
-			inline void m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose = false) const;
+			inline void m_VectorMatrixMultiply(const I* vec, O* mat_vec, bool transpose = false) const;
 
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
+			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix_T;
 		};
 
 		template <typename T>
@@ -67,15 +72,26 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks))
+		OPQQuantizer<T>::OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix) : m_OPQMatrix(std::move(OPQMatrix)), PQQuantizer<T>::PQQuantizer(NumSubvectors, KsPerSubvector, DimPerSubvector, EnableADC, std::move(Codebooks)), m_matrixDim(NumSubvectors * DimPerSubvector)
 		{
+			m_InitMatrixTranspose();
+		}
+
+		template <typename T>
+		void OPQQuantizer<T>::m_InitMatrixTranspose() {
+			m_OPQMatrix_T = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+			for (int i = 0; i < m_matrixDim; i++) {
+				for (int j = 0; j < m_matrixDim; j++) {
+					m_OPQMatrix_T[i * m_matrixDim + j] = m_OPQMatrix[j * m_matrixDim + i];
+				}
+			}
 		}
 
 		template <typename T>
 		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
 		{
-			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
-			m_MatrixVectorMultiply<T, OPQMatrixType>(m_OPQMatrix.get(), (T*) vec, mat_vec, true);
+			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
+			m_VectorMatrixMultiply<T, OPQMatrixType>((T*) vec, mat_vec);
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
 			ALIGN_FREE(mat_vec);
 		}
@@ -83,11 +99,10 @@ namespace SPTAG
 		template <typename T>
 		void OPQQuantizer<T>::ReconstructVector(const std::uint8_t* qvec, void* vecout) const
 		{
-			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector);
+			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
-			m_MatrixVectorMultiply<OPQMatrixType, T>(m_OPQMatrix.get(), pre_mat_vec, (T*) vecout);
-
+			m_VectorMatrixMultiply<OPQMatrixType, T>(pre_mat_vec, (T*) vecout, true);
 			ALIGN_FREE(pre_mat_vec);
 		}
 
@@ -102,7 +117,7 @@ namespace SPTAG
 			IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
 			IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
 			IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
-			IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_OPQMatrix.get());
+			IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
 			LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
 			return ErrorCode::Success;
 		}
@@ -115,11 +130,12 @@ namespace SPTAG
 			{
 				return code;
 			}
-			
-			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector, (char*)m_OPQMatrix.get());
+			m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
+			m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+			IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
 			LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
 
+			m_InitMatrixTranspose();
 			return ErrorCode::Success;
 		}
 
@@ -128,9 +144,12 @@ namespace SPTAG
 		{
 			PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
 			raw_bytes += sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + (sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
-			m_OPQMatrix = std::make_unique<OPQMatrixType[]>((m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector));
-			raw_bytes += sizeof(OPQMatrixType) * (m_NumSubvectors * m_DimPerSubvector) * (m_NumSubvectors * m_DimPerSubvector);
+			m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
+			m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
+			std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);
+			raw_bytes += sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim;
+
+			m_InitMatrixTranspose();
 			return ErrorCode::Success;
 		}
 
@@ -143,7 +162,7 @@ namespace SPTAG
 		template <typename T>
 		std::uint64_t OPQQuantizer<T>::BufferSize() const
 		{
-			return PQQuantizer<OPQMatrixType>::BufferSize() + (sizeof(OPQMatrixType) * m_NumSubvectors * m_DimPerSubvector * m_NumSubvectors * m_DimPerSubvector);
+			return PQQuantizer<OPQMatrixType>::BufferSize() + (sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);
 		}
 
 		template <typename T>
@@ -153,34 +172,44 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		inline SizeType OPQQuantizer<T>::m_MatrixIndexCalc(SizeType i, SizeType j) const
-		{
-			return (i * m_NumSubvectors * m_DimPerSubvector) + j;
-		}
-
-		template <typename T>
 		template <typename I, typename O>
-		inline void OPQQuantizer<T>::m_MatrixVectorMultiply(OPQMatrixType* mat, const I* vec, O* mat_vec, bool transpose) const
+		inline void OPQQuantizer<T>::m_VectorMatrixMultiply(const I* vec, O* mat_vec, bool transpose) const
 		{
-			for (int i = 0; i < m_NumSubvectors * m_DimPerSubvector; i++)
+			OPQMatrixType* typed_vec;
+			if constexpr (std::is_same_v<I, OPQMatrixType>)
 			{
-				OPQMatrixType tmp = 0;
-				for (int j = 0; j < m_NumSubvectors * m_DimPerSubvector; j++)
+				typed_vec = const_cast<OPQMatrixType*>(vec);
+			}
+			else
+			{
+				typed_vec = (OPQMatrixType*)ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
+				for (int i = 0; i < m_matrixDim; i++)
 				{
-					if (transpose)
-					{
-						tmp += mat[m_MatrixIndexCalc(j, i)] * vec[j];
-					}
-					else
-					{
-						tmp += mat[m_MatrixIndexCalc(i, j)] * vec[j];
-					}
+					typed_vec[i] = (OPQMatrixType)vec[i];
 				}
-				mat_vec[i] = (O) tmp;
+			}
+
+			if (transpose) {
+				OPQMatrixType* mat = m_OPQMatrix.get();
+				for (int i = 0; i < m_matrixDim; i++) {
+					mat_vec[i] = (O)(m_base - m_fdot(typed_vec, mat, m_matrixDim));
+					mat += m_matrixDim;
+				}
+			}
+			else
+			{
+				OPQMatrixType* mat = m_OPQMatrix_T.get();
+				for (int i = 0; i < m_matrixDim; i++) {
+					mat_vec[i] = (O)(m_base - m_fdot(typed_vec, mat, m_matrixDim));
+					mat += m_matrixDim;
+				}
+			}
+
+			if constexpr (!std::is_same_v<I, OPQMatrixType>)
+			{
+				ALIGN_FREE(typed_vec);
 			}
 		}
-
-
 	}
 }
 

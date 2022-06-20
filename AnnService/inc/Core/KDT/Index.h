@@ -150,7 +150,7 @@ namespace SPTAG
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
-            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false);
+            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;

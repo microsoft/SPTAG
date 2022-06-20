@@ -67,6 +67,8 @@ DefaultVectorReader::GetVectorSet(SizeType start, SizeType end) const
             exit(1);
         }
     }
+
+    LOG(Helper::LogLevel::LL_Info, "Load Vector(%d,%d)\n", end - start, col);
     return std::make_shared<BasicVectorSet>(vectorSet,
                                             m_options->m_inputValueType,
                                             col,
