@@ -59,8 +59,8 @@ namespace SPTAG
 
 			void m_InitMatrixTranspose();
 
-			template <typename I, typename O>
-			inline void m_VectorMatrixMultiply(const I* vec, O* mat_vec, bool transpose = false) const;
+			template <typename O>
+			inline void m_VectorMatrixMultiply(OPQMatrixType* mat, const OPQMatrixType* vec, O* mat_vec) const;
 
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix;
 			std::unique_ptr<OPQMatrixType[]> m_OPQMatrix_T;
@@ -91,9 +91,28 @@ namespace SPTAG
 		void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
 		{
 			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
-			m_VectorMatrixMultiply<T, OPQMatrixType>((T*) vec, mat_vec);
+			OPQMatrixType* typed_vec;
+			if constexpr (std::is_same_v<T, OPQMatrixType>)
+			{
+				typed_vec = (OPQMatrixType*)vec;
+			}
+			else
+			{
+				typed_vec = (OPQMatrixType*)ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
+				for (int i = 0; i < m_matrixDim; i++)
+				{
+					typed_vec[i] = (OPQMatrixType)((T*)vec)[i];
+				}
+			}
+			
+			m_VectorMatrixMultiply<OPQMatrixType>(m_OPQMatrix_T.get(), typed_vec, mat_vec);
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
 			ALIGN_FREE(mat_vec);
+
+			if constexpr (!std::is_same_v<T, OPQMatrixType>)
+			{
+				ALIGN_FREE(typed_vec);
+			}
 		}
 
 		template <typename T>
@@ -102,7 +121,7 @@ namespace SPTAG
 			OPQMatrixType* pre_mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
 			PQQuantizer<OPQMatrixType>::ReconstructVector(qvec, pre_mat_vec);
 			// OPQ Matrix is orthonormal, so inverse = transpose
-			m_VectorMatrixMultiply<OPQMatrixType, T>(pre_mat_vec, (T*) vecout, true);
+			m_VectorMatrixMultiply<T>(m_OPQMatrix.get(), pre_mat_vec, (T*)vecout);
 			ALIGN_FREE(pre_mat_vec);
 		}
 
@@ -172,42 +191,12 @@ namespace SPTAG
 		}
 
 		template <typename T>
-		template <typename I, typename O>
-		inline void OPQQuantizer<T>::m_VectorMatrixMultiply(const I* vec, O* mat_vec, bool transpose) const
+		template <typename O>
+		inline void OPQQuantizer<T>::m_VectorMatrixMultiply(OPQMatrixType* mat, const OPQMatrixType* vec, O* mat_vec) const
 		{
-			OPQMatrixType* typed_vec;
-			if constexpr (std::is_same_v<I, OPQMatrixType>)
-			{
-				typed_vec = const_cast<OPQMatrixType*>(vec);
-			}
-			else
-			{
-				typed_vec = (OPQMatrixType*)ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
-				for (int i = 0; i < m_matrixDim; i++)
-				{
-					typed_vec[i] = (OPQMatrixType)vec[i];
-				}
-			}
-
-			if (transpose) {
-				OPQMatrixType* mat = m_OPQMatrix.get();
-				for (int i = 0; i < m_matrixDim; i++) {
-					mat_vec[i] = (O)(m_base - m_fdot(typed_vec, mat, m_matrixDim));
-					mat += m_matrixDim;
-				}
-			}
-			else
-			{
-				OPQMatrixType* mat = m_OPQMatrix_T.get();
-				for (int i = 0; i < m_matrixDim; i++) {
-					mat_vec[i] = (O)(m_base - m_fdot(typed_vec, mat, m_matrixDim));
-					mat += m_matrixDim;
-				}
-			}
-
-			if constexpr (!std::is_same_v<I, OPQMatrixType>)
-			{
-				ALIGN_FREE(typed_vec);
+			for (int i = 0; i < m_matrixDim; i++) {
+				mat_vec[i] = (O)(m_base - m_fdot(vec, mat, m_matrixDim));
+				mat += m_matrixDim;
 			}
 		}
 	}
