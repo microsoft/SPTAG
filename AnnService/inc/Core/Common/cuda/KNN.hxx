@@ -1078,7 +1078,7 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     // Memory for a heap for each thread
     extern __shared__ char sharememory[];
     //DistPair<SUMTYPE> vals[9];
-    __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
+    ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem;
     //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM]; in KNN Source Code
     //template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 
@@ -1096,12 +1096,12 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 
     //heapMem[threadIdx.x].KVAL = KVAL;
     //heapMem[threadIdx.x].initialize(vals, KVAL-1);
-    heapMem[threadIdx.x].initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
+    heapMem.initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
 
     SUMTYPE dist;
     // Loop through all query points
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
-        heapMem[threadIdx.x].reset();
+        heapMem.reset();
         extra.dist = INFTY<DTYPE>();
         query.loadPoint(querySet[i]); // Load into shared memory
         // Compare with all points in the dataset
@@ -1112,11 +1112,11 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 //            dist = query.l2(&data[j]);
 //#endif
             if (dist < extra.dist) {
-                if (dist < heapMem[threadIdx.x].top()) {
-                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
-                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
+                if (dist < heapMem.top()) {
+                    extra.dist = heapMem.vals[0].dist;
+                    extra.idx = heapMem.vals[0].idx + idx_offset;
                     //When recording the index, remember the off_set to discriminate different subvectorSets
-                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
+                    heapMem.insert(dist, j + idx_offset);
                 }
                 else {
                     extra.dist = dist;
@@ -1128,10 +1128,10 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
         results[(i + 1) * KVAL - 1].idx = extra.idx;
         results[(i + 1) * KVAL - 1].dist = extra.dist;
         for (int j = KVAL - 2; j >= 0; j--) {
-            results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
-            results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
-            heapMem[threadIdx.x].vals[0].dist = -1;
-            heapMem[threadIdx.x].heapify();
+            results[i * KVAL + j].idx = heapMem.vals[0].idx;
+            results[i * KVAL + j].dist = heapMem.vals[0].dist;
+            heapMem.vals[0].dist = -1;
+            heapMem.heapify();
 
         }
     }
@@ -1168,21 +1168,9 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     //Is there any easier way to get subets?
     Point<DTYPE, SUMTYPE, MAX_DIM>* sub_vectors_points[NUM_GPUS];
     for (int i = 0; i < NUM_GPUS; i++) {
-        //std::vector<std::vector<T>> sub_vector;
-        //for (int idx = i * sub_vector_size; idx < (i + 1) * sub_vector_size; idx++) {
-        //    sub_vector.emplace_back((const T*)(vectorSet->GetVector(i)));
-        //}
-        //LOG_INFO("GPU%d has %ld vectors\n", i, sub_vector.size());
         int start = sub_vector_size * i;
         int end = min(start + sub_vector_size, vector_size);
         int curr_sub_size = end - start;
-    //origin
-        //std::shared_ptr<VectorSet> sub_vector = std::shared_ptr<VectorSet>(new BasicVectorSet(ByteArray((std::uint8_t*)(querySet->GetVector(start)), (end - start) * querySet->PerVectorDataSize(), false),
-        //    querySet->GetValueType(),
-        //    querySet->Dimension(),
-        //    end - start));
-        //sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >((DTYPE*)sub_vector->GetData(), (end-start), dim);
-        //& vectors[(GPUPointOffset[gpuNum] + offset[gpuNum]) * dim]
         sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start*dim], curr_sub_size, dim);
     }
 
@@ -1220,9 +1208,20 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
         LOG_INFO("Alloc'ing memory for results on device: %ld bytes.\n", querySet->Count() * K * sizeof(int));
 
-        int KNN_blocks = querySet->Count() / THREADS;
+        int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
         // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets 
-        query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS >> > (d_points, d_check_points, vector_size / NUM_GPUS, i * (vector_size / NUM_GPUS), result_size, d_results[i], K);
+        size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608
+        size_t staticShareMem = MAX_DIM * THREADS * sizeof(DTYPE);
+        LOG_INFO("we have %d blocks.\n", KNN_blocks);
+        LOG_INFO("Alloc'ing dynamic shared memory for DistPair per Block: %ld bytes.\n", dynamicSharedMem);
+        LOG_INFO("Alloc'ing  static shared memory for TransposeMem per Block: %ld bytes.\n", staticShareMem);
+        cudaDeviceProp prop;
+        CUDA_CHECK(cudaGetDeviceProperties(&prop, i));
+
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - has shared memory %ld Per Block\n", i, prop.sharedMemPerBlock);
+        query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem >> > (d_points, d_check_points, vector_size / NUM_GPUS, i * (vector_size / NUM_GPUS), result_size, d_results[i], K);
+        cudaError_t c_ret = cudaGetLastError();
+        LOG_INFO("Error: %s\n", cudaGetErrorString(c_ret));
     }
 
     for (int i = 0; i < NUM_GPUS; i++) {
@@ -1234,8 +1233,10 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
     auto t2 = std::chrono::high_resolution_clock::now();
     double gpuRunTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
+    double gpuRunTimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
 
     LOG_ALL("Total GPU time (sec): %lf\n", gpuRunTime);
+    LOG_ALL("Total GPU time (ms): %lf\n", gpuRunTimeMs);
     //LOG_INFO("GPU runtime (ms): %lf\n", (1000 * end.tv_sec + 1e-6 * end.tv_nsec) - (1000 * start.tv_sec + 1e-6 * start.tv_nsec));
     
 
