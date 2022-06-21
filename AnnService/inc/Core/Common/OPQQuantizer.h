@@ -5,6 +5,12 @@
 
 #include "PQQuantizer.h"
 
+#if (__cplusplus < 201703L)
+#define ISNOTSAME(A, B) if (!std::is_same<A, B>::value)
+#else
+#define ISNOTSAME(A, B) if constexpr (!std::is_same_v<A, B>)
+#endif
+
 namespace SPTAG
 {
 	namespace COMMON
@@ -92,11 +98,7 @@ namespace SPTAG
 		{
 			OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
 			OPQMatrixType* typed_vec;
-			if constexpr (std::is_same_v<T, OPQMatrixType>)
-			{
-				typed_vec = (OPQMatrixType*)vec;
-			}
-			else
+		    ISNOTSAME(T, OPQMatrixType)
 			{
 				typed_vec = (OPQMatrixType*)ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
 				for (int i = 0; i < m_matrixDim; i++)
@@ -104,12 +106,15 @@ namespace SPTAG
 					typed_vec[i] = (OPQMatrixType)((T*)vec)[i];
 				}
 			}
-			
+            else {
+				typed_vec = (OPQMatrixType*)vec;
+			}
+
 			m_VectorMatrixMultiply<OPQMatrixType>(m_OPQMatrix_T.get(), typed_vec, mat_vec);
 			PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
 			ALIGN_FREE(mat_vec);
 
-			if constexpr (!std::is_same_v<T, OPQMatrixType>)
+			ISNOTSAME(T, OPQMatrixType)
 			{
 				ALIGN_FREE(typed_vec);
 			}
