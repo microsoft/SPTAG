@@ -1078,16 +1078,17 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     // Memory for a heap for each thread
     extern __shared__ char sharememory[];
     //DistPair<SUMTYPE> vals[9];
-    ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem;
+    __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
     //__shared__ ThreadHeap<T, Dim, KVAL - 1, BLOCK_DIM> heapMem[BLOCK_DIM]; in KNN Source Code
     //template<typename T, typename SUMTYPE, int Dim, int BLOCK_DIM>
 
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
     // Memory used to store a query point for each thread
     //__shared__ DTYPE transpose_mem[100 * BLOCK_DIM];
-    __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
-    TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
-    query.setMem(&transpose_mem[threadIdx.x]);
+    //__shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
+    //TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
+    Point<DTYPE, SUMTYPE, Dim> query;  // Stores in strided memory to avoid bank conflicts
+    //query.setMem(&transpose_mem[threadIdx.x]);
 
 #if LOG_LEVEL >= 5
     int dSize = sizeof(DTYPE);
@@ -1096,14 +1097,14 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 
     //heapMem[threadIdx.x].KVAL = KVAL;
     //heapMem[threadIdx.x].initialize(vals, KVAL-1);
-    heapMem.initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
+    heapMem[threadIdx.x].initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
 
     SUMTYPE dist;
     // Loop through all query points
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
-        heapMem.reset();
+        heapMem[threadIdx.x].reset();
         extra.dist = INFTY<DTYPE>();
-        query.loadPoint(querySet[i]); // Load into shared memory
+        query = querySet[i]; // Load into shared memory
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
 //#if METRIC == 1 
@@ -1112,11 +1113,11 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 //            dist = query.l2(&data[j]);
 //#endif
             if (dist < extra.dist) {
-                if (dist < heapMem.top()) {
-                    extra.dist = heapMem.vals[0].dist;
-                    extra.idx = heapMem.vals[0].idx + idx_offset;
+                if (dist < heapMem[threadIdx.x].top()) {
+                    extra.dist = heapMem[threadIdx.x].vals[0].dist;
+                    extra.idx = heapMem[threadIdx.x].vals[0].idx + idx_offset;
                     //When recording the index, remember the off_set to discriminate different subvectorSets
-                    heapMem.insert(dist, j + idx_offset);
+                    heapMem[threadIdx.x].insert(dist, j + idx_offset);
                 }
                 else {
                     extra.dist = dist;
@@ -1128,10 +1129,10 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
         results[(i + 1) * KVAL - 1].idx = extra.idx;
         results[(i + 1) * KVAL - 1].dist = extra.dist;
         for (int j = KVAL - 2; j >= 0; j--) {
-            results[i * KVAL + j].idx = heapMem.vals[0].idx;
-            results[i * KVAL + j].dist = heapMem.vals[0].dist;
-            heapMem.vals[0].dist = -1;
-            heapMem.heapify();
+            results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
+            results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
+            heapMem[threadIdx.x].vals[0].dist = -1;
+            heapMem[threadIdx.x].heapify();
 
         }
     }
@@ -1210,11 +1211,13 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
         int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
         // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets 
-        size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608
+        size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608 for 64 Threads
         size_t staticShareMem = MAX_DIM * THREADS * sizeof(DTYPE);
+        size_t threadShareMem = THREADS * sizeof(ThreadHeap<DTYPE, SUMTYPE, MAX_DIM, THREADS>);
         LOG_INFO("we have %d blocks.\n", KNN_blocks);
         LOG_INFO("Alloc'ing dynamic shared memory for DistPair per Block: %ld bytes.\n", dynamicSharedMem);
-        LOG_INFO("Alloc'ing  static shared memory for TransposeMem per Block: %ld bytes.\n", staticShareMem);
+        //LOG_INFO("Alloc'ing  static shared memory for TransposeMem per Block: %ld bytes.\n", staticShareMem);
+        LOG_INFO("Alloc'ing  static shared memory for ThreadHeap per Block: %ld bytes.\n", threadShareMem);
         cudaDeviceProp prop;
         CUDA_CHECK(cudaGetDeviceProperties(&prop, i));
 
