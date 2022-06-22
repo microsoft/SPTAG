@@ -57,6 +57,7 @@ namespace SPTAG {
                         }
                     }
                 }
+                return ErrorCode::Success;
             }
 
             template<typename T, typename V>
