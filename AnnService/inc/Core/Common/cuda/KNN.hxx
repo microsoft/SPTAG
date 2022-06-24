@@ -1087,10 +1087,10 @@ __global__ void query_KNN_local(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYP
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
     // Memory used to store a query point for each thread
     //__shared__ DTYPE transpose_mem[100 * BLOCK_DIM];
-    Point<DTYPE, SUMTYPE, Dim> query;  // Stores in strided memory to avoid bank conflicts
-    //__shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
-    //TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
-    //query.setMem(&transpose_mem[threadIdx.x]);
+    //Point<DTYPE, SUMTYPE, Dim> query;  // Stores in strided memory to avoid bank conflicts
+    __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
+    TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
+    query.setMem(&transpose_mem[threadIdx.x]);
 
 #if LOG_LEVEL >= 5
     int dSize = sizeof(DTYPE);
@@ -1106,8 +1106,8 @@ __global__ void query_KNN_local(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYP
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
         heapMem.reset();
         extra.dist = INFTY<DTYPE>();
-        query = querySet[i]; // Load into shared memory
-        //query.loadPoint(querySet[i]); // Load into shared memory
+        //query = querySet[i]; // Load into shared memory
+        query.loadPointloadPoint(querySet[i]); // Load into shared memory
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
             //#if METRIC == 1 
