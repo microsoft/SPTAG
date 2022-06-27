@@ -57,6 +57,8 @@ namespace SPTAG
 
             SizeType GetKsPerSubvector() const;
 
+            SizeType GetBlockSize() const;
+
             DimensionType GetDimPerSubvector() const;
 
             virtual bool GetEnableADC() const;
@@ -71,6 +73,10 @@ namespace SPTAG
             QuantizerType GetQuantizerType() const {
                 return QuantizerType::PQQuantizer;
             }
+
+            float* GetCosineDistanceTables();
+
+            float* GetL2DistanceTables();
 
         protected:
             DimensionType m_NumSubvectors;
@@ -356,6 +362,12 @@ namespace SPTAG
         }
 
         template <typename T>
+        SizeType PQQuantizer<T>::GetBlockSize() const
+        {
+            return m_BlockSize;
+        }
+
+        template <typename T>
         DimensionType PQQuantizer<T>::GetDimPerSubvector() const
         {
             return m_DimPerSubvector;
@@ -377,6 +389,16 @@ namespace SPTAG
         inline SizeType PQQuantizer<T>::m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const {
             return m_BlockSize * i + j * m_KsPerSubvector + k;
         }
+
+	template <typename T>
+        float* PQQuantizer<T>::GetCosineDistanceTables() {
+          return (float*)(m_CosineDistanceTables.get());
+	}
+
+	template <typename T>
+        float* PQQuantizer<T>::GetL2DistanceTables() {
+          return (float*)(m_L2DistanceTables.get());
+	}
     }
 }
 

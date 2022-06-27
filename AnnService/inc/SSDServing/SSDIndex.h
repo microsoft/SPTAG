@@ -18,24 +18,24 @@ namespace SPTAG {
 		namespace SSDIndex {
 
             template <typename ValueType>
-            void OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
+            ErrorCode OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
             {
                 if (!p_output.empty())
                 {
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(p_output.c_str(), std::ios::binary | std::ios::out)) {
                         LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
-                        exit(1);
+                        return ErrorCode::FailedCreateFile;
                     }
                     int32_t i32Val = static_cast<int32_t>(p_results.size());
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
                         LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
-                        exit(1);
+                        return ErrorCode::DiskIOFail;
                     }
                     i32Val = p_resultNum;
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
                         LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
-                        exit(1);
+                        return ErrorCode::DiskIOFail;
                     }
 
                     float fVal = 0;
@@ -46,17 +46,18 @@ namespace SPTAG {
                             i32Val = p_results[i].GetResult(j)->VID;
                             if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
                                 LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
-                                exit(1);
+                                return ErrorCode::DiskIOFail;
                             }
 
                             fVal = p_results[i].GetResult(j)->Dist;
                             if (ptr->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
                                 LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
-                                exit(1);
+                                return ErrorCode::DiskIOFail;
                             }
                         }
                     }
                 }
+                return ErrorCode::Success;
             }
 
             template<typename T, typename V>
@@ -170,11 +171,12 @@ namespace SPTAG {
                    p_index->m_pQuantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
-                if (!p_opts.m_logFile.empty())
-                {
-                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
-                }
-                int numThreads = p_opts.m_iSSDNumberOfThreads;
+//                if (!p_opts.m_logFile.empty())
+//                {
+//                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+//                }
+//                int numThreads = p_opts.m_iSSDNumberOfThreads;
+                int numThreads = 1;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;

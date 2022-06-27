@@ -13,7 +13,7 @@ using namespace SPTAG;
 class QuantizerOptions : public Helper::ReaderOptions
 {
 public:
-    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda, SPTAG::QuantizerType qtype, std::string qfile, DimensionType qdim, std::string fullvecs) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda), m_quantizerType(qtype), m_outputQuantizerFile(qfile), m_quantizedDim(qdim), m_outputFullVecFile(fullvecs)
+    QuantizerOptions(SizeType trainingSamples, bool debug, float lambda, SPTAG::QuantizerType qtype, std::string qfile, DimensionType qdim, std::string fullvecs, std::string recvecs) : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32), m_trainingSamples(trainingSamples), m_debug(debug), m_KmeansLambda(lambda), m_quantizerType(qtype), m_outputQuantizerFile(qfile), m_quantizedDim(qdim), m_outputFullVecFile(fullvecs), m_outputReconstructVecFile(recvecs)
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_outputFile, "-o", "--output", "Output quantized vectors.");
@@ -22,10 +22,13 @@ public:
         AddOptionalOption(m_outputQuantizerFile, "-oq", "--outputquantizer", "Output quantizer.");
         AddOptionalOption(m_quantizerType, "-qt", "--quantizer", "Quantizer type.");
         AddOptionalOption(m_quantizedDim, "-qd", "--quantizeddim", "Quantized Dimension.");
+
+        // We also use this to determine batch size (max number of vectors to load at once)
         AddOptionalOption(m_trainingSamples, "-ts", "--train_samples", "Number of samples for training.");
         AddOptionalOption(m_debug, "-debug", "--debug", "Print debug information.");
         AddOptionalOption(m_KmeansLambda, "-kml", "--lambda", "Kmeans lambda parameter.");
         AddOptionalOption(m_outputFullVecFile, "-ofv", "--output_full", "Output Uncompressed vectors.");
+        AddOptionalOption(m_outputFullVecFile, "-orv", "--output_reconstruct", "Output reconstructed vectors.");
     }
 
     ~QuantizerOptions() {}
@@ -35,6 +38,8 @@ public:
     std::string m_outputFile;
 
     std::string m_outputFullVecFile;
+
+    std::string m_outputReconstructVecFile;
 
     std::string m_outputMetadataFile;
 
@@ -115,22 +120,4 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     }
 
     return codebooks;
-}
-
-ErrorCode WriteQuantizedVecs(std::shared_ptr<VectorSet> vectors, std::shared_ptr<Helper::DiskIO> fp, const std::shared_ptr<COMMON::IQuantizer>& quantizer)
-{
-	SizeType cnt = vectors->Count();
-	DimensionType dim = quantizer->GetNumSubvectors();
-	SizeType qvec_size = quantizer->QuantizeSize();
-	IOBINARY(fp, WriteBinary, sizeof(SizeType), (char*)&cnt);
-	IOBINARY(fp, WriteBinary, sizeof(DimensionType), (char*)&dim);
-
-	uint8_t* qvec = (uint8_t*)ALIGN_ALLOC(qvec_size);
-	for (int i = 0; i < cnt; i++)
-	{
-		quantizer->QuantizeVector(vectors->GetVector(i), qvec);
-		IOBINARY(fp, WriteBinary, qvec_size, (char*)qvec);
-	}
-    ALIGN_FREE(qvec);
-	
 }

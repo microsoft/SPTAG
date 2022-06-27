@@ -2,28 +2,34 @@
 # Licensed under the MIT License.
 
 set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
+set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
 
 include_directories(${AnnService})
+include_directories(${Zstd}/lib)
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
 
 list(REMOVE_ITEM HDR_FILES
-    ${AnnService}/inc/Core/Common/DistanceUtils.h 
+    ${AnnService}/inc/Core/Common/DistanceUtils.h
+    ${AnnService}/inc/Core/Common/SIMDUtils.h 
     ${AnnService}/inc/Core/Common/InstructionUtils.h
     ${AnnService}/inc/Core/Common/CommonUtils.h
     )
 
 list(REMOVE_ITEM SRC_FILES
     ${AnnService}/src/Core/Common/DistanceUtils.cpp
+    ${AnnService}/src/Core/Common/SIMDUtils.cpp
     ${AnnService}/src/Core/Common/InstructionUtils.cpp
     )
 
 add_library (DistanceUtils STATIC 
-    inc/Core/Common/DistanceUtils.h 
+    inc/Core/Common/DistanceUtils.h
+    inc/Core/Common/SIMDUtils.h
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
     src/Core/Common/DistanceUtils.cpp
+    src/Core/Common/SIMDUtils.cpp
     src/Core/Common/InstructionUtils.cpp
     )
 
@@ -32,9 +38,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLib DistanceUtils)
+target_link_libraries (SPTAGLib DistanceUtils libzstd_shared)
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLibStatic DistanceUtils)
+target_link_libraries (SPTAGLibStatic DistanceUtils libzstd_static)
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
@@ -81,6 +87,15 @@ endif()
 
 file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
 file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
+#if(NOT WIN32)
+#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+#            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
+#            )
+#elseif(WIN32)
+#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
+#            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
+#            )
+#endif()
 
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})

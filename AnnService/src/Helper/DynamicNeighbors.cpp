@@ -39,19 +39,19 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
     auto fp = f_createIO();
     if (fp == nullptr || !fp->Initialize(p_filePath, std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed open graph file: %s\n", p_filePath);
-        exit(1);
+        throw std::runtime_error("Opening graph file failed");
     }
 
     if (fp->ReadBinary(sizeof(m_vectorCount), (char*)&m_vectorCount) != sizeof(m_vectorCount)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read DynamicNeighborsSet!\n");
-        exit(1);
+        throw std::runtime_error("reading DynamicNeighborsSet failed");
     }
 
     m_neighborOffset.reset(new int[m_vectorCount + 1]);
     m_neighborOffset[0] = 0;
     if (fp->ReadBinary(m_vectorCount * sizeof(int), (char*)(m_neighborOffset.get() + 1)) != m_vectorCount * sizeof(int)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read DynamicNeighborsSet!\n");
-        exit(1);
+        throw std::runtime_error("reading DynamicNeighborsSet failed");
     }
 
     size_t graphSize = static_cast<size_t>(m_neighborOffset[m_vectorCount]);
@@ -64,7 +64,7 @@ DynamicNeighborsSet::DynamicNeighborsSet(const char* p_filePath)
             "Failed read graph: size not match, expected %zu, actually %zu\n",
             static_cast<size_t>(graphSize * sizeof(int)),
             static_cast<size_t>(readSize));
-        exit(1);
+        throw std::runtime_error("Graph size doesn't match expected");
     }
 }
 
