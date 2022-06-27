@@ -622,6 +622,7 @@ namespace SPTAG
                     size_t curPostingListEnd = min(postingListSize.size(), (i + 1) * postingFileSize);
                     selectionsBatchOffset[i + 1] = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), (SizeType)curPostingListEnd, Selection::g_edgeComparer) - selections.m_selections.begin();
                 }
+                if (p_opt.m_ssdIndexFileNum > 1) selections.SaveBatch();
 
                 if (p_opt.m_ssdIndexFileNum > 1)
                 {
@@ -633,75 +634,7 @@ namespace SPTAG
 
                 auto fullVectors = p_reader->GetVectorSet();
                 if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
-                
-                // get compressed size of each posting list
-                std::vector<size_t> postingListBytes(headVectorIDS.size());
-                
-                if (p_opt.m_enableDataCompression)
-                {
-                    m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
-                    LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
 
-                    LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
-                    std::string samplesBuffer("");
-                    std::vector<size_t> samplesSizes;
-                    for (int i = 0; i < postingListSize.size(); i++) {
-                        if (postingListSize[i] == 0) {
-                            continue;
-                        }
-                        ValueType* headVector = nullptr;
-                        if (p_opt.m_enableDeltaEncoding)
-                        {
-                            headVector = (ValueType*)p_headIndex->GetSample(i);
-                        }
-                        std::string postingListFullData = GetPostingListFullData(
-                            i, postingListSize[i], selections, fullVectors, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
-
-                        samplesBuffer += postingListFullData;
-                        samplesSizes.push_back(postingListFullData.size());
-                        if (samplesBuffer.size() > p_opt.m_minDictTraingBufferSize) break;
-                    }
-                    LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
-                    std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
-                    LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
-
-#pragma omp parallel for schedule(dynamic)
-                    for (int i = 0; i < postingListSize.size(); i++) {
-                        // do not compress if no data
-                        if (postingListSize[i] == 0) {
-                            postingListBytes[i] = 0;
-                            continue;
-                        }
-                        ValueType* headVector = nullptr;
-                        if (p_opt.m_enableDeltaEncoding)
-                        {
-                            headVector = (ValueType*)p_headIndex->GetSample(i);
-                        }
-                        std::string postingListFullData = GetPostingListFullData(
-                            i, postingListSize[i], selections, fullVectors, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
-                        size_t sizeToCompress = postingListSize[i] * vectorInfoSize;
-                        if (sizeToCompress != postingListFullData.size()) {
-                            LOG(Helper::LogLevel::LL_Error, "Size to compress NOT MATCH! PostingListFullData size: %zu sizeToCompress: %zu \n", postingListFullData.size(), sizeToCompress);
-                        }
-                        postingListBytes[i] = m_pCompressor->GetCompressedSize(postingListFullData, true);
-                        if (i % 10000 == 0 || postingListBytes[i] > static_cast<uint64_t>(p_opt.m_postingPageLimit) * PageSize) {
-                            LOG(Helper::LogLevel::LL_Info, "Posting list %d/%d, compressed size: %d, compression ratio: %.4f\n", i, postingListSize.size(), postingListBytes[i], postingListBytes[i] / float(sizeToCompress));
-                        }
-                    }
-                    LOG(Helper::LogLevel::LL_Info, "Getted compressed size for all the %d posting lists.\n", postingListBytes.size());
-                    LOG(Helper::LogLevel::LL_Info, "Mean compressed size: %.4f \n", std::accumulate(postingListBytes.begin(), postingListBytes.end(), 0.0) / postingListBytes.size());
-                    LOG(Helper::LogLevel::LL_Info, "Mean compression ratio: %.4f \n", std::accumulate(postingListBytes.begin(), postingListBytes.end(), 0.0) / (std::accumulate(postingListSize.begin(), postingListSize.end(), 0.0) * vectorInfoSize));
-                }
-                else
-                {
-                    for (int i = 0; i < postingListSize.size(); i++) 
-                    {
-                        postingListBytes[i] = postingListSize[i] * vectorInfoSize;
-                    }
-                }
-
-                if (p_opt.m_ssdIndexFileNum > 1) selections.SaveBatch();
-                
                 // iterate over files
                 for (int i = 0; i < p_opt.m_ssdIndexFileNum; i++) {
                     size_t curPostingListOffSet = i * postingFileSize;
@@ -710,10 +643,76 @@ namespace SPTAG
                     std::vector<int> curPostingListSizes(
                         postingListSize.begin() + curPostingListOffSet,
                         postingListSize.begin() + curPostingListEnd);
-                    std::vector<size_t> curPostingListBytes;
-                    curPostingListBytes.assign(
-                        postingListBytes.begin() + curPostingListOffSet,
-                        postingListBytes.begin() + curPostingListEnd);
+
+                    std::vector<size_t> curPostingListBytes(curPostingListSizes.size());
+                    
+                    if (p_opt.m_ssdIndexFileNum > 1) selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]);
+
+                    // train dict
+                    if (p_opt.m_enableDataCompression && i == 0)
+                    {
+                        m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
+                        LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
+                        std::string samplesBuffer("");
+                        std::vector<size_t> samplesSizes;
+                        for (int j = 0; j < curPostingListSizes.size(); j++) {
+                            if (curPostingListSizes[j] == 0) {
+                                continue;
+                            }
+                            ValueType* headVector = nullptr;
+                            if (p_opt.m_enableDeltaEncoding)
+                            {
+                                headVector = (ValueType*)p_headIndex->GetSample(j);
+                            }
+                            std::string postingListFullData = GetPostingListFullData(
+                                j, curPostingListSizes[j], selections, fullVectors, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
+
+                            samplesBuffer += postingListFullData;
+                            samplesSizes.push_back(postingListFullData.size());
+                            if (samplesBuffer.size() > p_opt.m_minDictTraingBufferSize) break;
+                        }
+                        LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
+                        std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
+                        LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
+                    }
+
+                    if (p_opt.m_enableDataCompression) {
+                        LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
+#pragma omp parallel for schedule(dynamic)
+                        for (int j = 0; j < curPostingListSizes.size(); j++) 
+                        {
+                            // do not compress if no data
+                            int postingListId = j + curPostingListOffSet;
+                            if (postingListSize[postingListId] == 0) {
+                                curPostingListBytes[j] = 0;
+                                continue;
+                            }
+                            ValueType* headVector = nullptr;
+                            if (p_opt.m_enableDeltaEncoding)
+                            {
+                                headVector = (ValueType*)p_headIndex->GetSample(postingListId);
+                            }
+                            std::string postingListFullData = GetPostingListFullData(
+                                postingListId, postingListSize[postingListId], selections, fullVectors, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
+                            size_t sizeToCompress = postingListSize[postingListId] * vectorInfoSize;
+                            if (sizeToCompress != postingListFullData.size()) {
+                                LOG(Helper::LogLevel::LL_Error, "Size to compress NOT MATCH! PostingListFullData size: %zu sizeToCompress: %zu \n", postingListFullData.size(), sizeToCompress);
+                            }
+                            curPostingListBytes[j] = m_pCompressor->GetCompressedSize(postingListFullData, true);
+                            if (postingListId % 10000 == 0 || curPostingListBytes[j] > static_cast<uint64_t>(p_opt.m_postingPageLimit) * PageSize) {
+                                LOG(Helper::LogLevel::LL_Info, "Posting list %d/%d, compressed size: %d, compression ratio: %.4f\n", postingListId, postingListSize.size(), curPostingListBytes[j], curPostingListBytes[j] / float(sizeToCompress));
+                            }
+                        }
+                        LOG(Helper::LogLevel::LL_Info, "Getted compressed size for all the %d posting lists in SSD Index file %d.\n", curPostingListBytes.size(), i);
+                        LOG(Helper::LogLevel::LL_Info, "Mean compressed size: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / curPostingListBytes.size());
+                        LOG(Helper::LogLevel::LL_Info, "Mean compression ratio: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / (std::accumulate(curPostingListSizes.begin(), curPostingListSizes.end(), 0.0) * vectorInfoSize));
+                    }
+                    else {
+                        for (int j = 0; j < curPostingListSizes.size(); j++)
+                        {
+                            curPostingListBytes[j] = curPostingListSizes[j] * vectorInfoSize;
+                        }
+                    }
 
                     std::unique_ptr<int[]> postPageNum;
                     std::unique_ptr<std::uint16_t[]> postPageOffset;
