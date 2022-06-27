@@ -622,7 +622,6 @@ namespace SPTAG
                     size_t curPostingListEnd = min(postingListSize.size(), (i + 1) * postingFileSize);
                     selectionsBatchOffset[i + 1] = std::lower_bound(selections.m_selections.begin(), selections.m_selections.end(), (SizeType)curPostingListEnd, Selection::g_edgeComparer) - selections.m_selections.begin();
                 }
-                if (p_opt.m_ssdIndexFileNum > 1) selections.SaveBatch();
 
                 if (p_opt.m_ssdIndexFileNum > 1)
                 {
@@ -646,7 +645,13 @@ namespace SPTAG
 
                     std::vector<size_t> curPostingListBytes(curPostingListSizes.size());
                     
-                    if (p_opt.m_ssdIndexFileNum > 1) selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]);
+                    if (p_opt.m_ssdIndexFileNum > 1)
+                    {
+                        if (selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]) != ErrorCode::Success)
+                        {
+                            return false;
+                        }
+                    }
 
                     // train dict
                     if (p_opt.m_enableDataCompression && i == 0)
@@ -719,14 +724,6 @@ namespace SPTAG
                     std::vector<int> postingOrderInIndex;
                     SelectPostingOffset(curPostingListBytes, postPageNum, postPageOffset, postingOrderInIndex);
 
-                    // LoadBatch: select vectors for each posting list
-                    if (p_opt.m_ssdIndexFileNum > 1)
-                    {
-                        if (selections.LoadBatch(selectionsBatchOffset[i], selectionsBatchOffset[i + 1]) != ErrorCode::Success)
-                        {
-                            return false;
-                        }
-                    }
                     OutputSSDIndexFile((i == 0) ? outputFile : outputFile + "_" + std::to_string(i),
                         p_opt.m_enableDeltaEncoding,
                         p_opt.m_enablePostingListRearrange,
