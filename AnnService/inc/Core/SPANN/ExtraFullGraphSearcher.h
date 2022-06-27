@@ -171,7 +171,7 @@ namespace SPTAG
                     m_enableDataCompression = p_opt.m_enableDataCompression;
                     m_enableDictTraining = p_opt.m_enableDictTraining;
                     try {
-                        m_totalListCount += LoadingHeadInfo(curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back());
+                        m_totalListCount += LoadingHeadInfo(m_totalListCount, curFile, p_opt.m_searchPostingPageLimit, m_listInfos.back());
                     } 
                     catch (std::exception& e)
                     {
