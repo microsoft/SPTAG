@@ -164,177 +164,143 @@ break;
                 }
                 else
                 {
-                    SizeType cols = index->GetFeatureDim();
-                    bool quantizer_exists = (bool)index->m_pQuantizer;
-                    R* v_holder = nullptr;
-                    if (quantizer_exists) {
-                        cols = index->m_pQuantizer->ReconstructDim();
-                        v_holder = (R*)ALIGN_ALLOC(index->m_pQuantizer->ReconstructSize());
-                    }
-                    std::vector<float> Mean(cols, 0);
-
-                    int iIteration = 100;
-                    SizeType end = min(first + m_iSamples, last);
-                    SizeType count = end - first + 1;
-                    // calculate the mean of each dimension
-                    for (SizeType j = first; j <= end; j++)
+                    SizeType splitidx = first;
                     {
-                        R* v;
-                        if (quantizer_exists)
-                        {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
-                            v = v_holder;
-                        }
-                        else
-                        {
-                            v = (R*)index->GetSample(indices[j]);
+                        int iIteration = 100;
+                        SizeType end = min(first + m_iSamples, last);
+                        SizeType count = end - first + 1;
+                        bool quantizer_exists = (bool)index->m_pQuantizer;
+
+                        SizeType cols = index->GetFeatureDim();
+                        std::shared_ptr<VectorSet> indices_vectors;
+                        if (quantizer_exists) {
+                            cols = index->m_pQuantizer->ReconstructDim();
+                            indices_vectors.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * cols * count), GetEnumValueType<R>(), cols, count));
+                            for (int i = 0; i < count; i++) index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + i]), indices_vectors->GetVector(i));
                         }
 
-                        for (DimensionType k = 0; k < cols; k++)
+                        std::vector<float> Mean(cols, 0);
+                        // calculate the mean of each dimension
+                        for (SizeType j = first; j <= end; j++)
                         {
-                            Mean[k] += v[k];
-                        }
-                    }
-                    for (DimensionType k = 0; k < cols; k++)
-                    {
-                        Mean[k] /= count;
-                    }
-                    std::vector<BasicResult> Variance;
-                    Variance.reserve(cols);
-                    for (DimensionType j = 0; j < cols; j++)
-                    {
-                        Variance.emplace_back(j, 0.0f);
-                    }
-                    // calculate the variance of each dimension
-                    for (SizeType j = first; j <= end; j++)
-                    {
-                        R* v;
-                        if (quantizer_exists)
-                        {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[j]), v_holder);
-                            v = v_holder;
-                        }
-                        else
-                        {
-                            v = (R*)index->GetSample(indices[j]);
-                        }
-
-                        for (DimensionType k = 0; k < cols; k++)
-                        {
-                            float dist = v[k] - Mean[k];
-                            Variance[k].Dist += dist * dist;
-                        }
-                    }
-                    std::sort(Variance.begin(), Variance.end(), COMMON::Compare);
-                    std::vector<SizeType> indexs(m_numTopDimensionTPTSplit);
-                    std::vector<float> weight(m_numTopDimensionTPTSplit), bestweight(m_numTopDimensionTPTSplit);
-                    float bestvariance = Variance[cols - 1].Dist;
-                    for (int i = 0; i < m_numTopDimensionTPTSplit; i++)
-                    {
-                        indexs[i] = Variance[cols - 1 - i].VID;
-                        bestweight[i] = 0;
-                    }
-                    bestweight[0] = 1;
-                    float bestmean = Mean[indexs[0]];
-
-                    std::vector<float> Val(count);
-                    for (int i = 0; i < iIteration; i++)
-                    {
-                        float sumweight = 0;
-                        for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
-                        {
-                            weight[j] = float(rand() % 10000) / 5000.0f - 1.0f;
-                            sumweight += weight[j] * weight[j];
-                        }
-                        sumweight = sqrt(sumweight);
-                        for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
-                        {
-                            weight[j] /= sumweight;
-                        }
-                        float mean = 0;
-                        for (SizeType j = 0; j < count; j++)
-                        {
-                            Val[j] = 0;
-                            R* v;
-                            if (quantizer_exists)
+                            R* v = (quantizer_exists) ? (R*)indices_vectors->GetVector(j - first) : (R*)index->GetSample(indices[j]);
+                            for (DimensionType k = 0; k < cols; k++)
                             {
-                                index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[first + j]), v_holder);
-                                v = v_holder;
+                                Mean[k] += v[k];
+                            }
+                        }
+
+                        std::vector<BasicResult> Variance;
+                        Variance.reserve(cols);
+                        for (DimensionType j = 0; j < cols; j++)
+                        {
+                            Mean[j] /= count;
+                            Variance.emplace_back(j, 0.0f);
+                        }
+
+                        // calculate the variance of each dimension
+                        for (SizeType j = first; j <= end; j++)
+                        {
+                            R* v = (quantizer_exists) ? (R*)indices_vectors->GetVector(j - first) : (R*)index->GetSample(indices[j]);
+                            for (DimensionType k = 0; k < cols; k++)
+                            {
+                                float dist = v[k] - Mean[k];
+                                Variance[k].Dist += dist * dist;
+                            }
+                        }
+
+                        std::sort(Variance.begin(), Variance.end(), COMMON::Compare);
+                        std::vector<SizeType> indexs(m_numTopDimensionTPTSplit);
+                        std::vector<float> weight(m_numTopDimensionTPTSplit), bestweight(m_numTopDimensionTPTSplit);
+                        float bestvariance = Variance[cols - 1].Dist;
+                        for (int i = 0; i < m_numTopDimensionTPTSplit; i++)
+                        {
+                            indexs[i] = Variance[cols - 1 - i].VID;
+                            bestweight[i] = 0;
+                        }
+                        bestweight[0] = 1;
+                        float bestmean = Mean[indexs[0]];
+
+                        std::vector<float> Val(count);
+                        for (int i = 0; i < iIteration; i++)
+                        {
+                            float sumweight = 0;
+                            for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
+                            {
+                                weight[j] = float(rand() % 10000) / 5000.0f - 1.0f;
+                                sumweight += weight[j] * weight[j];
+                            }
+                            sumweight = sqrt(sumweight);
+                            for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
+                            {
+                                weight[j] /= sumweight;
+                            }
+                            float mean = 0;
+                            for (SizeType j = 0; j < count; j++)
+                            {
+                                Val[j] = 0;
+                                R* v = (quantizer_exists) ? (R*)indices_vectors->GetVector(j) : (R*)index->GetSample(indices[first + j]);
+                                for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
+                                {
+                                    Val[j] += weight[k] * v[indexs[k]];
+                                }
+                                mean += Val[j];
+                            }
+                            mean /= count;
+                            float var = 0;
+                            for (SizeType j = 0; j < count; j++)
+                            {
+                                float dist = Val[j] - mean;
+                                var += dist * dist;
+                            }
+                            if (var > bestvariance)
+                            {
+                                bestvariance = var;
+                                bestmean = mean;
+                                for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
+                                {
+                                    bestweight[j] = weight[j];
+                                }
+                            }
+                        }
+                        SizeType i = first;
+                        SizeType j = last;
+                        // decide which child one point belongs
+                        while (i <= j)
+                        {
+                            float val = 0;
+                            R* v = (quantizer_exists) ? (R*)indices_vectors->GetVector(i - first) : (R*)index->GetSample(indices[i]);
+                            for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
+                            {
+                                val += bestweight[k] * v[indexs[k]];
+                            }
+                            if (val < bestmean)
+                            {
+                                i++;
                             }
                             else
                             {
-                                v = (R*)index->GetSample(indices[first + j]);
-                            }
-                            for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
-                            {
-                                Val[j] += weight[k] * v[indexs[k]];
-                            }
-                            mean += Val[j];
-                        }
-                        mean /= count;
-                        float var = 0;
-                        for (SizeType j = 0; j < count; j++)
-                        {
-                            float dist = Val[j] - mean;
-                            var += dist * dist;
-                        }
-                        if (var > bestvariance)
-                        {
-                            bestvariance = var;
-                            bestmean = mean;
-                            for (int j = 0; j < m_numTopDimensionTPTSplit; j++)
-                            {
-                                bestweight[j] = weight[j];
+                                std::swap(indices[i], indices[j]);
+                                j--;
                             }
                         }
-                    }
-                    SizeType i = first;
-                    SizeType j = last;
-                    // decide which child one point belongs
-                    while (i <= j)
-                    {
-                        float val = 0;
-                        R* v;
-                        if (quantizer_exists)
+                        // if all the points in the node are equal,equally split the node into 2
+                        if ((i == first) || (i == last + 1))
                         {
-                            index->m_pQuantizer->ReconstructVector((uint8_t*)index->GetSample(indices[i]), v_holder);
-                            v = v_holder;
+                            i = (first + last + 1) / 2;
                         }
-                        else
-                        {
-                            v = (R*)index->GetSample(indices[i]);
-                        }
+                        splitidx = i;
 
-                        for (int k = 0; k < m_numTopDimensionTPTSplit; k++)
-                        {
-                            val += bestweight[k] * v[indexs[k]];
-                        }
-                        if (val < bestmean)
-                        {
-                            i++;
-                        }
-                        else
-                        {
-                            std::swap(indices[i], indices[j]);
-                            j--;
-                        }
-                    }
-                    // if all the points in the node are equal,equally split the node into 2
-                    if ((i == first) || (i == last + 1))
-                    {
-                        i = (first + last + 1) / 2;
+                        Mean.clear();
+                        Variance.clear();
+                        Val.clear();
+                        indexs.clear();
+                        weight.clear();
+                        bestweight.clear();
                     }
 
-                    Mean.clear();
-                    Variance.clear();
-                    Val.clear();
-                    indexs.clear();
-                    weight.clear();
-                    bestweight.clear();
-                    if (v_holder) ALIGN_FREE(v_holder);
-
-                    PartitionByTptreeCore<T, R>(index, indices, first, i - 1, leaves);
-                    PartitionByTptreeCore<T, R>(index, indices, i, last, leaves);
+                    PartitionByTptreeCore<T, R>(index, indices, first, splitidx - 1, leaves);
+                    PartitionByTptreeCore<T, R>(index, indices, splitidx, last, leaves);
                 }
             }
 
