@@ -681,8 +681,8 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                         for (int j = 0; j < curPostingListSizes.size(); j++) 
                         {
-                            // do not compress if no data
                             int postingListId = j + curPostingListOffSet;
+                            // do not compress if no data
                             if (postingListSize[postingListId] == 0) {
                                 curPostingListBytes[j] = 0;
                                 continue;
