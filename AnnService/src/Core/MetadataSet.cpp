@@ -108,19 +108,19 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     auto fpidx = f_createIO();
     if (m_fp == nullptr || fpidx == nullptr || !m_fp->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !fpidx->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(), p_metaindexfile.c_str());
-        exit(1);
+        throw std::runtime_error("Cannot open meta files");
     }
 
     if (fpidx->ReadBinary(sizeof(m_count), (char*)&m_count) != sizeof(m_count)) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
-        exit(1);
+        throw std::runtime_error("Cannot read meta files");
     }
 
     m_offsets.reserve(p_blockSize);
     m_offsets.resize(m_count + 1);
     if (fpidx->ReadBinary(sizeof(std::uint64_t) * (m_count + 1), (char*)m_offsets.data()) != sizeof(std::uint64_t) * (m_count + 1)) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
-        exit(1);
+        throw std::runtime_error("Cannot read meta files");
     }
     m_newdata.reserve(p_blockSize * p_metaSize);
     m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
@@ -293,7 +293,7 @@ MemMetadataSet::MemMetadataSet(std::shared_ptr<Helper::DiskIO> p_metain, std::sh
 {
     if (Init(p_metain, p_metaindexin, p_blockSize, p_capacity, p_metaSize) != ErrorCode::Success) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
-        exit(1);
+        throw std::runtime_error("Cannot read MemMetadataSet");
     }
 }
 
@@ -303,11 +303,11 @@ MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string&
     std::shared_ptr<Helper::DiskIO> ptrMeta = f_createIO(), ptrMetaIndex = f_createIO();
     if (ptrMeta == nullptr || ptrMetaIndex == nullptr || !ptrMeta->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !ptrMetaIndex->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(),  p_metaindexfile.c_str());
-        exit(1);
+        throw std::runtime_error("Cannot open MemMetadataSet files");
     }
     if (Init(ptrMeta, ptrMetaIndex, p_blockSize, p_capacity, p_metaSize) != ErrorCode::Success) {
         LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
-        exit(1);
+        throw std::runtime_error("Cannot read MemMetadataSet");
     }
 }
 

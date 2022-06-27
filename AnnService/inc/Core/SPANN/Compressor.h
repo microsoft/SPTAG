@@ -22,7 +22,7 @@ namespace SPTAG
                 if (cdict == NULL)
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD_createCDict() failed! \n");
-                    exit(1);
+                    throw std::runtime_error("ZSTD_createCDict() failed!");
                 }
             }
 
@@ -46,13 +46,13 @@ namespace SPTAG
                 if (cctx == NULL)
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD_createCCtx() failed! \n");
-                    exit(1);
+                    throw std::runtime_error("ZSTD_createCCtx() failed!");
                 }
                 size_t compressed_size = ZSTD_compress_usingCDict(cctx, (void *)comp_buffer.data(), est_compress_size, src.data(), src.size(), cdict);
                 if (ZSTD_isError(compressed_size))
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD compress error %s, \n", ZSTD_getErrorName(compressed_size));
-                    exit(1);
+                    throw std::runtime_error("ZSTD compress error");
                 }
                 ZSTD_freeCCtx(cctx);
                 comp_buffer.resize(compressed_size);
@@ -90,7 +90,7 @@ namespace SPTAG
                 if (ZSTD_isError(compressed_size))
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZSTD compress error %s, \n", ZSTD_getErrorName(compressed_size));
-                    exit(1);
+                    throw std::runtime_error("ZSTD compress error");
                 }
                 buffer.resize(compressed_size);
                 buffer.shrink_to_fit();
@@ -129,7 +129,7 @@ namespace SPTAG
                 if (ZDICT_isError(dictSize))
                 {
                     LOG(Helper::LogLevel::LL_Error, "ZDICT_trainFromBuffer() failed: %s \n", ZDICT_getErrorName(dictSize));
-                    exit(1);
+                    throw std::runtime_error("ZDICT_trainFromBuffer() failed");
                 }
                 dictBuffer.resize(dictSize);
                 dictBuffer.shrink_to_fit();

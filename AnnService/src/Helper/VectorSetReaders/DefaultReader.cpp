@@ -40,18 +40,18 @@ DefaultVectorReader::GetVectorSet(SizeType start, SizeType end) const
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
-        exit(1);
+        throw std::runtime_error("Failed read file");
     }
 
     SizeType row;
     DimensionType col;
     if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
-        exit(1);
+        throw std::runtime_error("Failed read file");
     }
     if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
         LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
-        exit(1);
+        throw std::runtime_error("Failed read file");
     }
     
     if (start > row) start = row;
@@ -64,7 +64,7 @@ DefaultVectorReader::GetVectorSet(SizeType start, SizeType end) const
         std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * start * col + sizeof(SizeType) + sizeof(DimensionType);
         if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf, offset) != totalRecordVectorBytes) {
             LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
-            exit(1);
+            throw std::runtime_error("Failed read file");
         }
     }
 
