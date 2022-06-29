@@ -365,7 +365,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
     auto mp = std::shared_ptr<Helper::DiskIO>(new Helper::SimpleBufferIO());
-    if (mp == nullptr || !mp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+    if (mp == nullptr || !mp->Initialize(nullptr, std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
     ErrorCode ret = ErrorCode::Success;
     if ((ret = SaveIndexConfig(mp)) != ErrorCode::Success) return ret;
 
