@@ -130,7 +130,7 @@ namespace SPTAG
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
-            IOBINARY(p_indexStreams.back(), ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
+            IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
@@ -184,7 +184,7 @@ namespace SPTAG
             ErrorCode ret;
             if ((ret = m_index->SaveIndexData(p_indexStreams)) != ErrorCode::Success) return ret;
 
-            IOBINARY(p_indexStreams.back(), WriteBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+            IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], WriteBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
             return ErrorCode::Success;
         }
 
@@ -742,19 +742,31 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
-            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
-                COMMON::Utils::BatchNormalize((T*)p_data, p_vectorNum, p_dimension, COMMON::Utils::GetBase<T>(), m_options.m_iSSDNumberOfThreads);
+            std::shared_ptr<VectorSet> vectorSet;
+            if (p_shareOwnership) {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
             }
-            std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
-                GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            else {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            }
+
+
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
+                vectorSet->Normalize(m_options.m_iSSDNumberOfThreads);
+            }
             SPTAG::VectorValueType valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             std::shared_ptr<Helper::VectorSetReader> vectorReader(new Helper::MemoryVectorReader(std::make_shared<Helper::ReaderOptions>(valueType, p_dimension, VectorFileType::DEFAULT, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads, true),
                 vectorSet));
             
+            m_options.m_valueType = GetEnumValueType<T>();
+            m_options.m_dim = p_dimension;
             m_options.m_vectorSize = p_vectorNum;
             return BuildIndexInternal(vectorReader);
         }

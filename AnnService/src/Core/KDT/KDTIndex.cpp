@@ -242,13 +242,13 @@ namespace SPTAG
 #pragma endregion
 
         template <typename T>
-        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized)
+        ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
             omp_set_num_threads(m_iNumberOfThreads);
 
-            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, false);
+            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, p_shareOwnership);
             m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)

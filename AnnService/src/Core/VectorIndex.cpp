@@ -403,7 +403,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
-    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
+    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, bool p_shareOwnership)
 {
     LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
 
@@ -419,7 +419,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
         LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
         BuildMetaMapping(false);
     }
-    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized);
+    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized, p_shareOwnership);
     return ErrorCode::Success;
 }
 
