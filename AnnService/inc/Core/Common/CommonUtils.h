@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_COMMONUTILS_H_
 #define _SPTAG_COMMON_COMMONUTILS_H_
 
-#include "../Common.h"
+#include "inc/Core/Common.h"
 
 #include <unordered_map>
 

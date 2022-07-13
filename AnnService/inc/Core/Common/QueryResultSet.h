@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_QUERYRESULTSET_H_
 #define _SPTAG_COMMON_QUERYRESULTSET_H_
 
-#include "../SearchQuery.h"
+#include "inc/Core/SearchQuery.h"
 #include "DistanceUtils.h"
 #include <algorithm>
 #include "IQuantizer.h"

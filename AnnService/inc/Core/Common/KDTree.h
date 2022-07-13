@@ -8,7 +8,7 @@
 #include <string>
 #include <shared_mutex>
 
-#include "../VectorIndex.h"
+#include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "QueryResultSet.h"

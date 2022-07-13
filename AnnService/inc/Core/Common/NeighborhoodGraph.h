@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_NG_H_
 #define _SPTAG_COMMON_NG_H_
 
-#include "../VectorIndex.h"
+#include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "Dataset.h"

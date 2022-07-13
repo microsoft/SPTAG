@@ -7,7 +7,7 @@
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "IExtraSearcher.h"
-#include "../Common/TruthSet.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "Compressor.h"
 
 #include <map>

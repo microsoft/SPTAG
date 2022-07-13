@@ -4,22 +4,22 @@
 #ifndef _SPTAG_KDT_INDEX_H_
 #define _SPTAG_KDT_INDEX_H_
 
-#include "../Common.h"
-#include "../VectorIndex.h"
+#include "inc/Core/Common.h"
+#include "inc/Core/VectorIndex.h"
 
-#include "../Common/CommonUtils.h"
-#include "../Common/DistanceUtils.h"
-#include "../Common/QueryResultSet.h"
-#include "../Common/Dataset.h"
-#include "../Common/WorkSpace.h"
-#include "../Common/WorkSpacePool.h"
-#include "../Common/RelativeNeighborhoodGraph.h"
-#include "../Common/KDTree.h"
-#include "../Common/Labelset.h"
+#include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/Dataset.h"
+#include "inc/Core/Common/WorkSpace.h"
+#include "inc/Core/Common/WorkSpacePool.h"
+#include "inc/Core/Common/RelativeNeighborhoodGraph.h"
+#include "inc/Core/Common/KDTree.h"
+#include "inc/Core/Common/Labelset.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
-#include "../Common/IQuantizer.h"
+#include "inc/Core/Common/IQuantizer.h"
 
 #include <functional>
 #include <shared_mutex>

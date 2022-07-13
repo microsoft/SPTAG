@@ -7,7 +7,7 @@
 #include <string>
 #include "zstd.h"
 #include "zdict.h"
-#include "../Common.h"
+#include "inc/Core/Common.h"
 
 namespace SPTAG
 {

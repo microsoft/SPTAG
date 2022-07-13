@@ -4,7 +4,7 @@
 #ifndef _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
 #define _SPTAG_HELPER_VECTORSETREADERS_DEFAULTREADER_H_
 
-#include "../VectorSetReader.h"
+#include "inc/Helper/VectorSetReader.h"
 
 namespace SPTAG
 {

@@ -4,23 +4,23 @@
 #ifndef _SPTAG_SPANN_INDEX_H_
 #define _SPTAG_SPANN_INDEX_H_
 
-#include "../Common.h"
-#include "../VectorIndex.h"
+#include "inc/Core/Common.h"
+#include "inc/Core/VectorIndex.h"
 
-#include "../Common/CommonUtils.h"
-#include "../Common/DistanceUtils.h"
-#include "../Common/SIMDUtils.h"
-#include "../Common/QueryResultSet.h"
-#include "../Common/BKTree.h"
-#include "../Common/WorkSpacePool.h"
+#include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/SIMDUtils.h"
+#include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/BKTree.h"
+#include "inc/Core/Common/WorkSpacePool.h"
 
-#include "../Common/Labelset.h"
+#include "inc/Core/Common/Labelset.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
 #include "inc/Helper/ConcurrentSet.h"
 #include "inc/Helper/VectorSetReader.h"
-#include "../Common/IQuantizer.h"
+#include "inc/Core/Common/IQuantizer.h"
 
 #include "IExtraSearcher.h"
 #include "Options.h"
