@@ -1,6 +1,6 @@
 ﻿<ProjectSettingsModel DefinitionId="a218e900-1199-4ab1-a767-7976786f04d4" DisplayName="Nexus Project User Settings" xmlns="clr-namespace:Ark.PropertyModel;assembly=Ark">
     <SettingsPointModel DefinitionId="3eb7ba04-016d-475e-b0ff-daa5f0e59a08" DisplayName="Launch">
-        <Property Name="Arguments" Value="C:\Users\diegotest\SPTAG\x64\Debug\glove_gpu_configure_truth.ini" />
+        <Property Name="Arguments" Value="C:\Users\diegotest\SPTAG\x64\Debug\t30M_gpu_configure_truth.ini" />
         <Property Name="ExternalStartProgram" Value="C:\Users\diegotest\SPTAG\x64\Debug\GPUSSDServing.exe" />
     </SettingsPointModel>
 </ProjectSettingsModel>

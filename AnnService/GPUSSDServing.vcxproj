@@ -67,13 +67,14 @@
       <AdditionalDependencies>GPUCoreLibrary.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CudaCompile>
-      <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_70,sm_70;compute_75,sm_75;compute_80,sm_80</CodeGeneration>
       <Defines>WIN32;%(Defines)</Defines>
       <Runtime>MTd</Runtime>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS /D "_exe"</AdditionalCompilerOptions>
       <FastMath>true</FastMath>
       <Optimization>InheritFromHost</Optimization>
+      <CudaRuntime>Static</CudaRuntime>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">

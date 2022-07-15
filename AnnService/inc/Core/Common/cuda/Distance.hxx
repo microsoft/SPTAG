@@ -377,9 +377,9 @@ class Point<int8_t, SUMTYPE, Dim> {
  * Create an array of Point structures out of an input array
  ********************************************************************/
 template<typename T, typename SUMTYPE, int Dim>
-__host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim) {
+__host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, size_t rows, int exact_dim) {
   Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
-  for(int i=0; i<rows; i++) {
+  for(size_t i=0; i<rows; i++) {
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
   }
   return pointArray;
@@ -498,4 +498,133 @@ public:
     }
 };
 
+template<int Dim, int Stride, typename SUMTYPE>
+class TransposePoint<int8_t, Dim, Stride, SUMTYPE> {
+public:
+    uint32_t* dataPtr;
+
+    __device__ void setMem(void* ptr) {
+        dataPtr = reinterpret_cast <uint32_t*>(ptr);
+    }
+
+    // Load regular point into memory transposed
+    __device__ void loadPoint(Point<int8_t, SUMTYPE, Dim> p) {
+        for (int i = 0; i < Dim/4; i++) {
+            dataPtr[i * Stride] = p.coords[i];
+        }
+    }
+
+    // Return the idx-th coordinate of the transposed vector
+    __forceinline__ __device__ uint32_t getCoord(int idx) {
+        return dataPtr[idx * Stride];
+    }
+
+    __forceinline__ __device__ __host__ SUMTYPE l2(Point<int8_t, SUMTYPE, Dim>* other) {
+
+        SUMTYPE totals[4] = { 0,0,0,0 };
+        int32_t temp[4];
+        int32_t temp_other[4];
+
+        for (int i = 0; i < Dim / 4; ++i) {
+            temp[0] = (int8_t)(getCoord(i) & 0x000000FF);
+            temp_other[0] = (int8_t)(other->coords[i] & 0x000000FF);
+
+            temp[1] = (int8_t)((getCoord(i) & 0x0000FF00) >> 8);
+            temp_other[1] = (int8_t)((other->coords[i] & 0x0000FF00) >> 8);
+
+            temp[2] = (int8_t)((getCoord(i) & 0x00FF0000) >> 16);
+            temp_other[2] = (int8_t)((other->coords[i] & 0x00FF0000) >> 16);
+
+            temp[3] = (int8_t)((getCoord(i)) >> 24);
+            temp_other[3] = (int8_t)((other->coords[i]) >> 24);
+
+            totals[0] += (temp[0] - temp_other[0]) * (temp[0] - temp_other[0]);
+            totals[1] += (temp[1] - temp_other[1]) * (temp[1] - temp_other[1]);
+            totals[2] += (temp[2] - temp_other[2]) * (temp[2] - temp_other[2]);
+            totals[3] += (temp[3] - temp_other[3]) * (temp[3] - temp_other[3]);
+        }
+        return totals[0] + totals[1] + totals[2] + totals[3];
+    }
+
+    __forceinline__ __device__ SUMTYPE cosine(Point<int8_t, SUMTYPE, Dim>* other) {
+        SUMTYPE prod[4];
+        prod[0] = 0;
+
+        for (int i = 0; i < Dim / 4; ++i) {
+            prod[0] += (getCoord(i) & 0x000000FF) * (other->coords[i] & 0x000000FF);
+            prod[1] = ((getCoord(i) & 0x0000FF00) >> 8) * ((other->coords[i] & 0x0000FF00) >> 8);
+            prod[2] = ((getCoord(i) & 0x00FF0000) >> 16) * ((other->coords[i] & 0x00FF0000) >> 16);
+            prod[3] = ((getCoord(i)) >> 24) * ((other->coords[i]) >> 24);
+
+            prod[0] += prod[1] + prod[2] + prod[3];
+        }
+
+        return ((SUMTYPE)65536) - prod[0];
+    }
+};
+
+template<int Dim, int Stride, typename SUMTYPE>
+class TransposePoint<uint8_t, Dim, Stride, SUMTYPE> {
+public:
+    uint32_t* dataPtr;
+
+    __device__ void setMem(void* ptr) {
+        dataPtr = reinterpret_cast <uint32_t*>(ptr);
+    }
+
+    // Load regular point into memory transposed
+    __device__ void loadPoint(Point<uint8_t, SUMTYPE, Dim> p) {
+        for (int i = 0; i < Dim / 4; i++) {
+            dataPtr[i * Stride] = p.coords[i];
+        }
+    }
+
+    // Return the idx-th coordinate of the transposed vector
+    __forceinline__ __device__ uint32_t getCoord(int idx) {
+        return dataPtr[idx * Stride];
+    }
+
+    __forceinline__ __device__ __host__ SUMTYPE l2(Point<uint8_t, SUMTYPE, Dim>* other) {
+
+        SUMTYPE totals[4] = { 0,0,0,0 };
+        int32_t temp[4];
+        int32_t temp_other[4];
+
+        for (int i = 0; i < Dim / 4; ++i) {
+            temp[0] = (uint8_t)(getCoord(i) & 0x000000FF);
+            temp_other[0] = (uint8_t)(other->coords[i] & 0x000000FF);
+
+            temp[1] = (uint8_t)((getCoord(i) & 0x0000FF00) >> 8);
+            temp_other[1] = (uint8_t)((other->coords[i] & 0x0000FF00) >> 8);
+
+            temp[2] = (uint8_t)((getCoord(i) & 0x00FF0000) >> 16);
+            temp_other[2] = (uint8_t)((other->coords[i] & 0x00FF0000) >> 16);
+
+            temp[3] = (uint8_t)((getCoord(i)) >> 24);
+            temp_other[3] = (uint8_t)((other->coords[i]) >> 24);
+
+            totals[0] += (temp[0] - temp_other[0]) * (temp[0] - temp_other[0]);
+            totals[1] += (temp[1] - temp_other[1]) * (temp[1] - temp_other[1]);
+            totals[2] += (temp[2] - temp_other[2]) * (temp[2] - temp_other[2]);
+            totals[3] += (temp[3] - temp_other[3]) * (temp[3] - temp_other[3]);
+        }
+        return totals[0] + totals[1] + totals[2] + totals[3];
+    }
+
+    __forceinline__ __device__ SUMTYPE cosine(Point<uint8_t, SUMTYPE, Dim>* other) {
+        SUMTYPE prod[4];
+        prod[0] = 0;
+
+        for (int i = 0; i < Dim / 4; ++i) {
+            prod[0] += (getCoord(i) & 0x000000FF) * (other->coords[i] & 0x000000FF);
+            prod[1] = ((getCoord(i) & 0x0000FF00) >> 8) * ((other->coords[i] & 0x0000FF00) >> 8);
+            prod[2] = ((getCoord(i) & 0x00FF0000) >> 16) * ((other->coords[i] & 0x00FF0000) >> 16);
+            prod[3] = ((getCoord(i)) >> 24) * ((other->coords[i]) >> 24);
+
+            prod[0] += prod[1] + prod[2] + prod[3];
+        }
+
+        return ((SUMTYPE)65536) - prod[0];
+    }
+};
 #endif
