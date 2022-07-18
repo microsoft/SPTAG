@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_WORKSPACE_H_
 #define _SPTAG_COMMON_WORKSPACE_H_
 
-#include "../SearchResult.h"
+#include "inc/Core/SearchResult.h"
 #include "CommonUtils.h"
 #include "Heap.h"
 

@@ -4,9 +4,9 @@
 #ifndef _SPTAG_COMMON_QUANTIZER_H_
 #define _SPTAG_COMMON_QUANTIZER_H_
 
-#include "../Common.h"
+#include "inc/Core/Common.h"
 #include <cstdint>
-#include "../CommonDataStructure.h"
+#include "inc/Core/CommonDataStructure.h"
 #include "DistanceUtils.h"
 
 namespace SPTAG

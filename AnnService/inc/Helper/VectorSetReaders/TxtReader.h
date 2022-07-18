@@ -4,7 +4,7 @@
 #ifndef _SPTAG_HELPER_VECTORSETREADERS_TXTREADER_H_
 #define _SPTAG_HELPER_VECTORSETREADERS_TXTREADER_H_
 
-#include "../VectorSetReader.h"
+#include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/Concurrent.h"
 
 #include <atomic>

@@ -4,7 +4,7 @@
 #ifndef _SPTAG_COMMON_TRUTHSET_H_
 #define _SPTAG_COMMON_TRUTHSET_H_
 
-#include "../VectorIndex.h"
+#include "inc/Core/VectorIndex.h"
 #include "QueryResultSet.h"
 
 namespace SPTAG
