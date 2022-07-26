@@ -175,6 +175,7 @@ namespace SPTAG
                     } 
                     catch (std::exception& e)
                     {
+                        LOG(Helper::LogLevel::LL_Error, "Error occurs when loading HeadInfo:%s\n", e.what());
                         return false;
                     }
 
@@ -678,7 +679,7 @@ namespace SPTAG
                                 if (samplesBuffer.size() > p_opt.m_minDictTraingBufferSize) break;
                             }
                             LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
-                            std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], samplesSizes.size());
+                            std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], (unsigned int)samplesSizes.size());
                             LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
                         }
                     }
@@ -688,7 +689,7 @@ namespace SPTAG
 #pragma omp parallel for schedule(dynamic)
                         for (int j = 0; j < curPostingListSizes.size(); j++) 
                         {
-                            int postingListId = j + curPostingListOffSet;
+                            SizeType postingListId = j + (SizeType)curPostingListOffSet;
                             // do not compress if no data
                             if (postingListSize[postingListId] == 0) {
                                 curPostingListBytes[j] = 0;

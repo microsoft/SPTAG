@@ -149,7 +149,6 @@ break;
                 }
                 else
                 {
-			printf("No quantizer!\n");
                     PartitionByTptreeCore<T, T>(index, indices, first, last, leaves);
                 }
             }
@@ -330,13 +329,6 @@ break;
                 LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
-
-		for(int i=0; i<10; i++) {
-                  for(int j=0; j<20; j++) {
-                    std::cout << static_cast<int16_t>(((uint8_t*)index->GetSample(i))[j]) << ", ";
-		  }
-		  std::cout << std::endl;
-		}
 
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
