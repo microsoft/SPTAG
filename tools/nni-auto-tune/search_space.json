@@ -1,0 +1,12 @@
+{
+    "BKTKmeansK": {"_type": "choice", "_value": [4,8,16,32]},
+    "Samples": {"_type": "choice", "_value": [1000, 2000, 4000, 8000, 10000]},
+    "TPTNumber": {"_type": "choice", "_value": [32, 34, 38, 46, 62, 94, 128]},
+    "RefineIterations": {"_type": "choice", "_value": [2, 3]},
+    "NeighborhoodSize": {"_type": "choice", "_value": [16, 18, 22, 30, 46, 64]},
+    "CEF": {"_type": "choice", "_value": [1000, 1100, 1200, 1400, 1800,2000]},
+    "MaxCheckForRefineGraph": {"_type": "choice", "_value": [4096, 5120, 7168, 11264,16324]},
+    "NumberOfInitialDynamicPivots": {"_type": "choice", "_value": [1, 2, 4, 8, 16,32,50]},
+    "NumberOfOtherDynamicPivots": {"_type": "choice", "_value": [1, 2, 4, 8, 10]}
+}
+

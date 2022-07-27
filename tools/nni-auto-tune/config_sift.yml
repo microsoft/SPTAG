@@ -1,0 +1,14 @@
+experimentName: sift
+trialConcurrency: 4
+maxExperimentDuration: 168h
+searchSpaceFile: search_space.json
+trialCommand: python main.py --dataset sift-128-euclidean
+
+tuner:
+  name: GridSearch
+  classArgs:
+    optimize_mode: maximize
+    
+trainingService:  # For other platforms, check mnist-pytorch example
+  platform: local
+
