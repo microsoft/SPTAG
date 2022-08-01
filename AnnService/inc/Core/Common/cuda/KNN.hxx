@@ -1064,17 +1064,25 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 
 inline void updateKNNResults(std::vector< std::vector<SPTAG::SizeType> >& batch_truth, std::vector< std::vector<float> >& batch_dist, std::vector< std::vector<SPTAG::SizeType> >temp_truth, std::vector< std::vector<float> >temp_dist,
     int result_size, int K) {
+    //LOG(SPTAG::Helper::LogLevel::LL_Info, "Entered updateFile.\n");
     std::vector< std::vector<SPTAG::SizeType> > result_truth = batch_truth;
     std::vector< std::vector<float> > result_dist = batch_dist;
     for (int i = 0; i < result_size; i++) {
         //For each result, we need to compare the 2K DistPairs and take top K. 
-        int reader1, reader2 = 0;
+        int reader1 = 0;
+        int reader2 = 0;
         for (int writer_ptr = 0; writer_ptr < K; writer_ptr++) {
             if (batch_dist[i][reader1] < temp_dist[i][reader2]) {
+                //if (i == 0) {
+                //    LOG(SPTAG::Helper::LogLevel::LL_Info, "Selected original %d for %d.\n", reader1, writer_ptr);
+                //}
                 result_truth[i][writer_ptr] = batch_truth[i][reader1];
                 result_dist[i][writer_ptr] = batch_dist[i][reader1++];
             }
             else {
+                //if (i == 0) {
+                //    LOG(SPTAG::Helper::LogLevel::LL_Info, "Selected current %d for %d.\n", reader2, writer_ptr);
+                //}
                 result_truth[i][writer_ptr] = temp_truth[i][reader2];
                 result_dist[i][writer_ptr] = temp_dist[i][reader2++];
             }
@@ -1171,18 +1179,18 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
 
     DLOG_DEBUG("Running on shared Thread Heap\n");
     //add Log to test if it's the debugger's problem, if(block ==0, thread ==0)
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        DLOG_DEBUG("VectorSet [0] id is: %ld", data[0].id);
-        for (int coo = 0; coo < 25; coo++) {
-            DLOG_DEBUG("VectorSet[0] Coord %d is : %lu\n", coo, (unsigned long)data[0].coords[coo]);
-        }
-    }
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        DLOG_DEBUG("QuerySet[0] id is: %ld\n", querySet[0].id);
-        for (int coo = 0; coo < 25; coo++) {
-            DLOG_DEBUG("QuerySet[0] Coord %d is : %lu\n", coo, (unsigned long)querySet[0].coords[coo]);
-        }
-    }
+    //if (threadIdx.x == 0 && blockIdx.x == 0) {
+    //    DLOG_DEBUG("VectorSet [0] id is: %ld", data[0].id);
+    //    for (int coo = 0; coo < 25; coo++) {
+    //        DLOG_DEBUG("VectorSet[0] Coord %d is : %lu\n", coo, (unsigned long)data[0].coords[coo]);
+    //    }
+    //}
+    //if (threadIdx.x == 0 && blockIdx.x == 0) {
+    //    DLOG_DEBUG("QuerySet[0] id is: %ld\n", querySet[0].id);
+    //    for (int coo = 0; coo < 25; coo++) {
+    //        DLOG_DEBUG("QuerySet[0] Coord %d is : %lu\n", coo, (unsigned long)querySet[0].coords[coo]);
+    //    }
+    //}
     extern __shared__ char sharememory[];
     //DistPair<SUMTYPE> vals[9];
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
@@ -1215,19 +1223,39 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     // Loop through all query points
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
         heapMem[threadIdx.x].reset();
-        extra.dist = INFTY<DTYPE>();
+        extra.dist = INFTY<SUMTYPE>();
         //query = querySet[i]; // Load into shared memory
         query.loadPoint(querySet[i]); // Load into shared memory
         DLOG_DEBUG("Query Point id is : %d \n", i);
-        for (int coo = 0; coo < 25; coo++) {
-            DLOG_DEBUG("Query Point Coord %d is : %lu\n" , coo, (unsigned long)query.getCoord(coo));
-        }
+        //for (int coo = 0; coo < 25; coo++) {
+        //    DLOG_DEBUG("Query Point Coord %d is : %lu\n" , coo, (unsigned long)query.getCoord(coo));
+        //}
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
             //#if METRIC == 1 
             dist = query.cosine(&data[j]);
+            //if (threadIdx.x == 0 && blockIdx.x == 0) {
+            //    if (j == 0 || j == 645359 || j == 2384291 || j == 3404562 || j == 29917730) {
+            //        dist = query.cosine_debug(&data[j], true);
+            //    }
+            //}
+            //else {
+                //dist = query.cosine(&data[j]);
+            //}
             if (j == 0) {
-                DLOG_DEBUG("Dist for data[%d] is : %d\n", i, dist);
+                DLOG_DEBUG("Dist for data[%d] is : %d\n", j, dist);
+            }
+            if (j == 645359) {
+                DLOG_DEBUG("KL, Dist for data[%d] is : %d\n", j, dist);
+            }
+            if (j == 2384291) {
+                DLOG_DEBUG("XL, Dist for data[%d] is : %d\n", j, dist);
+            }
+            if (j == 3404562) {
+                DLOG_DEBUG("XF, Dist for data[%d] is : %d\n", j, dist);
+            }
+            if (j == 29917730) {
+                DLOG_DEBUG("KF, Dist for data[%d] is : %d\n", j, dist);
             }
             //#else
             //dist = query.l2(&data[j]);
@@ -1248,7 +1276,11 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
         // Write KNN to result list in sorted order
         results[(i + 1) * KVAL - 1].idx = extra.idx;
         results[(i + 1) * KVAL - 1].dist = extra.dist;
+        DLOG_DEBUG("%d farest Dist for query[0] is : %d\n", KVAL - 1, extra.dist);
+        DLOG_DEBUG("%d farest Point Id for query[0] is : %d\n", KVAL - 1, extra.idx);
         for (int j = KVAL - 2; j >= 0; j--) {
+            DLOG_DEBUG("%d farest Dist for query[0] is : %d\n", j, heapMem[threadIdx.x].vals[0].dist);
+            DLOG_DEBUG("%d farest Point Id for query[0] is : %d\n", j, heapMem[threadIdx.x].vals[0].idx);
             results[i * KVAL + j].idx = heapMem[threadIdx.x].vals[0].idx;
             results[i * KVAL + j].dist = heapMem[threadIdx.x].vals[0].dist;
             heapMem[threadIdx.x].vals[0].dist = -1;
@@ -1373,11 +1405,17 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     //    cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)); // Device memory on each GPU
     //}
     cudaError_t resultErr;
+    
+    //KNN 
 
     LOG_INFO("Copying to Point array\n");
     Point<DTYPE, SUMTYPE, MAX_DIM>* points = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >((DTYPE*)querySet->GetData(), result_size, dim);
+    Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
+    Point<DTYPE, SUMTYPE, MAX_DIM>* d_check_points;
+    Point<DTYPE, SUMTYPE, MAX_DIM>* sub_vectors_points[NUM_GPUS];
+    Point<DTYPE, SUMTYPE, MAX_DIM>* back_sub_vectors_points[NUM_GPUS];
 
-    // Allocate and initialize GPU data on each device
+    // Calculate GPU memory usage on each device
     for (int gpuNum = 0; gpuNum < NUM_GPUS; gpuNum++) {
         CUDA_CHECK(cudaSetDevice(gpuNum));
         CUDA_CHECK(cudaStreamCreate(&streams[gpuNum]));
@@ -1402,7 +1440,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         }
 
         size_t total_batches = ((batchSize[gpuNum] - 1) + vectorsPerGPU[gpuNum]) / batchSize[gpuNum];
-        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory for  query Points vectors:%lu MiB, Memory for resultSet:%lu MiB, Memory left for vectors:%lu MiB, total vectors:%lu, batch size:%d, total batches:%lu\n", queryPointSize / 1000000, resultSetSize / 1000000, resMemAvail / 1000000, vectorsPerGPU[gpuNum], batchSize[gpuNum], total_batches);
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Memory for  query Points vectors:%lu MiB, Memory for resultSet:%lu MiB, Memory left for vectors:%lu MiB, total vectors:%lu, batch size:%d, total batches:%lu\n", queryPointSize / 1000000, resultSetSize / 1000000, resMemAvail / 1000000, vectorsPerGPU[gpuNum], batchSize[gpuNum], total_batches);
 
     }
 
@@ -1413,6 +1451,24 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         batchOffset[gpuNum] = 0;
     }
 
+    // Allocate space on gpu
+    DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
+    for (int i = 0; i < NUM_GPUS; i++) {
+        cudaSetDevice(i);
+        cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
+
+        cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)); // Device result memory on each GPU
+
+        //Copy Queryvectors
+        LOG_INFO("Alloc'ing Query Points on device: %ld bytes.\n", querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+        cudaMalloc(&d_points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+        LOG_INFO("Copying to device.\n");
+        cudaMemcpyAsync(d_points, points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
+
+        LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+        cudaMalloc(&d_check_points, batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+    }
+    //batchSize[0] = 16000000;// Force the 30M data to be split
     //auto batch_start_t = std::chrono::high_resolution_clock::now();
     LOG_INFO("Starting KNN Kernel timer\n");
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -1430,47 +1486,45 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             if (batchOffset[gpuNum] + batchSize[gpuNum] > vectorsPerGPU[gpuNum]) {
                 curr_batch_size[gpuNum] = vectorsPerGPU[gpuNum] - batchOffset[gpuNum];
             }
-            LOG(SPTAG::Helper::LogLevel::LL_Debug, "GPU %d - starting batch with offset:%lu, with GPU offset:%lu, size:%lu, TailRows:%lld\n", gpuNum, batchOffset[gpuNum], GPUOffset[gpuNum], curr_batch_size[gpuNum], vectorsPerGPU[gpuNum]);
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - starting batch with offset:%lu, with GPU offset:%lu, size:%lu, TailRows:%lld\n", gpuNum, batchOffset[gpuNum], GPUOffset[gpuNum], curr_batch_size[gpuNum], vectorsPerGPU[gpuNum] -batchOffset[gpuNum]);
         }
 
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        //KNN 
-        LOG_INFO("Copying to Sub Point Array\n");
-        Point<DTYPE, SUMTYPE, MAX_DIM>* sub_vectors_points[NUM_GPUS];
-        Point<DTYPE, SUMTYPE, MAX_DIM>* back_sub_vectors_points[NUM_GPUS];
+        
 
-        DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
-        for (int i = 0; i < NUM_GPUS; i++) {
-            cudaSetDevice(i);
-            cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)); // Device memory on each GPU
-        }
+        //DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
+        //for (int i = 0; i < NUM_GPUS; i++) {
+        //    cudaSetDevice(i);
+        //    cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)); // Device memory on each GPU
+        //}
 
         for (int i = 0; i < NUM_GPUS; i++) {
             cudaSetDevice(i);
 
-            cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
-            //Copy Queryvectors
-            LOG_INFO("Alloc'ing Query Points on device: %ld bytes.\n", querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-            Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
-            cudaMalloc(&d_points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-            LOG_INFO("Copying to device.\n");
-            cudaMemcpyAsync(d_points, points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
+            //cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
+            ////Copy Queryvectors
+            //LOG_INFO("Alloc'ing Query Points on device: %ld bytes.\n", querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+            //Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
+            //cudaMalloc(&d_points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+            //LOG_INFO("Copying to device.\n");
+            //cudaMemcpyAsync(d_points, points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
 
             //copy one chunk of vectorSet
-            LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-            Point<DTYPE, SUMTYPE, MAX_DIM>* d_check_points;
+            //LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+            LOG_INFO("Copying to Sub Point Array\n"); 
             int start = GPUOffset[i] + batchOffset[i];
             sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start * dim], curr_batch_size[i], dim);
-            for (int coo = 0; coo < 25; coo++) {
-                LOG_INFO("Vector Set Point[0] Coord %d is : %lu\n", coo, (unsigned long)sub_vectors_points[i][0].coords[coo]);
-            }
-            for (int coo = 0; coo < 25; coo++) {
-                LOG_INFO("Query Set Point[0] Coord %d is : %lu\n", coo, (unsigned long)points[0].coords[coo]);
-            }
+            //for (int coo = 0; coo < 25; coo++) {
+            //    LOG_INFO("Vector Set Point[0] Coord %d is : %lu\n", coo, (unsigned long)sub_vectors_points[i][0].coords[coo]);
+            //}
+            //for (int coo = 0; coo < 25; coo++) {
+            //    LOG_INFO("Query Set Point[0] Coord %d is : %lu\n", coo, (unsigned long)points[0].coords[coo]);
+            //}
             //back_sub_vectors_points[i] = new Point<DTYPE, SUMTYPE, MAX_DIM>[curr_batch_size[i]];
-            //back_sub_vectors_points[i] = (Point<DTYPE, SUMTYPE, MAX_DIM>*)malloc(curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>);
-            cudaMalloc(&d_check_points, curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+            ////back_sub_vectors_points[i] = (Point<DTYPE, SUMTYPE, MAX_DIM>*)malloc(curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>);
+            //LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+            //cudaMalloc(&d_check_points, curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
             LOG_INFO("Copying to device.\n");
             //cudaMemcpy(d_check_points, sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice);
             cudaMemcpyAsync(d_check_points, sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
@@ -1498,19 +1552,20 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points, d_check_points, curr_batch_size[i], start, result_size, d_results[i], K);
             cudaError_t c_ret = cudaGetLastError();
             LOG_INFO("Error: %s\n", cudaGetErrorString(c_ret));
+            
         }
-
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Query Running...\n");
         //Copy back to result
         for (int gpuNum = 0; gpuNum < NUM_GPUS; gpuNum++) {
             cudaSetDevice(gpuNum);
             cudaDeviceSynchronize();
         }
-
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Finished query for all GPUs !\n");
         DistPair<SUMTYPE>* results = (DistPair<SUMTYPE>*)malloc(per_gpu_result * sizeof(DistPair<SUMTYPE>) * NUM_GPUS);
         for (int gpuNum = 0; gpuNum < NUM_GPUS; gpuNum++) {
             cudaMemcpy(&results[(gpuNum * per_gpu_result)], d_results[gpuNum], per_gpu_result * sizeof(DistPair<SUMTYPE>), cudaMemcpyDeviceToHost);
         }
-
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Copied the results from all GPUs.\n");
 
         // To combine the results, we need to compare value from different GPU 
         //Results [KNN from GPU0][KNN from GPU1][KNN from GPU2][KNN from GPU3]
@@ -1535,8 +1590,10 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                 temp_dist[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]++].dist;
             }
         }
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Recorded current batch's results.\n");
         //update results, just copy to truthset for first batch
         if (update) {
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Updating final results...\n");
             updateKNNResults(truthset, distset, temp_truth, temp_dist, result_size, K);
         }
         else {
@@ -1544,12 +1601,14 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             distset = temp_dist;
             update = true;
         }
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Updated the truthset and distset.\n");
         // Update all batchOffsets and check if done
         done = true;
         for (int gpuNum = 0; gpuNum < NUM_GPUS; ++gpuNum) {
             batchOffset[gpuNum] += curr_batch_size[gpuNum];
             if (batchOffset[gpuNum] < vectorsPerGPU[gpuNum]) {
                 done = false;
+                LOG(SPTAG::Helper::LogLevel::LL_Info, "Batches are not all done. Continuing...\n");
             }
         }
     } // Batches loop (while !done) 

@@ -496,6 +496,11 @@ public:
 
         return 1 - (prod / (sqrt(a * b)));
     }
+    __forceinline__ __device__ SUMTYPE cosine_debug(Point<T, SUMTYPE, Dim>* other, bool debug) {
+        SUMTYPE prod[4];
+        prod[0] = 0;
+        return ((SUMTYPE)1) - prod[0];
+    }
 };
 
 template<int Dim, int Stride, typename SUMTYPE>
@@ -546,20 +551,56 @@ public:
         return totals[0] + totals[1] + totals[2] + totals[3];
     }
 
-    __forceinline__ __device__ SUMTYPE cosine(Point<int8_t, SUMTYPE, Dim>* other) {
-        SUMTYPE prod[4];
-        prod[0] = 0;
+     __device__ __host__ SUMTYPE cosine(Point<int8_t, SUMTYPE, Dim>* other) {
+        SUMTYPE prod[4] = { 0,0,0,0 };
+        int8_t temp[4];
+        int8_t temp_other[4];
 
         for (int i = 0; i < Dim / 4; ++i) {
-            prod[0] += (getCoord(i) & 0x000000FF) * (other->coords[i] & 0x000000FF);
-            prod[1] = ((getCoord(i) & 0x0000FF00) >> 8) * ((other->coords[i] & 0x0000FF00) >> 8);
-            prod[2] = ((getCoord(i) & 0x00FF0000) >> 16) * ((other->coords[i] & 0x00FF0000) >> 16);
-            prod[3] = ((getCoord(i)) >> 24) * ((other->coords[i]) >> 24);
+            temp[0] = ((int8_t)(getCoord(i) & 0x000000FF));
+            temp_other[0] = ((int8_t)(other->coords[i] & 0x000000FF));
 
-            prod[0] += prod[1] + prod[2] + prod[3];
+            temp[1] = ((int8_t)((getCoord(i) & 0x0000FF00) >> 8));
+            temp_other[1] = ((int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+
+            temp[2] = ((int8_t)((getCoord(i) & 0x00FF0000) >> 16));
+            temp_other[2] = ((int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+
+            temp[3] = ((int8_t)((getCoord(i)) >> 24));
+            temp_other[3] = ((int8_t)((other->coords[i]) >> 24));
+
+            prod[0] += temp[0] * temp_other[0];
+            prod[1] += temp[1] * temp_other[1];
+            prod[2] += temp[2] * temp_other[2];
+            prod[3] += temp[3] * temp_other[3];
+            //prod[0] += ((int8_t)(getCoord(i) & 0x000000FF)) * ((int8_t)(other->coords[i] & 0x000000FF));
+            //prod[1] += ((int8_t)((getCoord(i) & 0x0000FF00) >> 8)) * ((int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+            //prod[2] += ((int8_t)((getCoord(i) & 0x00FF0000) >> 16)) * ((int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+            //prod[3] += ((int8_t)((getCoord(i)) >> 24)) * ((int8_t)((other->coords[i]) >> 24));
+
+            //prod[0] += prod[1] + prod[2] + prod[3];
         }
+        return ((SUMTYPE)65536) - prod[0] - prod[1] - prod[2] - prod[3];
+    }
 
-        return ((SUMTYPE)65536) - prod[0];
+    __forceinline__ __device__ __host__ SUMTYPE cosine_debug(Point<int8_t, SUMTYPE, Dim>* other, bool debug) {
+        SUMTYPE prod[4];
+        for (int i = 0; i < Dim / 4; ++i) {
+            prod[i] = 0;
+        }
+#pragma unroll
+        for (int i = 0; i < Dim / 4; ++i) {
+            prod[0] += ((int8_t)(getCoord(i) & 0x000000FF)) * ((int8_t)(other->coords[i] & 0x000000FF));
+            prod[1] += ((int8_t)((getCoord(i) & 0x0000FF00) >> 8)) * ((int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+            prod[2] += ((int8_t)((getCoord(i) & 0x00FF0000) >> 16)) * ((int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+            prod[3] += ((int8_t)((getCoord(i)) >> 24)) * ((int8_t)((other->coords[i]) >> 24));
+            
+            //prod[0] += prod[1] + prod[2] + prod[3];
+            if (debug) {
+                printf("prod[0] on i = %d is %d\n", i, prod[0]);
+            }
+        }
+        return ((SUMTYPE)65536) - prod[0] - prod[1] - prod[2] - prod[3];
     }
 };
 
@@ -611,19 +652,37 @@ public:
         return totals[0] + totals[1] + totals[2] + totals[3];
     }
 
-    __forceinline__ __device__ SUMTYPE cosine(Point<uint8_t, SUMTYPE, Dim>* other) {
+    __forceinline__ __device__ __host__ SUMTYPE cosine(Point<uint8_t, SUMTYPE, Dim>* other) {
         SUMTYPE prod[4];
         prod[0] = 0;
 
         for (int i = 0; i < Dim / 4; ++i) {
-            prod[0] += (getCoord(i) & 0x000000FF) * (other->coords[i] & 0x000000FF);
-            prod[1] = ((getCoord(i) & 0x0000FF00) >> 8) * ((other->coords[i] & 0x0000FF00) >> 8);
-            prod[2] = ((getCoord(i) & 0x00FF0000) >> 16) * ((other->coords[i] & 0x00FF0000) >> 16);
-            prod[3] = ((getCoord(i)) >> 24) * ((other->coords[i]) >> 24);
+            prod[0] += (uint8_t)(getCoord(i) & 0x000000FF) * (uint8_t)(other->coords[i] & 0x000000FF);
+            prod[1] = (uint8_t)((getCoord(i) & 0x0000FF00) >> 8) * (uint8_t)((other->coords[i] & 0x0000FF00) >> 8);
+            prod[2] = (uint8_t)((getCoord(i) & 0x00FF0000) >> 16) * (uint8_t)((other->coords[i] & 0x00FF0000) >> 16);
+            prod[3] = (uint8_t)((getCoord(i)) >> 24) * (uint8_t)((other->coords[i]) >> 24);
 
             prod[0] += prod[1] + prod[2] + prod[3];
         }
 
+        return ((SUMTYPE)65536) - prod[0];
+    }
+
+    __forceinline__ __device__ __host__ SUMTYPE cosine_debug(Point<uint8_t, SUMTYPE, Dim>* other, bool debug) {
+        SUMTYPE prod[4];
+        prod[0] = 0;
+#pragma unroll
+        for (int i = 0; i < Dim / 4; ++i) {
+            prod[0] += ((uint8_t)(getCoord(i) & 0x000000FF)) * ((uint8_t)(other->coords[i] & 0x000000FF));
+            prod[1] = ((uint8_t)((getCoord(i) & 0x0000FF00) >> 8)) * ((uint8_t)((other->coords[i] & 0x0000FF00) >> 8));
+            prod[2] = ((uint8_t)((getCoord(i) & 0x00FF0000) >> 16)) * ((uint8_t)((other->coords[i] & 0x00FF0000) >> 16));
+            prod[3] = ((uint8_t)((getCoord(i)) >> 24)) * ((uint8_t)((other->coords[i]) >> 24));
+
+            prod[0] += prod[1] + prod[2] + prod[3];
+            if (debug) {
+                printf("prod[0] on i = %d is %d\n", i, prod[0]);
+            }
+        }
         return ((SUMTYPE)65536) - prod[0];
     }
 };
