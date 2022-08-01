@@ -182,6 +182,17 @@ public:
         }
     }
 
+    void CheckInvalidResults(const std::string& label)
+    {
+        for (int i = 0; i < m_resultNum; i++)
+        {
+            if (m_results[i].VID == -1)
+            {
+                LOG(Helper::LogLevel::LL_Warning, "Invalid result ID found with distance: %d and label %s", m_results[i].Dist, label.c_str());
+            }
+        }
+    }
+
 
     iterator begin()
     {

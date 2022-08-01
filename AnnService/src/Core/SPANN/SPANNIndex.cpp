@@ -202,8 +202,9 @@ namespace SPTAG
                 p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
 
             m_index->SearchIndex(*p_queryResults);
+            p_queryResults->CheckInvalidResults("After search head index");
             
-            if (m_pQuantizer.get() != m_index->m_pQuantizer.get()) { p_queryResults->SetTarget(p_queryResults->GetTarget(), m_index->m_pQuantizer); }
+            //if (m_pQuantizer.get() != m_index->m_pQuantizer.get()) { p_queryResults->SetTarget(p_queryResults->GetTarget(), m_index->m_pQuantizer); }
             std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
                 workSpace = m_workSpacePool->Rent();
@@ -230,13 +231,16 @@ namespace SPTAG
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
+                p_queryResults->CheckInvalidResults("After search SSD results");
                 p_queryResults->SortResult();
+                p_queryResults->CheckInvalidResults("After sorting SSD results");
                 m_workSpacePool->Return(workSpace);
             }
 
             if (p_query.GetResultNum() < m_options.m_searchInternalResultNum) {
                 std::copy(p_queryResults->GetResults(), p_queryResults->GetResults() + p_query.GetResultNum(), p_query.GetResults());
                 delete p_queryResults;
+                p_query->CheckInvalidResults("After copy back to original QueryResult");
             }
 
             if (p_query.WithMeta() && nullptr != m_pMetadata)
