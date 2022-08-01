@@ -240,7 +240,7 @@ namespace SPTAG
             if (p_query.GetResultNum() < m_options.m_searchInternalResultNum) {
                 std::copy(p_queryResults->GetResults(), p_queryResults->GetResults() + p_query.GetResultNum(), p_query.GetResults());
                 delete p_queryResults;
-                p_query->CheckInvalidResults("After copy back to original QueryResult");
+                p_query.CheckInvalidResults("After copy back to original QueryResult");
             }
 
             if (p_query.WithMeta() && nullptr != m_pMetadata)
