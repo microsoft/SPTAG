@@ -122,8 +122,6 @@ namespace SPTAG {
 				exit(1);
 			}
 
-printf("in BootProgram! genreateTruth:%d\n", opts->m_generateTruth);
-
 			if (opts->m_generateTruth)
 			{
 				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
