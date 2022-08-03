@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
   <metadata>
     <id>SPTAG.Library</id>
-    <version>1.2.12-mainOPQ-CoreLib-SPANN-c6a30481-vc140</version>
+    <version>1.2.12-mainOPQ-CoreLib-SPANN-789c7ca3-vc140</version>
     <title>SPTAG.Library</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli,zhah</owners>
@@ -78,9 +78,9 @@
     <file src="AnnService\inc\Helper\StringConvert.h" target="build\native\inc\Helper\StringConvert.h" />
     <file src="AnnService\inc\Helper\ThreadPool.h" target="build\native\inc\Helper\ThreadPool.h" />
     <file src="AnnService\inc\Helper\VectorSetReader.h" target="build\native\inc\Helper\VectorSetReader.h" />
-    <file src="ThirdParty\zstd\lib\zdict.h" target="build\native\inc\zdict.h" />
-    <file src="ThirdParty\zstd\lib\zstd.h" target="build\native\inc\zstd.h" />
-    <file src="ThirdParty\zstd\lib\zstd_errors.h" target="build\native\inc\zstd_errors.h" />
+    <file src="ThirdParty\zstd\lib\zdict.h" target="build\native\zdict.h" />
+    <file src="ThirdParty\zstd\lib\zstd.h" target="build\native\zstd.h" />
+    <file src="ThirdParty\zstd\lib\zstd_errors.h" target="build\native\zstd_errors.h" />
     <file src="x64\Debug\CoreLibrary.lib" target="lib\native\debug\x64\CoreLibrary.lib" />
     <file src="x64\Debug\CoreLibrary.pdb" target="lib\native\debug\x64\CoreLibrary.pdb" />
     <file src="x64\Release\CoreLibrary.lib" target="lib\native\retail\x64\CoreLibrary.lib" />
