@@ -113,7 +113,7 @@ namespace SPTAG
             if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_index->SetReady(true);
@@ -658,7 +658,7 @@ namespace SPTAG
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
                 m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-                m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+                //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
                 m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
                 m_index->UpdateIndex();
 
