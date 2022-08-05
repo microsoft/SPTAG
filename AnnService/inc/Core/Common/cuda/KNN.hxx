@@ -32,6 +32,7 @@
 
 #include <cuda/std/type_traits>
 #include <chrono>
+#include <windows.h>
 
 template<typename T, typename SUMTYPE, int Dim>
 __device__ bool violatesRNG(Point<T,SUMTYPE,Dim>* data, DistPair<SUMTYPE> farther, DistPair<SUMTYPE> closer, int metric) {
@@ -1407,14 +1408,18 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     cudaError_t resultErr;
     
     //KNN 
-
     LOG_INFO("Copying to Point array\n");
     Point<DTYPE, SUMTYPE, MAX_DIM>* points = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >((DTYPE*)querySet->GetData(), result_size, dim);
     Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
     Point<DTYPE, SUMTYPE, MAX_DIM>* d_check_points;
     Point<DTYPE, SUMTYPE, MAX_DIM>* sub_vectors_points[NUM_GPUS];
     Point<DTYPE, SUMTYPE, MAX_DIM>* back_sub_vectors_points[NUM_GPUS];
-
+    // Allocate space on gpu
+    DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
+    //!!!!For d_point and d_check_points should be array like above
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(memInfo);
+    GlobalMemoryStatusEx(&memInfo);
     // Calculate GPU memory usage on each device
     for (int gpuNum = 0; gpuNum < NUM_GPUS; gpuNum++) {
         CUDA_CHECK(cudaSetDevice(gpuNum));
@@ -1430,7 +1435,8 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
         size_t queryPointSize = querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>);
         size_t resultSetSize = querySet->Count() * K * 4;//size(int) = 4
-        size_t resMemAvail = (freeMem * 0.9) - (queryPointSize + resultSetSize); // Only use 90% of total memory to be safe
+        //size_t resMemAvail = (freeMem * 0.9) - (queryPointSize + resultSetSize); // Only use 90% of total memory to be safe
+        size_t resMemAvail = (freeMem * 0.45) - (queryPointSize + resultSetSize); // Use 45% of total memory see if 400M can work
         int maxEltsPerBatch = resMemAvail / (sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
         batchSize[gpuNum] = min(maxEltsPerBatch, (int)(vectorsPerGPU[gpuNum]));
         // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
@@ -1451,24 +1457,23 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         batchOffset[gpuNum] = 0;
     }
 
-    // Allocate space on gpu
-    DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
     for (int i = 0; i < NUM_GPUS; i++) {
         cudaSetDevice(i);
         cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
-
-        cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)); // Device result memory on each GPU
+        // Device result memory on each GPU
+        LOG_INFO("Alloc'ing memory for results on device: %ld bytes.\n", querySet->Count() * K * sizeof(int)); 
+        cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>));
 
         //Copy Queryvectors
         LOG_INFO("Alloc'ing Query Points on device: %ld bytes.\n", querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
         cudaMalloc(&d_points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
         LOG_INFO("Copying to device.\n");
         cudaMemcpyAsync(d_points, points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
-
+        //Batchvectors
         LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
         cudaMalloc(&d_check_points, batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
     }
-    //batchSize[0] = 16000000;// Force the 30M data to be split
+    batchSize[0] = 16000000;// Force the 30M data to be split
     //auto batch_start_t = std::chrono::high_resolution_clock::now();
     LOG_INFO("Starting KNN Kernel timer\n");
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -1478,7 +1483,11 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     // Need to copy the resul, and copy back to host to update. 
     // The vectors split, malloc, copy neeed to be done in here.
     while (!done) { // Continue until all GPUs have completed all of their batches
+        size_t freeMem, totalMem;
+        CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Avaliable Memory out of %lu MiB total Memory for GPU 0 is %lu MiB\n", totalMem / 1000000, freeMem / 1000000);
 
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Avaliable Memory out of %lu MiB total Memory for CPU 0 is %lu MiB\n", memInfo.ullTotalPhys/1000000, memInfo.ullAvailPhys / 1000000);
     // Prep next batch for each GPU
         for (int gpuNum = 0; gpuNum < NUM_GPUS; ++gpuNum) {
             curr_batch_size[gpuNum] = batchSize[gpuNum];
@@ -1491,8 +1500,6 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
         CUDA_CHECK(cudaDeviceSynchronize());
 
-        
-
         //DistPair<SUMTYPE>* d_results[NUM_GPUS]; // malloc space for each gpu to save bf result
         //for (int i = 0; i < NUM_GPUS; i++) {
         //    cudaSetDevice(i);
@@ -1500,8 +1507,8 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         //}
 
         for (int i = 0; i < NUM_GPUS; i++) {
-            cudaSetDevice(i);
-
+            CUDA_CHECK(cudaSetDevice(i));
+            LOG_INFO("Error: %s\n", cudaGetErrorString(cudaGetLastError()));
             //cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
             ////Copy Queryvectors
             //LOG_INFO("Alloc'ing Query Points on device: %ld bytes.\n", querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
@@ -1512,7 +1519,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
             //copy one chunk of vectorSet
             //LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-            LOG_INFO("Copying to Sub Point Array\n"); 
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Converting to Sub Point Array\n");
             int start = GPUOffset[i] + batchOffset[i];
             sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start * dim], curr_batch_size[i], dim);
             //for (int coo = 0; coo < 25; coo++) {
@@ -1525,15 +1532,12 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             ////back_sub_vectors_points[i] = (Point<DTYPE, SUMTYPE, MAX_DIM>*)malloc(curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>);
             //LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
             //cudaMalloc(&d_check_points, curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-            LOG_INFO("Copying to device.\n");
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Copying to device.\n");
             //cudaMemcpy(d_check_points, sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice);
-            cudaMemcpyAsync(d_check_points, sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
+            CUDA_CHECK(cudaMemcpyAsync(d_check_points, sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]));
             //cudaDeviceSynchronize();
             //cudaMemcpyAsync(back_sub_vectors_points[i], d_check_points, curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyDeviceToHost, streams[i]);
             //cudaDeviceSynchronize();
-            LOG_INFO("Error: %s\n", cudaGetErrorString(cudaGetLastError()));
-
-            LOG_INFO("Alloc'ing memory for results on device: %ld bytes.\n", querySet->Count() * K * sizeof(int));
             
             int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
             // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets 
@@ -1550,6 +1554,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - has shared memory %ld Per Block\n", i, prop.sharedMemPerBlock);
             // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets 
             query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points, d_check_points, curr_batch_size[i], start, result_size, d_results[i], K);
+            //CUDA_CHECK(cudaDeviceSynchronize());// Try to exclude the query's problem
             cudaError_t c_ret = cudaGetLastError();
             LOG_INFO("Error: %s\n", cudaGetErrorString(c_ret));
             
@@ -1610,6 +1615,9 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                 done = false;
                 LOG(SPTAG::Helper::LogLevel::LL_Info, "Batches are not all done. Continuing...\n");
             }
+            //fix memory leak
+            free(sub_vectors_points[gpuNum]);
+            free(results);
         }
     } // Batches loop (while !done) 
 

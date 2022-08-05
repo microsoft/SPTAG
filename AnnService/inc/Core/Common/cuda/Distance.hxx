@@ -381,6 +381,9 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, size_t rows, int exact_d
   Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
   for(size_t i=0; i<rows; i++) {
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
+    if (i % 1000000 == 0) {
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Finished %lu point converting\n", i);
+    }
   }
   return pointArray;
 } 
