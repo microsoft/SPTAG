@@ -132,7 +132,7 @@ namespace SPTAG {
                             double startTime = threadws.getElapsedMs();
                             p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
                             double endTime = threadws.getElapsedMs();
-                            p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
+                            p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
                             double exEndTime = threadws.getElapsedMs();
 
                             p_stats[index].m_exLatency = exEndTime - endTime;
@@ -155,6 +155,8 @@ namespace SPTAG {
                     sendingCost,
                     numQueries / sendingCost,
                     static_cast<uint32_t>(numQueries));
+
+                for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
             }
 
             template <typename ValueType>

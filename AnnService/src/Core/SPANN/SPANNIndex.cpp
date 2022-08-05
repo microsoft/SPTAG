@@ -217,7 +217,10 @@ namespace SPTAG
 
                     auto postingID = res->VID;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    if (res->VID == MaxSize) res->Dist = MaxDist;
+                    if (res->VID == MaxSize) {
+                        res->VID = -1;
+                        res->Dist = MaxDist;
+                    }
 
                     // Don't do disk reads for irrelevant pages
                     if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || 
@@ -229,8 +232,8 @@ namespace SPTAG
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
-                p_queryResults->SortResult();
                 m_workSpacePool->Return(workSpace);
+                p_queryResults->SortResult();
             }
 
             if (p_query.GetResultNum() < m_options.m_searchInternalResultNum) {
@@ -250,8 +253,55 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats) const
+        {
+            if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
+
+            COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+            workSpace->m_deduper.clear();
+            workSpace->m_postingIDs.clear();
+
+            float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+            int i = 0;
+            for (; i < m_options.m_searchInternalResultNum; ++i)
+            {
+                auto res = p_queryResults->GetResult(i);
+                if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+                if (m_extraSearcher->CheckValidPosting(res->VID)) 
+                {
+                    workSpace->m_postingIDs.emplace_back(res->VID);
+                }
+                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (res->VID == MaxSize) 
+                {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
+            }
+
+            for (; i < p_queryResults->GetResultNum(); ++i)
+            {
+                auto res = p_queryResults->GetResult(i);
+                if (res->VID == -1) break;
+                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (res->VID == MaxSize) 
+                {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
+            }
+
+            p_queryResults->Reverse();
+            m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
+            m_workSpacePool->Return(workSpace);
+            p_queryResults->SortResult();
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
-            SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found)
+            SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found) const
         {
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
 
@@ -264,7 +314,10 @@ namespace SPTAG
                 auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                 if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
                 res->VID = global_VID;
-                if (res->VID == MaxSize) res->Dist = MaxDist;
+                if (res->VID == MaxSize) {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
             }
             newResults.Reverse();
 
