@@ -232,10 +232,10 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, this](Helper::AsyncReadRequest *request)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, this](bool success)
                     {
-                        char* buffer = request->m_buffer;
-                        ListInfo* listInfo = (ListInfo*)(request->m_payload);
+                        char* buffer = request.m_buffer;
+                        ListInfo* listInfo = (ListInfo*)(request.m_payload);
 
                         // decompress posting list
                         char* p_postingListFullData = buffer + listInfo->pageOffset;
@@ -247,9 +247,9 @@ namespace SPTAG
                         ProcessPosting();
                     };
 #else // async read
-                    request.m_callback = [&p_exWorkSpace](Helper::AsyncReadRequest* request)
+                    request.m_callback = [&p_exWorkSpace, &request](bool success)
                     {
-                        p_exWorkSpace->m_processIocp.push(request);
+                        p_exWorkSpace->m_processIocp.push(&request);
                     };
 
                     ++unprocessed;
