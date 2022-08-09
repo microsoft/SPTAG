@@ -19,20 +19,20 @@ pip install sptag
 
 ## Dataset
 
-We support muiltiple types of data for training. Including text file binary file and [ann-benchmark](https://github.com/erikbern/ann-benchmarks) format hdf5 file. But the groundturth file should be texts of index.
+We support muiltiple types of data for training. Including text file, binary file and [ann-benchmark](https://github.com/erikbern/ann-benchmarks) format hdf5 file. But the groundturth file should only be texts of index.
 
 ## Quickstart
 
 
 Use this command to start a NNI trial to tune SPTAG model on ann-benchmark format hdf5 sift-128-euclidean dataset.
 ```sh
-nnictl create --config config_sift.yaml
+nnictl create --config config.yml
 ```
 
-If you wish to tune SPTAG on a binary dataset, for example, origin sift dataset. You can change `trialCommand` in config to:
+If you wish to tune SPTAG on a binary dataset, for example, origin sift dataset. You can change `trialCommand` in config.yml to:
 
 ```sh
-python main_new.py --train_file /sift/sift_base.fvecs --query_file sift/sift_query.fvecs --distance euclidean --dim 128
+python main.py --train_file /sift/sift_base.fvecs --query_file sift/sift_query.fvecs --distance euclidean --dim 128
 ```
 
 **NOTE:** Always clear corresponding folder under `results/` before starting a trial on same dataset.
