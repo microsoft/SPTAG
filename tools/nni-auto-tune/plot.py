@@ -3,24 +3,36 @@ import json
 import os
 import numpy as np
 import argparse
+import time
 
-def create_plot(dataset,x_scale,y_scale,results):
-    qps, recalls, build_times = [], [], []
+def create_plot(path, x_scale, y_scale, results):
+    qps, recalls, build_times, build_params, search_params = [], [], [], [], []
     data = []
-    for p in results:
-        with open(os.path.join("results",dataset,p),"r") as f:
-            res = json.load(f)
-            data.append((res["qps"],res["recall"],res["build_time"]))
+    print(len(results))
+    start = time.time()
+    for i,p in enumerate(results):
+        if i % 2000 == 0:
+            print("processed",i,'results in',round(time.time()-start),'seconds')
+            start = time.time()
 
+        with open(os.path.join("results", path, p),"r") as f:
+            try:
+                res = json.load(f)
+                data.append((res["qps"],res["recall"],res["build_time"],res["build_params"],res["search_params"]))
+            except:
+                print(os.path.join("results",path,p))
+                
     data.sort(key=lambda t: (-1 * t[0], -1 * t[1]))
     last_x = -1
     comparator = ((lambda xv, lx: xv > lx)
                     if last_x < 0 else (lambda xv, lx: xv < lx))
-    for q,r,b in data:
+    for i,(q,r,b,bp,sp) in enumerate(data):
         if comparator(r, last_x):
             last_x = r
             recalls.append(r)
             qps.append(q)
+            print("Selected point", i, "recalls:", r, "qps:", q, "with build params:", bp, "and search params:", sp)
+    
     handles, labels = [], []
     handle, = plt.plot(recalls, qps, '-', label="SPTAG", color="r",
                             ms=7, mew=3, lw=3, linestyle='-',
@@ -56,15 +68,14 @@ def create_plot(dataset,x_scale,y_scale,results):
 
     ax.spines['bottom']._adjust_location()    
 
-    plt.savefig(dataset+'.png', bbox_inches='tight')
+    plt.savefig(path+'.png', bbox_inches='tight')
     plt.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--dataset',
-                        metavar='NAME',
-                        help='the dataset to load training points from',
+    parser.add_argument('--path',
+                        help='the path to load result from',
                         default='glove-100-angular')
     parser.add_argument(
         '-X', '--x_scale',
@@ -77,9 +88,9 @@ if __name__ == "__main__":
         default='log')
     args = parser.parse_args()
 
-    if os.path.exists(os.path.join("results",args.dataset)):
-        results = os.listdir(os.path.join("results",args.dataset))
+    if os.path.exists(os.path.join("results",args.path)):
+        results = os.listdir(os.path.join("results",args.path))
     else:
         raise FileNotFoundError("No auto tune result found")
-
-    create_plot(args.dataset,args.x_scale,args.y_scale,results)
+    print("ploting",args.path)
+    create_plot(args.path,args.x_scale,args.y_scale,results)

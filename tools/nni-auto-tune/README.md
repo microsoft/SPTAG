@@ -3,7 +3,8 @@
 
 ## Requirements
 
-This example requires NNI >= 2.8
+This example requires NNI >= 2.8, python >= 3.9, Ubuntu >= 20.04
+
 
 ```sh
 pip install nni
@@ -16,37 +17,41 @@ Install SPTAG
 pip install sptag
 ```
 
-Install h5py
-
-```sh
-pip install h5py
-```
-
 ## Dataset
 
-This example uses hdf5 datasets from [ann-benchmark](https://github.com/erikbern/ann-benchmarks). Please download hdf5 dataset under this folder.
+We support muiltiple types of data for training. Including text file binary file and [ann-benchmark](https://github.com/erikbern/ann-benchmarks) format hdf5 file. But the groundturth file should be texts of index.
 
 ## Quickstart
 
 
-Use this command to start a NNI trial.
+Use this command to start a NNI trial to tune SPTAG model on ann-benchmark format hdf5 sift-128-euclidean dataset.
 ```sh
 nnictl create --config config_sift.yaml
 ```
 
-We currently have two configs for `glove-100-angular` and `sift-128-euclidean`. 
+If you wish to tune SPTAG on a binary dataset, for example, origin sift dataset. You can change `trialCommand` in config to:
+
+```sh
+python main_new.py --train_file /sift/sift_base.fvecs --query_file sift/sift_query.fvecs --distance euclidean --dim 128
+```
 
 **NOTE:** Always clear corresponding folder under `results/` before starting a trial on same dataset.
 
 
 ## Results
 
+Install matplotlib for figure drawing
+
+```sh
+pip install matplotlib
+```
+
 During the trial, the results are saved as json files in `results/(dataset_name)`. Use following command to visualize results.
 
 ```sh
-plot.py --dataset sift-128-euclidean
+plot.py --path sift-128-euclidean
 ```
-The figure the correspondence between recall and qps.
+The figure shows the correspondence between recall and qps. And you can see the details of each selected point in console.
 
 
 The following are the results of sptag and other algorithms on different datasets
@@ -54,10 +59,25 @@ The following are the results of sptag and other algorithms on different dataset
 sift-128-euclidean
 ------------------
 
-![glove-100-angular](picture/sift.png)
+![sift-128-euclidean](picture/sift-128-euclidean.png)
 
-sift-128-euclidean
+glove-100-angular
 ------------------
 
-![glove-100-angular](picture/glove100.png)
+![glove-100-angular](picture/glove-100-angular.png)
+
+glove-25-angular
+------------------
+
+![glove-25-angular](picture/glove-25-angular.png)
+
+nytimes-256-angular
+------------------
+
+![nytimes-256-angular](picture/nytimes-256-angular.png)
+
+fashion-mnist-784-euclidean
+------------------
+
+![fashion-mnist-784-euclidean](picture/fashion-mnist-784-euclidean.png)
 
