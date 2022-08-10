@@ -14,7 +14,7 @@ For more details, please view [NNI installation](https://nni.readthedocs.io/en/s
 Install SPTAG
 
 ```sh
-pip install sptag
+pip install -i https://test.pypi.org/simple/ sptag
 ```
 
 ## Dataset
