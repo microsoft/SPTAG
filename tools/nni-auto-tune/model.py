@@ -1,17 +1,19 @@
 from sptag import SPTAG as SPTAG
 from scipy.spatial.distance import pdist as scipy_pdist
 import numpy
-
 """ We use the implementation of metric and brute force algorithm from ann-banchmark"""
+
 
 def pdist(a, b, metric):
     return scipy_pdist([a, b], metric=metric)[0]
 
+
 def jaccard(a, b):
     if len(a) == 0 or len(b) == 0:
-         return 0
+        return 0
     intersect = len(set(a) & set(b))
     return intersect / (float)(len(a) + len(b) - intersect)
+
 
 metrics = {
     'hamming': {
@@ -21,7 +23,7 @@ metrics = {
     # return 1 - jaccard similarity, because smaller distances are better.
     # modified to use pdist jaccard given new data format (boolean ndarray)
     'jaccard': {
-        'distance': lambda a, b: 1 - jaccard(a, b), #pdist(a, b, "jaccard"), 
+        'distance': lambda a, b: 1 - jaccard(a, b),  #pdist(a, b, "jaccard"), 
         'distance_valid': lambda a: a < 1 - 1e-5
     },
     'euclidean': {
@@ -34,7 +36,9 @@ metrics = {
     }
 }
 
+
 class Sptag:
+
     def __init__(self, algo, metric):
         self._algo = str(algo)
         self._para = {}
@@ -71,9 +75,10 @@ class Sptag:
                 [k + "=" + str(v) for k, v in self._para.items()])
         if self.s_para:
             s += ", " + ", ".join(
-                [k+"_s" + "=" + str(v) for k, v in self.s_para.items()])
-        return 'Sptag(metric=%s, algo=%s' % (
-            self._metric, self._algo) + s + ')'
+                [k + "_s" + "=" + str(v) for k, v in self.s_para.items()])
+        return 'Sptag(metric=%s, algo=%s' % (self._metric,
+                                             self._algo) + s + ')'
+
 
 class BruteForceBLAS:
     """kNN search that uses a linear scan = brute force."""
@@ -94,7 +99,7 @@ class BruteForceBLAS:
         """Initialize the search index."""
         if self._metric == 'angular':
             # precompute (squared) length of each vector
-            lens = (X ** 2).sum(-1)
+            lens = (X**2).sum(-1)
             # normalize index vectors to unit length
             X /= numpy.sqrt(lens)[..., numpy.newaxis]
             self.index = numpy.ascontiguousarray(X, dtype=self._precision)
@@ -102,12 +107,12 @@ class BruteForceBLAS:
             # Regarding bitvectors as vectors in l_2 is faster for blas
             X = X.astype(numpy.float32)
             # precompute (squared) length of each vector
-            lens = (X ** 2).sum(-1)
+            lens = (X**2).sum(-1)
             self.index = numpy.ascontiguousarray(X, dtype=numpy.float32)
             self.lengths = numpy.ascontiguousarray(lens, dtype=numpy.float32)
         elif self._metric == 'euclidean':
             # precompute (squared) length of each vector
-            lens = (X ** 2).sum(-1)
+            lens = (X**2).sum(-1)
             self.index = numpy.ascontiguousarray(X, dtype=self._precision)
             self.lengths = numpy.ascontiguousarray(lens, dtype=self._precision)
         elif self._metric == 'jaccard':
@@ -139,17 +144,22 @@ class BruteForceBLAS:
             # Just compute hamming distance using euclidean distance
             dists = self.lengths - 2 * numpy.dot(self.index, v)
         elif self._metric == 'jaccard':
-            dists = [metrics[self._metric]['distance'](v, e) for e in self.index]
+            dists = [
+                metrics[self._metric]['distance'](v, e) for e in self.index
+            ]
         else:
             # shouldn't get past the constructor!
             assert False, "invalid metric"
         # partition-sort by distance, get `n` closest
         nearest_indices = numpy.argpartition(dists, n)[:n]
-        indices = [idx for idx in nearest_indices if metrics[self._metric]
-                   ["distance_valid"](dists[idx])]
+        indices = [
+            idx for idx in nearest_indices
+            if metrics[self._metric]["distance_valid"](dists[idx])
+        ]
 
         def fix(index):
             ep = self.index[index]
             ev = v
             return (index, metrics[self._metric]['distance'](ep, ev))
+
         return map(fix, indices)

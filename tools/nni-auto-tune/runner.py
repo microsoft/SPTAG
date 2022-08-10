@@ -1,7 +1,9 @@
 from model import metrics
 import time
 
+
 def run_individual_query(algo, X_train, X_test, distance, k, run_count):
+
     best_search_time = float('inf')
     for i in range(run_count):
         print('Run %d/%d...' % (i + 1, run_count))

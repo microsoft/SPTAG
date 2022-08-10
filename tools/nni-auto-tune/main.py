@@ -32,7 +32,11 @@ import itertools
 def knn_threshold(data, k, epsilon):
     return data[k - 1] + epsilon
 
-def get_recall_from_distance(dataset_distances, run_distances, k, epsilon=1e-3):
+
+def get_recall_from_distance(dataset_distances,
+                             run_distances,
+                             k,
+                             epsilon=1e-3):
     recalls = np.zeros(len(run_distances))
     for i in range(len(run_distances)):
         t = knn_threshold(dataset_distances[i], k, epsilon)
@@ -44,6 +48,7 @@ def get_recall_from_distance(dataset_distances, run_distances, k, epsilon=1e-3):
 
     return (np.mean(recalls) / float(k), np.std(recalls) / float(k), recalls)
 
+
 def get_recall_from_index(dataset_index, run_index, k):
     recalls = np.zeros(len(run_index))
     for i in range(len(run_index)):
@@ -54,6 +59,7 @@ def get_recall_from_index(dataset_index, run_index, k):
         recalls[i] = actual
 
     return (np.mean(recalls) / float(k), np.std(recalls) / float(k), recalls)
+
 
 def queries_per_second(attrs):
     return 1.0 / attrs["best_search_time"]
@@ -68,6 +74,7 @@ def compute_metrics(groundtruth, attrs, results, k, from_index=False):
     print('mean: %12.3f,std: %12.3f, qps: %12.3f' % (mean, std, qps))
     return mean, qps
 
+
 def grid_search(params):
     param_num = len(params)
     params = list(params.items())
@@ -75,7 +82,7 @@ def grid_search(params):
     temp = []
     for i in range(max_param_choices):
         temp += [i for _ in range(param_num)]
-    for c in set(itertools.permutations(temp,param_num)):
+    for c in set(itertools.permutations(temp, param_num)):
         res = {}
         for i in range(len(c)):
             if c[i] >= len(params[i][1]):
@@ -86,21 +93,24 @@ def grid_search(params):
             yield res
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--train_file',
-                        help='the data file to load training points from, '
-                        'could be text file, binary flie or ann-benchmark format hdf5 file',
-                        default='glove-100-angular.hdf5')
-    parser.add_argument('--query_file',
-                        help='the data file to load query points from, if you use '
-                        'ann-benchmark format hdf5 file in train_file, this should be None',
-                        default=None)
-    parser.add_argument('--label_file',
-                        help='the data file to load groundtruth index from, only support text file',
-                        default=None)
+    parser.add_argument(
+        '--train_file',
+        help='the data file to load training points from, '
+        'could be text file, binary flie or ann-benchmark format hdf5 file',
+        default='glove-100-angular.hdf5')
+    parser.add_argument(
+        '--query_file',
+        help='the data file to load query points from, if you use '
+        'ann-benchmark format hdf5 file in train_file, this should be None',
+        default=None)
+    parser.add_argument(
+        '--label_file',
+        help=
+        'the data file to load groundtruth index from, only support text file',
+        default=None)
     parser.add_argument('--algorithm',
                         help='the name of SPTAG algorithm',
                         default="BKT")
@@ -125,8 +135,10 @@ def main():
         dimension = data_reader.featuredim
         label = data_reader.label
     else:
-        X_train = DataReader(args.train_file,args.dim,-1).readbatch()[1]
-        X_test = DataReader(args.query_file,args.dim,-1).readbatch()[1]
+        X_train = DataReader(args.train_file, args.dim,
+                             batch_size=-1).readbatch()[1]
+        X_test = DataReader(args.query_file, args.dim,
+                            batch_size=-1).readbatch()[1]
         distance = args.distance
         dimension = args.dim
         label = []
@@ -144,10 +156,10 @@ def main():
         else:
             label = []
             # we assume the groundtruth index are split by space
-            with open(args.label_file,'r') as f:
+            with open(args.label_file, 'r') as f:
                 for line in f:
                     label.append(line.strip().split())
-        
+
     print('got a train set of size (%d * %d)' % (X_train.shape[0], dimension))
     print('got %d queries' % len(X_test))
 
@@ -155,38 +167,50 @@ def main():
 
     para = nni.get_next_parameter()
     algo = Sptag(args.algorithm, distance)
-    algo.fit(X_train,para)
+    algo.fit(X_train, para)
     build_time = time.time() - t0
 
     print('Built index in', build_time)
 
-    search_param_choices = {"NumberOfInitialDynamicPivots":[1,2,4,8,16,32,50],
-                            "MaxCheck":[512,640,896,1408,2432,4408,8192],
-                            "NumberOfOtherDynamicPivots":[1,2,4,8,10]}
+    search_param_choices = {
+        "NumberOfInitialDynamicPivots": [1, 2, 4, 8, 16, 32, 50],
+        "MaxCheck": [512, 640, 896, 1408, 2432, 4408, 8192],
+        "NumberOfOtherDynamicPivots": [1, 2, 4, 8, 10]
+    }
 
     best_metric = -1
     best_res = {}
     for i, search_params in enumerate(grid_search(search_param_choices)):
         algo.set_query_arguments(search_params)
         attrs, results = run_individual_query(algo, X_train, X_test, distance,
-                                            args.k, 1)
+                                              args.k, 1)
 
         neighbors = [0 for _ in results]
         distances = [0 for _ in results]
 
         for idx, (t, ds) in enumerate(results):
             neighbors[idx] = [n for n, d in ds] + [-1] * (args.k - len(ds))
-            distances[idx] = [d for n, d in ds] + [float('inf')] * (args.k - len(ds))
+            distances[idx] = [d for n, d in ds
+                              ] + [float('inf')] * (args.k - len(ds))
         if args.label_file is None:
-            recalls_mean, qps = compute_metrics(label, attrs,
-                                                distances, args.k)
+            recalls_mean, qps = compute_metrics(label, attrs, distances,
+                                                args.k)
         else:
-            recalls_mean, qps = compute_metrics(label, attrs,
-                                                neighbors, args.k,from_index=True)
+            recalls_mean, qps = compute_metrics(label,
+                                                attrs,
+                                                neighbors,
+                                                args.k,
+                                                from_index=True)
 
-        combined_metric = -0.7 * np.log10(1-recalls_mean) + 0.3 * np.log10(qps)
+        combined_metric = -0.7 * np.log10(1 -
+                                          recalls_mean) + 0.3 * np.log10(qps)
 
-        res = {"default": combined_metric, "recall": recalls_mean, "qps": qps, "build_time": build_time}
+        res = {
+            "default": combined_metric,
+            "recall": recalls_mean,
+            "qps": qps,
+            "build_time": build_time
+        }
 
         if combined_metric > best_metric:
             best_metric = combined_metric
@@ -194,16 +218,21 @@ def main():
 
         res["build_params"] = para
         res["search_params"] = search_params
-        
+
         experiment_id = nni.get_experiment_id()
-        result_dir = os.path.join('results',args.train_file.split('.')[0])
+        result_dir = os.path.join('results', args.train_file.split('.')[0])
         if not os.path.exists(result_dir):
             os.makedirs(result_dir)
         trial_id = nni.get_trial_id()
-        with open(os.path.join(result_dir,"result_"+ str(trial_id)+ ' ' + str(i) +".json"),"w") as f:
-            json.dump(res,f)
-        
+        with open(
+                os.path.join(
+                    result_dir,
+                    "result_" + str(trial_id) + ' ' + str(i) + ".json"),
+                "w") as f:
+            json.dump(res, f)
+
     nni.report_final_result(best_res)
+
 
 if __name__ == '__main__':
     main()
