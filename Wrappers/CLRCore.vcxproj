@@ -119,6 +119,9 @@
     <Link>
       <AdditionalDependencies>CoreLibrary.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PreBuildEvent>
+      <Command>sn -k $(SolutionDir)sgKey.snk</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <Reference Include="System" />

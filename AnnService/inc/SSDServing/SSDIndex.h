@@ -132,9 +132,8 @@ namespace SPTAG {
                             double startTime = threadws.getElapsedMs();
                             p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
                             double endTime = threadws.getElapsedMs();
-                            p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
+                            p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
                             double exEndTime = threadws.getElapsedMs();
-                            p_results[index].ClearTmp();
 
                             p_stats[index].m_exLatency = exEndTime - endTime;
                             p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
@@ -156,6 +155,8 @@ namespace SPTAG {
                     sendingCost,
                     numQueries / sendingCost,
                     static_cast<uint32_t>(numQueries));
+
+                for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
             }
 
             template <typename ValueType>
@@ -171,12 +172,11 @@ namespace SPTAG {
                    p_index->m_pQuantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
-//                if (!p_opts.m_logFile.empty())
-//                {
-//                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
-//                }
-//                int numThreads = p_opts.m_iSSDNumberOfThreads;
-                int numThreads = 1;
+                if (!p_opts.m_logFile.empty())
+                {
+                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+                }
+                int numThreads = p_opts.m_iSSDNumberOfThreads;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;

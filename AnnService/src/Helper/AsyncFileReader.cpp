@@ -55,7 +55,7 @@ namespace SPTAG {
                     AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
                     if (nullptr != req)
                     {
-                        req->m_callback(req);
+                        req->m_callback(true);
                     }
                 }
                 totalQueued = totalDone;
@@ -75,7 +75,7 @@ namespace SPTAG {
                 AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[i].data));
                 if (nullptr != req)
                 {
-                    req->m_callback(req);
+                    req->m_callback(true);
                 }
             }
         }
@@ -114,7 +114,7 @@ namespace SPTAG {
                 
                 if (readRequest->m_success && readRequest->m_callback)
                 {
-                    readRequest->m_callback(readRequest);
+                    readRequest->m_callback(true);
                     readRequest->m_callback = nullptr;
                 }
             }

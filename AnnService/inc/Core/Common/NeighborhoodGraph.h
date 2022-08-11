@@ -109,13 +109,8 @@ namespace SPTAG
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-                if (index->m_pQuantizer) {
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
-                }
-                else {
-                    // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                    buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
-                }
+                // Build the entire RNG graph, both builds the KNN and refines it to RNG
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iheadNumGPUs, m_iTPTBalanceFactor);
 
                 if (idmap != nullptr) {
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -149,7 +144,6 @@ break;
                 }
                 else
                 {
-			printf("No quantizer!\n");
                     PartitionByTptreeCore<T, T>(index, indices, first, last, leaves);
                 }
             }
@@ -330,13 +324,6 @@ break;
                 LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
                 LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
-
-		for(int i=0; i<10; i++) {
-                  for(int j=0; j<20; j++) {
-                    std::cout << static_cast<int16_t>(((uint8_t*)index->GetSample(i))[j]) << ", ";
-		  }
-		  std::cout << std::endl;
-		}
 
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {

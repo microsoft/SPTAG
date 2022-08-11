@@ -127,11 +127,9 @@ namespace SPTAG
 #pragma region K-NN search
 
 #define Search(CheckDeleted) \
-        if (m_pQuantizer && !p_query.HasQuantizedTarget()) \
-        { p_query.SetTarget(p_query.GetTarget(), m_pQuantizer); } \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
-        m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
-        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        m_pTrees.InitSearchTrees<T,Q>(m_pSamples, m_fComputeDistance, p_query, p_space); \
+        m_pTrees.SearchTrees<T,Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         while (!p_space.m_NGQueue.empty()) { \
             NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             const SizeType *node = m_pGraph[gnode.node]; \
@@ -158,7 +156,7 @@ namespace SPTAG
             else p_space.m_iNumOfContinuousNoBetterPropagation = 0; \
             if (p_space.m_iNumOfContinuousNoBetterPropagation > m_iThresholdOfNumberOfContinuousNoBetterPropagation) { \
                 if (p_space.m_iNumberOfTreeCheckedLeaves <= p_space.m_iNumberOfCheckedLeaves / 10) { \
-                    m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+                    m_pTrees.SearchTrees<T,Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
                 } else if (gnode.distance > p_query.worstDist()) { \
                     break; \
                 } \
@@ -166,16 +164,17 @@ namespace SPTAG
         } \
         p_query.SortResult(); \
 
-        template <typename T>
-        void Index<T>::SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
-        {
-            Search(if (!m_deletedID.Contains(gnode.node)))
-        }
 
         template <typename T>
-        void Index<T>::SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
+        template <typename Q>
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const
         {
-            Search(;)
+            if (m_deletedID.Count() == 0 || p_searchDeleted) {
+                Search(;)
+            }
+            else {
+                Search(if (!m_deletedID.Contains(gnode.node)))
+            }
         }
 
         template<typename T>
@@ -187,10 +186,30 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
+
+            if (m_pQuantizer)
+            {
+                if (!(p_results->HasQuantizedTarget())) {
+                    p_results->SetTarget(p_results->GetTarget(), m_pQuantizer);
+                }
+                switch (m_pQuantizer->GetReconstructType())
+                {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+                SearchIndex<Type>(*p_results, *workSpace, p_searchDeleted); \
+                break; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                default: break;
+                }
+            }
             else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            {            
+                SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
+            }
 
             m_workSpacePool->Return(workSpace);
 
@@ -211,10 +230,30 @@ namespace SPTAG
             auto workSpace = m_workSpacePool->Rent();
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
-                SearchIndexWithDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
+
+            if (m_pQuantizer)
+            {
+                if (!(p_results->HasQuantizedTarget())) {
+                    p_results->SetTarget(p_results->GetTarget(), m_pQuantizer);
+                }
+                switch (m_pQuantizer->GetReconstructType())
+                {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+                SearchIndex<Type>(*p_results, *workSpace, p_searchDeleted); \
+                break; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                default: break;
+                }
+            }
             else
-                SearchIndexWithoutDeleted(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace);
+            {
+                SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
+            }
 
             m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
@@ -227,8 +266,32 @@ namespace SPTAG
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
-            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
-            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+
+            if (m_pQuantizer)
+            {
+                if (!(p_results->HasQuantizedTarget())) {
+                    p_results->SetTarget(p_results->GetTarget(), m_pQuantizer);
+                }
+                switch (m_pQuantizer->GetReconstructType())
+                {
+#define DefineVectorValueType(Name, Type) \
+case VectorValueType::Name: \
+                    m_pTrees.InitSearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *workSpace); \
+                    m_pTrees.SearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots); \
+                    break; \
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+                default: break;
+                }
+            }
+            else
+            {
+                m_pTrees.InitSearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
+                m_pTrees.SearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            }
+
             BasicResult * res = p_query.GetResults();
             for (int i = 0; i < p_query.GetResultNum(); i++)
             {
