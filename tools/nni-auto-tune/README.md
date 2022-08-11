@@ -29,10 +29,38 @@ Use this command to start a NNI trial to tune SPTAG model on ann-benchmark forma
 nnictl create --config config.yml
 ```
 
-If you wish to tune SPTAG on a binary dataset, for example, origin sift dataset. You can change `trialCommand` in config.yml to:
+If you wish to tune SPTAG on a binary dataset or text dataset, the input file format are as below.
+
+#### DEFAULT (Binary)
+> Input raw data for index build and input query file for index search (suppose vector dimension is 3):
+
+```
+<4 bytes int representing num_vectors><4 bytes int representing num_dimension>
+<num_vectors * num_dimension * sizeof(data type) bytes raw data>
+```
+
+#### TXT
+> Input raw data for index build and input query file for index search (suppose vector dimension is 3):
+
+```
+<metadata1>\t<v11>|<v12>|<v13>|
+<metadata2>\t<v21>|<v22>|<v23>|
+...
+```
+where each line represents a vector with its metadata and its value separated by a tab space. Each dimension of a vector is separated by | or use --delimiter to define the separator.
+
+> Truth file to calculate recall (suppose K is 2):
+```
+<t11> <t12>
+<t21> <t22>
+...
+```
+where each line represents the K nearest neighbors of a query separated by a blank space. Each neighbor is given by its vector id.
+
+Then you can change `trialCommand` in config.yml to:
 
 ```sh
-python main.py --train_file /sift/sift_base.fvecs --query_file sift/sift_query.fvecs --distance euclidean --dim 128
+python main.py --train_file victors.bin --query_file query.bin --label_file truth.txt --distance euclidean
 ```
 
 **NOTE:** Always clear corresponding folder under `results/` before starting a trial on same dataset.
@@ -80,4 +108,3 @@ fashion-mnist-784-euclidean
 ------------------
 
 ![fashion-mnist-784-euclidean](picture/fashion-mnist-784-euclidean.png)
-

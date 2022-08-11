@@ -18,13 +18,10 @@ class DataReader:
                  normalize=False,
                  targettype='float32'):
         self.mytype = targettype
-        if filename.find('.bin') >= 0 or filename.find('.fvecs') >= 0:
-            # this reading function is for sift format binary file
-            # please change it if you use other format
+        if filename.find('.bin') >= 0:
             self.fin = open(filename, 'rb')
-            m = os.path.getsize(filename)
+            R = unpack('i', self.fin.read(4))[0]
             self.featuredim = unpack('i', self.fin.read(4))[0]
-            R = m // (4 + 4 * self.featuredim)
             self.isbinary = True
             self.type = datatype
             print('Open Binary DataReader for data(%d,%d)...' %

@@ -125,6 +125,9 @@ def main():
                         default=100,
                         type=int,
                         help="the dimention of training vectors")
+    parser.add_argument("--data_type",
+                        default="float32",
+                        help="the data type of input vectors")
     args = parser.parse_args()
 
     if args.train_file.endswith(".hdf5"):
@@ -135,10 +138,14 @@ def main():
         dimension = data_reader.featuredim
         label = data_reader.label
     else:
-        X_train = DataReader(args.train_file, args.dim,
-                             batch_size=-1).readbatch()[1]
-        X_test = DataReader(args.query_file, args.dim,
-                            batch_size=-1).readbatch()[1]
+        X_train = DataReader(args.train_file,
+                             args.dim,
+                             batchsize=-1,
+                             datatype=args.data_type).readbatch()[1]
+        X_test = DataReader(args.query_file,
+                            args.dim,
+                            batchsize=-1,
+                            datatype=args.data_type).readbatch()[1]
         distance = args.distance
         dimension = args.dim
         label = []
@@ -174,7 +181,7 @@ def main():
 
     search_param_choices = {
         "NumberOfInitialDynamicPivots": [1, 2, 4, 8, 16, 32, 50],
-        "MaxCheck": [512, 640, 896, 1408, 2432, 4408, 8192],
+        "MaxCheck": [512, 640, 896, 1408, 2432, 4408, 8192, 10250, 12800],
         "NumberOfOtherDynamicPivots": [1, 2, 4, 8, 10]
     }
 
