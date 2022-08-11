@@ -1375,6 +1375,8 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     auto vectors = (DTYPE*)vectorSet->GetData();
     int per_gpu_result = (result_size)*K;
 
+    //try access the vector here immediately
+
     LOG_INFO("QueryDatatype: %s, Rows:%ld, Columns:%d\n", (STR(DTYPE)), result_size, dim);
     LOG_INFO("Datatype: %s, Rows:%ld, Columns:%d\n", (STR(DTYPE)), vector_size, dim);
 
@@ -1520,8 +1522,17 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             //copy one chunk of vectorSet
             //LOG_INFO("Alloc'ing Check_Points on device: %zu bytes.\n", curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Converting to Sub Point Array\n");
-            int start = GPUOffset[i] + batchOffset[i];
+            size_t start = GPUOffset[i] + batchOffset[i];
+            //32M debug 400M, 3rd batch failure, 48M debug 200M, 4th batch failure
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Converting offset: %lu at vectors[%lu] for batchsize: %lu\n", start, start*dim, curr_batch_size[i]);
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Peeking current subvector 0, dim 0: %lu at %p\n", vectors[start * dim], &vectors[start * dim]);
             sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start * dim], curr_batch_size[i], dim);
+            //if (start == 48000000) {
+            //    sub_vectors_points[i] = convertMatrix2 < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start * dim], curr_batch_size[i], dim);
+            //}
+            //else {
+            //    sub_vectors_points[i] = convertMatrix < DTYPE, SUMTYPE, MAX_DIM >(&vectors[start * dim], curr_batch_size[i], dim);
+            //}
             //for (int coo = 0; coo < 25; coo++) {
             //    LOG_INFO("Vector Set Point[0] Coord %d is : %lu\n", coo, (unsigned long)sub_vectors_points[i][0].coords[coo]);
             //}

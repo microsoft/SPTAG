@@ -72,6 +72,20 @@ class Point {
     }
   }
 
+  __host__ __device__ void loadChunk2(T* data, int exact_dims) {
+
+      uint8_t* test = reinterpret_cast<uint8_t*>(data);
+      for (int i = 0; i < exact_dims / 4; i++) {
+          coords[i] = 0;
+          for (int j = 0; j < 4; j++) {
+              coords[i] += (test[i * 4 + j] << (j * 8));
+          }
+      }
+      for (int i = exact_dims / 4; i < Dim / 4; i++) {
+          coords[i] = 0;
+      }
+  }
+
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim; i++) {
       coords[i] = other.coords[i];
@@ -167,6 +181,19 @@ class Point<uint8_t, SUMTYPE, Dim> {
     }
   }
 
+  __host__ __device__ void loadChunk2(uint8_t* data, int exact_dims) {
+
+      uint8_t* test = reinterpret_cast<uint8_t*>(data);
+      for (int i = 0; i < exact_dims / 4; i++) {
+          coords[i] = 0;
+          for (int j = 0; j < 4; j++) {
+              coords[i] += (test[i * 4 + j] << (j * 8));
+          }
+      }
+      for (int i = exact_dims / 4; i < Dim / 4; i++) {
+          coords[i] = 0;
+      }
+  }
 
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim/4; i++) {
@@ -280,6 +307,25 @@ class Point<int8_t, SUMTYPE, Dim> {
     }
   }
 
+  __host__ __device__ void loadChunk2(int8_t* data, int exact_dims) {
+      printf("Loading...\n");
+      uint8_t* test = reinterpret_cast<uint8_t*>(data);
+      printf("Finished pointer casting from %hhd to %hhu\n", data, test);
+      for (int i = 0; i < exact_dims / 4; i++) {
+          coords[i] = 0;
+          printf("Finished initializing set %d", i);
+          for (int j = 0; j < 4; j++) {
+              coords[i] += (test[i * 4 + j] << (j * 8));
+              printf("Finished packing %d th coord\n", i*4+j);
+          }
+          printf("Finished packing set %d\n", i);
+      }
+      for (int i = exact_dims / 4; i < Dim / 4; i++) {
+          coords[i] = 0;
+          printf("Finished filling empty coord %d\n", i);
+      }
+  }
+
   __host__ int8_t getVal(int idx) {
     if(idx % 4 == 0) {
       return (int8_t)(coords[idx/4] & 0x000000FF);
@@ -387,6 +433,16 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, size_t rows, int exact_d
   }
   return pointArray;
 } 
+
+template<typename T, typename SUMTYPE, int Dim>
+__host__ Point<T, SUMTYPE, Dim>* convertMatrix2(T* data, size_t rows, int exact_dim) {
+    Point<T, SUMTYPE, Dim>* pointArray = (Point<T, SUMTYPE, Dim>*)malloc(rows * sizeof(Point<T, SUMTYPE, Dim>));
+    for (size_t i = 0; i < rows; i++) {
+        pointArray[i].loadChunk2(&data[i * exact_dim], exact_dim);
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Finished %lu point converting\n", i);
+    }
+    return pointArray;
+}
 
 template<typename T, typename SUMTYPE, int Dim>
 __host__ Point<T, SUMTYPE, Dim>* convertMatrix(SPTAG::VectorIndex* index, size_t rows, int exact_dim) {
