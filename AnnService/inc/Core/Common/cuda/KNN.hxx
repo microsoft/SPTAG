@@ -1305,16 +1305,16 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         //Results [KNN from GPU0][KNN from GPU1][KNN from GPU2][KNN from GPU3]
         // Every block will be [result_size*K] [K|K|K|...|K]
         // The real KNN is selected from 4*KNN
-        int* reader_ptrs = (int*)malloc(NUM_GPUS * sizeof(int));
-        for (int i = 0; i < result_size; i++) {
+        size_t* reader_ptrs = (size_t*)malloc(NUM_GPUS * sizeof(size_t));
+        for (size_t i = 0; i < result_size; i++) {
             //For each result, there should be writer pointer, four reader pointers
             // reader ptr is assigned to i+gpu_idx*(result_size*K)/4
-            for (int gpu_idx = 0; gpu_idx < NUM_GPUS; gpu_idx++) {
+            for (size_t gpu_idx = 0; gpu_idx < NUM_GPUS; gpu_idx++) {
                 reader_ptrs[gpu_idx] = i * K + gpu_idx * (result_size * K);
             }
-            for (int writer_ptr = i * K; writer_ptr < (i + 1) * K; writer_ptr++) {
+            for (size_t writer_ptr = i * K; writer_ptr < (i + 1) * K; writer_ptr++) {
                 int selected = 0;
-                for (int gpu_idx = 1; gpu_idx < NUM_GPUS; gpu_idx++) {
+                for (size_t gpu_idx = 1; gpu_idx < NUM_GPUS; gpu_idx++) {
                     //if the other gpu has shorter dist
                     if (results[reader_ptrs[gpu_idx]].dist < results[reader_ptrs[selected]].dist) {
                         selected = gpu_idx;
@@ -1324,7 +1324,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                 temp_dist[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]++].dist;
             }
         }
-        LOG(SPTAG::Helper::LogLevel::LL_Info, "Collected all the result from GPUs\n");
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Collected all the result from GPUs.\n");
         //update results, just assign to truthset for first batch
         if (update) {
             updateKNNResults(truthset, distset, temp_truth, temp_dist, result_size, K);
@@ -1334,6 +1334,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             distset = temp_dist;
             update = true;
         }
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Updated batch result.\n");
         // Update all batchOffsets and check if done
         done = true;
         for (int gpuNum = 0; gpuNum < NUM_GPUS; ++gpuNum) {
@@ -1343,8 +1344,8 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             }
             //avoid memory leak
             free(sub_vectors_points[gpuNum]);
-            free(results);
         }
+        free(results);
     } // Batches loop (while !done) 
 
     auto t2 = std::chrono::high_resolution_clock::now();
