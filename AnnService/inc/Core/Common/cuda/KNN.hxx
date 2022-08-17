@@ -1215,7 +1215,8 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         size_t queryPointSize = querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>);
         size_t resultSetSize = querySet->Count() * K * 4;//size(int) = 4
         size_t resMemAvail = (freeMem * 0.9) - (queryPointSize + resultSetSize); // Only use 90% of total memory to be safe
-        int maxEltsPerBatch = resMemAvail / (sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+        size_t cpuSaveMem = resMemAvail / NUM_GPUS;//using 90% of multi-GPUs might be to much for CPU. 
+        int maxEltsPerBatch = cpuSaveMem / (sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
         batchSize[gpuNum] = min(maxEltsPerBatch, (int)(vectorsPerGPU[gpuNum]));
         // If GPU memory is insufficient or so limited that we need so many batches it becomes inefficient, return error
         if (batchSize[gpuNum] == 0 || ((int)vectorsPerGPU[gpuNum]) / batchSize[gpuNum] > 10000) {
@@ -1283,7 +1284,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets
             int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
             size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608 for 64 Threads
-
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching kernel on %d\n", i);
             query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K);
             cudaError_t c_ret = cudaGetLastError();
 
@@ -1323,6 +1324,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                 temp_dist[i][writer_ptr - (i * K)] = results[reader_ptrs[selected]++].dist;
             }
         }
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "Collected all the result from GPUs\n");
         //update results, just assign to truthset for first batch
         if (update) {
             updateKNNResults(truthset, distset, temp_truth, temp_dist, result_size, K);
