@@ -1,7 +1,6 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 
-set (Python3_USE_STATIC_LIBS true)
 
 find_package(Python3 COMPONENTS Development)
 
