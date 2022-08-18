@@ -81,6 +81,15 @@ inline bool fileexists(const TCHAR* path) {
     return (dwAttr != INVALID_FILE_ATTRIBUTES) && (dwAttr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 #define mkdir(a) CreateDirectory(a, NULL)
+
+#ifndef max
+#define max(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef min
+#define min(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
 #endif
 
 namespace SPTAG
