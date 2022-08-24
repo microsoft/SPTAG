@@ -38,6 +38,11 @@ nuget_release = os.environ.get('NUGET_RELEASE')
 python_version = "%d.%d" % (sys.version_info.major, sys.version_info.minor)
 print ("Python version:%s" % python_version)
 
+if 'bdist_wheel' in sys.argv:
+  if not any(arg.startswith('--python-tag') for arg in sys.argv):
+      sys.argv.extend(['--python-tag', 'py%d%d'%(sys.version_info.major, sys.version_info.minor)])
+print (sys.argv)
+
 def _setup():
     setuptools.setup(
         name = 'sptag',
