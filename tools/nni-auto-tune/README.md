@@ -3,7 +3,7 @@
 
 ## Requirements
 
-This example requires NNI >= 2.8, python >= 3.9, Ubuntu >= 20.04
+This example requires NNI >= 2.8, python == 3.6/3.8
 
 
 ```sh

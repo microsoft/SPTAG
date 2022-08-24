@@ -8,7 +8,7 @@ tuner:
   name: TPE
   classArgs:
     optimize_mode: maximize
-    
+
 trainingService: 
   platform: local
 

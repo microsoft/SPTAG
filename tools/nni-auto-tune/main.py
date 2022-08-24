@@ -181,7 +181,7 @@ def main():
 
     search_param_choices = {
         "NumberOfInitialDynamicPivots": [1, 2, 4, 8, 16, 32, 50],
-        "MaxCheck": [512, 640, 896, 1408, 2432, 4408, 8192, 10250, 12800],
+        "MaxCheck": [512, 1408, 2432, 4408, 8192, 10250, 12800, 15600, 19600],
         "NumberOfOtherDynamicPivots": [1, 2, 4, 8, 10]
     }
 
@@ -209,8 +209,7 @@ def main():
                                                 args.k,
                                                 from_index=True)
 
-        combined_metric = -0.7 * np.log10(1 -
-                                          recalls_mean) + 0.3 * np.log10(qps)
+        combined_metric = -1 * np.log10(1 - recalls_mean) + 0.1 * np.log10(qps)
 
         res = {
             "default": combined_metric,
