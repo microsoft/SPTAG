@@ -14,7 +14,7 @@ trialCommand:
 
   pip install -i https://test.pypi.org/simple/ sptag;
 
-  git clone -b add-ann-auto-tune https://github.com/smallv0221/SPTAG.git;
+  git clone https://github.com/microsoft/SPTAG.git;
 
   cd SPTAG/tools/nni-auto-tune;
 
