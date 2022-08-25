@@ -420,7 +420,7 @@ namespace SPTAG
 
                     if (nullptr != req)
                     {
-                        req->m_callback(req);
+                        req->m_callback(true);
                     }
                 }
             }
@@ -631,7 +631,7 @@ namespace SPTAG
                         AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>((events[r].data));
                         if (nullptr != req)
                         {
-                            req->m_callback(req);
+                            req->m_callback(true);
                         }
                     }
                 }

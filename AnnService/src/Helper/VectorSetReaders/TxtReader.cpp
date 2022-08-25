@@ -66,12 +66,12 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint32_t fileTaskCount = 1;
+        std::uint32_t fileTaskCount = 0;
         std::size_t blockSize = m_subTaskBlocksize;
         if (0 == blockSize)
         {
             fileTaskCount = m_options->m_threadNum;
-if(fileTaskCount == 0) fileTaskCount = 1;
+            if(fileTaskCount == 0) fileTaskCount = 1;
             blockSize = (fileInfo.second + fileTaskCount - 1) / fileTaskCount;
         }
         else

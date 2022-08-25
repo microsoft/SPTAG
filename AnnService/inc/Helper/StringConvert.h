@@ -95,7 +95,7 @@ inline bool ConvertStringToUnsignedInt(const char* p_str, DataType& p_value)
         return false;
     }
 
-    if (val < (std::numeric_limits<DataType>::min)() || val >(std::numeric_limits<DataType>::max)())
+    if (val >(std::numeric_limits<DataType>::max)())
     {
         return false;
     }
