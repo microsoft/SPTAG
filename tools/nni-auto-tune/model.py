@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
+
 from sptag import SPTAG as SPTAG
 from scipy.spatial.distance import pdist as scipy_pdist
 import numpy
