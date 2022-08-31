@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
   <metadata>
     <id>SPTAG.Library</id>
-    <version>1.2.12-mainOPQ-CoreLib-SPANN-c6a30481-vc140</version>
+    <version>1.2.13-mainOPQ-CoreLib-SPANN-withsource-a6b7604</version>
     <title>SPTAG.Library</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli,zhah</owners>
@@ -10,7 +10,7 @@
     <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
     <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
     <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
-    <releaseNotes>publish with commit microsoft/legacy-avx512/c6a30481</releaseNotes>
+    <releaseNotes>publish with commit microsoft/add python version in wheel package/a6b7604</releaseNotes>
     <copyright>Copyright © Microsoft</copyright>
   </metadata>
   <files>
@@ -78,9 +78,39 @@
     <file src="AnnService\inc\Helper\StringConvert.h" target="build\native\inc\Helper\StringConvert.h" />
     <file src="AnnService\inc\Helper\ThreadPool.h" target="build\native\inc\Helper\ThreadPool.h" />
     <file src="AnnService\inc\Helper\VectorSetReader.h" target="build\native\inc\Helper\VectorSetReader.h" />
+    <file src="AnnService\src\Core\BKT\BKTIndex.cpp" target="build\native\src\Core\BKT\BKTIndex.cpp" />
+    <file src="AnnService\src\Core\Common\CommonUtils.cpp" target="build\native\src\Core\Common\CommonUtils.cpp" />
+    <file src="AnnService\src\Core\Common\DistanceUtils.cpp" target="build\native\src\Core\Common\DistanceUtils.cpp" />
+    <file src="AnnService\src\Core\Common\InstructionUtils.cpp" target="build\native\src\Core\Common\InstructionUtils.cpp" />
+    <file src="AnnService\src\Core\Common\IQuantizer.cpp" target="build\native\src\Core\Common\IQuantizer.cpp" />
+    <file src="AnnService\src\Core\Common\NeighborhoodGraph.cpp" target="build\native\src\Core\Common\NeighborhoodGraph.cpp" />
+    <file src="AnnService\src\Core\Common\SIMDUtils.cpp" target="build\native\src\Core\Common\SIMDUtils.cpp" />
+    <file src="AnnService\src\Core\KDT\KDTIndex.cpp" target="build\native\src\Core\KDT\KDTIndex.cpp" />
+    <file src="AnnService\src\Core\SPANN\SPANNIndex.cpp" target="build\native\src\Core\SPANN\SPANNIndex.cpp" />
+    <file src="AnnService\src\Core\MetadataSet.cpp" target="build\native\src\Core\MetadataSet.cpp" />
+    <file src="AnnService\src\Core\VectorIndex.cpp" target="build\native\src\Core\VectorIndex.cpp" />
+    <file src="AnnService\src\Core\VectorSet.cpp" target="build\native\src\Core\VectorSet.cpp" />
+    <file src="AnnService\src\Helper\VectorSetReader.cpp" target="build\native\src\Helper\VectorSetReader.cpp" />
+    <file src="AnnService\src\Helper\SimpleIniReader.cpp" target="build\native\src\Helper\SimpleIniReader.cpp" />
+    <file src="AnnService\src\Helper\DynamicNeighbors.cpp" target="build\native\src\Helper\DynamicNeighbors.cpp" />
+    <file src="AnnService\src\Helper\Concurrent.cpp" target="build\native\src\Helper\Concurrent.cpp" />
+    <file src="AnnService\src\Helper\CommonHelper.cpp" target="build\native\src\Helper\CommonHelper.cpp" />
+    <file src="AnnService\src\Helper\Base64Encode.cpp" target="build\native\src\Helper\Base64Encode.cpp" />
+    <file src="AnnService\src\Helper\AsyncFileReader.cpp" target="build\native\src\Helper\AsyncFileReader.cpp" />
+    <file src="AnnService\src\Helper\ArgumentsParser.cpp" target="build\native\src\Helper\ArgumentsParser.cpp" />
+    <file src="AnnService\src\Helper\VectorSetReaders\DefaultReader.cpp" target="build\native\src\Helper\VectorSetReaders\DefaultReader.cpp" />
+    <file src="AnnService\src\Helper\VectorSetReaders\TxtReader.cpp" target="build\native\src\Helper\VectorSetReaders\TxtReader.cpp" />
+    <file src="AnnService\src\Helper\VectorSetReaders\XvecReader.cpp" target="build\native\src\Helper\VectorSetReaders\XvecReader.cpp" />
+    <file src="ThirdParty\zstd\lib\zdict.h" target="build\native\zdict.h" />
+    <file src="ThirdParty\zstd\lib\zstd.h" target="build\native\zstd.h" />
+    <file src="ThirdParty\zstd\lib\zstd_errors.h" target="build\native\zstd_errors.h" />
     <file src="x64\Debug\CoreLibrary.lib" target="lib\native\debug\x64\CoreLibrary.lib" />
     <file src="x64\Debug\CoreLibrary.pdb" target="lib\native\debug\x64\CoreLibrary.pdb" />
+    <file src="x64\Debug\libzstd.dll" target="lib\native\debug\x64\libzstd.dll" />
     <file src="x64\Release\CoreLibrary.lib" target="lib\native\retail\x64\CoreLibrary.lib" />
+    <file src="x64\Release\libzstd.dll" target="lib\native\retail\x64\libzstd.dll" />
     <file src="obj\x64_Release\CoreLibrary\CoreLibrary.pdb" target="lib\native\retail\x64\CoreLibrary.pdb" />
+    <file src="packages\Zstandard.dyn.x64.1.4.0\build\native\x64\libzstd.lib" target="lib\native\debug\x64\libzstd.lib" />
+    <file src="packages\Zstandard.dyn.x64.1.4.0\build\native\x64\libzstd.lib" target="lib\native\retail\x64\libzstd.lib" />
   </files>
 </package>
