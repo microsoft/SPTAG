@@ -4,9 +4,9 @@
 #ifndef _SPTAG_COMMON_QUANTIZER_H_
 #define _SPTAG_COMMON_QUANTIZER_H_
 
-#include "../Common.h"
+#include "inc/Core/Common.h"
 #include <cstdint>
-#include "../CommonDataStructure.h"
+#include "inc/Core/CommonDataStructure.h"
 #include "DistanceUtils.h"
 
 namespace SPTAG
@@ -56,9 +56,6 @@ namespace SPTAG
             virtual DimensionType GetNumSubvectors() const = 0;
 
             virtual int GetBase() const = 0;
-
-
-            virtual float* GetCosineDistanceTables() = 0;
 
             virtual float* GetL2DistanceTables() = 0;
         };

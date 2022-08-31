@@ -8,7 +8,7 @@
 #include <string>
 #include <shared_mutex>
 
-#include "../VectorIndex.h"
+#include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "QueryResultSet.h"
@@ -210,53 +210,28 @@ break;
                 return LoadTrees(ptr);
             }
 
-            template <typename T>
+            template <typename T, typename Q>
             void InitSearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
                 for (int i = 0; i < m_iTreeNumber; i++) {
-                    KDTSearch(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
+                    KDTSearch<T, Q>(p_data, fComputeDistance, p_query, p_space, m_pTreeStart[i], 0);
                 }
             }
 
-            template <typename T>
+            template <typename T, typename Q>
             void SearchTrees(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const int p_limits) const
             {
                 while (!p_space.m_SPTQueue.empty() && p_space.m_iNumberOfCheckedLeaves < p_limits)
                 {
                     auto& tcell = p_space.m_SPTQueue.pop();
-                    KDTSearch(p_data, fComputeDistance, p_query, p_space, tcell.node, tcell.distance);
+                    KDTSearch<T, Q>(p_data, fComputeDistance, p_query, p_space, tcell.node, tcell.distance);
                 }
             }
 
         private:
 
-            template <typename T>
-            void KDTSearch(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T>& p_query,
-                COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const
-            {
-                if (m_pQuantizer)
-                {
-                    switch (m_pQuantizer->GetReconstructType())
-                    {
-#define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, distBound);
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-
-                    default: break;
-                    }
-                }
-                else
-                {
-                    return KDTSearchCore<T, T>(p_data, fComputeDistance, p_query, p_space, node, distBound);
-                }
-
-            }
-
             template <typename T, typename Q>
-            void KDTSearchCore(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query,
+            void KDTSearch(const Dataset<T>& p_data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query,
                            COMMON::WorkSpace& p_space, const SizeType node, const float distBound) const {
                 if (node < 0)
                 {
@@ -292,7 +267,7 @@ return KDTSearchCore<T, Type>(p_data, fComputeDistance, p_query, p_space, node, 
                 }
 
                 p_space.m_SPTQueue.insert(NodeDistPair(otherChild, distanceBound));
-                KDTSearchCore<T,Q>(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
+                KDTSearch<T,Q>(p_data, fComputeDistance, p_query, p_space, bestChild, distBound);
             }
 
 

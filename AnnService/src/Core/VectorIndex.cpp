@@ -364,12 +364,16 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     auto fp = SPTAG::f_createIO();
     if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
+    auto mp = std::shared_ptr<Helper::DiskIO>(new Helper::SimpleBufferIO());
+    if (mp == nullptr || !mp->Initialize(nullptr, std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
     ErrorCode ret = ErrorCode::Success;
-    
-    std::uint64_t configSize = 0;
+    if ((ret = SaveIndexConfig(mp)) != ErrorCode::Success) return ret;
+
+    std::uint64_t configSize = mp->TellP();
+    mp->ShutDown();
+
     IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize);
     if ((ret = SaveIndexConfig(fp)) != ErrorCode::Success) return ret;
-    configSize = fp->TellP() - sizeof(configSize);
 
     if (p_abort != nullptr && p_abort->ShouldAbort()) ret = ErrorCode::ExternalAbort;
     else {
@@ -393,7 +397,6 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
             ret = m_pQuantizer->SaveQuantizer(fp);
         }
     }
-    if (ErrorCode::Success == ret) IOBINARY(fp, WriteBinary, sizeof(configSize), (char*)&configSize, 0);
     fp->ShutDown();
 
     if (ret != ErrorCode::Success) std::remove(p_file.c_str());
@@ -403,7 +406,7 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
-    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
+    std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, bool p_shareOwnership)
 {
     LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
 
@@ -419,7 +422,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
         LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
         BuildMetaMapping(false);
     }
-    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized);
+    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized, p_shareOwnership);
     return ErrorCode::Success;
 }
 

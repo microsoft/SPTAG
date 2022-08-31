@@ -27,9 +27,9 @@ namespace SPTAG
         public:
             Dataset() {}
 
-            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            Dataset(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool shareOwnership_ = true)
             {
-                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, transferOnwership_);
+                Initialize(rows_, cols_, rowsInBlock_, capacity_, data_, shareOwnership_);
             }
             ~Dataset()
             {
@@ -37,12 +37,12 @@ namespace SPTAG
                 for (T* ptr : incBlocks) ALIGN_FREE(ptr);
                 incBlocks.clear();
             }
-            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool transferOnwership_ = true)
+            void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool shareOwnership_ = true)
             {
                 rows = rows_;
                 cols = cols_;
                 data = data_;
-                if (data_ == nullptr || !transferOnwership_)
+                if (data_ == nullptr || !shareOwnership_)
                 {
                     ownData = true;
                     data = (T*)ALIGN_ALLOC(((size_t)rows) * cols * sizeof(T));

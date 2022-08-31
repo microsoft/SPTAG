@@ -4,7 +4,7 @@
 #ifndef _SPTAG_HELPER_VECTORSETREADERS_TXTREADER_H_
 #define _SPTAG_HELPER_VECTORSETREADERS_TXTREADER_H_
 
-#include "../VectorSetReader.h"
+#include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/Concurrent.h"
 
 #include <atomic>
@@ -34,12 +34,12 @@ private:
 
     static std::vector<FileInfoPair> GetFileSizes(const std::string& p_filePaths);
 
-    void LoadFileInternal(const std::string& p_filePath,
+    ErrorCode LoadFileInternal(const std::string& p_filePath,
                           std::uint32_t p_subtaskID,
                           std::uint32_t p_fileBlockID,
                           std::size_t p_fileBlockSize);
 
-    void MergeData();
+    ErrorCode MergeData();
 
     template<typename DataType>
     bool TranslateVector(char* p_str, DataType* p_vector)

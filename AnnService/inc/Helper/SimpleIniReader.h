@@ -4,7 +4,7 @@
 #ifndef _SPTAG_HELPER_INIREADER_H_
 #define _SPTAG_HELPER_INIREADER_H_
 
-#include "../Core/Common.h"
+#include "inc/Core/Common.h"
 #include "StringConvert.h"
 
 #include <vector>

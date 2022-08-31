@@ -4,22 +4,22 @@
 #ifndef _SPTAG_BKT_INDEX_H_
 #define _SPTAG_BKT_INDEX_H_
 
-#include "../Common.h"
-#include "../VectorIndex.h"
+#include "inc/Core/Common.h"
+#include "inc/Core/VectorIndex.h"
 
-#include "../Common/CommonUtils.h"
-#include "../Common/DistanceUtils.h"
-#include "../Common/QueryResultSet.h"
-#include "../Common/Dataset.h"
-#include "../Common/WorkSpace.h"
-#include "../Common/WorkSpacePool.h"
-#include "../Common/RelativeNeighborhoodGraph.h"
-#include "../Common/BKTree.h"
-#include "../Common/Labelset.h"
+#include "inc/Core/Common/CommonUtils.h"
+#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/Dataset.h"
+#include "inc/Core/Common/WorkSpace.h"
+#include "inc/Core/Common/WorkSpacePool.h"
+#include "inc/Core/Common/RelativeNeighborhoodGraph.h"
+#include "inc/Core/Common/BKTree.h"
+#include "inc/Core/Common/Labelset.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/ThreadPool.h"
-#include "../Common/IQuantizer.h"
+#include "inc/Core/Common/IQuantizer.h"
 
 #include <functional>
 #include <shared_mutex>
@@ -152,7 +152,7 @@ namespace SPTAG
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
-            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false);
+            ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;

@@ -48,7 +48,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 ```
 set GIT_LFS_SKIP_SMUDGE=1
-git clone https://github.com/microsoft/SPTAG
+git clone --recurse-submodules https://github.com/microsoft/SPTAG
 
 OR
 

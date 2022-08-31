@@ -16,8 +16,30 @@ void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_pt
     std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
 
-    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
-    vecIndex->SetParameter("NumberOfThreads", "16");
+    if (algo != SPTAG::IndexAlgoType::SPANN) {
+        vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+        vecIndex->SetParameter("NumberOfThreads", "16");
+    }
+    else {
+        vecIndex->SetParameter("IndexAlgoType", "BKT", "Base");
+        vecIndex->SetParameter("DistCalcMethod", distCalcMethod, "Base");
+
+        vecIndex->SetParameter("isExecute", "true", "SelectHead");
+        vecIndex->SetParameter("NumberOfThreads", "4", "SelectHead");
+        vecIndex->SetParameter("Ratio", "0.2", "SelectHead"); // vecIndex->SetParameter("Count", "200", "SelectHead");
+
+        vecIndex->SetParameter("isExecute", "true", "BuildHead");
+        vecIndex->SetParameter("RefineIterations", "3", "BuildHead");
+        vecIndex->SetParameter("NumberOfThreads", "4", "BuildHead");
+
+        vecIndex->SetParameter("isExecute", "true", "BuildSSDIndex");
+        vecIndex->SetParameter("BuildSsdIndex", "true", "BuildSSDIndex");
+        vecIndex->SetParameter("NumberOfThreads", "4", "BuildSSDIndex");
+        vecIndex->SetParameter("PostingPageLimit", "12", "BuildSSDIndex");
+        vecIndex->SetParameter("SearchPostingPageLimit", "12", "BuildSSDIndex");
+        vecIndex->SetParameter("InternalResultNum", "64", "BuildSSDIndex");
+        vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
+    }
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
@@ -30,8 +52,30 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
     std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     BOOST_CHECK(nullptr != vecIndex);
 
-    vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
-    vecIndex->SetParameter("NumberOfThreads", "16");
+    if (algo != SPTAG::IndexAlgoType::SPANN) {
+        vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
+        vecIndex->SetParameter("NumberOfThreads", "16");
+    }
+    else {
+        vecIndex->SetParameter("IndexAlgoType", "BKT", "Base");
+        vecIndex->SetParameter("DistCalcMethod", distCalcMethod, "Base");
+
+        vecIndex->SetParameter("isExecute", "true", "SelectHead");
+        vecIndex->SetParameter("NumberOfThreads", "4", "SelectHead");
+        vecIndex->SetParameter("Ratio", "0.2", "SelectHead"); // vecIndex->SetParameter("Count", "200", "SelectHead");
+
+        vecIndex->SetParameter("isExecute", "true", "BuildHead");
+        vecIndex->SetParameter("RefineIterations", "3", "BuildHead");
+        vecIndex->SetParameter("NumberOfThreads", "4", "BuildHead");
+
+        vecIndex->SetParameter("isExecute", "true", "BuildSSDIndex");
+        vecIndex->SetParameter("BuildSsdIndex", "true", "BuildSSDIndex");
+        vecIndex->SetParameter("NumberOfThreads", "4", "BuildSSDIndex");
+        vecIndex->SetParameter("PostingPageLimit", "12", "BuildSSDIndex");
+        vecIndex->SetParameter("SearchPostingPageLimit", "12", "BuildSSDIndex");
+        vecIndex->SetParameter("InternalResultNum", "64", "BuildSSDIndex");
+        vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
+    }
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
@@ -156,25 +200,29 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta1);
 
-    Add<T>("testindices", vecset, metaset, "testindices");
-    std::string truthmeta2[] = { "0", "0", "1", "2", "2", "1", "4", "4", "3" };
-    Search<T>("testindices", query.data(), q, k, truthmeta2);
+    if (algo != SPTAG::IndexAlgoType::SPANN) {
+        Add<T>("testindices", vecset, metaset, "testindices");
+        std::string truthmeta2[] = { "0", "0", "1", "2", "2", "1", "4", "4", "3" };
+        Search<T>("testindices", query.data(), q, k, truthmeta2);
 
-    Delete<T>("testindices", query.data(), q, "testindices");
-    std::string truthmeta3[] = { "1", "1", "3", "1", "3", "1", "3", "5", "3" };
-    Search<T>("testindices", query.data(), q, k, truthmeta3);
-    
+        Delete<T>("testindices", query.data(), q, "testindices");
+        std::string truthmeta3[] = { "1", "1", "3", "1", "3", "1", "3", "5", "3" };
+        Search<T>("testindices", query.data(), q, k, truthmeta3);
+    }
+
     BuildWithMetaMapping<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta4[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     Search<T>("testindices", query.data(), q, k, truthmeta4);
 
-    Add<T>("testindices", vecset, metaset, "testindices");
-    std::string truthmeta5[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
-    Search<T>("testindices", query.data(), q, k, truthmeta5);
-    
-    AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices");
-    std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
-    Search<float>("testindices", query.data(), q, k, truthmeta6);
+    if (algo != SPTAG::IndexAlgoType::SPANN) {
+        Add<T>("testindices", vecset, metaset, "testindices");
+        std::string truthmeta5[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+        Search<T>("testindices", query.data(), q, k, truthmeta5);
+
+        AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices");
+        std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
+        Search<float>("testindices", query.data(), q, k, truthmeta6);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE (AlgoTest)
@@ -187,6 +235,11 @@ BOOST_AUTO_TEST_CASE(KDTTest)
 BOOST_AUTO_TEST_CASE(BKTTest)
 {
     Test<float>(SPTAG::IndexAlgoType::BKT, "L2");
+}
+
+BOOST_AUTO_TEST_CASE(SPANNTest)
+{
+    Test<float>(SPTAG::IndexAlgoType::SPANN, "L2");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

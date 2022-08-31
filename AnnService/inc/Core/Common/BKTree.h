@@ -9,7 +9,7 @@
 #include <vector>
 #include <shared_mutex>
 
-#include "../VectorIndex.h"
+#include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
 #include "QueryResultSet.h"
@@ -57,8 +57,11 @@ namespace SPTAG
                     _RD = m_pQuantizer->ReconstructDim();
                     fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(distMethod);
                 }
-                else
+                else if (distMethod == DistCalcMethod::L2 || distMethod == DistCalcMethod::Cosine)
                 {
+                    fComputeDistance = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
+                }
+                else {
                     fComputeDistance = COMMON::DistanceCalcSelector<T>(distMethod);
                 }
 
@@ -179,10 +182,11 @@ namespace SPTAG
                     for (DimensionType j = 0; j < args._RD; j++) {
                         currCenters[j] /= args.counts[k];
                     }
+                    /*
                     if (args._M == DistCalcMethod::Cosine) {
                         COMMON::Utils::Normalize(currCenters, args._RD, COMMON::Utils::GetBase<T>());
                     }
-
+                    */
                     if (args.m_pQuantizer) {
                         for (DimensionType j = 0; j < args._RD; j++) reconstructVector[j] = (R)(currCenters[j]);
                         args.m_pQuantizer->QuantizeVector(reconstructVector.data(), (uint8_t*)TCenter);
