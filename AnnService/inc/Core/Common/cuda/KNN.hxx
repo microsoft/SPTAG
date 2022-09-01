@@ -1073,7 +1073,7 @@ inline void updateKNNResults(std::vector< std::vector<SPTAG::SizeType> >& batch_
         int reader1 = 0;
         int reader2 = 0;
         for (int writer_ptr = 0; writer_ptr < K; writer_ptr++) {
-            if (batch_dist[i][reader1] < temp_dist[i][reader2]) {
+            if (batch_dist[i][reader1] <= temp_dist[i][reader2]) {
                 result_truth[i][writer_ptr] = batch_truth[i][reader1];
                 result_dist[i][writer_ptr] = batch_dist[i][reader1++];
             }
@@ -1088,7 +1088,7 @@ inline void updateKNNResults(std::vector< std::vector<SPTAG::SizeType> >& batch_
 }
 
 template<typename DTYPE, int Dim, int BLOCK_DIM, typename SUMTYPE>
-__global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL) {
+__global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUMTYPE, Dim>* data, int dataSize, int idx_offset, int numQueries, DistPair<SUMTYPE>* results, int KVAL, int metric) {
     extern __shared__ char sharememory[];
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
@@ -1112,11 +1112,12 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
         query.loadPoint(querySet[i]); // Load into shared memory
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
-            //#if METRIC == 1 
-            dist = query.cosine(&data[j]);\
-            //#else
-            //dist = query.l2(&data[j]);
-            //#endif
+            if (metric == 0) {
+                dist = query.l2(&data[j]);
+            }
+            else if (metric == 1){
+                dist = query.cosine(&data[j]);
+            }
             if (dist < extra.dist) {
                 if (dist < heapMem[threadIdx.x].top()) {
                     extra.dist = heapMem[threadIdx.x].vals[0].dist;
@@ -1151,6 +1152,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     int numDevicesOnHost;
     CUDA_CHECK(cudaGetDeviceCount(&numDevicesOnHost));
     int NUM_GPUS = numDevicesOnHost;
+    int metric = distMethod == DistCalcMethod::Cosine ? 1 : 0;
     //const int NUM_GPUS = 4;
 
     std::vector< std::vector<SPTAG::SizeType> > temp_truth = truthset;
@@ -1285,7 +1287,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
             size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608 for 64 Threads
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching kernel on %d\n", i);
-            query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K);
+            query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K, metric);
             cudaError_t c_ret = cudaGetLastError();
 
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "Error: %s\n", cudaGetErrorString(c_ret));            
