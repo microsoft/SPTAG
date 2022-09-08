@@ -163,9 +163,9 @@ def main():
 
     t0 = time.time()
 
-    #para = nni.get_next_parameter()
+    para = nni.get_next_parameter()
     algo = Sptag(args.algorithm, distance)
-    algo.fit(X_train, data_type=args.data_type)
+    algo.fit(X_train, para=para, data_type=args.data_type)
     build_time = time.time() - t0
 
     print('Built index in', build_time)
@@ -213,9 +213,9 @@ def main():
             best_metric = combined_metric
             best_res = res.copy()
 
-        #res["build_params"] = para
+        res["build_params"] = para
         res["search_params"] = search_params
-    '''
+
         experiment_id = nni.get_experiment_id()
         result_dir = os.path.join('results', args.train_file.split('.')[0])
         if not os.path.exists(result_dir):
@@ -229,7 +229,6 @@ def main():
             json.dump(res, f)
 
     nni.report_final_result(best_res)
-    '''
 
 
 if __name__ == '__main__':
