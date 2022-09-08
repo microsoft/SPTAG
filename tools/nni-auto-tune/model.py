@@ -47,8 +47,13 @@ class Sptag:
         self._para = {}
         self._metric = {'angular': 'Cosine', 'euclidean': 'L2'}[metric]
 
-    def fit(self, X, para=None):
-        self._sptag = SPTAG.AnnIndex(self._algo, 'Float', X.shape[1])
+    def fit(self, X, para=None, data_type='float32'):
+        self._data_type = {
+            'float32': 'Float',
+            'int8': 'Int8',
+            'int16': 'Int16'
+        }[data_type]
+        self._sptag = SPTAG.AnnIndex(self._algo, self._data_type, X.shape[1])
         self._sptag.SetBuildParam("NumberOfThreads", '32', "Index")
         self._sptag.SetBuildParam("DistCalcMethod", self._metric, "Index")
 

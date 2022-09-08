@@ -111,14 +111,17 @@ def main():
                         default=100,
                         type=int,
                         help="the dimention of training vectors")
-    parser.add_argument("--data_type",
+    parser.add_argument("--input_type",
                         default="float32",
                         help="the data type of input vectors")
+    parser.add_argument("--data_type",
+                        default="float32",
+                        help="the data type for building and search in SPTAG ")
     args = parser.parse_args()
 
     if args.train_file.endswith(".hdf5"):
         # ann-benchmark format hdf5 file got all we want, so args like distance are ignored
-        data_reader = HDF5Reader(args.train_file)
+        data_reader = HDF5Reader(args.train_file, args.data_type)
         X_train, X_test = data_reader.readallbatches()
         distance = data_reader.distance
         dimension = data_reader.featuredim
@@ -127,23 +130,25 @@ def main():
         X_train = DataReader(args.train_file,
                              args.dim,
                              batchsize=-1,
-                             datatype=args.data_type).readbatch()[1]
+                             datatype=args.input_type,
+                             targettype=args.data_type).readbatch()[1]
         X_test = DataReader(args.query_file,
                             args.dim,
                             batchsize=-1,
-                            datatype=args.data_type).readbatch()[1]
+                            datatype=args.input_type,
+                            targettype=args.data_type).readbatch()[1]
         distance = args.distance
         dimension = args.dim
         label = []
         if args.label_file is None:
             # if the groundtruth is not provided
             # we calculate groundtruth distances with brute force
-            bf = BruteForceBLAS(distance)
+            bf = BruteForceBLAS(distance, precision=args.data_type)
             bf.fit(X_train)
             for i, x in enumerate(X_test):
                 if i % 1000 == 0:
                     print('%d/%d...' % (i, len(X_test)))
-                res = list(bf.query_with_distances(x, 100))
+                res = list(bf.query_with_distances(x, args.k))
                 res.sort(key=lambda t: t[-1])
                 label.append([d for _, d in res])
         else:
@@ -158,16 +163,16 @@ def main():
 
     t0 = time.time()
 
-    para = nni.get_next_parameter()
+    #para = nni.get_next_parameter()
     algo = Sptag(args.algorithm, distance)
-    algo.fit(X_train, para)
+    algo.fit(X_train, data_type=args.data_type)
     build_time = time.time() - t0
 
     print('Built index in', build_time)
 
     search_param_choices = {
         "NumberOfInitialDynamicPivots": [1, 2, 4, 8, 16, 32, 50],
-        "MaxCheck": [512, 1408, 2432, 4408, 8192, 10250, 12800, 15600, 19600],
+        "MaxCheck": [512, 3200, 5120, 8192, 12800, 16400, 19600],
         "NumberOfOtherDynamicPivots": [1, 2, 4, 8, 10]
     }
 
@@ -203,14 +208,14 @@ def main():
             "qps": qps,
             "build_time": build_time
         }
-
+        print(res)
         if combined_metric > best_metric:
             best_metric = combined_metric
             best_res = res.copy()
 
-        res["build_params"] = para
+        #res["build_params"] = para
         res["search_params"] = search_params
-
+    '''
         experiment_id = nni.get_experiment_id()
         result_dir = os.path.join('results', args.train_file.split('.')[0])
         if not os.path.exists(result_dir):
@@ -224,6 +229,7 @@ def main():
             json.dump(res, f)
 
     nni.report_final_result(best_res)
+    '''
 
 
 if __name__ == '__main__':

@@ -111,8 +111,9 @@ def dataset_transform(dataset):
 
 class HDF5Reader:
 
-    def __init__(self, filename):
+    def __init__(self, filename, data_type='float32'):
         self.data = h5py.File(filename, 'r')
+        self._data_type = data_type
         self.featuredim = int(self.data.attrs['dimension']
                               ) if 'dimension' in self.data.attrs else len(
                                   self.data['train'][0])
@@ -128,7 +129,9 @@ class HDF5Reader:
         return data
 
     def readallbatches(self):
-        return np.array(self.train), np.array(self.test)
+        return np.array(self.train,
+                        dtype=self._data_type), np.array(self.test,
+                                                         dtype=self._data_type)
 
     def close(self):
         pass
