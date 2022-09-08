@@ -61,3 +61,4 @@ dkms.conf
 /ipch
 /packages
 /out/build/x64-Debug
+/sgKey.snk

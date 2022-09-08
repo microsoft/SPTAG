@@ -203,7 +203,6 @@ namespace SPTAG
 
             m_index->SearchIndex(*p_queryResults);
             
-            if (m_pQuantizer.get() != m_index->m_pQuantizer.get()) { p_queryResults->SetTarget(p_queryResults->GetTarget(), m_index->m_pQuantizer); }
             std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
                 workSpace = m_workSpacePool->Rent();
@@ -218,7 +217,10 @@ namespace SPTAG
 
                     auto postingID = res->VID;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    if (res->VID == MaxSize) res->Dist = MaxDist;
+                    if (res->VID == MaxSize) {
+                        res->VID = -1;
+                        res->Dist = MaxDist;
+                    }
 
                     // Don't do disk reads for irrelevant pages
                     if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || 
@@ -230,8 +232,8 @@ namespace SPTAG
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
-                p_queryResults->SortResult();
                 m_workSpacePool->Return(workSpace);
+                p_queryResults->SortResult();
             }
 
             if (p_query.GetResultNum() < m_options.m_searchInternalResultNum) {
@@ -251,8 +253,55 @@ namespace SPTAG
         }
 
         template <typename T>
+        ErrorCode Index<T>::SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats) const
+        {
+            if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
+
+            COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+            std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+            workSpace->m_deduper.clear();
+            workSpace->m_postingIDs.clear();
+
+            float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+            int i = 0;
+            for (; i < m_options.m_searchInternalResultNum; ++i)
+            {
+                auto res = p_queryResults->GetResult(i);
+                if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+                if (m_extraSearcher->CheckValidPosting(res->VID)) 
+                {
+                    workSpace->m_postingIDs.emplace_back(res->VID);
+                }
+                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (res->VID == MaxSize) 
+                {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
+            }
+
+            for (; i < p_queryResults->GetResultNum(); ++i)
+            {
+                auto res = p_queryResults->GetResult(i);
+                if (res->VID == -1) break;
+                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (res->VID == MaxSize) 
+                {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
+            }
+
+            p_queryResults->Reverse();
+            m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
+            m_workSpacePool->Return(workSpace);
+            p_queryResults->SortResult();
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
         ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
-            SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found)
+            SearchStats* p_stats, std::set<int>* truth, std::map<int, std::set<int>>* found) const
         {
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
 
@@ -265,7 +314,10 @@ namespace SPTAG
                 auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                 if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
                 res->VID = global_VID;
-                if (res->VID == MaxSize) res->Dist = MaxDist;
+                if (res->VID == MaxSize) {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
             }
             newResults.Reverse();
 
@@ -283,6 +335,7 @@ namespace SPTAG
                 {
                     auto res = p_query.GetResult(i);
                     if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
+                    if (!m_extraSearcher->CheckValidPosting(res->VID)) continue;
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
@@ -628,14 +681,17 @@ namespace SPTAG
                     LOG(Helper::LogLevel::LL_Error, "Failed to read head vector file.\n");
                     return ErrorCode::Fail;
                 }
-                if (m_index->BuildIndex(vectorReader->GetVectorSet(), nullptr, false, true) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
-                    return ErrorCode::Fail;
-                }
-                m_index->SetQuantizerFileName(m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
-                if (m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
-                    return ErrorCode::Fail;
+                {
+                    auto headvectorset = vectorReader->GetVectorSet();
+                    if (m_index->BuildIndex(headvectorset, nullptr, false, true, true) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
+                        return ErrorCode::Fail;
+                    }
+                    m_index->SetQuantizerFileName(m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
+                    if (m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
+                        return ErrorCode::Fail;
+                    }
                 }
                 m_index.reset();
                 if (LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_index) != ErrorCode::Success) {
@@ -691,16 +747,23 @@ namespace SPTAG
                 }
                 if (!m_extraSearcher->LoadIndex(m_options)) {
                     LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
-                    return ErrorCode::Fail;
+                    if (m_options.m_buildSsdIndex) {
+                        return ErrorCode::Fail;
+                    }
+                    else {
+                        m_extraSearcher.reset();
+                    }
                 }
 
-                m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
-                std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
-                    return ErrorCode::Fail;
+                if (m_extraSearcher != nullptr) {
+                    m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
+                    std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                        return ErrorCode::Fail;
+                    }
+                    IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
                 }
-                IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
             }
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();
@@ -713,8 +776,10 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
+            if (m_extraSearcher != nullptr) {
+                m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
+                m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
+            }
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -776,6 +841,9 @@ namespace SPTAG
             Index<T>::UpdateIndex()
         {
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
+            m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
             m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));

@@ -18,6 +18,9 @@ namespace SPTAG
             DIS_BulkRead = 0,
             DIS_UserRead,
             DIS_HighPriorityUserRead,
+            DIS_BulkWrite,
+            DIS_UserWrite,
+            DIS_HighPriorityUserWrite,
             DIS_Count
         };
 
@@ -26,7 +29,7 @@ namespace SPTAG
             std::uint64_t m_offset;
             std::uint64_t m_readSize;
             char* m_buffer;
-            std::function<void(AsyncReadRequest*)> m_callback;
+            std::function<void(bool)> m_callback;
             int m_status;
 
             // Carry items like counter for callback to process.
