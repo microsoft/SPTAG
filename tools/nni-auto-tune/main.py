@@ -208,7 +208,7 @@ def main():
             "qps": qps,
             "build_time": build_time
         }
-        print(res)
+
         if combined_metric > best_metric:
             best_metric = combined_metric
             best_res = res.copy()
