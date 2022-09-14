@@ -135,7 +135,7 @@ class BruteForceBLAS:
     def query_with_distances(self, v, n):
         """Find indices of `n` most similar vectors from the index to query
         vector `v`."""
-
+        v = v.astype(self._precision)
         if self._metric != 'jaccard':
             # use same precision for query as for index
             v = numpy.ascontiguousarray(v, dtype=self.index.dtype)

@@ -143,7 +143,7 @@ def main():
         if args.label_file is None:
             # if the groundtruth is not provided
             # we calculate groundtruth distances with brute force
-            bf = BruteForceBLAS(distance, precision=args.data_type)
+            bf = BruteForceBLAS(distance)
             bf.fit(X_train)
             for i, x in enumerate(X_test):
                 if i % 1000 == 0:
