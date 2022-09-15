@@ -40,7 +40,8 @@ def get_recall_from_index(dataset_index, run_index, k):
     for i in range(len(run_index)):
         actual = 0
         for d in run_index[i][:k]:
-            if d in dataset_index[i][:k]:
+            # need to conver to string because default loaded label are strings
+            if str(d) in dataset_index[i][:k]:
                 actual += 1
         recalls[i] = actual
 
