@@ -79,7 +79,9 @@ class GPU_PQQuantizer {
       CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
 
       if(metric == DistMetric::Cosine) {
-        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+//        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+        LOG(Helper::LogLevel::LL_Error, "Cosine distance not supported for PQ or OPQ\n");
+        exit(1);
       }
       else {
         CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));

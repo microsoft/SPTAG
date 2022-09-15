@@ -41,6 +41,7 @@ if (CUDA_FOUND)
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp
         ${AnnService}/src/Core/Common/InstructionUtils.cpp
+        ${AnnService}/src/Core/Common/cuda/cuda_unit_tests.cu
     )
 
     set_source_files_properties(${GPU_SRC_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
