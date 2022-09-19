@@ -48,7 +48,7 @@ using namespace SPTAG;
 * NOTE: Dim must be templated so that we can store coordinate values in registers
 *********************************************************************/
 
-enum DistMetric { L2, Cosine };
+enum DistMetric { L2 };
 
 class GPU_PQQuantizer {
 
@@ -78,13 +78,13 @@ class GPU_PQQuantizer {
 
       CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
 
-      if(metric == DistMetric::Cosine) {
-//        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
-        LOG(Helper::LogLevel::LL_Error, "Cosine distance not supported for PQ or OPQ\n");
+      // Make sure L2 is used, since other 
+      if(metric != DistMetric::L2) {
+        LOG(Helper::LogLevel::LL_Error, "Only L2 distance currently supported for PQ or OPQ\n");
         exit(1);
       }
-      else {
-        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+
+      CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
       }
 
     }
@@ -102,10 +102,6 @@ class GPU_PQQuantizer {
         totals[1] += m_DistanceTables[m_DistIndexCalc(i+1, pX[i+1], pY[i+1])];
       } 
 
-//      if(metric == DistMetric::Cosine) {
-//        out = 1 - out;
-//      }
-//      return 1 - (totals[0]+totals[1]);
       return totals[0]+totals[1];
     }
 

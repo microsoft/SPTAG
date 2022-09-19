@@ -442,6 +442,10 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
 
     /***** Run batch on GPU (all TPT iters) *****/
     if(metric == (int)DistMetric::Cosine) {
+      if(d_qantizer != NULL) {
+        LOG(Helper::LogLevel::LL_Error, "Cosine distance not currently supported when using quantization.\n");
+        exit(1);
+      }
       run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
     }
     else {
