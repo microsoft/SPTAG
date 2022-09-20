@@ -442,7 +442,7 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
 
     /***** Run batch on GPU (all TPT iters) *****/
     if(metric == (int)DistMetric::Cosine) {
-      if(d_qantizer != NULL) {
+      if(d_quantizer != NULL) {
         LOG(Helper::LogLevel::LL_Error, "Cosine distance not currently supported when using quantization.\n");
         exit(1);
       }

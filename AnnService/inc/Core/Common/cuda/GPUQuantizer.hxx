@@ -48,7 +48,7 @@ using namespace SPTAG;
 * NOTE: Dim must be templated so that we can store coordinate values in registers
 *********************************************************************/
 
-enum DistMetric { L2 };
+enum DistMetric { L2, Cosine };
 
 class GPU_PQQuantizer {
 
@@ -85,8 +85,6 @@ class GPU_PQQuantizer {
       }
 
       CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
-      }
-
     }
 
     __host__ ~GPU_PQQuantizer()
