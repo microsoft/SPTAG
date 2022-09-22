@@ -199,7 +199,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
           candidate_vec = ps->getVec(candidate.idx);
           candidate.dist = dist_comp(query, candidate_vec);
 
-          if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
+          if(max_dist >= candidate.dist){ // If it is a candidate to be added to neighbor list
 	    for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
               if(violatesRNG<T,SUMTYPE>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
                 good = false;
