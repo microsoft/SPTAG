@@ -199,7 +199,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
           candidate_vec = ps->getVec(candidate.idx);
           candidate.dist = dist_comp(query, candidate_vec);
 
-          if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
+          if(max_dist >= candidate.dist){ // If it is a candidate to be added to neighbor list
 	    for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
               if(violatesRNG<T,SUMTYPE>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
                 good = false;
@@ -442,6 +442,10 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
 
     /***** Run batch on GPU (all TPT iters) *****/
     if(metric == (int)DistMetric::Cosine) {
+      if(d_quantizer != NULL) {
+        LOG(Helper::LogLevel::LL_Error, "Cosine distance not currently supported when using quantization.\n");
+        exit(1);
+      }
       run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
     }
     else {
