@@ -33,6 +33,7 @@
 #include <curand_kernel.h>
 #include "params.h"
 #include "Distance.hxx"
+#include "GPUKNNDistance.hxx"
 
 //template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
 //class TPtree;
