@@ -14,13 +14,13 @@ if (CUDA_FOUND)
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
         set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math --disable-warnings -lineinfo
         -gencode arch=compute_70,code=sm_70
-        -gencode arch=compute_61,code=sm_61
-        -gencode arch=compute_60,code=sm_60" )
+        -gencode arch=compute_75,code=sm_75
+        -gencode arch=compute_80,code=sm_80" )
     elseif(WIN32)
         set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus -Xcompiler /FS --use_fast_math
         -gencode arch=compute_70,code=sm_70
-        -gencode arch=compute_61,code=sm_61
-        -gencode arch=compute_60,code=sm_60" )
+        -gencode arch=compute_75,code=sm_75
+        -gencode arch=compute_80,code=sm_80" )
     endif()
 
     message (STATUS "CUDA_NVCC_FLAGS:" ${CUDA_NVCC_FLAGS})
@@ -35,7 +35,7 @@ if (CUDA_FOUND)
     set_target_properties( libzstd PROPERTIES IMPORTED_LOCATION ${PROJECT_SOURCE_DIR}/ThirdParty/zstd/lib/libzstd.so )
 
     file(GLOB_RECURSE GPU_HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h ${AnnService}/inc/Core/Common/cuda/*)
-    file(GLOB_RECURSE GPU_SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu)
+    file(GLOB_RECURSE GPU_SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Core/SPANN/*.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu ${AnnService}/src/SSDServing/main.cpp ${AnnService}/src/IndexSearcher/main.cpp)
 
     list(REMOVE_ITEM GPU_HDR_FILES
         ${AnnService}/inc/Core/Common/DistanceUtils.h

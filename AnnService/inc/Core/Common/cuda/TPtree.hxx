@@ -28,13 +28,16 @@
 
 #include<iostream>
 #include<queue>
-#include <cuda.h>
+//#include <cuda.h>
 #include <limits.h>
 #include <curand_kernel.h>
 #include "params.h"
 #include "Distance.hxx"
+#include "GPUKNNDistance.hxx"
 
 class TPtree;
+//template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
+//class TPtree;
 
 /************************************************************************************
  * Structure that defines the memory locations where points/ids are for a leaf node

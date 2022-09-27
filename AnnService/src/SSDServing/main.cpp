@@ -13,7 +13,7 @@
 
 #include "inc/SSDServing/main.h"
 #include "inc/SSDServing/Utils.h"
-#include "inc/SSDServing/SSDIndex.h"
+//#include "inc/SSDServing/SSDIndex.h"
 
 using namespace SPTAG;
 
@@ -164,13 +164,13 @@ namespace SPTAG {
 			}
 
 			if (searchSSD) {
-#define DefineVectorValueType(Name, Type) \
-	if (opts->m_valueType == VectorValueType::Name) { \
-        SSDIndex::Search((SPANN::Index<Type>*)(index.get())); \
-	} \
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
+//#define DefineVectorValueType(Name, Type) \
+//	if (opts->m_valueType == VectorValueType::Name) { \
+//        SSDIndex::Search((SPANN::Index<Type>*)(index.get())); \
+//	} \
+//
+//#include "inc/Core/DefinitionList.h"
+//#undef DefineVectorValueType
 			}
 			return 0;
 		}
