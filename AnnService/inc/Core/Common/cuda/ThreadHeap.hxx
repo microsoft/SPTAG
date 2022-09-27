@@ -73,8 +73,8 @@ class ThreadHeap {
 
       while(2*i+2 < KVAL) {
         swapDest = 2*i;
-        swapDest += (vals[i].dist < vals[2*i+1].dist && vals[2*i+2].dist <= vals[2*i+1].dist);
-        swapDest += 2*(vals[i].dist < vals[2*i+2].dist && vals[2*i+1].dist < vals[2*i+2].dist);
+        swapDest += (vals[2*i+1].dist >= vals[i].dist && vals[2*i+1].dist > vals[2*i+2].dist);
+        swapDest += 2*(vals[2*i+2].dist >= vals[i].dist && vals[2*i+2].dist >= vals[2*i+1].dist);
 
         if(swapDest == 2*i) return;
 
@@ -89,10 +89,10 @@ class ThreadHeap {
       int i=idx;
       int swapDest=0;
 
-      while(2*i+2 < KVAL) {
+      while(KVAL >= 2*i+2) {
         swapDest = 2*i;
-        swapDest += (vals[i].dist < vals[2*i+1].dist && vals[2*i+2].dist <= vals[2*i+1].dist);
-        swapDest += 2*(vals[i].dist < vals[2*i+2].dist && vals[2*i+1].dist < vals[2*i+2].dist);
+        swapDest += (vals[2*i+1].dist >= vals[i].dist && vals[2*i+1].dist > vals[2*i+2].dist);
+        swapDest += 2*(vals[2*i+2].dist >= vals[i].dist && vals[2*i+2].dist >= vals[2*i+1].dist);
 
         if(swapDest == 2*i) return;
 
