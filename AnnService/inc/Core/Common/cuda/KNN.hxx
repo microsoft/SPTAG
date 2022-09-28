@@ -290,7 +290,7 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
 
 template<typename DTYPE, typename SUMTYPE, int metric>
-void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer) 
+void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer, SPTAG::VectorIndex* index)
 {
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
@@ -299,7 +299,7 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
 
     auto before_tpt = std::chrono::high_resolution_clock::now(); // Start timer for TPT building
 
-    create_tptree_multigpu<DTYPE>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor);
+    create_tptree_multigpu<DTYPE>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor, index);
     CUDA_CHECK(cudaDeviceSynchronize());
 
             // Copy TPTs to each GPU
@@ -367,12 +367,9 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   GPU_PQQuantizer* h_quantizer = NULL; 
 
   if(use_q) {
-printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric == DistMetric::L2);
     h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
     CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
     CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
-
-
   }
 
 /********* Allocate and transfer data to each GPU ********/
@@ -400,7 +397,7 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
     CUDA_CHECK(cudaMemcpy(d_pointset[gpuNum], &temp_ps, sizeof(PointSet<DTYPE>), cudaMemcpyHostToDevice));
 
     // Allocate and initialize TPT structures
-    CUDA_CHECK(cudaMalloc(&d_tptrees[gpuNum], sizeof(TPtree)));
+    CUDA_CHECK(cudaMallocManaged(&d_tptrees[gpuNum], sizeof(TPtree)));
     tptrees[gpuNum] = new TPtree;
 
     tptrees[gpuNum]->initialize(dataSize, levels, dim);
@@ -449,10 +446,10 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
         LOG(Helper::LogLevel::LL_Error, "Cosine distance not currently supported when using quantization.\n");
         exit(1);
       }
-      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer, index);
     }
     else {
-      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::L2>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::L2>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer, index);
     }
 
     auto before_copy = std::chrono::high_resolution_clock::now();
