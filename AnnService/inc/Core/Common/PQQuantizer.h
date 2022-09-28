@@ -76,6 +76,8 @@ namespace SPTAG
 
             float* GetL2DistanceTables();
 
+            T* GetCodebooks();
+
         protected:
             DimensionType m_NumSubvectors;
             SizeType m_KsPerSubvector;
@@ -348,6 +350,11 @@ namespace SPTAG
         template <typename T>
         float* PQQuantizer<T>::GetL2DistanceTables() {
             return (float*)(m_L2DistanceTables.get());
+        }
+ 
+        template<typename T>
+        T* PQQuantizer<T>::GetCodebooks() {
+          return (T*)(m_codebooks.get());
         }
     }
 }
