@@ -32,7 +32,7 @@ if (CUDA_FOUND)
     include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/zstd/lib)   
 
     file(GLOB_RECURSE GPU_HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h ${AnnService}/inc/Core/Common/cuda/*)
-    file(GLOB_RECURSE GPU_SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Core/SPANN/SPANNIndex.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu)
+    file(GLOB_RECURSE GPU_SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu)
 
     list(REMOVE_ITEM GPU_HDR_FILES
         ${AnnService}/inc/Core/Common/DistanceUtils.h

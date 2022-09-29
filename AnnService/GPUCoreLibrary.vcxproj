@@ -112,6 +112,7 @@
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu" />
     <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
+	<CudaCompile Include="src\Core\Common\TruthSet.cpp" />
     <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <CudaCompile Include="src\Core\MetadataSet.cpp" />
