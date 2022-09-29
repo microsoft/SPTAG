@@ -681,6 +681,7 @@ __global__ void findKNN_leaf_nodes(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SU
     }
   }
 }
+*/
 
 inline void updateKNNResults(std::vector< std::vector<SPTAG::SizeType> >& batch_truth, std::vector< std::vector<float> >& batch_dist, std::vector< std::vector<SPTAG::SizeType> >temp_truth, std::vector< std::vector<float> >temp_dist,
     int result_size, int K) {
@@ -937,7 +938,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
                 int selected = 0;
                 for (size_t gpu_idx = 1; gpu_idx < NUM_GPUS; gpu_idx++) {
                     //if the other gpu has shorter dist
-                    if (results[reader_ptrs[gpu_idx]].dist < results[reader_ptrs[selected]].dist) {
+                    if (results[reader_ptrs[selected]].dist > results[reader_ptrs[gpu_idx]].dist) {
                         selected = gpu_idx;
                     }
                 }

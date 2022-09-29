@@ -22,8 +22,8 @@
  * Licensed under the MIT License.
  */
 
-#ifndef _SPTAG_COMMON_CUDA_DISTANCE_H_
-#define _SPTAG_COMMON_CUDA_DISTANCE_H_
+#ifndef _SPTAG_COMMON_CUDA_GPUKNN_DISTANCE_H_
+#define _SPTAG_COMMON_CUDA_GPUKNN_DISTANCE_H_
 
 #include<cuda.h>
 #include<cstdint>
@@ -39,13 +39,6 @@ using namespace std;
 using namespace SPTAG;
 
 // Templated infinity value
-template<typename T> __host__ __device__ T INFTY() {};
-template<> __forceinline__ __host__ __device__ int INFTY<int>() { return INT_MAX; }
-template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() { return LLONG_MAX; }
-template<> __forceinline__ __host__ __device__ float INFTY<float>() { return FLT_MAX; }
-//template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
-template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() { return 255; }
-
 /*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
 * represented by a element of datatype T

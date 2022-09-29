@@ -277,13 +277,7 @@
       <Filter>Source Files\Helper</Filter>
     </CudaCompile>
     <CudaCompile Include="src\Core\SPANN\SPANNIndex.cpp">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\SSDServing\main.cpp">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="src\IndexSearcher\main.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Core\SPANN</Filter>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
@@ -313,6 +307,9 @@
     </ClCompile>
     <ClCompile Include="src\Helper\AsyncFileReader.cpp">
       <Filter>Source Files\Helper</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\SIMDUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
