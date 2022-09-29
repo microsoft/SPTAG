@@ -63,6 +63,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -92,6 +93,8 @@
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -112,7 +115,7 @@
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu" />
     <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
-	<CudaCompile Include="src\Core\Common\TruthSet.cpp" />
+    <CudaCompile Include="src\Core\Common\TruthSet.cpp" />
     <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <CudaCompile Include="src\Core\MetadataSet.cpp" />
