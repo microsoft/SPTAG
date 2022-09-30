@@ -33,7 +33,6 @@
 
 #include <cuda/std/type_traits>
 #include <chrono>
-#include <windows.h>
 
 template<int Dim>
 __device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
@@ -818,9 +817,6 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
     //TPtree<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>** tptrees = new TPtree<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>*[NUM_GPUS];
     //TPtree<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>** d_tptrees = new TPtree<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM>*[NUM_GPUS];
     //int** d_results = new int* [NUM_GPUS];
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(memInfo);
-    GlobalMemoryStatusEx(&memInfo);
     // Calculate GPU memory usage on each device
     for (int gpuNum = 0; gpuNum < NUM_GPUS; gpuNum++) {
         CUDA_CHECK(cudaSetDevice(gpuNum));

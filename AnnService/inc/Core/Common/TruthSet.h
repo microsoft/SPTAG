@@ -7,17 +7,6 @@
 #include "inc/Core/VectorIndex.h"
 #include "QueryResultSet.h"
 
-#if defined(GPU)
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <device_launch_parameters.h>
-#include <typeinfo>
-#include <cuda_fp16.h>
-
-#include "inc/Core/Common/cuda/KNN.hxx"
-#include "inc/Core/Common/cuda/params.h"
-#endif
-
 namespace SPTAG
 {
     namespace COMMON
