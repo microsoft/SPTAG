@@ -223,9 +223,6 @@
     <ClInclude Include="inc\Core\Common\TruthSet.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\Common\cuda\log.hxx">
-      <Filter>Header Files\Core\Common\cuda</Filter>
-    </ClInclude>
     <ClInclude Include="inc\Core\Common\cuda\Kdtree.hxx">
       <Filter>Header Files\Core\Common\cuda</Filter>
     </ClInclude>
