@@ -13,6 +13,8 @@ from dataset import DataReader, HDF5Reader
 import argparse
 import json
 import itertools
+from multiprocess import Pool, Process
+import multiprocess
 
 
 def knn_threshold(data, k, epsilon):
@@ -108,6 +110,17 @@ def main():
     parser.add_argument("--distance",
                         default='angular',
                         help="the type of distance for searching")
+    parser.add_argument(
+        "--max_build_time",
+        default=-1,
+        type=int,
+        help="the limit of index build time in seconds. -1 means no limit")
+    parser.add_argument(
+        "--max_memory",
+        default=-1,
+        type=int,
+        help=
+        "the limit of memory use during searching in bytes. -1 means no limit")
     parser.add_argument("--dim",
                         default=100,
                         type=int,
@@ -162,11 +175,35 @@ def main():
     print('got a train set of size (%d * %d)' % (X_train.shape[0], dimension))
     print('got %d queries' % len(X_test))
 
-    t0 = time.time()
-
     para = nni.get_next_parameter()
     algo = Sptag(args.algorithm, distance)
-    algo.fit(X_train, para=para, data_type=args.data_type)
+
+    t0 = time.time()
+    if args.max_build_time > 0:
+        pool = Pool(1)
+        results = pool.apply_async(algo.fit,
+                                   kwds=dict(X=X_train,
+                                             para=para,
+                                             data_type=args.data_type,
+                                             save_index=True))
+        try:
+            results.get(args.max_build_time
+                        )  # Wait timeout seconds for func to complete.
+            algo.load('index')
+            shutil.rmtree("index")
+            pool.close()
+            pool.join()
+        except multiprocess.TimeoutError:  # kill subprocess if timeout
+            print("Aborting due to timeout", args.max_build_time)
+            pool.terminate()
+            nni.report_final_result({
+                'default': -1,
+                "recall": 0,
+                "qps": 0,
+                "build_time": args.max_build_time
+            })
+            return
+
     build_time = time.time() - t0
 
     print('Built index in', build_time)
@@ -181,8 +218,22 @@ def main():
     best_res = {}
     for i, search_params in enumerate(grid_search(search_param_choices)):
         algo.set_query_arguments(search_params)
-        attrs, results = run_individual_query(algo, X_train, X_test, distance,
-                                              args.k, 1)
+        try:
+            attrs, results = run_individual_query(algo,
+                                                  X_train,
+                                                  X_test,
+                                                  distance,
+                                                  args.k,
+                                                  max_mem=args.max_memory)
+        except MemoryError:
+            print("Aborting due to exceed memory limit")
+            nni.report_final_result({
+                'default': -1,
+                "recall": 0,
+                "qps": 0,
+                "build_time": args.max_build_time
+            })
+            return
 
         neighbors = [0 for _ in results]
         distances = [0 for _ in results]

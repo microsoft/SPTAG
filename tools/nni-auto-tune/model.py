@@ -47,7 +47,7 @@ class Sptag:
         self._para = {}
         self._metric = {'angular': 'Cosine', 'euclidean': 'L2'}[metric]
 
-    def fit(self, X, para=None, data_type='float32'):
+    def fit(self, X, para=None, data_type='float32', save_index=False):
         self._data_type = {
             'float32': 'Float',
             'int8': 'Int8',
@@ -63,6 +63,9 @@ class Sptag:
                 self._sptag.SetBuildParam(k, str(v), "Index")
 
         self._sptag.Build(X, X.shape[0], False)
+        # temp save for auto tune, please use self.save() for intended saving
+        if save_index:
+            self.save("index")
 
     def set_query_arguments(self, s_para=None):
         if s_para:
@@ -75,6 +78,9 @@ class Sptag:
 
     def save(self, fn):
         self._sptag.Save(fn)
+
+    def load(self, fn):
+        self._sptag = SPTAG.AnnIndex.Load(fn)
 
     def __str__(self):
         s = ''
@@ -105,6 +111,7 @@ class BruteForceBLAS:
 
     def fit(self, X):
         """Initialize the search index."""
+        X = X.astype(self._precision)
         if self._metric == 'angular':
             # precompute (squared) length of each vector
             lens = (X**2).sum(-1)
@@ -120,8 +127,8 @@ class BruteForceBLAS:
             self.lengths = numpy.ascontiguousarray(lens, dtype=numpy.float32)
         elif self._metric == 'euclidean':
             # precompute (squared) length of each vector
-            lens = (X**2).sum(-1)
             self.index = numpy.ascontiguousarray(X, dtype=self._precision)
+            lens = (self.index**2).sum(-1)
             self.lengths = numpy.ascontiguousarray(lens, dtype=self._precision)
         elif self._metric == 'jaccard':
             self.index = X

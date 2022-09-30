@@ -3,9 +3,17 @@
 
 from model import metrics
 import time
+import os
+import psutil
 
 
-def run_individual_query(algo, X_train, X_test, distance, k, run_count):
+def run_individual_query(algo,
+                         X_train,
+                         X_test,
+                         distance,
+                         k,
+                         run_count=1,
+                         max_mem=-1):
 
     best_search_time = float('inf')
     for i in range(run_count):
@@ -16,6 +24,9 @@ def run_individual_query(algo, X_train, X_test, distance, k, run_count):
         def single_query(v):
             start = time.time()
             candidates = algo.query(v, k)
+            if max_mem > 0 and psutil.Process(
+                    os.getpid()).memory_info().rss > max_mem:
+                raise MemoryError
             total = (time.time() - start)
 
             candidates = [

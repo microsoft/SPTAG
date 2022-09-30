@@ -17,9 +17,23 @@ Install SPTAG
 pip install -i https://test.pypi.org/simple/ sptag
 ```
 
+Install other dependencies
+
+```sh
+pip install multiprocess
+```
+
 ## Dataset
 
 We support muiltiple types of data for training. Including text file, binary file and [ann-benchmark](https://github.com/erikbern/ann-benchmarks) format hdf5 file. But the groundturth file should only be texts of index.
+
+In many cased, parameters that works fine in sampled dataset also work in original dataset. So we also provided a preprocessing script for dataset sampling and ground truth calculation. You can use follow command to do sample and ground truth pre-calculate.
+
+```sh
+python main.py --train_file victors.bin --query_file query.bin --output_dir sampled/ --distance euclidean  --num_sample 100000
+```
+
+If you only need to calculate ground truth for time save in auto-tune, which we highly recommend, you can set `--num_sample` to -1
 
 ## Quickstart
 
@@ -63,8 +77,9 @@ Then you can change `trialCommand` in config.yml to:
 python main.py --train_file victors.bin --query_file query.bin --label_file truth.txt --distance euclidean
 ```
 
-**NOTE:** Always clear corresponding folder under `results/` before starting a trial on same dataset.
+You can also specify `--max_build_time` or `--max_memory` if you have build time limit or search memory usage limit in your project. they both default to -1, which mean no limit.
 
+**NOTE:** Always clear corresponding folder under `results/` before starting a trial on same dataset.
 
 ## Results
 
