@@ -295,7 +295,14 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
 
+
   for(int tree_id=0; tree_id < iters; ++tree_id) { // number of TPTs used to create approx. KNN graph
+
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0)); // Get avil. memory
+    size_t freeMem, totalMem;
+    CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Starting TPtree number %d, Total memory of GPU 0:%ld, GPU 0 memory used:%ld\n", tree_id, totalMem, freeMem);
 
     auto before_tpt = std::chrono::high_resolution_clock::now(); // Start timer for TPT building
 
@@ -343,6 +350,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   int levels = (int)std::log2(dataSize/leafSize); // TPT levels
   size_t rawSize = dataSize*dim;
   cudaError_t resultErr;
+
+  printf("leafSize:%d, levels:%d\n", leafSize, levels);
 
   // Timers
   double tree_time=0.0;
@@ -479,8 +488,10 @@ auto end_t = std::chrono::high_resolution_clock::now();
   for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
     tptrees[gpuNum]->destroy();
     delete tptrees[gpuNum];
-    cudaFree(d_tptrees[gpuNum]);
-    cudaFree(d_results[gpuNum]);
+    CUDA_CHECK(cudaFree(d_tptrees[gpuNum]));
+    CUDA_CHECK(cudaFree(d_results[gpuNum]));
+    CUDA_CHECK(cudaFree(d_data_raw[gpuNum]));
+    CUDA_CHECK(cudaFree(d_pointset[gpuNum]));
   }
   delete[] tptrees;
   delete[] d_results;
@@ -489,6 +500,7 @@ auto end_t = std::chrono::high_resolution_clock::now();
   delete[] d_pointset;
 
   if(use_q) {
+    CUDA_CHECK(cudaFree(d_quantizer));
     delete h_quantizer;
   }
 
