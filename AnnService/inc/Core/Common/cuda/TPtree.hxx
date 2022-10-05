@@ -396,13 +396,13 @@ __host__ void construct_trees_PQ(TPtree** d_trees, PointSet<T>** ps, int N, int 
     construct_trees_multigpu<R>(d_trees, d_recon_ps, N, NUM_GPUS, streams, 0);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         CUDA_CHECK(cudaFree(d_recon_raw[gpuNum]));
         CUDA_CHECK(cudaFree(d_recon_ps[gpuNum]));
     }
     delete d_recon_raw;
     delete d_recon_ps;
+    delete h_recon_raw;
 
 /*
 int min_size=99999999;
