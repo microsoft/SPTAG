@@ -49,7 +49,7 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
       candidate.dist = dist_comp(query, ps->getVec(i));
 
       
-      if(candidate.dist < max_dist) {
+      if(max_dist > candidate.dist) {
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
           if(violatesRNG<T,SUMTYPE>(candidate_vec, ps->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {
             good = false;

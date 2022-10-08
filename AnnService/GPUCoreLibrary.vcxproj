@@ -15,6 +15,7 @@
     <RootNamespace>GPUCoreLibrary</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>GPUCoreLibrary</ProjectName>
+    <CudaToolkitCustomDir>$(CUDA_PATH)</CudaToolkitCustomDir>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <Import Project="$(SolutionDir)\AnnService.users.props" />
@@ -23,6 +24,7 @@
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v142</PlatformToolset>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
@@ -50,6 +52,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <PublicIncludeDirectories>$(CudaToolkitIncludeDir);$(PublicIncludeDirectories)</PublicIncludeDirectories>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -60,6 +63,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -70,10 +74,13 @@
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_70,sm_70;compute_75,sm_75;compute_80,sm_80;</CodeGeneration>
       <Defines>WIN32;%(Defines)</Defines>
-      <Runtime>MTd</Runtime>
+      <Runtime>InheritFromHost</Runtime>
       <AdditionalCompilerOptions>/openmp /std:c++14 /Zc:__cplusplus /FS</AdditionalCompilerOptions>
       <FastMath>true</FastMath>
       <Optimization>InheritFromHost</Optimization>
+      <Include>%(Include)</Include>
+      <CudaRuntime>Static</CudaRuntime>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -86,6 +93,8 @@
       <OpenMPSupport>true</OpenMPSupport>
       <DisableSpecificWarnings>4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -106,11 +115,13 @@
   <ItemGroup>
     <CudaCompile Include="src\Core\Common\Kernel.cu" />
     <CudaCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />
+    <CudaCompile Include="src\Core\Common\TruthSet.cpp" />
     <CudaCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <CudaCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <CudaCompile Include="src\Core\MetadataSet.cpp" />
     <CudaCompile Include="src\Core\VectorIndex.cpp" />
     <CudaCompile Include="src\Core\VectorSet.cpp" />
+    <CudaCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <CudaCompile Include="src\Helper\ArgumentsParser.cpp" />
     <CudaCompile Include="src\Helper\Base64Encode.cpp" />
     <CudaCompile Include="src\Helper\CommonHelper.cpp" />
@@ -130,6 +141,8 @@
     <ClInclude Include="inc\Core\Common\cuda\TailNeighbors.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\ThreadHeap.hxx" />
     <ClInclude Include="inc\Core\Common\cuda\TPtree.hxx" />
+    <ClInclude Include="inc\Core\Common\cuda\Kdtree.hxx" />
+	<ClInclude Include="inc\Core\Common\cuda\log.hxx" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
@@ -186,9 +199,8 @@
     <ClCompile Include="src\Core\Common\DistanceUtils.cpp" />
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
-	<ClCompile Include="src\Core\Common\SIMDUtils.cpp" />
-	<ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
-	<ClCompile Include="src\Helper\AsyncFileReader.cpp" />
+    <ClCompile Include="src\Core\Common\SIMDUtils.cpp" />
+    <ClCompile Include="src\Helper\AsyncFileReader.cpp" />
     <ClCompile Include="src\Helper\DynamicNeighbors.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\TxtReader.cpp" />
     <ClCompile Include="src\Helper\VectorSetReaders\XvecReader.cpp" />
