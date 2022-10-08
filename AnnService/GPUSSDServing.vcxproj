@@ -106,9 +106,6 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="src\SSDServing\main.cpp" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="inc\SSDServing\main.h" />
     <ClInclude Include="inc\SSDServing\SelectHead.h" />
     <ClInclude Include="inc\SSDServing\SSDIndex.h" />
@@ -118,7 +115,7 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <!--<ClCompile Include="src\SSDServing\main.cpp" />-->
+    <ClCompile Include="src\SSDServing\main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

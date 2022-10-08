@@ -65,6 +65,4 @@ dkms.conf
 /packages
 /out/build/x64-Debug
 /sgKey.snk
-/out/build/x64-Debug
-/AnnService/x64/Debug/SSDServing.log
-/AnnService/x64/Debug/SSDServing.lib.recipe
+/AnnService/x64/Debug
