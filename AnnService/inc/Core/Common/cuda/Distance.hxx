@@ -43,7 +43,7 @@ using namespace SPTAG;
 
 
 // Templated infinity value
-template<typename T> __host__ __device__ T INFTY() {};
+template<typename T> __host__ __device__ T INFTY() {}
 template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;}
 template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() {return LLONG_MAX;}
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
