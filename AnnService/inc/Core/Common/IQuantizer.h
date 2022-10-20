@@ -21,7 +21,7 @@ namespace SPTAG
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const = 0;
 
             template <typename T>
-            std::function<float(const T*, const T*, SizeType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const;
+            std::function<float(const T*, const T*, DimensionType)> DistanceCalcSelector(SPTAG::DistCalcMethod p_method) const;
 
             virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const = 0;
 
