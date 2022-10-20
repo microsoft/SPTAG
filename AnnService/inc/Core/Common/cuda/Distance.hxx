@@ -134,10 +134,6 @@ __host__ void copyRawDataToMultiGPU(SPTAG::VectorIndex* index, T** d_data, size_
 }
 
 /*********************************************************************
-* DEPRICATED CODE - Old data structures used before code restructure
-*********************************************************************/
-
-/*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
 * represented by a element of datatype T
 * NOTE: Dim must be templated so that we can store coordinate values in registers
@@ -170,6 +166,10 @@ class Point {
     }
     id = other.id;
     return *this;
+  }
+
+  __host__ __device__ Point& operator>(const Point& other) {
+      return id > other.id;
   }
 
   // Computes euclidean dist.  Uses 2 registers to increase pipeline efficiency and ILP
@@ -254,7 +254,6 @@ class Point<uint8_t, SUMTYPE, Dim> {
       coords[i]=0;
     }
   }
-
 
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim/4; i++) {
