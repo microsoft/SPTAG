@@ -114,7 +114,7 @@ public:
             total[0] += ((SUMTYPE)((SUMTYPE)coords[i] * (SUMTYPE)other->coords[i]));
             total[1] += ((SUMTYPE)((SUMTYPE)coords[i + 1] * (SUMTYPE)other->coords[i + 1]));
         }
-        return (SUMTYPE)1.0 - (total[0] + total[1]);
+        return (SUMTYPE)Dim - (total[0] + total[1]);
     }
 
     __forceinline__ __device__ SUMTYPE dist(Point<T, SUMTYPE, Dim>* other, int metric) {
