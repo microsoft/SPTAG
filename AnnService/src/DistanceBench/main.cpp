@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
         ByteArray DB_vector_array = ByteArray::Alloc(quantizer->QuantizeSize() * DBSet->Count());
         DBSet = std::make_shared<BasicVectorSet>(DB_vector_array, VectorValueType::UInt8, quantizer->QuantizeSize(), DBSet->Count());
         
+#pragma omp parallel for
         for (int i = 0; i < DBSet->Count(); i++)
         {
             quantizer->QuantizeVector(DBset_raw->GetVector((std::uint32_t)i), (std::uint8_t*)DBSet->GetVector((std::uint32_t)i));
@@ -132,6 +133,7 @@ int main(int argc, char* argv[])
         ByteArray query_vector_array = ByteArray::Alloc(quantizer->QuantizeSize() * querySet->Count());
         querySet = std::make_shared<BasicVectorSet>(query_vector_array, VectorValueType::UInt8, quantizer->QuantizeSize(), querySet->Count());
 
+#pragma omp parallel for
         for (int i = 0; i < querySet->Count(); i++)
         {
             quantizer->QuantizeVector(queryset_raw->GetVector((std::uint32_t)i), (std::uint8_t*)querySet->GetVector((std::uint32_t)i));
@@ -165,7 +167,7 @@ int main(int argc, char* argv[])
     auto duration = after - before;
     std::cout << "Finished " << options->m_numLoops << " iterations in " << std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() << " ms" << std::endl;
     
-    auto perCompare = duration / (options->m_numLoops * options->m_DBVecPerQuery);
+    auto perCompare = duration / (options->m_numLoops * options->m_DBVecPerQuery * querySet->Count());
     std::cout << "Average time per comparison = " << std::chrono::duration_cast<std::chrono::nanoseconds>(perCompare).count() << " ns" << std::endl;
 
     
