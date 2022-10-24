@@ -903,12 +903,18 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             
             // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets
             int KNN_blocks = (KNN_THREADS - 1 + querySet->Count()) / KNN_THREADS;
-            size_t dynamicSharedMem = KNN_THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608 for 64 KNN_Threads
+            size_t dynamicSharedMem = KNN_THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); 
+            //64*9*8=4608 for K=10 , KNN_Threads = 64
+            //64*99*8=50688 for K = 100, KNN_Threads = 64
+            if (dynamicSharedMem > (1024 * 48)) {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Cannot Launch CUDA kernel on %d, because of using to much shared memory size, %zu\n", i, dynamicSharedMem);
+                exit(1);
+            }
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching kernel on %d\n", i);
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching Parameters: KNN_blocks = %d, KNN_Thread = %d , dynamicSharedMem = %d, \n", KNN_blocks, KNN_THREADS, dynamicSharedMem);
 
-            CUDA_CHECK(query_KNN<DTYPE, MAX_DIM, KNN_THREADS, SUMTYPE> << <KNN_blocks, KNN_THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K, metric));
-
+            query_KNN<DTYPE, MAX_DIM, KNN_THREADS, SUMTYPE> << <KNN_blocks, KNN_THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K, metric);
+            cudaError_t c_ret = cudaGetLastError();
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "Error: %s\n", cudaGetErrorString(c_ret));            
         }
         

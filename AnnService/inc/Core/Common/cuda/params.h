@@ -33,7 +33,7 @@
 * Parameters that have been optimized experimentally 
 ******************************************************/
 #define THREADS 64 // Number of threads per block
-#define KNN_THREADS 64 // Number of threads per block
+#define KNN_THREADS 32 // Number of threads per block
 #define BLOCKS 10240 // Total blocks used
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
 #define KEYTYPE float // Keys used to divide TPTs at each node
