@@ -7,6 +7,9 @@
 *.obj
 *.elf
 
+# Log files
+*.tlog
+
 # Linker output
 *.ilk
 *.map
@@ -62,3 +65,4 @@ dkms.conf
 /packages
 /out/build/x64-Debug
 /sgKey.snk
+/AnnService/x64/Debug

@@ -84,7 +84,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
       candidate_vec = headPS->getVec(candidate.idx);
       candidate.dist = dist_comp(query, candidate_vec);
 
-      if(candidate.dist < max_dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
+      if(max_dist >= candidate.dist && candidate.idx != tailId) { // If it is a candidate to be added to neighbor list
 
         for(read_id=0; candidate.dist > threadList[read_id].dist && good; read_id++) {
           if(violatesRNG<T, SUMTYPE>(candidate_vec, headPS->getVec(threadList[read_id].idx), candidate.dist, dist_comp)) {

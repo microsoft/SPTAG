@@ -78,13 +78,13 @@ class GPU_PQQuantizer {
 
       CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
 
-      if(metric == DistMetric::Cosine) {
-        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetCosineDistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
-      }
-      else {
-        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+      // Make sure L2 is used, since other 
+      if(metric != DistMetric::L2) {
+        LOG(Helper::LogLevel::LL_Error, "Only L2 distance currently supported for PQ or OPQ\n");
+        exit(1);
       }
 
+      CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
     }
 
     __host__ ~GPU_PQQuantizer()
@@ -100,10 +100,6 @@ class GPU_PQQuantizer {
         totals[1] += m_DistanceTables[m_DistIndexCalc(i+1, pX[i+1], pY[i+1])];
       } 
 
-//      if(metric == DistMetric::Cosine) {
-//        out = 1 - out;
-//      }
-//      return 1 - (totals[0]+totals[1]);
       return totals[0]+totals[1];
     }
 
