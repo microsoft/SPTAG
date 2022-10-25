@@ -64,7 +64,7 @@ def _setup():
         ],
 
         packages = _find_python_packages(),
-        python_requires = '>=3.7',
+        python_requires = '>=3.6',
         install_requires = ['numpy'],
 
         cmdclass = {
