@@ -273,10 +273,11 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
   extern __shared__ char sharememory[];
 
+// Enable dimension of dataset that you will be using for maximum performance
   if(quantizer == NULL) {
-//    RUN_KERNEL(64);
+    RUN_KERNEL(64);
     RUN_KERNEL(100);
-    RUN_KERNEL(200);
+//    RUN_KERNEL(200);
 //    RUN_KERNEL(MAX_SHAPE);
   }
   else {
@@ -367,7 +368,6 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   GPU_PQQuantizer* h_quantizer = NULL; 
 
   if(use_q) {
-printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric == DistMetric::L2);
     h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
     CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
     CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
