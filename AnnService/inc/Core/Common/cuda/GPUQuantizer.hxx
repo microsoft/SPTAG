@@ -35,6 +35,7 @@
 #include "params.h"
 
 #include "../PQQuantizer.h"
+#include "../OPQQuantizer.h"
 
 #include "inc/Core/VectorIndex.h"
 
@@ -61,7 +62,7 @@ __host__ int GetRTypeWidth(RType type) {
   if(type == RType::Float) return 4;
 }
 
-class GPU_PQQuantizer {
+class GPU_Quantizer {
 
 //  private:
   public:
@@ -82,24 +83,9 @@ class GPU_PQQuantizer {
 
   public:
 
-    __host__ GPU_PQQuantizer() {}
+    __host__ GPU_Quantizer() {}
 
-    __host__ GPU_PQQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer, DistMetric metric) {
-      
-      SPTAG::COMMON::PQQuantizer<int>* pq_quantizer = (SPTAG::COMMON::PQQuantizer<int>*)quantizer.get();
-
-      m_NumSubvectors = pq_quantizer->GetNumSubvectors();
-      m_KsPerSubvector = pq_quantizer->GetKsPerSubvector();
-      m_BlockSize = pq_quantizer->GetBlockSize();
-      m_DimPerSubvector = pq_quantizer->GetDimPerSubvector();
-
-      VectorValueType rType = pq_quantizer->GetReconstructType();
-      if(rType == SPTAG::VectorValueType::Float) m_type = RType::Float;
-      else if(rType == SPTAG::VectorValueType::Int8) m_type = RType::Int8;
-      else if(rType == SPTAG::VectorValueType::UInt8) m_type = RType::UInt8;
-      else if(rType == SPTAG::VectorValueType::Int16) m_type = RType::Int16;
-
-      CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
+    __host__ GPU_Quantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer, DistMetric metric) {
 
       // Make sure L2 is used, since other 
       if(metric != DistMetric::L2) {
@@ -107,17 +93,54 @@ class GPU_PQQuantizer {
         exit(1);
       }
 
-      CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+      VectorValueType rType;
+      
+      if(quantizer->GetQuantizerType() == QuantizerType::PQQuantizer) {
+        SPTAG::COMMON::PQQuantizer<int>* pq_quantizer = (SPTAG::COMMON::PQQuantizer<int>*)quantizer.get();
 
-      CUDA_CHECK(cudaMalloc(&m_codebooks, m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector * GetRTypeWidth(m_type)));
-      CUDA_CHECK(cudaMemcpy(m_codebooks, pq_quantizer->GetCodebooks(), m_NumSubvectors*m_KsPerSubvector*m_DimPerSubvector*GetRTypeWidth(m_type), cudaMemcpyHostToDevice));
+        m_NumSubvectors = pq_quantizer->GetNumSubvectors();
+        m_KsPerSubvector = pq_quantizer->GetKsPerSubvector();
+        m_BlockSize = pq_quantizer->GetBlockSize();
+        m_DimPerSubvector = pq_quantizer->GetDimPerSubvector();
+
+        LOG(Helper::LogLevel::LL_Debug, "Using PQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
+
+        rType = pq_quantizer->GetReconstructType();
+        CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
+        CUDA_CHECK(cudaMemcpy(m_DistanceTables, pq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+      }
+      else if(quantizer->GetQuantizerType() == QuantizerType::OPQQuantizer) {
+        SPTAG::COMMON::OPQQuantizer<int>* opq_quantizer = (SPTAG::COMMON::OPQQuantizer<int>*)quantizer.get();
+
+        m_NumSubvectors = opq_quantizer->GetNumSubvectors();
+        m_KsPerSubvector = opq_quantizer->GetKsPerSubvector();
+        m_BlockSize = opq_quantizer->GetBlockSize();
+        m_DimPerSubvector = opq_quantizer->GetDimPerSubvector();
+
+        LOG(Helper::LogLevel::LL_Debug, "Using OPQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
+
+        rType = opq_quantizer->GetReconstructType();
+        CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
+        CUDA_CHECK(cudaMemcpy(m_DistanceTables, opq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
+      }
+      else {
+        LOG(Helper::LogLevel::LL_Error, "Only PQ and OPQ quantizers are supported for GPU build\n");
+        exit(1);
+      }
+
+      if(rType == SPTAG::VectorValueType::Float) m_type = RType::Float;
+      else if(rType == SPTAG::VectorValueType::Int8) m_type = RType::Int8;
+      else if(rType == SPTAG::VectorValueType::UInt8) m_type = RType::UInt8;
+      else if(rType == SPTAG::VectorValueType::Int16) m_type = RType::Int16;
+
     }
 
-    __host__ ~GPU_PQQuantizer()
+    __host__ ~GPU_Quantizer()
     {
       cudaFree(m_DistanceTables);
     }
 
+/*
     template<typename R>
     __device__ void ReconstructVector(uint8_t* qvec, R* vecout)
     {
@@ -130,6 +153,7 @@ class GPU_PQQuantizer {
         memcpy(sub_vecout, m_codebooks+codebook_idx, m_DimPerSubvector*sizeof(R));
       }
     }
+*/
 
     // TODO - Optimize quantized distance comparator
     __forceinline__ __device__ float dist(uint8_t* pX, uint8_t* pY) {
@@ -147,6 +171,32 @@ class GPU_PQQuantizer {
       return between <= distance;
     }
 
+// Attempt to improve perf by checking threshold during computation to short-circuit 
+//   distance lookups
+/*
+    __forceinline__ __device__ float dist(uint8_t* pX, uint8_t* pY, float target) {
+      float totals[2]; totals[0]=0; totals[1]=0;
+      float temp;
+
+      for(int i = 0; i < m_NumSubvectors; i+=2) {
+        totals[0] += m_DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+//        totals[1] += m_DistanceTables[m_DistIndexCalc(i+1, pX[i+1], pY[i+1])];
+        temp = m_DistanceTables[m_DistIndexCalc(i+1, pX[i+1], pY[i+1])];
+
+        if(totals[0] >= target || totals[0] >= (target*(i+1))/(float)m_NumSubvectors) {
+          return target+1.0;
+        }
+        totals[0]+=temp;
+      } 
+
+      return totals[0];
+    }
+
+    __device__ bool violatesRNG_test(uint8_t* a, uint8_t* b, float distance) {
+      float between = dist(a, b, distance);
+      return between <= distance;
+    }
+*/
 
 };
 

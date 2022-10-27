@@ -35,7 +35,7 @@
 #include <chrono>
 
 template<int Dim>
-__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_Quantizer* quantizer) {
 
   uint8_t query[Dim];
   uint8_t* candidate_vec;
@@ -269,7 +269,7 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 #define MAX_SHAPE 1024
 
 template<typename T, typename SUMTYPE, int metric>
-__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_PQQuantizer* quantizer) {
+__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_Quantizer* quantizer) {
 
   extern __shared__ char sharememory[];
 
@@ -290,7 +290,7 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
 
 template<typename DTYPE, typename SUMTYPE, int metric>
-void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer, SPTAG::VectorIndex* index)
+void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_Quantizer* quantizer, SPTAG::VectorIndex* index)
 {
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
@@ -363,13 +363,13 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
 
 
 /**** Varibales if PQ is enabled ****/
-  GPU_PQQuantizer* d_quantizer = NULL;  // Only use if quantizer is enabled
-  GPU_PQQuantizer* h_quantizer = NULL; 
+  GPU_Quantizer* d_quantizer = NULL;  // Only use if quantizer is enabled
+  GPU_Quantizer* h_quantizer = NULL; 
 
   if(use_q) {
-    h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
-    CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
-    CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
+    h_quantizer = new GPU_Quantizer(index->m_pQuantizer, (DistMetric)metric);
+    CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_Quantizer)));
+    CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_Quantizer), cudaMemcpyHostToDevice));
   }
 
 /********* Allocate and transfer data to each GPU ********/
@@ -397,7 +397,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
     CUDA_CHECK(cudaMemcpy(d_pointset[gpuNum], &temp_ps, sizeof(PointSet<DTYPE>), cudaMemcpyHostToDevice));
 
     // Allocate and initialize TPT structures
-    CUDA_CHECK(cudaMallocManaged(&d_tptrees[gpuNum], sizeof(TPtree)));
+    CUDA_CHECK(cudaMalloc(&d_tptrees[gpuNum], sizeof(TPtree)));
     tptrees[gpuNum] = new TPtree;
 
     tptrees[gpuNum]->initialize(dataSize, levels, dim);

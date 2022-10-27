@@ -138,7 +138,7 @@ __device__ void findTailNeighbors(PointSet<T>* headPS, PointSet<T>* tailPS, TPtr
  *          *** Uses Quantizer ***
 ***********************************************************************************/
 template<int Dim>
-__device__ void findTailNeighbors_PQ(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t numTails, int numHeads, QueryGroup* groups, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+__device__ void findTailNeighbors_PQ(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t numTails, int numHeads, QueryGroup* groups, DistPair<float>* threadList, GPU_Quantizer* quantizer) {
 
   uint8_t query[Dim];
   float max_dist = INFTY<float>();
@@ -350,7 +350,7 @@ __global__ void findTailNeighbors_selector(PointSet<T>* headPS, PointSet<T>* tai
 
 }
 
-__global__ void findTailNeighbors_PQ_selector(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t curr_batch_size, size_t numHeads, QueryGroup* groups, int dim, GPU_PQQuantizer* quantizer) {
+__global__ void findTailNeighbors_PQ_selector(PointSet<uint8_t>* headPS, PointSet<uint8_t>* tailPS, TPtree* tptree, int KVAL, DistPair<float>* results, size_t curr_batch_size, size_t numHeads, QueryGroup* groups, int dim, GPU_Quantizer* quantizer) {
 
   extern __shared__ char sharememory[];
   DistPair<float>* threadList = (&((DistPair<float>*)sharememory)[KVAL*threadIdx.x]);
@@ -479,13 +479,13 @@ void getTailNeighborsTPT(T* vectors, SPTAG::SizeType N, SPTAG::VectorIndex* head
     std::vector<QueryGroup*> d_queryGroups(NUM_GPUS);
 
     // Quantizer structures only used if quantization is enabled
-    GPU_PQQuantizer* d_quantizer = NULL; 
-    GPU_PQQuantizer* h_quantizer = NULL;
+    GPU_Quantizer* d_quantizer = NULL; 
+    GPU_Quantizer* h_quantizer = NULL;
 
     if(use_q) {
-      h_quantizer = new GPU_PQQuantizer(headIndex->m_pQuantizer, (DistMetric)metric);
-      CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
-      CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
+      h_quantizer = new GPU_Quantizer(headIndex->m_pQuantizer, (DistMetric)metric);
+      CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_Quantizer)));
+      CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_Quantizer), cudaMemcpyHostToDevice));
     }
 
     LOG(SPTAG::Helper::LogLevel::LL_Info, "Setting up each of the %d GPUs...\n", NUM_GPUS);
