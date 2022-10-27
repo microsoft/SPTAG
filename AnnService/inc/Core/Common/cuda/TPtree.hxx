@@ -374,6 +374,18 @@ __host__ void construct_trees_PQ(TPtree** d_trees, PointSet<T>** ps, int N, int 
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
         CUDA_CHECK(cudaSetDevice(gpuNum));
+
+        cudaDeviceProp prop;
+        CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum)); // Get avil. memory
+        size_t freeMem, totalMem;
+        CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+        size_t neededMem = N*reconDim*sizeof(R);
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory needed for reconstructed vectors to build TPT: %ld, memory availalbe: %ld\n", neededMem, totalMem);
+        if(freeMem*0.9 < neededMem) {
+          LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient memory for reconstructed vectors to build TPTree.\n");
+          exit(1);
+        }
+          
         CUDA_CHECK(cudaMalloc(&d_recon_raw[gpuNum], N*reconDim*sizeof(R)));
         CUDA_CHECK(cudaMemcpy(d_recon_raw[gpuNum], h_recon_raw, N*reconDim*sizeof(R), cudaMemcpyHostToDevice));
         temp_ps.data = d_recon_raw[gpuNum];
@@ -383,6 +395,14 @@ __host__ void construct_trees_PQ(TPtree** d_trees, PointSet<T>** ps, int N, int 
 
     construct_trees_multigpu<R>(d_trees, d_recon_ps, N, NUM_GPUS, streams, 0);
     CUDA_CHECK(cudaDeviceSynchronize());
+
+
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        CUDA_CHECK(cudaFree(d_recon_raw[gpuNum]));
+        CUDA_CHECK(cudaFree(d_recon_ps[gpuNum]));
+    }
+    delete d_recon_raw;
+    delete d_recon_ps;
 
 /*
 int min_size=99999999;
