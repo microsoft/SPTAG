@@ -19,10 +19,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>15.0</VCProjectVersion>
+    <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{C2BC5FDE-C853-4F3D-B7E4-2C9B5524DDF9}</ProjectGuid>
     <RootNamespace>CoreLibrary</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>CoreLibrary</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -49,8 +49,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
     <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -203,6 +203,7 @@
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
     <ClCompile Include="src\Core\Common\SIMDUtils.cpp" />
+    <ClCompile Include="src\Core\Common\TruthSet.cpp" />
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
