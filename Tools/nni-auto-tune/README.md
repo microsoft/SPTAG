@@ -30,7 +30,7 @@ We support muiltiple types of data for training. Including text file, binary fil
 In many cased, parameters that works fine in sampled dataset also work in original dataset. So we also provided a preprocessing script for dataset sampling and ground truth calculation. You can use follow command to do sample and ground truth pre-calculate.
 
 ```sh
-python main.py --train_file victors.bin --query_file query.bin --output_dir sampled/ --distance euclidean  --num_sample 100000
+python preprocessing.py --train_file victors.bin --query_file query.bin --output_dir sampled/ --distance euclidean  --num_sample 100000
 ```
 
 If you only need to calculate ground truth for time save in auto-tune, which we highly recommend, you can set `--num_sample` to -1

@@ -87,11 +87,11 @@ def main():
         X_train = X_train[:args.num_sample]
 
         print('sampled train set to size (%d)' % (X_train.shape[0]))
-
+        prefix = args.train_file.replace(".bin", "")
         target_path = os.path.join(
             args.output_dir,
-            os.path.splitext(os.path.split(args.train_file)[1])[0] +
-            '-sampled-' + str(args.num_sample) + '.txt')
+            os.path.splitext(os.path.split(prefix)[1])[0] + '-sampled-' +
+            str(args.num_sample) + '.txt')
         with open(target_path, 'w') as f:
             for i in range(len(X_train)):
                 f.write('\t')

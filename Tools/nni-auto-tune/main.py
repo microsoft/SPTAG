@@ -12,6 +12,7 @@ from runner import run_individual_query
 from dataset import DataReader, HDF5Reader
 import argparse
 import json
+import shutil
 import itertools
 from multiprocess import Pool, Process
 import multiprocess
@@ -203,6 +204,8 @@ def main():
                 "build_time": args.max_build_time
             })
             return
+    else:
+        algo.fit(X=X_train, para=para, data_type=args.data_type)
 
     build_time = time.time() - t0
 
