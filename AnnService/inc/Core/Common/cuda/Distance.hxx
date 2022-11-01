@@ -32,6 +32,7 @@
 #include<float.h>
 #include<unordered_set>
 #include<chrono>
+#include<cuda/std/type_traits>
 
 #include "params.h"
 #include "inc/Core/VectorIndex.h"
@@ -48,11 +49,14 @@ template<> __forceinline__ __host__ __device__ int INFTY<int>() {return INT_MAX;
 template<> __forceinline__ __host__ __device__ long long int INFTY<long long int>() {return LLONG_MAX;}
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
 //template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
+template<> __forceinline__ __host__ __device__ int8_t INFTY<int8_t>() {return 127;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
 
 template<typename T> __device__ T BASE() {}
 template<> __forceinline__ __device__ float BASE<float>() {return 1;}
-template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 16384;}
+template<> __forceinline__ __device__ int32_t BASE<int32_t>() {return 16384;}
+template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 65536;}
+
 
 template<typename T, typename SUMTYPE, int Dim>
 __forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
@@ -62,6 +66,25 @@ __forceinline__ __device__ SUMTYPE cosine(T* a, T* b) {
       total[1] += ((SUMTYPE)(a[i+1] * b[i+1]));
     }
     return BASE<SUMTYPE>()-(total[0]+total[1]);
+}
+
+
+template<int Dim>
+__device__ int32_t cosine_int8(int8_t* a, int8_t* b) {
+  int32_t prod=0;
+  int32_t src=0;
+  int32_t target=0;
+
+  uint32_t* newA = reinterpret_cast<uint32_t*>(a);
+  uint32_t* newB = reinterpret_cast<uint32_t*>(b);
+
+  for(int i=0; i<Dim/4; ++i) {
+    src = newA[i];
+    target = newB[i];
+    prod = __dp4a(src, target, prod);
+  }
+
+  return BASE<int32_t>() - prod;
 }
 
 template<typename T, typename SUMTYPE, int Dim>
@@ -78,6 +101,9 @@ __forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
 template<typename T, typename SUMTYPE, int Dim, int metric>
 __device__ SUMTYPE dist(T* a, T* b) {
   if(metric == (int)DistMetric::Cosine) {
+    if(::cuda::std::is_same_v<T,int8_t>) {
+      return cosine_int8<Dim>((int8_t*)a, (int8_t*)b);
+    }
     return cosine<T,SUMTYPE,Dim>(a, b);
   }
   else {
@@ -134,10 +160,6 @@ __host__ void copyRawDataToMultiGPU(SPTAG::VectorIndex* index, T** d_data, size_
 }
 
 /*********************************************************************
-* DEPRICATED CODE - Old data structures used before code restructure
-*********************************************************************/
-
-/*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
 * represented by a element of datatype T
 * NOTE: Dim must be templated so that we can store coordinate values in registers
@@ -170,6 +192,10 @@ class Point {
     }
     id = other.id;
     return *this;
+  }
+
+  __host__ __device__ Point& operator>(const Point& other) {
+      return id > other.id;
   }
 
   // Computes euclidean dist.  Uses 2 registers to increase pipeline efficiency and ILP
@@ -254,7 +280,6 @@ class Point<uint8_t, SUMTYPE, Dim> {
       coords[i]=0;
     }
   }
-
 
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim/4; i++) {

@@ -14,13 +14,13 @@ if (CUDA_FOUND)
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
         set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -Xcompiler -fopenmp -std=c++14 -Xptxas -O3 --use_fast_math --disable-warnings -lineinfo
         -gencode arch=compute_70,code=sm_70
-        -gencode arch=compute_61,code=sm_61
-        -gencode arch=compute_60,code=sm_60" )
+        -gencode arch=compute_75,code=sm_75
+        -gencode arch=compute_80,code=sm_80" )
     elseif(WIN32)
         set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler /openmp -Xcompiler /std:c++14 -Xcompiler /Zc:__cplusplus -Xcompiler /FS --use_fast_math
         -gencode arch=compute_70,code=sm_70
-        -gencode arch=compute_61,code=sm_61
-        -gencode arch=compute_60,code=sm_60" )
+        -gencode arch=compute_75,code=sm_75
+        -gencode arch=compute_80,code=sm_80" )
     endif()
 
     message (STATUS "CUDA_NVCC_FLAGS:" ${CUDA_NVCC_FLAGS})
@@ -28,6 +28,8 @@ if (CUDA_FOUND)
     set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 
     include_directories(${AnnService})
+
+    include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/zstd/lib)   
 
     file(GLOB_RECURSE GPU_HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h ${AnnService}/inc/Core/Common/cuda/*)
     file(GLOB_RECURSE GPU_SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp ${AnnService}/src/Core/Common/Kernel.cu)
@@ -41,6 +43,7 @@ if (CUDA_FOUND)
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp
         ${AnnService}/src/Core/Common/InstructionUtils.cpp
+        ${AnnService}/src/Core/Common/cuda/cuda_unit_tests.cu
     )
 
     set_source_files_properties(${GPU_SRC_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
@@ -51,11 +54,11 @@ if (CUDA_FOUND)
     endif()
 
     CUDA_ADD_LIBRARY(GPUSPTAGLib SHARED ${GPU_SRC_FILES} ${GPU_HDR_FILES})
-    target_link_libraries(GPUSPTAGLib DistanceUtils ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_link_libraries(GPUSPTAGLib DistanceUtils ${Boost_LIBRARIES} ${CUDA_LIBRARIES} libzstd_shared)
     target_compile_definitions(GPUSPTAGLib PRIVATE ${Definition})
 
     CUDA_ADD_LIBRARY(GPUSPTAGLibStatic STATIC ${GPU_SRC_FILES} ${GPU_HDR_FILES})
-    target_link_libraries(GPUSPTAGLibStatic DistanceUtils ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_link_libraries(GPUSPTAGLibStatic DistanceUtils ${Boost_LIBRARIES} ${CUDA_LIBRARIES} libzstd_static)
     target_compile_definitions(GPUSPTAGLibStatic PRIVATE ${Definition})
     add_dependencies(GPUSPTAGLibStatic GPUSPTAGLib)
 

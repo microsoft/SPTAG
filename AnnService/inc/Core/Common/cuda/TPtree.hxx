@@ -33,8 +33,11 @@
 #include <curand_kernel.h>
 #include "params.h"
 #include "Distance.hxx"
+#include "GPUKNNDistance.hxx"
 
 class TPtree;
+//template<typename T, typename KEY_T,typename SUMTYPE, int Dim>
+//class TPtree;
 
 /************************************************************************************
  * Structure that defines the memory locations where points/ids are for a leaf node
@@ -247,7 +250,8 @@ __host__ void construct_trees_multigpu(TPtree** d_trees, PointSet<T>** ps, int N
             find_level_sum<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->Dim, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, nodes_on_level, i);
         }
 
-/* TODO - fix rebalancing
+// TODO - fix rebalancing
+/*
         // Check and rebalance all levels beyond the first (first level has only 1 node)
         if(i > 0) {
             for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
@@ -269,6 +273,7 @@ __host__ void construct_trees_multigpu(TPtree** d_trees, PointSet<T>** ps, int N
 
             update_node_assignments<T><<<RUN_BLOCKS,THREADS,0,streams[gpuNum]>>>(ps[gpuNum], d_trees[gpuNum]->weight_list, d_trees[gpuNum]->node_ids, d_trees[gpuNum]->split_keys, d_trees[gpuNum]->node_sizes, N, i, d_trees[gpuNum]->Dim);
         }
+
         nodes_on_level*=2;
 
     }
@@ -404,9 +409,9 @@ template<typename T>
 __global__ void find_level_sum(PointSet<T>* ps, KEYTYPE* weights, int Dim, int* node_ids, KEYTYPE* split_keys, int* node_sizes, int N, int nodes_on_level, int level) {
   KEYTYPE val=0;
   int size = min(N, nodes_on_level*SAMPLES);
-  int step = N/size;
   for(int i=blockIdx.x*blockDim.x+threadIdx.x; i<size; i+=blockDim.x*gridDim.x) {
     val = weighted_val<T>(ps->getVec(i), &weights[level*Dim], Dim);
+
     atomicAdd(&split_keys[node_ids[i]], val);
     atomicAdd(&node_sizes[node_ids[i]], 1);
   }
