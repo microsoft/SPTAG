@@ -177,7 +177,7 @@ namespace SPTAG {
 	}
 }
 
-// switch between exe and static library by _$(OutputType)
+// switch between exe and static library by _$(OutputType) 
 #ifdef _exe
 
 int main(int argc, char* argv[]) {
