@@ -14,7 +14,7 @@
 #include "inc/SSDServing/main.h"
 #include "inc/SSDServing/Utils.h"
 #include "inc/SSDServing/SSDIndex.h"
-
+ 
 using namespace SPTAG;
 
 namespace SPTAG {
