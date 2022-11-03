@@ -447,6 +447,99 @@ printf("Num leaves:%d, min leaf:%d, max leaf:%d\n", d_trees[0]->num_leaves, min_
 //        find_level_sum_batch_PQ<T, R>(d_trees, ps, N, NUM_GPUS, nodes_on_level, i, index, recon_batch_size);
 //    }
 }
+*/
+
+
+template<typename T, typename R>
+__host__ void construct_trees_PQ(TPtree** d_trees, PointSet<T>** ps, int N, int NUM_GPUS, cudaStream_t* streams, SPTAG::VectorIndex* index) {
+
+    size_t reconDim = index->m_pQuantizer->ReconstructDim();
+    PointSet<R> temp_ps;
+    temp_ps.dim = reconDim;
+    R* h_recon_raw = new R[N*reconDim];
+
+    for(int i=0; i<N; ++i) {
+        index->m_pQuantizer->ReconstructVector((const uint8_t*)(index->GetSample(i)), &h_recon_raw[i*reconDim]);
+    }
+
+    R** d_recon_raw = new R*[NUM_GPUS];
+    PointSet<R>** d_recon_ps = new PointSet<R>*[NUM_GPUS];
+
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        CUDA_CHECK(cudaSetDevice(gpuNum));
+
+        cudaDeviceProp prop;
+        CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum)); // Get avil. memory
+        size_t freeMem, totalMem;
+        CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+        size_t neededMem = N*reconDim*sizeof(R);
+        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory needed for reconstructed vectors to build TPT: %ld, memory availalbe: %ld\n", neededMem, totalMem);
+        if(freeMem*0.9 < neededMem) {
+          LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient memory for reconstructed vectors to build TPTree.\n");
+          exit(1);
+        }
+          
+        CUDA_CHECK(cudaMalloc(&d_recon_raw[gpuNum], N*reconDim*sizeof(R)));
+        CUDA_CHECK(cudaMemcpy(d_recon_raw[gpuNum], h_recon_raw, N*reconDim*sizeof(R), cudaMemcpyHostToDevice));
+        temp_ps.data = d_recon_raw[gpuNum];
+        CUDA_CHECK(cudaMalloc(&d_recon_ps[gpuNum], sizeof(PointSet<R>)));
+        CUDA_CHECK(cudaMemcpy(d_recon_ps[gpuNum], &temp_ps, sizeof(PointSet<R>), cudaMemcpyHostToDevice));
+    }
+
+    construct_trees_multigpu<R>(d_trees, d_recon_ps, N, NUM_GPUS, streams, 0);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        CUDA_CHECK(cudaFree(d_recon_raw[gpuNum]));
+        CUDA_CHECK(cudaFree(d_recon_ps[gpuNum]));
+    }
+    delete d_recon_raw;
+    delete d_recon_ps;
+    delete h_recon_raw;
+
+/*
+int min_size=99999999;
+int max_size=0;
+for(int i=0; i<d_trees[0]->num_leaves; ++i) {
+  if(d_trees[0]->leafs[i].size > max_size) max_size = d_trees[0]->leafs[i].size;
+  if(d_trees[0]->leafs[i].size < min_size) min_size = d_trees[0]->leafs[i].size;
+}
+printf("Num leaves:%d, min leaf:%d, max leaf:%d\n", d_trees[0]->num_leaves, min_size, max_size);
+*/
+/*
+    int nodes_on_level=1;
+
+    const int RUN_BLOCKS = min(N/THREADS, BLOCKS);
+    const int RAND_BLOCKS = min(N/THREADS, 1024); // Use fewer blocks for kernels using random numbers to cut down memory usage
+
+    float** frac_to_move = new float*[NUM_GPUS];
+    curandState** states = new curandState*[NUM_GPUS];
+
+    recon_batch_size = N;
+
+    // Prepare random number generator
+    for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
+        CUDA_CHECK(cudaSetDevice(gpuNum));
+        CUDA_CHECK(cudaMalloc(&frac_to_move[gpuNum], d_trees[0]->num_nodes*sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&states[gpuNum], RAND_BLOCKS*THREADS*sizeof(curandState)));
+        initialize_rands<<<RAND_BLOCKS,THREADS>>>(states[gpuNum], 0);
+
+        cudaDeviceProp prop;
+        CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum)); // Get avil. memory
+        LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s\n", gpuNum, prop.name);
+
+        size_t freeMem, totalMem;
+        CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+
+        size_t gpu_batch_size = (freeMem*0.9) / sizeof(R);
+        if(gpu_batch_size < recon_batch_size) recon_batch_size = gpu_batch_size; // Use batch size of smallest GPU
+    }
+*/
+// Get all reconstructed vectors on CPU
+//    for(int i=0; i<d_trees[0]->levels; ++i) {
+//        find_level_sum_batch_PQ<T, R>(d_trees, ps, N, NUM_GPUS, nodes_on_level, i, index, recon_batch_size);
+//    }
+}
 
 
 template<typename T>
