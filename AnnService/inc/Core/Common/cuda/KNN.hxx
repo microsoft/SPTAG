@@ -35,7 +35,7 @@
 #include <chrono>
 
 template<int Dim>
-__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_PQQuantizer* quantizer) {
+__device__ void findRNG_PQ(PointSet<uint8_t>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, DistPair<float>* threadList, GPU_Quantizer* quantizer) {
 
   uint8_t query[Dim];
   uint8_t* candidate_vec;
@@ -269,14 +269,15 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
 #define MAX_SHAPE 1024
 
 template<typename T, typename SUMTYPE, int metric>
-__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_PQQuantizer* quantizer) {
+__global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_Quantizer* quantizer) {
 
   extern __shared__ char sharememory[];
 
+// Enable dimension of dataset that you will be using for maximum performance
   if(quantizer == NULL) {
-//    RUN_KERNEL(64);
+    RUN_KERNEL(64);
     RUN_KERNEL(100);
-    RUN_KERNEL(200);
+//    RUN_KERNEL(200);
 //    RUN_KERNEL(MAX_SHAPE);
   }
   else {
@@ -290,16 +291,23 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
 
 template<typename DTYPE, typename SUMTYPE, int metric>
-void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_PQQuantizer* quantizer) 
+void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, TPtree** d_tptrees, int iters, int levels, int NUM_GPUS, int KVAL, cudaStream_t* streams, std::vector<size_t> batch_min, std::vector<size_t> batch_max, int balanceFactor, PointSet<DTYPE>** d_pointset, int dim, GPU_Quantizer* quantizer, SPTAG::VectorIndex* index)
 {
   // Set num blocks for all GPU kernel calls
   int KNN_blocks= max(tptrees[0]->num_leaves, BLOCKS);
 
+
   for(int tree_id=0; tree_id < iters; ++tree_id) { // number of TPTs used to create approx. KNN graph
+
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0)); // Get avil. memory
+    size_t freeMem, totalMem;
+    CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+    LOG(SPTAG::Helper::LogLevel::LL_Debug, "Starting TPtree number %d, Total memory of GPU 0:%ld, GPU 0 memory used:%ld\n", tree_id, totalMem, freeMem);
 
     auto before_tpt = std::chrono::high_resolution_clock::now(); // Start timer for TPT building
 
-    create_tptree_multigpu<DTYPE>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor);
+    create_tptree_multigpu<DTYPE>(tptrees, d_pointset, dataSize, levels, NUM_GPUS, streams, balanceFactor, index);
     CUDA_CHECK(cudaDeviceSynchronize());
 
             // Copy TPTs to each GPU
@@ -344,6 +352,8 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
   size_t rawSize = dataSize*dim;
   cudaError_t resultErr;
 
+  printf("leafSize:%d, levels:%d\n", leafSize, levels);
+
   // Timers
   double tree_time=0.0;
   double KNN_time=0.0;
@@ -363,16 +373,13 @@ void buildGraphGPU(SPTAG::VectorIndex* index, size_t dataSize, int KVAL, int tre
 
 
 /**** Varibales if PQ is enabled ****/
-  GPU_PQQuantizer* d_quantizer = NULL;  // Only use if quantizer is enabled
-  GPU_PQQuantizer* h_quantizer = NULL; 
+  GPU_Quantizer* d_quantizer = NULL;  // Only use if quantizer is enabled
+  GPU_Quantizer* h_quantizer = NULL; 
 
   if(use_q) {
-printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric == DistMetric::L2);
-    h_quantizer = new GPU_PQQuantizer(index->m_pQuantizer, (DistMetric)metric);
-    CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_PQQuantizer)));
-    CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_PQQuantizer), cudaMemcpyHostToDevice));
-
-
+    h_quantizer = new GPU_Quantizer(index->m_pQuantizer, (DistMetric)metric);
+    CUDA_CHECK(cudaMalloc(&d_quantizer, sizeof(GPU_Quantizer)));
+    CUDA_CHECK(cudaMemcpy(d_quantizer, h_quantizer, sizeof(GPU_Quantizer), cudaMemcpyHostToDevice));
   }
 
 /********* Allocate and transfer data to each GPU ********/
@@ -449,10 +456,10 @@ printf("Using quantizer, and metric:%d (L2?:%d)\n", (metric), (DistMetric)metric
         LOG(Helper::LogLevel::LL_Error, "Cosine distance not currently supported when using quantization.\n");
         exit(1);
       }
-      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::Cosine>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer, index);
     }
     else {
-      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::L2>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer);
+      run_TPT_batch_multigpu<DTYPE, SUMTYPE, (int)DistMetric::L2>(dataSize, d_results, tptrees, d_tptrees, trees, levels, NUM_GPUS, KVAL, streams.data(), batch_min, batch_max, balanceFactor, d_pointset, dim, d_quantizer, index);
     }
 
     auto before_copy = std::chrono::high_resolution_clock::now();
@@ -482,8 +489,10 @@ auto end_t = std::chrono::high_resolution_clock::now();
   for(int gpuNum=0; gpuNum < NUM_GPUS; ++gpuNum) {
     tptrees[gpuNum]->destroy();
     delete tptrees[gpuNum];
-    cudaFree(d_tptrees[gpuNum]);
-    cudaFree(d_results[gpuNum]);
+    CUDA_CHECK(cudaFree(d_tptrees[gpuNum]));
+    CUDA_CHECK(cudaFree(d_results[gpuNum]));
+    CUDA_CHECK(cudaFree(d_data_raw[gpuNum]));
+    CUDA_CHECK(cudaFree(d_pointset[gpuNum]));
   }
   delete[] tptrees;
   delete[] d_results;
@@ -492,6 +501,7 @@ auto end_t = std::chrono::high_resolution_clock::now();
   delete[] d_pointset;
 
   if(use_q) {
+    CUDA_CHECK(cudaFree(d_quantizer));
     delete h_quantizer;
   }
 
@@ -711,15 +721,16 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     extern __shared__ char sharememory[];
     __shared__ ThreadHeap<DTYPE, SUMTYPE, Dim, BLOCK_DIM> heapMem[BLOCK_DIM];
     DistPair<SUMTYPE> extra; // extra variable to store the largest distance/id for all KNN of the point
-    TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
-    __shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
+    //TransposePoint<DTYPE, Dim, BLOCK_DIM, SUMTYPE> query;  // Stores in strided memory to avoid bank conflicts
+    //__shared__ DTYPE transpose_mem[Dim * BLOCK_DIM];
+    Point<DTYPE, SUMTYPE, Dim> query;
 
-    if (cuda::std::is_same<DTYPE, uint8_t>::value || cuda::std::is_same<DTYPE, int8_t>::value) {
-        query.setMem(&transpose_mem[threadIdx.x*4]);
-    }
-    else {
-        query.setMem(&transpose_mem[threadIdx.x]);
-    }
+    //if (cuda::std::is_same<DTYPE, uint8_t>::value || cuda::std::is_same<DTYPE, int8_t>::value) {
+    //    query.setMem(&transpose_mem[threadIdx.x*4]);
+    //}
+    //else {
+    //    query.setMem(&transpose_mem[threadIdx.x]);
+    //}
 
     heapMem[threadIdx.x].initialize(&((DistPair<SUMTYPE>*)sharememory)[(KVAL - 1) * threadIdx.x], KVAL - 1);
 
@@ -728,7 +739,8 @@ __global__ void query_KNN(Point<DTYPE, SUMTYPE, Dim>* querySet, Point<DTYPE, SUM
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < numQueries; i += blockDim.x * gridDim.x) {
         heapMem[threadIdx.x].reset();
         extra.dist = INFTY<SUMTYPE>();
-        query.loadPoint(querySet[i]); // Load into shared memory
+        query=querySet[i]; 
+        //query.loadPoint(querySet[i]); // Load into shared memory
         // Compare with all points in the dataset
         for (int j = 0; j < dataSize; j++) {
             if (metric == 0) {
@@ -847,7 +859,7 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
 
     }
 
-    int KNN_blocks = querySet->Count() / THREADS;
+    int KNN_blocks = querySet->Count() / KNN_THREADS;
     std::vector<size_t> curr_batch_size(NUM_GPUS);
     std::vector<size_t> batchOffset(NUM_GPUS);
     for (int gpuNum = 0; gpuNum < NUM_GPUS; ++gpuNum) {
@@ -859,13 +871,13 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
         cudaSetDevice(i);
         cudaStreamCreate(&streams[i]); // Copy data over on a separate stream for each GPU
         // Device result memory on each GPU
-        cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>));
-
+        CUDA_CHECK(cudaMalloc(&d_results[i], per_gpu_result * sizeof(DistPair<SUMTYPE>)));
+        
         //Copy Queryvectors
-        cudaMalloc(&d_points[i], querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
-        cudaMemcpyAsync(d_points[i], points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]);
+        CUDA_CHECK(cudaMalloc(&d_points[i], querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>)));
+        CUDA_CHECK(cudaMemcpyAsync(d_points[i], points, querySet->Count() * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]));
         //Batchvectors
-        cudaMalloc(&d_check_points[i], batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>));
+        CUDA_CHECK(cudaMalloc(&d_check_points[i], batchSize[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>)));
     }
     
     LOG_INFO("Starting KNN Kernel timer\n");
@@ -900,12 +912,19 @@ __host__ void GenerateTruthGPUCore(std::shared_ptr<VectorSet> querySet, std::sha
             CUDA_CHECK(cudaMemcpyAsync(d_check_points[i], sub_vectors_points[i], curr_batch_size[i] * sizeof(Point<DTYPE, SUMTYPE, MAX_DIM>), cudaMemcpyHostToDevice, streams[i]));
             
             // Perfrom brute-force KNN from the subsets assigned to the GPU for the querySets
-            int KNN_blocks = (THREADS - 1 + querySet->Count()) / THREADS;
-            size_t dynamicSharedMem = THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); //4608 for 64 Threads
+            int KNN_blocks = (KNN_THREADS - 1 + querySet->Count()) / KNN_THREADS;
+            size_t dynamicSharedMem = KNN_THREADS * sizeof(DistPair < SUMTYPE>) * (K - 1); 
+            //64*9*8=4608 for K=10 , KNN_Threads = 64
+            //64*99*8=50688 for K = 100, KNN_Threads = 64
+            if (dynamicSharedMem > (1024 * 48)) {
+                LOG(SPTAG::Helper::LogLevel::LL_Error, "Cannot Launch CUDA kernel on %d, because of using to much shared memory size, %zu\n", i, dynamicSharedMem);
+                exit(1);
+            }
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching kernel on %d\n", i);
-            query_KNN<DTYPE, MAX_DIM, THREADS, SUMTYPE> << <KNN_blocks, THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K, metric);
-            cudaError_t c_ret = cudaGetLastError();
+            LOG(SPTAG::Helper::LogLevel::LL_Info, "Launching Parameters: KNN_blocks = %d, KNN_Thread = %d , dynamicSharedMem = %d, \n", KNN_blocks, KNN_THREADS, dynamicSharedMem);
 
+            query_KNN<DTYPE, MAX_DIM, KNN_THREADS, SUMTYPE> << <KNN_blocks, KNN_THREADS, dynamicSharedMem, streams[i]>> > (d_points[i], d_check_points[i], curr_batch_size[i], start, result_size, d_results[i], K, metric);
+            cudaError_t c_ret = cudaGetLastError();
             LOG(SPTAG::Helper::LogLevel::LL_Debug, "Error: %s\n", cudaGetErrorString(c_ret));            
         }
         
@@ -992,9 +1011,12 @@ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<Vecto
         else if (m_iFeatureDim <= 184) {
             GenerateTruthGPUCore<T, float, 184>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
         }
-        //else if (m_iFeatureDim <= 768) {
-        //    GenerateTruthGPUCore<T, SUMTYPE, 768>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
-        //}
+        else if (m_iFeatureDim <= 384) {
+            GenerateTruthGPUCore<T, float, 384>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+        }
+        else if (m_iFeatureDim <= 768) {
+            GenerateTruthGPUCore<T, float, 768>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+        }
         //else if (m_iFeatureDim <= 1024) {
         //    GenerateTruthGPUCore<T, SUMTYPE, 1024>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
         //}
@@ -1021,6 +1043,12 @@ void GenerateTruthGPU(std::shared_ptr<VectorSet> querySet, std::shared_ptr<Vecto
         }
         else if (m_iFeatureDim <= 184) {
             GenerateTruthGPUCore<T, int32_t, 184>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+        }
+        else if (m_iFeatureDim <= 384) {
+            GenerateTruthGPUCore<T, int32_t, 384>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
+        }
+        else if (m_iFeatureDim <= 768) {
+            GenerateTruthGPUCore<T, int32_t, 768>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
         }
         else {
             LOG(SPTAG::Helper::LogLevel::LL_Error, "%d dimensions not currently supported for GPU generate Truth.\n");
