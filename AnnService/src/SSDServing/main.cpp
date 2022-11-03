@@ -14,7 +14,7 @@
 #include "inc/SSDServing/main.h"
 #include "inc/SSDServing/Utils.h"
 #include "inc/SSDServing/SSDIndex.h"
-
+ 
 using namespace SPTAG;
 
 namespace SPTAG {
@@ -177,7 +177,7 @@ namespace SPTAG {
 	}
 }
 
-// switch between exe and static library by _$(OutputType)
+// switch between exe and static library by _$(OutputType) 
 #ifdef _exe
 
 int main(int argc, char* argv[]) {
