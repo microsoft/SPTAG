@@ -312,12 +312,13 @@ TxtVectorReader::MergeData()
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {            
             if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
                 LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
                 return ErrorCode::DiskIOFail;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown();
         remove(file.c_str());
@@ -336,12 +337,13 @@ TxtVectorReader::MergeData()
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while ( readSize != 0 ) {
             if (meta->WriteBinary(readSize, bufferHolder.get()) != readSize) {
                 LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataConentOutput.c_str());
                 return ErrorCode::DiskIOFail;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown();
         remove(file.c_str());
@@ -374,9 +376,9 @@ TxtVectorReader::MergeData()
                 return ErrorCode::DiskIOFail;
             }
             std::uint64_t* offset = reinterpret_cast<std::uint64_t*>(buf);
-            for (std::uint64_t i = 0; i < readBytesCount / sizeof(std::uint64_t); ++i)
+            for (std::uint64_t j = 0; j < readBytesCount / sizeof(std::uint64_t); ++j)
             {
-                offset[i] += totalOffset;
+                offset[j] += totalOffset;
             }
 
             if (metaIndex->WriteBinary(readBytesCount, buf) != readBytesCount) {
