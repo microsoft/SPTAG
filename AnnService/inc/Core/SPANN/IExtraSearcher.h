@@ -121,9 +121,6 @@ namespace SPTAG {
                     m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
                 }
                 m_diskRequests.resize(p_internalResultNum);
-                for (int pi = 0; pi < p_internalResultNum; pi++) {
-                    m_diskRequests[pi].m_extension = m_processIocp.handle();
-                }
                 m_enableDataCompression = enableDataCompression;
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);

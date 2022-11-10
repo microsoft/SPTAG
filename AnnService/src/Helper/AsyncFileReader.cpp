@@ -80,10 +80,11 @@ namespace SPTAG {
             }
         }
 #else
-        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        using BatchOp = bool (DiskIO::*)(AsyncReadRequest*, uint32_t);
+        void CallOnAppropriateBatch(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num, BatchOp f)
         {
             if (handlers.size() == 1) {
-                handlers[0]->BatchReadFile(readRequests, num);
+                (handlers[0].get()->*f)(readRequests, num);
             }
             else {
                 int currFileId = 0, currReqStart = 0;
@@ -92,15 +93,33 @@ namespace SPTAG {
 
                     int fileid = (readRequest->m_status >> 16);
                     if (fileid != currFileId) {
-                        handlers[currFileId]->BatchReadFile(readRequests + currReqStart, i - currReqStart);
+                        (handlers[currFileId].get()->*f)(readRequests + currReqStart, i - currReqStart);
                         currFileId = fileid;
                         currReqStart = i;
                     }
                 }
                 if (currReqStart < num) {
-                    handlers[currFileId]->BatchReadFile(readRequests + currReqStart, num - currReqStart);
+                    (handlers[currFileId].get()->*f)(readRequests + currReqStart, num - currReqStart);
                 }
             }
+        }
+
+        void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num)
+        {
+
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskIO::BatchReadFile);
+
+            for (int i = 0; i < num; i++) {
+                AsyncReadRequest* readRequest = &(readRequests[i]);
+
+                if (readRequest->m_success && readRequest->m_callback)
+                {
+                    readRequest->m_callback(true);
+                    readRequest->m_callback = nullptr;
+                }
+            }
+
+            CallOnAppropriateBatch(handlers, readRequests, num, &DiskIO::BatchCleanRequests);
         }
 #endif
     }

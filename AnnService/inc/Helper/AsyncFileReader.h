@@ -128,10 +128,6 @@ namespace SPTAG
                 return true;
             }
 
-            void* handle() {
-                return m_handle.GetHandle();
-            }
-
         private:
             HandleWrapper m_handle;
         };
@@ -164,6 +160,7 @@ namespace SPTAG
 
                 PreAllocQueryContext();
 
+#ifndef BATCH_READ
                 int iocpThreads = threadPoolSize;
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
@@ -171,6 +168,9 @@ namespace SPTAG
                     m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
                 }
                 return m_fileIocp.IsValid();
+#else
+                return true;
+#endif
             }
 
             virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
@@ -239,27 +239,46 @@ namespace SPTAG
 
             virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount)
             {
-                std::uint32_t remaining = requestCount;
-                HANDLE completeQueue = readRequests[0].m_extension;
+                std::vector<ResourceType*> waitResources;
                 for (std::uint32_t i = 0; i < requestCount; i++) {
                     AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (!ReadFileAsync(*readRequest)) remaining--;
+
+                    ResourceType* resource = GetResource();
+                    DiskUtils::CallbackOverLapped& col = resource->m_col;
+                    memset(&col, 0, sizeof(col));
+                    col.Offset = (readRequest->m_offset & 0xffffffff);
+                    col.OffsetHigh = (readRequest->m_offset >> 32);
+                    col.m_data = (void*)readRequest;
+
+                    col.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+                    if (!::ReadFile(m_fileHandle.GetHandle(),
+                        readRequest->m_buffer,
+                        static_cast<DWORD>(readRequest->m_readSize),
+                        nullptr,
+                        &col) && GetLastError() != ERROR_IO_PENDING)
+                    {
+                        if (col.hEvent) CloseHandle(col.hEvent);
+                        ReturnResource(resource);
+                        LOG(Helper::LogLevel::LL_Error, "Cannot read request %d error:%u\n", i, GetLastError());
+                    }
+                    else {
+                        waitResources.push_back(resource);
+                    }
                 }
 
-                while (remaining > 0) {
-                    DWORD cBytes;
-                    ULONG_PTR key;
-                    OVERLAPPED* ol;
-                    BOOL ret = ::GetQueuedCompletionStatus(completeQueue,
-                        &cBytes,
-                        &key,
-                        &ol,
-                        INFINITE);
-                    if (FALSE == ret || nullptr == ol) break;
-                    remaining--;
-                    AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>(ol);
-                    req->m_callback(true);
+                for (int i = 0; i < waitResources.size(); i++) {
+                    DWORD readbytes = 0;
+                    DiskUtils::CallbackOverLapped* col = &(waitResources[i]->m_col);
+                    AsyncReadRequest* readRequest = (AsyncReadRequest*)(col->m_data);
 
+                    if (!::GetOverlappedResult(m_fileHandle.GetHandle(), col, &readbytes, TRUE) || readbytes != readRequest->m_readSize) {
+                        LOG(Helper::LogLevel::LL_Error, "Cannot wait request %d readbytes:%llu expect:%llu error:%u\n", i, readbytes, readRequest->m_readSize, GetLastError());
+                    }
+                    else {
+                        readRequest->m_success = true;
+                    }
+                    if (col->hEvent) CloseHandle(col->hEvent);
+                    ReturnResource(waitResources[i]);
                 }
                 return true;
             }
@@ -401,7 +420,7 @@ namespace SPTAG
 
                     if (nullptr != req)
                     {
-                        ::PostQueuedCompletionStatus(req->m_extension, 0, NULL, reinterpret_cast<LPOVERLAPPED>(req));
+                        req->m_callback(true);
                     }
                 }
             }
@@ -491,11 +510,6 @@ namespace SPTAG
                 j = m_queue[m_front++];
                 if (m_front == m_capacity) m_front = 0;
                 return true;
-            }
-
-            void* handle() 
-            {
-                return nullptr;
             }
 
         protected:
