@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
   <metadata>
     <id>SPTAG.Library</id>
-    <version>1.2.13-excludeAsyncIOChange-CoreLib-SPANN-withsource</version>
+    <version>1.2.13-excludeAsyncIOChange-CoreLib-SPANN-withsource-aaa8300</version>
     <title>SPTAG.Library</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli,zhah</owners>
