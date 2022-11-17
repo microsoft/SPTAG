@@ -102,7 +102,7 @@ __forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
 template<typename T, typename SUMTYPE, int Dim, int metric>
 __device__ SUMTYPE dist(T* a, T* b) {
   if(metric == (int)DistMetric::Cosine) {
-    if(::cuda::std::is_same_v<T,int8_t>) {
+    if(::cuda::std::is_same<T,int8_t>::value) {
       return cosine_int8<Dim>((int8_t*)a, (int8_t*)b);
     }
     return cosine<T,SUMTYPE,Dim>(a, b);
