@@ -38,12 +38,12 @@ if (CUDA_FOUND)
         ${AnnService}/inc/Core/Common/DistanceUtils.h
         ${AnnService}/inc/Core/Common/InstructionUtils.h
         ${AnnService}/inc/Core/Common/CommonUtils.h
-        ${AnnService}/inc/Core/Common/cuda/cuda_unit_tests.cu
+        ${AnnService}/inc/Core/Common/cuda/tests/
     )
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp
         ${AnnService}/src/Core/Common/InstructionUtils.cpp
-        ${AnnService}/src/Core/Common/cuda/cuda_unit_tests.cu
+        ${AnnService}/src/Core/Common/cuda/tests/
     )
 
     set_source_files_properties(${GPU_SRC_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
