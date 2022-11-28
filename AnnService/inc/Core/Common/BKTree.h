@@ -112,7 +112,7 @@ namespace SPTAG
                 for (int k = 1; k < _K; k++) pos[k] = pos[k - 1] + newCounts[k - 1];
 
                 for (int k = 0; k < _K; k++) {
-                    if (newCounts[k] == 0) continue;
+                    // if (newCounts[k] == 0) continue;
                     SizeType i = pos[k];
                     while (newCounts[k] > 0) {
                         SizeType swapid = pos[label[i]] + newCounts[label[i]] - 1;
