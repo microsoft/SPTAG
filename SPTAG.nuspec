@@ -85,6 +85,7 @@
     <file src="AnnService\src\Core\Common\IQuantizer.cpp" target="build\native\src\Core\Common\IQuantizer.cpp" />
     <file src="AnnService\src\Core\Common\NeighborhoodGraph.cpp" target="build\native\src\Core\Common\NeighborhoodGraph.cpp" />
     <file src="AnnService\src\Core\Common\SIMDUtils.cpp" target="build\native\src\Core\Common\SIMDUtils.cpp" />
+    <file src="AnnService\src\Core\Common\TruthSet.cpp" target="build\native\src\Core\Common\TruthSet.cpp" />
     <file src="AnnService\src\Core\KDT\KDTIndex.cpp" target="build\native\src\Core\KDT\KDTIndex.cpp" />
     <file src="AnnService\src\Core\SPANN\SPANNIndex.cpp" target="build\native\src\Core\SPANN\SPANNIndex.cpp" />
     <file src="AnnService\src\Core\MetadataSet.cpp" target="build\native\src\Core\MetadataSet.cpp" />
@@ -108,8 +109,8 @@
     <file src="x64\Debug\CoreLibrary.pdb" target="lib\native\debug\x64\CoreLibrary.pdb" />
     <file src="x64\Debug\libzstd.dll" target="lib\native\debug\x64\libzstd.dll" />
     <file src="x64\Release\CoreLibrary.lib" target="lib\native\retail\x64\CoreLibrary.lib" />
+    <file src="x64\Release\CoreLibrary.pdb" target="lib\native\retail\x64\CoreLibrary.pdb" />
     <file src="x64\Release\libzstd.dll" target="lib\native\retail\x64\libzstd.dll" />
-    <file src="obj\x64_Release\CoreLibrary\CoreLibrary.pdb" target="lib\native\retail\x64\CoreLibrary.pdb" />
     <file src="packages\Zstandard.dyn.x64.1.4.0\build\native\x64\libzstd.lib" target="lib\native\debug\x64\libzstd.lib" />
     <file src="packages\Zstandard.dyn.x64.1.4.0\build\native\x64\libzstd.lib" target="lib\native\retail\x64\libzstd.lib" />
   </files>
