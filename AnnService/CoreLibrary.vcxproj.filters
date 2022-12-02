@@ -282,14 +282,17 @@
     <ClCompile Include="src\Core\Common\CommonUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\SIMDUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\TruthSet.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp">
       <Filter>Source Files\Core\SPANN</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\AsyncFileReader.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\SIMDUtils.cpp">
-      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

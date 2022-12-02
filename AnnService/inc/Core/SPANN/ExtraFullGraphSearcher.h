@@ -148,7 +148,7 @@ namespace SPTAG
 #endif
 */
 #else
-                        (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, p_opt.m_ioThreads
+                        (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, (std::uint16_t)p_opt.m_ioThreads
 #endif
                     )) {
                         LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
@@ -735,7 +735,7 @@ namespace SPTAG
                 }
 
                 auto t5 = std::chrono::high_resolution_clock::now();
-                double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t5 - t1).count();
+                auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t5 - t1).count();
                 LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
              
                 return true;
@@ -917,7 +917,7 @@ namespace SPTAG
 
             inline void ParseDeltaEncoding(std::shared_ptr<VectorIndex>& p_index, ListInfo* p_info, ValueType* vector)
             {
-                ValueType* headVector = (ValueType*)p_index->GetSample(p_info - m_listInfos.data());
+                ValueType* headVector = (ValueType*)p_index->GetSample((SizeType)(p_info - m_listInfos.data()));
                 COMMON::SIMDUtils::ComputeSum(vector, headVector, m_iDataDimension);
             }
 

@@ -8,6 +8,9 @@
 
 #ifndef _MSC_VER
 #include <cpuid.h>
+#include <xmmintrin.h>
+#include <immintrin.h>
+
 void cpuid(int info[4], int InfoType);
 
 #else

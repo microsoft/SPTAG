@@ -82,8 +82,8 @@ namespace SPTAG
             if (m_index->LoadIndexDataFromMemory(p_indexBlobs) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
@@ -113,8 +113,8 @@ namespace SPTAG
             if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
@@ -842,8 +842,8 @@ namespace SPTAG
         {
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
             m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));

@@ -173,7 +173,7 @@ namespace SPTAG
                         subcodebooks += m_DimPerSubvector;
                     }
                     assert(bestIndex != -1);
-                    vecout[i] = bestIndex;
+                    vecout[i] = (std::uint8_t)bestIndex;
                     subvec += m_DimPerSubvector;
                 }
             }           
