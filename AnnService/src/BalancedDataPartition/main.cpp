@@ -964,7 +964,6 @@ void Partition() {
 }
 
 int main(int argc, char* argv[]) {
-
     if (!options.Parse(argc - 1, argv + 1))
     {
         exit(1);
