@@ -1,5 +1,5 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
+ // Copyright (c) Microsoft Corporation. All rights reserved.
+ // Licensed under the MIT License.
 
 #include <mpi.h>
 #include <thread>
@@ -156,6 +156,8 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
     for (int k = 0; k < args._K; k++) avgCount += args.counts[k];
     avgCount /= args._K;
 
+    std::vector<float> dist_total(args._K * args._T, 0);
+
     auto func = [&](int tid)
     {
         SizeType istart = first + tid * subsize;
@@ -165,6 +167,7 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
         float* inewCenters = args.newCenters + tid * args._K * args._D;
         SizeType* iclusterIdx = args.clusterIdx + tid * args._K;
         float* iclusterDist = args.clusterDist + tid * args._K;
+        float* idist_total = dist_total.data() + tid * args._K;
         float idist = 0;
         std::vector<SPTAG::NodeDistPair> centerDist(args._K, SPTAG::NodeDistPair());
         for (SizeType i = istart; i < iend; i++) {
@@ -184,6 +187,7 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
                     inewCounts[centerDist[k].node]++;
                     inewWeightedCounts[centerDist[k].node] += weights[indices[i]];
                     idist += centerDist[k].distance;
+                    idist_total[centerDist[k].node] += centerDist[k].distance;
 
                     if (updateCenters) {
                         const T* v = (const T*)data[indices[i]];
@@ -217,7 +221,13 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
         for (int k = 0; k < args._K; k++) {
             args.newCounts[k] += args.newCounts[i*args._K + k];
             args.newWeightedCounts[k] += args.newWeightedCounts[i*args._K + k];
+            dist_total[k] += dist_total[i * args._K + k];
         }
+    }
+
+    LOG(Helper::LogLevel::LL_Info, "start printing dist_total\n");
+    for (int k = 0; k < args._K; k++) {
+        LOG(Helper::LogLevel::LL_Info, "cluster %d: dist_total:%f \n", k, dist_total[k]);
     }
 
     if (updateCenters) {
@@ -768,7 +778,9 @@ void ProcessWithoutMPI() {
     COMMON::KmeansArgs<T> args(options.m_clusterNum, vectors->Dimension(), vectors->Count(), options.m_threadNum, options.m_distMethod);
     COMMON::Dataset<LabelType> label(vectors->Count(), options.m_clusterassign, vectors->Count(), vectors->Count());
     std::vector<SizeType> localindices(data.R(), 0);
-    for (SizeType i = 0; i < data.R(); i++) localindices[i] = i;
+    for (SizeType i = 0; i < data.R(); i++) {
+        localindices[i] = i;
+    }
     args.ClearCounts();
 
     unsigned long long totalCount;
