@@ -16,6 +16,8 @@ namespace SPTAG
     {
         std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
+        template <typename T>
+        thread_local ExtraWorkSpace Index<T>::m_workSpace;
 
         std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO()); };
 
@@ -203,9 +205,9 @@ namespace SPTAG
 
             m_index->SearchIndex(*p_queryResults);
             
-            std::shared_ptr<ExtraWorkSpace> workSpace = nullptr;
             if (m_extraSearcher != nullptr) {
-                workSpace = m_workSpacePool->Rent();
+                //auto workSpace = m_workSpacePool->Rent();
+                auto workSpace = &m_workSpace;
                 workSpace->m_deduper.clear();
                 workSpace->m_postingIDs.clear();
 
@@ -231,8 +233,8 @@ namespace SPTAG
                 }
 
                 p_queryResults->Reverse();
-                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
-                m_workSpacePool->Return(workSpace);
+                m_extraSearcher->SearchIndex(workSpace, *p_queryResults, m_index, nullptr);
+                //m_workSpacePool->Return(workSpace);
                 p_queryResults->SortResult();
             }
 
@@ -258,7 +260,8 @@ namespace SPTAG
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
 
             COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
-            std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+            //std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+            auto workSpace = &m_workSpace;
             workSpace->m_deduper.clear();
             workSpace->m_postingIDs.clear();
 
@@ -293,8 +296,8 @@ namespace SPTAG
             }
 
             p_queryResults->Reverse();
-            m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
-            m_workSpacePool->Return(workSpace);
+            m_extraSearcher->SearchIndex(workSpace, *p_queryResults, m_index, p_stats);
+            //m_workSpacePool->Return(workSpace);
             p_queryResults->SortResult();
             return ErrorCode::Success;
         }
@@ -321,7 +324,8 @@ namespace SPTAG
             }
             newResults.Reverse();
 
-            auto auto_ws = m_workSpacePool->Rent();
+            //auto auto_ws = m_workSpacePool->Rent();
+            auto auto_ws = &m_workSpace;
             auto_ws->m_deduper.clear();
 
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
@@ -339,10 +343,10 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
+                m_extraSearcher->SearchIndex(auto_ws, newResults, m_index, p_stats, truth, found);
             }
             
-            m_workSpacePool->Return(auto_ws);
+            //m_workSpacePool->Return(auto_ws);
 
             newResults.SortResult();
             std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_query.GetResults());
