@@ -47,7 +47,6 @@ namespace SPTAG
             std::unordered_map<std::string, std::string> m_headParameters;
 
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
-            std::unique_ptr<COMMON::WorkSpacePool<ExtraWorkSpace>> m_workSpacePool;
 
             Options m_options;
 

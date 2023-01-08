@@ -103,8 +103,6 @@ namespace SPTAG
             m_vectorTranslateMap.reset((std::uint64_t*)(p_indexBlobs.back().Data()), [=](std::uint64_t* ptr) {});
            
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            //m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -135,8 +133,6 @@ namespace SPTAG
             IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            //m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 
@@ -206,14 +202,12 @@ namespace SPTAG
             m_index->SearchIndex(*p_queryResults);
             
             if (m_extraSearcher != nullptr) {
-                //auto workSpace = m_workSpacePool->Rent();
                 if (m_workspace.get() == nullptr) {
                     m_workspace.reset(new ExtraWorkSpace());
                     m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
                 }
-                auto& workSpace = m_workspace;
-                workSpace->m_deduper.clear();
-                workSpace->m_postingIDs.clear();
+                m_workspace->m_deduper.clear();
+                m_workspace->m_postingIDs.clear();
 
                 float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
                 for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
@@ -229,16 +223,15 @@ namespace SPTAG
                     }
 
                     // Don't do disk reads for irrelevant pages
-                    if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum || 
+                    if (m_workspace->m_postingIDs.size() >= m_options.m_searchInternalResultNum ||
                         (limitDist > 0.1 && res->Dist > limitDist) || 
                         !m_extraSearcher->CheckValidPosting(postingID)) 
                         continue;
-                    workSpace->m_postingIDs.emplace_back(postingID);
+                    m_workspace->m_postingIDs.emplace_back(postingID);
                 }
 
                 p_queryResults->Reverse();
-                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
-                //m_workSpacePool->Return(workSpace);
+                m_extraSearcher->SearchIndex(m_workspace.get(), *p_queryResults, m_index, nullptr);
                 p_queryResults->SortResult();
             }
 
@@ -264,14 +257,13 @@ namespace SPTAG
             if (nullptr == m_extraSearcher) return ErrorCode::EmptyIndex;
 
             COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
-            //std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new ExtraWorkSpace());
                 m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
             }
-            auto& workSpace = m_workspace;
-            workSpace->m_deduper.clear();
-            workSpace->m_postingIDs.clear();
+            m_workspace->m_deduper.clear();
+            m_workspace->m_postingIDs.clear();
 
             float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
             int i = 0;
@@ -281,7 +273,7 @@ namespace SPTAG
                 if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
                 if (m_extraSearcher->CheckValidPosting(res->VID)) 
                 {
-                    workSpace->m_postingIDs.emplace_back(res->VID);
+                    m_workspace->m_postingIDs.emplace_back(res->VID);
                 }
                 res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                 if (res->VID == MaxSize) 
@@ -304,8 +296,7 @@ namespace SPTAG
             }
 
             p_queryResults->Reverse();
-            m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
-            //m_workSpacePool->Return(workSpace);
+            m_extraSearcher->SearchIndex(m_workspace.get(), *p_queryResults, m_index, p_stats);
             p_queryResults->SortResult();
             return ErrorCode::Success;
         }
@@ -332,33 +323,29 @@ namespace SPTAG
             }
             newResults.Reverse();
 
-            //auto auto_ws = m_workSpacePool->Rent();
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new ExtraWorkSpace());
                 m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
             }
-            auto& auto_ws = m_workspace;
-            auto_ws->m_deduper.clear();
+            m_workspace->m_deduper.clear();
 
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
             float limitDist = p_query.GetResult(0)->Dist * m_options.m_maxDistRatio;
             for (SizeType p = 0; p < partitions; p++) {
                 int subInternalResultNum = min(p_subInternalResultNum, p_internalResultNum - p_subInternalResultNum * p);
 
-                auto_ws->m_postingIDs.clear();
+                m_workspace->m_postingIDs.clear();
 
                 for (int i = p * p_subInternalResultNum; i < p * p_subInternalResultNum + subInternalResultNum; i++)
                 {
                     auto res = p_query.GetResult(i);
                     if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist)) break;
                     if (!m_extraSearcher->CheckValidPosting(res->VID)) continue;
-                    auto_ws->m_postingIDs.emplace_back(res->VID);
+                    m_workspace->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
+                m_extraSearcher->SearchIndex(m_workspace.get(), newResults, m_index, p_stats, truth, found);
             }
-            
-            //m_workSpacePool->Return(auto_ws);
 
             newResults.SortResult();
             std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_query.GetResults());
@@ -792,10 +779,6 @@ namespace SPTAG
                 }
             }
 
-            if (m_extraSearcher != nullptr) {
-                m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-                //m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
-            }
             m_bReady = true;
             return ErrorCode::Success;
         }
@@ -861,8 +844,6 @@ namespace SPTAG
             //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<ExtraWorkSpace>());
-            //m_workSpacePool->Init(m_options.m_iSSDNumberOfThreads, m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
             return ErrorCode::Success;
         }
 

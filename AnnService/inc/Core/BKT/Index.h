@@ -72,7 +72,6 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             COMMON::Labelset m_deletedID;
 
-            std::unique_ptr<COMMON::WorkSpacePool<COMMON::WorkSpace>> m_workSpacePool;
             Helper::ThreadPool m_threadPool;
             int m_iNumberOfThreads;
 

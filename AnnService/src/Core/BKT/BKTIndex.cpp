@@ -70,8 +70,6 @@ namespace SPTAG
             else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ErrorCode::Success;
         }
@@ -89,8 +87,6 @@ namespace SPTAG
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ret;
         }
@@ -98,14 +94,9 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
-            //auto workSpace = m_workSpacePool->Rent();
-            if (m_workspace.get() == nullptr) {
-                m_workspace.reset(new COMMON::WorkSpace());
-                m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            if (m_workspace.get() != nullptr) {
+                m_iHashTableExp = m_workspace->HashTableExponent();
             }
-            auto& workSpace = m_workspace;
-            m_iHashTableExp = workSpace->HashTableExponent();
-            //m_workSpacePool->Return(workSpace);
 
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
@@ -284,17 +275,12 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
-            //auto workSpace = m_workSpacePool->Rent();
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            auto& workSpace = m_workspace;
-            workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
-
-            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
-
-            //m_workSpacePool->Return(workSpace);
+            m_workspace->Reset(m_iMaxCheck, p_query.GetResultNum());
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *m_workspace, p_searchDeleted, true);
 
             if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
@@ -310,42 +296,35 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
-            //auto workSpace = m_workSpacePool->Rent();
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            auto& workSpace = m_workspace;
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
+            m_workspace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
+            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *m_workspace, p_searchDeleted, false);
 
-            SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
-
-            //m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
-            //auto workSpace = m_workSpacePool->Rent();
             if (m_workspace.get() == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            auto& workSpace = m_workspace;
-            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
+            m_workspace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
-            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
-            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
+            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, *p_results, *m_workspace);
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, *p_results, *m_workspace, m_iNumberOfInitialDynamicPivots);
             BasicResult * res = p_query.GetResults();
             for (int i = 0; i < p_query.GetResultNum(); i++)
             {
-                auto& cell = workSpace->m_NGQueue.pop();
+                auto& cell = m_workspace->m_NGQueue.pop();
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
-            //m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
 #pragma endregion
@@ -369,8 +348,6 @@ namespace SPTAG
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
@@ -423,8 +400,6 @@ namespace SPTAG
             LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            ptr->m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             ptr->m_threadPool.init();
 
             ErrorCode ret = ErrorCode::Success;
@@ -592,8 +567,6 @@ namespace SPTAG
             Index<T>::UpdateIndex()
         {
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             return ErrorCode::Success;
         }
 
