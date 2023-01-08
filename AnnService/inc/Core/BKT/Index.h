@@ -86,7 +86,7 @@ namespace SPTAG
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
         public:
-            static thread_local COMMON::WorkSpace m_workspace;
+            static thread_local std::shared_ptr<COMMON::WorkSpace> m_workspace;
         public:
             Index()
             {

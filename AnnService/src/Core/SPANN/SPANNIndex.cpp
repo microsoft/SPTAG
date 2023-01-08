@@ -17,7 +17,7 @@ namespace SPTAG
         std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
         template <typename T>
-        thread_local ExtraWorkSpace Index<T>::m_workSpace;
+        thread_local std::shared_ptr<ExtraWorkSpace> Index<T>::m_workspace;
 
         std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO()); };
 
@@ -207,7 +207,11 @@ namespace SPTAG
             
             if (m_extraSearcher != nullptr) {
                 //auto workSpace = m_workSpacePool->Rent();
-                auto workSpace = &m_workSpace;
+                if (m_workspace.get() == nullptr) {
+                    m_workspace.reset(new ExtraWorkSpace());
+                    m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
+                }
+                auto& workSpace = m_workspace;
                 workSpace->m_deduper.clear();
                 workSpace->m_postingIDs.clear();
 
@@ -233,7 +237,7 @@ namespace SPTAG
                 }
 
                 p_queryResults->Reverse();
-                m_extraSearcher->SearchIndex(workSpace, *p_queryResults, m_index, nullptr);
+                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
                 //m_workSpacePool->Return(workSpace);
                 p_queryResults->SortResult();
             }
@@ -261,7 +265,11 @@ namespace SPTAG
 
             COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
             //std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
-            auto workSpace = &m_workSpace;
+            if (m_workspace.get() == nullptr) {
+                m_workspace.reset(new ExtraWorkSpace());
+                m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
+            }
+            auto& workSpace = m_workspace;
             workSpace->m_deduper.clear();
             workSpace->m_postingIDs.clear();
 
@@ -296,7 +304,7 @@ namespace SPTAG
             }
 
             p_queryResults->Reverse();
-            m_extraSearcher->SearchIndex(workSpace, *p_queryResults, m_index, p_stats);
+            m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
             //m_workSpacePool->Return(workSpace);
             p_queryResults->SortResult();
             return ErrorCode::Success;
@@ -325,7 +333,11 @@ namespace SPTAG
             newResults.Reverse();
 
             //auto auto_ws = m_workSpacePool->Rent();
-            auto auto_ws = &m_workSpace;
+            if (m_workspace.get() == nullptr) {
+                m_workspace.reset(new ExtraWorkSpace());
+                m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, int(m_options.m_enableDataCompression));
+            }
+            auto& auto_ws = m_workspace;
             auto_ws->m_deduper.clear();
 
             int partitions = (p_internalResultNum + p_subInternalResultNum - 1) / p_subInternalResultNum;
@@ -343,7 +355,7 @@ namespace SPTAG
                     auto_ws->m_postingIDs.emplace_back(res->VID);
                 }
 
-                m_extraSearcher->SearchIndex(auto_ws, newResults, m_index, p_stats, truth, found);
+                m_extraSearcher->SearchIndex(auto_ws.get(), newResults, m_index, p_stats, truth, found);
             }
             
             //m_workSpacePool->Return(auto_ws);

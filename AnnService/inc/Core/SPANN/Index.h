@@ -55,7 +55,7 @@ namespace SPTAG
             int m_iBaseSquare;
             
         public:
-            static thread_local ExtraWorkSpace m_workSpace;
+            static thread_local std::shared_ptr<ExtraWorkSpace> m_workspace;
 
         public:
             Index()
