@@ -105,11 +105,10 @@ namespace SPTAG {
         {
             ExtraWorkSpace() {}
 
-            ~ExtraWorkSpace() {}
+            ~ExtraWorkSpace() { g_spaceCount--; }
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
                 Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_enableDataCompression);
-                m_spaceID = g_spaceCount++;
             }
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
@@ -128,6 +127,7 @@ namespace SPTAG {
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
+                m_spaceID = g_spaceCount++;
             }
 
             void Initialize(va_list& arg) {
