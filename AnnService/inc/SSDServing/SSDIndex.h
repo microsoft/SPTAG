@@ -17,60 +17,6 @@ namespace SPTAG {
 	namespace SSDServing {
 		namespace SSDIndex {
 
-#ifdef _MSC_VER
-            ULONGLONG GetCpuMasks(WORD group, DWORD numCpus)
-            {
-                ULONGLONG masks = 0, mask = 1;
-                for (DWORD i = 0; i < numCpus; ++i)
-                {
-                    masks |= mask;
-                    mask <<= 1;
-                }
-
-                return masks;
-            }
-
-            void SetThreadAffinity(int threadID, std::thread& thread)
-            {
-                WORD numGroups = GetActiveProcessorGroupCount();
-                DWORD numCpus = GetActiveProcessorCount(0);
-                WORD group = (WORD)(threadID / numCpus);
-                GROUP_AFFINITY ga;
-                memset(&ga, 0, sizeof(ga));
-                PROCESSOR_NUMBER pn;
-                memset(&pn, 0, sizeof(pn));
-
-                ga.Group = group;
-                ga.Mask = GetCpuMasks(group, numCpus);
-                BOOL res = SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL);
-                if (!res)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Failed SetThreadGroupAffinity for group %d and mask %I64x for thread %d.\n", ga.Group, ga.Mask, threadID);
-                    return;
-                }
-                pn.Group = group;
-                pn.Number = (BYTE)(threadID % numCpus);
-                res = SetThreadIdealProcessorEx(GetCurrentThread(), &pn, NULL);
-                if (!res)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
-                    return;
-                }
-
-                YieldProcessor();
-            }
-#else
-            void SetThreadAffinity(int threadID, std::thread& thread)
-            {
-                cpu_set_t cpuset;
-                CPU_ZERO(&cpuset);
-                CPU_SET(threadID, &cpuset);
-                int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
-                if (rc != 0) {
-                    LOG(Helper::LogLevel::LL_Error,  "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
-                }
-            }
-#endif
             template <typename ValueType>
             ErrorCode OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
             {
@@ -171,7 +117,7 @@ namespace SPTAG {
 
                 for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
                     {
-                        SetThreadAffinity(i, threads[i]);
+                        Helper::SetThreadAffinity(i, threads[i], 0, 0);
 
                         Utils::StopW threadws;
                         size_t index = 0;

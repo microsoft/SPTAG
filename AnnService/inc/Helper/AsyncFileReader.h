@@ -16,23 +16,25 @@
 #include <stdint.h>
 
 #define ASYNC_READ 1
+#define BATCH_READ 1
 
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
-#define BATCH_READ 1
 #else
-#define BATCH_READ 1
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <linux/aio_abi.h>
+#ifdef NUMA
+#include <numa.h>
+#endif
 #endif
 
 namespace SPTAG
 {
     namespace Helper
     {
-
+        void SetThreadAffinity(int threadID, std::thread& thread, char socketStrategy = 0, char idStrategy = 0);
 #ifdef _MSC_VER
         namespace DiskUtils
         {
