@@ -17,6 +17,60 @@ namespace SPTAG {
 	namespace SSDServing {
 		namespace SSDIndex {
 
+#ifdef _MSC_VER
+            ULONGLONG GetCpuMasks(WORD group, DWORD numCpus)
+            {
+                ULONGLONG masks = 0, mask = 1;
+                for (DWORD i = 0; i < numCpus; ++i)
+                {
+                    masks |= mask;
+                    mask <<= 1;
+                }
+
+                return masks;
+            }
+
+            void SetThreadAffinity(int threadID, std::thread& thread)
+            {
+                WORD numGroups = GetActiveProcessorGroupCount();
+                DWORD numCpus = GetActiveProcessorCount(0);
+                WORD group = (WORD)(threadID / numCpus);
+                GROUP_AFFINITY ga;
+                memset(&ga, 0, sizeof(ga));
+                PROCESSOR_NUMBER pn;
+                memset(&pn, 0, sizeof(pn));
+
+                ga.Group = group;
+                ga.Mask = GetCpuMasks(group, numCpus);
+                BOOL res = SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL);
+                if (!res)
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Failed SetThreadGroupAffinity for group %d and mask %I64x for thread %d.\n", ga.Group, ga.Mask, threadID);
+                    return;
+                }
+                pn.Group = group;
+                pn.Number = (BYTE)(threadID % numCpus);
+                res = SetThreadIdealProcessorEx(GetCurrentThread(), &pn, NULL);
+                if (!res)
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
+                    return;
+                }
+
+                YieldProcessor();
+            }
+#else
+            void SetThreadAffinity(int threadID, std::thread& thread)
+            {
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(threadID, &cpuset);
+                int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
+                if (rc != 0) {
+                    LOG(Helper::LogLevel::LL_Error,  "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+                }
+            }
+#endif
             template <typename ValueType>
             ErrorCode OutputResult(const std::string& p_output, std::vector<QueryResult>& p_results, int p_resultNum)
             {
@@ -115,37 +169,38 @@ namespace SPTAG {
 
                 Utils::StopW sw;
 
-                auto func = [&]()
-                {
-                    Utils::StopW threadws;
-                    size_t index = 0;
-                    while (true)
+                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
                     {
-                        index = queriesSent.fetch_add(1);
-                        if (index < numQueries)
+                        SetThreadAffinity(i, threads[i]);
+
+                        Utils::StopW threadws;
+                        size_t index = 0;
+                        while (true)
                         {
-                            if ((index & ((1 << 14) - 1)) == 0)
+                            index = queriesSent.fetch_add(1);
+                            if (index < numQueries)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
+                                if ((index & ((1 << 14) - 1)) == 0)
+                                {
+                                    LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
+                                }
+
+                                double startTime = threadws.getElapsedMs();
+                                p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
+                                double endTime = threadws.getElapsedMs();
+                                p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
+                                double exEndTime = threadws.getElapsedMs();
+
+                                p_stats[index].m_exLatency = exEndTime - endTime;
+                                p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
                             }
-
-                            double startTime = threadws.getElapsedMs();
-                            p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
-                            double endTime = threadws.getElapsedMs();
-                            p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
-                            double exEndTime = threadws.getElapsedMs();
-
-                            p_stats[index].m_exLatency = exEndTime - endTime;
-                            p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
+                            else
+                            {
+                                return;
+                            }
                         }
-                        else
-                        {
-                            return;
-                        }
-                    }
-                };
-
-                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back(func); }
+                    });
+                }
                 for (auto& thread : threads) { thread.join(); }
 
                 double sendingCost = sw.getElapsedSec();
