@@ -18,6 +18,8 @@
 #define ASYNC_READ 1
 #define BATCH_READ 1
 
+#define NUMA 1
+
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
