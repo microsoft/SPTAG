@@ -24,11 +24,19 @@ namespace SPTAG {
                 unsigned int nodecpu = 0;
                 for (unsigned int i = 0; i < cpumask->size; i++) {
                     if (numa_bitmask_isbitset(cpumask, i)) {
-                        if (nodecpu != cpuid) numa_bitmask_clearbit(cpumask, i);
+                        if (cpuid == nodecpu) {
+                            cpu_set_t cpuset;
+                            CPU_ZERO(&cpuset);
+                            CPU_SET(i, &cpuset);
+                            int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
+                            if (rc != 0) {
+                                LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+                            }
+                            break;
+                        }
                         nodecpu++;
                     }
                 }
-                numa_bind(cpumask);
             }
 #else
             cpu_set_t cpuset;

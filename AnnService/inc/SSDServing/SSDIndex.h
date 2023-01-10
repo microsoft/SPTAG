@@ -117,7 +117,7 @@ namespace SPTAG {
 
                 for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
                     {
-                        Helper::SetThreadAffinity(i, threads[i], 0, 0);
+                        Helper::SetThreadAffinity(i, threads[i], 1, 0);
 
                         Utils::StopW threadws;
                         size_t index = 0;

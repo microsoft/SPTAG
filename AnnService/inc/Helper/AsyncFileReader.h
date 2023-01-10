@@ -172,7 +172,7 @@ namespace SPTAG
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
                 {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
                 return m_fileIocp.IsValid();
             }
@@ -379,8 +379,10 @@ namespace SPTAG
                 ExitProcess(dw);
             }
 
-            void ListionIOCP()
+            void ListionIOCP(int i)
             {
+                SetThreadAffinity(i, m_fileIocpThreads[i], 1, 1);
+
                 DWORD cBytes;
                 ULONG_PTR key;
                 OVERLAPPED* ol;
