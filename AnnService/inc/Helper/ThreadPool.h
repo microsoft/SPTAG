@@ -4,6 +4,7 @@
 #ifndef _SPTAG_HELPER_THREADPOOL_H_
 #define _SPTAG_HELPER_THREADPOOL_H_
 
+#include <atomic>
 #include <queue>
 #include <vector>
 #include <thread>
@@ -57,7 +58,9 @@ namespace SPTAG
                         {
                             try 
                             {
+                                currentJobs++;
                                 j->exec(&m_abort);
+                                currentJobs--;
                             }
                             catch (std::exception& e) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
@@ -95,7 +98,12 @@ namespace SPTAG
                 return m_jobs.size();
             }
 
+            inline uint32_t runningJobs() { return currentJobs; }
+
+            inline bool allClear() { return currentJobs == 0 && jobsize() == 0; }
+
         protected:
+            std::atomic_uint32_t currentJobs{ 0 };
             std::queue<Job*> m_jobs;
             Abort m_abort;
             std::mutex m_lock;

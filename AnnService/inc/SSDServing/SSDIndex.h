@@ -7,7 +7,6 @@
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/SPANN/Index.h"
-#include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/SSDServing/Utils.h"
@@ -177,7 +176,7 @@ namespace SPTAG {
                 {
                     SetLogger(std::make_shared<Helper::FileLogger>(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
                 }
-                int numThreads = p_opts.m_iSSDNumberOfThreads;
+                int numThreads = p_opts.m_searchThreadNum;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;

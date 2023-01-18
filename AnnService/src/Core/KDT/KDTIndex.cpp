@@ -649,7 +649,7 @@ case VectorValueType::Name: \
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
-                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
+                if (m_pSamples.AddBatch(p_vectorNum, (const T*)p_data) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");

@@ -92,6 +92,7 @@ if (JNI_FOUND)
 
     execute_process(COMMAND swig -java -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_jwrap.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/JavaCore.i)
     execute_process(COMMAND swig -java -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_jwrap.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/JavaClient.i)
+    execute_process(COMMAND swig -java -package site.ycsb.fileiointerface -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${PROJECT_SOURCE_DIR}/Wrappers/inc/FileIOInterface_jwrap.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/JavaFileIO.i)
 
     include_directories(${JNI_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Wrappers)
 
@@ -107,13 +108,19 @@ if (JNI_FOUND)
     set_target_properties(JAVASPTAGClient PROPERTIES SUFFIX ${JAVA_SUFFIX})
     target_link_libraries(JAVASPTAGClient SPTAGLib ${JNI_LIBRARIES} ${Boost_LIBRARIES})
 
+    file(GLOB FILEIO_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/FileIOInterface.h)
+    file(GLOB FILEIO_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/FileIOInterface_jwrap.cpp)
+    add_library (JAVASPTAGFileIO SHARED ${FILEIO_SRC_FILES} ${FILEIO_HDR_FILES})
+    set_target_properties(JAVASPTAGFileIO PROPERTIES SUFFIX ${JAVA_SUFFIX})
+    target_link_libraries(JAVASPTAGFileIO SPTAGLib ${JNI_LIBRARIES})
+
     file(GLOB JAVA_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/*.java)
     foreach(JAVA_FILE ${JAVA_FILES})
         message (STATUS "Add copy post-command for file " ${JAVA_FILE})
         add_custom_command(TARGET JAVASPTAGClient POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${JAVA_FILE} ${EXECUTABLE_OUTPUT_PATH})
     endforeach(JAVA_FILE)
 
-    install(TARGETS JAVASPTAG JAVASPTAGClient
+    install(TARGETS JAVASPTAG JAVASPTAGClient JAVASPTAGFileIO
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib)

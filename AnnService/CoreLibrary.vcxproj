@@ -149,6 +149,7 @@
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\SIMDUtils.h" />
     <ClInclude Include="inc\Core\Common\TruthSet.h" />
+    <ClInclude Include="inc\Core\Common\VersionLabel.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />
@@ -169,7 +170,10 @@
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\SPANN\Compressor.h" />
-    <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraDynamicSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraSPDKController.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraStaticSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraRocksDBController.h" />
     <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\Index.h" />
     <ClInclude Include="inc\Core\SPANN\Options.h" />
@@ -185,6 +189,7 @@
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />
     <ClInclude Include="inc\Helper\DiskIO.h" />
     <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
+    <ClInclude Include="inc\Helper\KeyValueIO.h" />
     <ClInclude Include="inc\Helper\LockFree.h" />
     <ClInclude Include="inc\Helper\Logging.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />
@@ -234,11 +239,15 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
+    <Import Project="..\packages\tbb.redist.4.2.3.1\build\native\tbb.redist.targets" Condition="Exists('..\packages\tbb.redist.4.2.3.1\build\native\tbb.redist.targets')" />
+    <Import Project="..\packages\tbb.4.2.3.1\build\native\tbb.targets" Condition="Exists('..\packages\tbb.4.2.3.1\build\native\tbb.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
+    <Error Condition="!Exists('..\packages\tbb.redist.4.2.3.1\build\native\tbb.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb.redist.4.2.3.1\build\native\tbb.redist.targets'))" />
+    <Error Condition="!Exists('..\packages\tbb.4.2.3.1\build\native\tbb.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\tbb.4.2.3.1\build\native\tbb.targets'))" />
   </Target>
 </Project>

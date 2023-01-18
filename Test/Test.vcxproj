@@ -155,6 +155,7 @@
     <ClCompile Include="src\FilterTest.cpp" />
     <ClCompile Include="src\IniReaderTest.cpp" />
     <ClCompile Include="src\IterativeScanTest.cpp" />
+    <ClCompile Include="src\KVTest.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\MultiIndexExperiment.cpp" />
     <ClCompile Include="src\MultiIndexScanTest.cpp" />

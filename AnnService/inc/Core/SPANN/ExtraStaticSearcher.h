@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_SPANN_EXTRASEARCHER_H_
-#define _SPTAG_SPANN_EXTRASEARCHER_H_
+#ifndef _SPTAG_SPANN_EXTRASTATICSEARCHER_H_
+#define _SPTAG_SPANN_EXTRASTATICSEARCHER_H_
 
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
@@ -147,10 +147,10 @@ namespace SPTAG
         } \
 
         template <typename ValueType>
-        class ExtraFullGraphSearcher : public IExtraSearcher
+        class ExtraStaticSearcher : public IExtraSearcher
         {
         public:
-            ExtraFullGraphSearcher()
+            ExtraStaticSearcher()
             {
                 m_enableDeltaEncoding = false;
                 m_enablePostingListRearrange = false;
@@ -158,11 +158,11 @@ namespace SPTAG
                 m_enableDictTraining = true;
             }
 
-            virtual ~ExtraFullGraphSearcher()
+            virtual ~ExtraStaticSearcher()
             {
             }
 
-            virtual bool LoadIndex(Options& p_opt) {
+            virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, std::shared_ptr<std::uint64_t> m_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
                 p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
@@ -210,10 +210,10 @@ namespace SPTAG
                 m_enableDataCompression = p_opt.m_enableDataCompression;
                 m_enableDictTraining = p_opt.m_enableDictTraining;
 
-                if (m_enablePostingListRearrange) m_parsePosting = &ExtraFullGraphSearcher<ValueType>::ParsePostingListRearrange;
-                else m_parsePosting = &ExtraFullGraphSearcher<ValueType>::ParsePostingList;
-                if (m_enableDeltaEncoding) m_parseEncoding = &ExtraFullGraphSearcher<ValueType>::ParseDeltaEncoding;
-                else m_parseEncoding = &ExtraFullGraphSearcher<ValueType>::ParseEncoding;
+                if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
+                else m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingList;
+                if (m_enableDeltaEncoding) m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseDeltaEncoding;
+                else m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseEncoding;
                 
                 m_listPerFile = static_cast<int>((m_totalListCount + m_indexFiles.size() - 1) / m_indexFiles.size());
 
@@ -584,7 +584,7 @@ namespace SPTAG
                 return postingListFullData;
             }
 
-            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt) {
+            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::VersionLabel& p_versionMap, SizeType upperBound = -1) {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
                 {
@@ -600,6 +600,7 @@ namespace SPTAG
                     return false;
                 }
 
+                if (fileexists((p_opt.m_indexDirectory + FolderSep + p_opt.m_headIDFile).c_str()))
                 {
                     auto ptr = SPTAG::f_createIO();
                     if (ptr == nullptr || !ptr->Initialize((p_opt.m_indexDirectory + FolderSep +  p_opt.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
@@ -622,6 +623,7 @@ namespace SPTAG
                     fullCount = fullVectors->Count();
                     vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
                 }
+                if (upperBound > 0) fullCount = upperBound;
 
                 Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
@@ -1567,6 +1569,27 @@ namespace SPTAG
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to write results:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
             }
 
+            void GetWritePosting(SizeType pid, std::string& posting, bool write = false) override {
+                if (write) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupport write\n");
+                    exit(1);
+                }
+                ListInfo* listInfo = &(m_listInfos[pid]);
+                size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                size_t realBytes = listInfo->listEleCount * m_vectorInfoSize;
+                posting.resize(totalBytes);
+                int fileid = m_oneContext? 0: pid / m_listPerFile;
+                Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
+                auto numRead = indexFile->ReadBinary(totalBytes, (char*)posting.data(), listInfo->listOffset);
+                if (numRead != totalBytes) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
+                    throw std::runtime_error("File read mismatch");
+                }
+                char* ptr = (char*)(posting.c_str());
+                memcpy(ptr, posting.c_str() + listInfo->pageOffset, realBytes);
+                posting.resize(realBytes);
+            }
+
         private:
             
             std::string m_extraFullGraphFile;
@@ -1581,8 +1604,8 @@ namespace SPTAG
             bool m_enableDataCompression;
             bool m_enableDictTraining;
 
-            void (ExtraFullGraphSearcher<ValueType>::*m_parsePosting)(uint64_t&, uint64_t&, int, int);
-            void (ExtraFullGraphSearcher<ValueType>::*m_parseEncoding)(std::shared_ptr<VectorIndex>&, ListInfo*, ValueType*);
+            void (ExtraStaticSearcher<ValueType>::*m_parsePosting)(uint64_t&, uint64_t&, int, int);
+            void (ExtraStaticSearcher<ValueType>::*m_parseEncoding)(std::shared_ptr<VectorIndex>&, ListInfo*, ValueType*);
 
             int m_vectorInfoSize = 0;
             int m_iDataDimension = 0;
@@ -1594,4 +1617,4 @@ namespace SPTAG
     } // namespace SPANN
 } // namespace SPTAG
 
-#endif // _SPTAG_SPANN_EXTRASEARCHER_H_
+#endif // _SPTAG_SPANN_EXTRASTATICSEARCHER_H_

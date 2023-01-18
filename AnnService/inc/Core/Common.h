@@ -67,6 +67,7 @@ inline T max(T a, T b) {
 #define InterlockedExchange8(a,b) __sync_lock_test_and_set(a, b)
 #define Sleep(a) usleep(a * 1000)
 #define strtok_s(a, b, c) strtok_r(a, b, c)
+#define ALIGN_ROUND(size) ((size) + 31) / 32 * 32
 
 #else
 
@@ -98,6 +99,17 @@ inline bool fileexists(const TCHAR* path) {
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
 
+FORCEINLINE
+char
+InterlockedCompareExchange(
+    _Inout_ _Interlocked_operand_ char volatile* Destination,
+    _In_ char Exchange,
+    _In_ char Comperand
+)
+{
+    return (char)_InterlockedCompareExchange8(Destination, Exchange, Comperand);
+}
+
 #endif
 
 namespace SPTAG
@@ -113,6 +125,8 @@ namespace SPTAG
 #define PAGE_ALLOC(size) ::operator new(size, (std::align_val_t)512)
 #define PAGE_FREE(ptr) ::operator delete(ptr, (std::align_val_t)512)
 #endif
+
+#define ALIGN_ROUND(size) ((size) + 31) / 32 * 32
 
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;
