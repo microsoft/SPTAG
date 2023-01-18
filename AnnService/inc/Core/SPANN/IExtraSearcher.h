@@ -8,11 +8,20 @@
 
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/VectorSetReader.h"
+#include "inc/Core/Common/WorkSpace.h"
+
+#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
+#include <malloc.h>
+#else
+#include <mm_malloc.h>
+#endif // defined(__GNUC__)
 
 #include <memory>
 #include <vector>
 #include <chrono>
 #include <atomic>
+#include <set>
 
 namespace SPTAG {
     namespace SPANN {
@@ -61,6 +70,12 @@ namespace SPTAG {
             double m_queueLatency;
 
             double m_sleepLatency;
+
+            double m_compLatency;
+
+            double m_diskReadLatency;
+
+            double m_exSetUpLatency;
 
             std::chrono::steady_clock::time_point m_searchRequestTime;
 
@@ -197,9 +212,7 @@ namespace SPTAG {
             virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
-                SearchStats* p_stats,
-                std::set<int>* truth = nullptr,
-                std::map<int, std::set<int>>* found = nullptr) = 0;
+                SearchStats* p_stats, const COMMON::VersionLabel& m_versionMap, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) = 0;
 
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
@@ -208,6 +221,18 @@ namespace SPTAG {
             virtual bool CheckValidPosting(SizeType postingID) = 0;
 
             virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) = 0;
+            
+            virtual ErrorCode AppendPosting(SizeType headID, const std::string& appendPosting) { return ErrorCode::Undefined; }
+            virtual void ForceCompaction() = 0 { return; }
+            virtual ErrorCode SearchIndex(SizeType headID, std::string& posting) { return ErrorCode::Undefined; }
+            virtual ErrorCode AddIndex(SizeType headID, const std::string& posting) { return ErrorCode::Undefined; }
+            virtual ErrorCode DeleteIndex(SizeType headID) { return ErrorCode::Undefined; }
+            virtual ErrorCode OverrideIndex(SizeType headID, const std::string& posting) { return ErrorCode::Undefined; }
+            virtual SizeType  GetIndexSize() { return -1; }
+            virtual SizeType  GetPostingSizeLimit() { return -1; }
+            virtual SizeType  GetMetaDataSize() { return -1; }
+            virtual ErrorCode SearchIndexMulti(const std::vector<SizeType>& keys, std::vector<std::string>* values) { return ErrorCode::Undefined; }
+            virtual void GetDBStats() { return; }
         };
     } // SPANN
 } // SPTAG

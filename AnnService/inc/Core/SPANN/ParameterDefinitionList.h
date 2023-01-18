@@ -96,6 +96,13 @@ DefineSSDParameter(m_rngFactor, float, 1.0f, "RNGFactor")
 DefineSSDParameter(m_samples, int, 100, "RecallTestSampleNumber")
 DefineSSDParameter(m_excludehead, bool, true, "ExcludeHead")
 DefineSSDParameter(m_postingVectorLimit, int, 118, "PostingVectorLimit")
+DefineSSDParameter(m_fullDeletedIDFile, std::string, std::string("fulldeleted"), "FullDeletedIDFile")
+DefineSSDParameter(m_useKV, bool, false, "UseKV")
+DefineSSDParameter(m_KVPath, std::string, std::string(""), "KVPath")
+DefineSSDParameter(m_ssdInfoFile, std::string, std::string(""), "SsdInfoFile")
+DefineSSDParameter(m_useDirectIO, bool, false, "UseDirectIO")
+DefineSSDParameter(m_preReassign, bool, false, "PreReassign")
+DefineSSDParameter(m_preReassignRatio, float, 0.7f, "PreReassignRatio")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
@@ -121,4 +128,51 @@ DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
 DefineSSDParameter(m_debugBuildInternalResultNum, int, 64, "DebugBuildInternalResultNum")
 DefineSSDParameter(m_iotimeout, int, 30, "IOTimeout")
 
+// Calculating
+// TruthFilePrefix
+DefineSSDParameter(m_truthFilePrefix, std::string, std::string(""), "TruthFilePrefix")
+// CalTruth
+DefineSSDParameter(m_calTruth, bool, true, "CalTruth")
+DefineSSDParameter(m_onlySearchFinalBatch, bool, false, "OnlySearchFinalBatch")
+// Search multiple times for stable result
+DefineSSDParameter(m_searchTimes, int, 1, "SearchTimes")
+// Frontend search threadnum
+DefineSSDParameter(m_searchThreadNum, int, 16, "SearchThreadNum")
+// Show tradeoff of latency and acurracy
+DefineSSDParameter(m_minInternalResultNum, int, -1, "MinInternalResultNum")
+DefineSSDParameter(m_stepInternalResultNum, int, -1, "StepInternalResultNum")
+DefineSSDParameter(m_maxInternalResultNum, int, -1, "MaxInternalResultNum")
+
+// Updating(SPFresh Update Test)
+// For update mode: current only update
+DefineSSDParameter(m_update, bool, false, "Update")
+// For Test Mode
+DefineSSDParameter(m_inPlace, bool, false, "InPlace")
+DefineSSDParameter(m_outOfPlace, bool, false, "OutOfPlace")
+// latency limit
+DefineSSDParameter(m_latencyLimit, float, 2.0, "LatencyLimit")
+// Update batch size
+DefineSSDParameter(m_step, int, 0, "Step")
+// Frontend update threadnum
+DefineSSDParameter(m_insertThreadNum, int, 16, "InsertThreadNum")
+// Update limit
+DefineSSDParameter(m_endVectorNum, int, -1, "EndVectorNum")
+// Persistent buffer path
+DefineSSDParameter(m_persistentBufferPath, std::string, std::string(""), "PersistentBufferPath")
+// Background append threadnum
+DefineSSDParameter(m_appendThreadNum, int, 16, "AppendThreadNum")
+// Background reassign threadnum
+DefineSSDParameter(m_reassignThreadNum, int, 16, "ReassignThreadNum")
+// Background process batch size
+DefineSSDParameter(m_batch, int, 1000, "Batch")
+// Total Vector Path
+DefineSSDParameter(m_fullVectorPath, std::string, std::string(""), "FullVectorPath")
+
+// SPANN
+DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")
+DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
+DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
+DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
+DefineSSDParameter(m_maxHeadNode, int, 200000000, "MaxHeadNode")
+DefineSSDParameter(m_virtualHead, bool, false, "VirtualHead")
 #endif

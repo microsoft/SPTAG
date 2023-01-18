@@ -98,6 +98,13 @@ namespace SPTAG {
             int m_samples;
             bool m_excludehead;
             int m_postingVectorLimit;
+            std::string m_fullDeletedIDFile;
+            bool m_useKV;
+            std::string m_KVPath;
+            std::string m_ssdInfoFile;
+            bool m_useDirectIO;
+            bool m_preReassign;
+            float m_preReassignRatio;
 
             // GPU building
             int m_gpuSSDNumTrees;
@@ -122,6 +129,40 @@ namespace SPTAG {
             int m_debugBuildInternalResultNum;
             bool m_enableADC;
             int m_iotimeout;
+
+            int m_searchThreadNum;
+
+            // Calculating
+            std::string m_truthFilePrefix;
+            bool m_calTruth;
+            bool m_calAllTruth;
+            int m_searchTimes;
+            int m_minInternalResultNum;
+            int m_stepInternalResultNum;
+            int m_maxInternalResultNum;
+            bool m_onlySearchFinalBatch;
+
+            // Updating
+            int m_postingVectorLimit;
+            bool m_disableReassign;
+            bool m_searchDuringUpdate;
+            int m_reassignK;
+            int m_maxHeadNode;
+            bool m_virtualHead;
+
+            // Updating(SPFresh Update Test)
+            bool m_update;
+            bool m_inPlace;
+            bool m_outOfPlace;
+            float m_latencyLimit;
+            int m_step;
+            int m_insertThreadNum;
+            int m_endVectorNum;
+            std::string m_persistentBufferPath;
+            int m_appendThreadNum;
+            int m_reassignThreadNum;
+            int m_batch;
+            std::string m_fullVectorPath;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
