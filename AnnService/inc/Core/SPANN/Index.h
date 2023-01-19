@@ -249,14 +249,13 @@ namespace SPTAG
 
             // std::unique_ptr<std::atomic_uint32_t[]> m_postingSizes;
             COMMON::PostingSizeRecord m_postingSizes;
-            std::atomic_uint64_t m_vectorNum{0};
 
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
 
             Options m_options;
 
-            float(*m_fComputeDistance)(const T* pX, const T* pY, DimensionType length);
+            std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
             
             int m_metaDataSize;
@@ -300,7 +299,8 @@ namespace SPTAG
             // GC
             double m_garbageCost{0};
             std::mutex m_dataAddLock;
-
+        public:
+                static thread_local std::shared_ptr<ExtraWorkSpace> m_workspace;
         public:
             Index()
             {
@@ -328,6 +328,8 @@ namespace SPTAG
 
             void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
             
+            void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
+
             inline float AccurateDistance(const void* pX, const void* pY) const { 
                 if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
 
@@ -435,6 +437,9 @@ namespace SPTAG
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
             bool SelectHead(std::shared_ptr<Helper::VectorSetReader>& p_reader);
+
+            template <typename InternalDataType>
+            bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>&p_reader);
 
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 

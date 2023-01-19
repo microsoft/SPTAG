@@ -21,6 +21,8 @@ namespace SPTAG
     {
         std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
+        template <typename T>
+        thread_local std::shared_ptr<ExtraWorkSpace> Index<T>::m_workspace;
 
         std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO()); };
 
@@ -225,7 +227,6 @@ namespace SPTAG
                 {
                     auto res = p_queryResults->GetResult(i);
                     if (res->VID == -1) break;
-
                     auto postingID = res->VID;
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                     if (res->VID == MaxSize) {
@@ -768,8 +769,8 @@ namespace SPTAG
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
                 m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-                m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-                m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+                //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+                //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
                 m_index->UpdateIndex();
 
                 if (m_pQuantizer)
@@ -785,7 +786,12 @@ namespace SPTAG
                         m_extraSearcher.reset(new ExtraRocksDBController<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T)*m_options.m_dim + sizeof(int) + sizeof(uint8_t) ), m_options.m_useDirectIO, m_options.m_latencyLimit));
                     }
                 } else {
-                    m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                    if (m_pQuantizer) {
+                        m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                    }
                 }
 
                 if (m_options.m_buildSsdIndex) {
@@ -843,28 +849,6 @@ namespace SPTAG
                     m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder);
                     LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
                     m_postingSizes.Save(m_options.m_ssdInfoFile);
-                }
-
-                if (m_options.m_update) {
-                    m_inMemoryThread += m_options.m_reassignThreadNum;
-                    m_inMemoryThread += m_options.m_insertThreadNum;
-                    LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
-                    std::shared_ptr<Helper::KeyValueIO> db;
-                    db.reset(new SPANN::RocksDBIO());
-                    m_persistentBuffer = std::make_shared<PersistentBuffer>(m_options.m_persistentBufferPath, db);
-                    LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
-                    LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_options.m_appendThreadNum, m_options.m_reassignThreadNum);
-                    m_splitThreadPool = std::make_shared<ThreadPool>();
-                    m_splitThreadPool->init(m_options.m_appendThreadNum);
-                    m_reassignThreadPool = std::make_shared<ThreadPool>();
-                    m_reassignThreadPool->init(m_options.m_reassignThreadNum);
-                    LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
-
-                    // LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
-                    // m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_options.m_batch, m_splitThreadPool, m_reassignThreadPool, this);
-
-                    // m_dispatcher->run();
-                    LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
                 }
             }
             auto t4 = std::chrono::high_resolution_clock::now();
