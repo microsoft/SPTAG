@@ -167,7 +167,9 @@
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\SPANN\Compressor.h" />
-    <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraDynamicSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraStaticSearcher.h" />
+    <ClInclude Include="inc\Core\SPANN\ExtraRocksDBController.h" />
     <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\Index.h" />
     <ClInclude Include="inc\Core\SPANN\Options.h" />
@@ -182,6 +184,7 @@
     <ClInclude Include="inc\Helper\ConcurrentSet.h" />
     <ClInclude Include="inc\Helper\DiskIO.h" />
     <ClInclude Include="inc\Helper\DynamicNeighbors.h" />
+    <ClInclude Include="inc\Helper\KeyValueIO.h" />
     <ClInclude Include="inc\Helper\LockFree.h" />
     <ClInclude Include="inc\Helper\Logging.h" />
     <ClInclude Include="inc\Helper\SimpleIniReader.h" />

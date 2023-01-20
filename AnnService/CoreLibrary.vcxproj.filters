@@ -196,7 +196,7 @@
     <ClInclude Include="inc\Core\SPANN\Options.h">
       <Filter>Header Files\Core\SPANN</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h">
+    <ClInclude Include="inc\Core\SPANN\ExtraStaticSearcher.h">
       <Filter>Header Files\Core\SPANN</Filter>
     </ClInclude>
     <ClInclude Include="inc\Helper\AsyncFileReader.h">
@@ -219,6 +219,15 @@
     </ClInclude>
     <ClInclude Include="inc\Core\Common\SIMDUtils.h">
       <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ExtraRocksDBController.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ExtraDynamicSearcher.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\KeyValueIO.h">
+      <Filter>Header Files\Helper</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

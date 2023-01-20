@@ -8,7 +8,6 @@
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/SPANN/Index.h"
-#include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/SSDServing/Utils.h"

@@ -14,13 +14,13 @@ namespace SPTAG
         class VersionLabel
         {
         private:
-            std::atomic<SizeType> m_inserted;
+            std::atomic<SizeType> m_deleted;
             Dataset<std::uint8_t> m_data;
             
         public:
             VersionLabel() 
             {
-                m_inserted = 0;
+                m_deleted = 0;
                 m_data.SetName("versionLabelID");
             }
 
@@ -29,7 +29,7 @@ namespace SPTAG
                 m_data.Initialize(size, 1, blockSize, capacity);
             }
 
-            inline size_t Count() const { return m_inserted.load(); }
+            inline size_t Count() const { return m_data.R() - m_deleted.load(); }
 
             inline bool Contains(const SizeType& key) const
             {
@@ -40,7 +40,7 @@ namespace SPTAG
             {
                 char oldvalue = InterlockedExchange8(m_data[key], 1);
                 if (oldvalue == 1) return false;
-                m_inserted++;
+                m_deleted++;
                 return true;
             }
 
@@ -82,9 +82,9 @@ namespace SPTAG
                 return m_data.R();
             }
 
-            inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
+            inline ErrorCode Save(std::shared_ptr<Helper::DiskIO> output)
             {
-                SizeType deleted = m_inserted.load();
+                SizeType deleted = m_deleted.load();
                 IOBINARY(output, WriteBinary, sizeof(SizeType), (char*)&deleted);
                 return m_data.Save(output);
             }
@@ -97,11 +97,11 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
-                m_inserted = deleted;
+                m_deleted = deleted;
                 return m_data.Load(input, blockSize, capacity);
             }
 
@@ -115,7 +115,7 @@ namespace SPTAG
 
             inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
             {
-                m_inserted = *((SizeType*)pmemoryFile);
+                m_deleted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
 

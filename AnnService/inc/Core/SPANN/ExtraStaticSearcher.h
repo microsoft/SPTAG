@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#ifndef _SPTAG_SPANN_EXTRASEARCHER_H_
-#define _SPTAG_SPANN_EXTRASEARCHER_H_
+#ifndef _SPTAG_SPANN_EXTRASTATICSEARCHER_H_
+#define _SPTAG_SPANN_EXTRASTATICSEARCHER_H_
 
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
@@ -113,10 +113,10 @@ namespace SPTAG
         } \
 
         template <typename ValueType>
-        class ExtraFullGraphSearcher : public IExtraSearcher
+        class ExtraStaticSearcher : public IExtraSearcher
         {
         public:
-            ExtraFullGraphSearcher()
+            ExtraStaticSearcher()
             {
                 m_enableDeltaEncoding = false;
                 m_enablePostingListRearrange = false;
@@ -124,7 +124,7 @@ namespace SPTAG
                 m_enableDictTraining = true;
             }
 
-            virtual ~ExtraFullGraphSearcher()
+            virtual ~ExtraStaticSearcher()
             {
             }
 
@@ -176,10 +176,10 @@ namespace SPTAG
                 m_enableDataCompression = p_opt.m_enableDataCompression;
                 m_enableDictTraining = p_opt.m_enableDictTraining;
 
-                if (m_enablePostingListRearrange) m_parsePosting = &ExtraFullGraphSearcher<ValueType>::ParsePostingListRearrange;
-                else m_parsePosting = &ExtraFullGraphSearcher<ValueType>::ParsePostingList;
-                if (m_enableDeltaEncoding) m_parseEncoding = &ExtraFullGraphSearcher<ValueType>::ParseDeltaEncoding;
-                else m_parseEncoding = &ExtraFullGraphSearcher<ValueType>::ParseEncoding;
+                if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
+                else m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingList;
+                if (m_enableDeltaEncoding) m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseDeltaEncoding;
+                else m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseEncoding;
                 
                 m_listPerFile = static_cast<int>((m_totalListCount + m_indexFiles.size() - 1) / m_indexFiles.size());
 
@@ -401,7 +401,7 @@ namespace SPTAG
                 return postingListFullData;
             }
 
-            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt) {
+            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, SizeType upperBound = -1) {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
                 {
@@ -439,6 +439,7 @@ namespace SPTAG
                     fullCount = fullVectors->Count();
                     vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
                 }
+                if (upperBound > 0) fullCount = upperBound;
 
                 Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
@@ -1398,8 +1399,8 @@ namespace SPTAG
             bool m_enableDataCompression;
             bool m_enableDictTraining;
 
-            void (ExtraFullGraphSearcher<ValueType>::*m_parsePosting)(uint64_t&, uint64_t&, int, int);
-            void (ExtraFullGraphSearcher<ValueType>::*m_parseEncoding)(std::shared_ptr<VectorIndex>&, ListInfo*, ValueType*);
+            void (ExtraStaticSearcher<ValueType>::*m_parsePosting)(uint64_t&, uint64_t&, int, int);
+            void (ExtraStaticSearcher<ValueType>::*m_parseEncoding)(std::shared_ptr<VectorIndex>&, ListInfo*, ValueType*);
 
             int m_vectorInfoSize = 0;
             int m_iDataDimension = 0;
@@ -1411,4 +1412,4 @@ namespace SPTAG
     } // namespace SPANN
 } // namespace SPTAG
 
-#endif // _SPTAG_SPANN_EXTRASEARCHER_H_
+#endif // _SPTAG_SPANN_EXTRASTATICSEARCHER_H_

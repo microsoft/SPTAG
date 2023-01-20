@@ -32,7 +32,8 @@ DefineBasicParameter(m_ssdIndex, std::string, std::string("SPTAGFullList.bin"), 
 DefineBasicParameter(m_deleteHeadVectors, bool, false, "DeleteHeadVectors")
 DefineBasicParameter(m_ssdIndexFileNum, int, 1, "SSDIndexFileNum")
 DefineBasicParameter(m_quantizerFilePath, std::string, std::string(), "QuantizerFilePath")
-
+DefineBasicParameter(m_datasetRowsInBlock, int, 1024 * 1024, "DataBlockSize")
+DefineBasicParameter(m_datasetCapacity, int, SPTAG::MaxSize, "DataCapacity")
 #endif
 
 #ifdef DefineSelectHeadParameter
@@ -61,10 +62,6 @@ DefineSelectHeadParameter(m_headVectorCount, int, 0, "Count")
 DefineSelectHeadParameter(m_recursiveCheckSmallCluster, bool, true, "RecursiveCheckSmallCluster")
 DefineSelectHeadParameter(m_printSizeCount, bool, true, "PrintSizeCount")
 DefineSelectHeadParameter(m_selectType, std::string, "BKT", "SelectHeadType")
-
-DefineSelectHeadParameter(m_datasetRowsInBlock, int, 1024 * 1024, "DataBlockSize")
-DefineSelectHeadParameter(m_datasetCapacity, int, SPTAG::MaxSize, "DataCapacity")
-
 #endif
 
 #ifdef DefineBuildHeadParameter

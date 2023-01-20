@@ -21,13 +21,23 @@ namespace SPTAG
 
             virtual ErrorCode Get(SizeType key, std::string* value) = 0;
 
+            virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) = 0;
+
+            virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) = 0;
+
             virtual ErrorCode Put(const std::string& key, const std::string& value) = 0;
 
             virtual ErrorCode Put(SizeType key, const std::string& value) = 0;
 
             virtual ErrorCode Put(SizeType key, SizeType id, const void* vector, SizeType dim) = 0;
 
+            virtual  ErrorCode Merge(SizeType key, const std::string& value) = 0;
+
             virtual ErrorCode Delete(SizeType key) = 0;
+
+            virtual void ForceCompaction() {}
+
+            virtual void GetStat() {}
         };
     }
 }
