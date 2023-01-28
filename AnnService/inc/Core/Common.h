@@ -98,6 +98,17 @@ inline bool fileexists(const TCHAR* path) {
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
 
+FORCEINLINE
+char
+InterlockedCompareExchange(
+    _Inout_ _Interlocked_operand_ char volatile* Destination,
+    _In_ char Exchange,
+    _In_ char Comperand
+)
+{
+    return (char)_InterlockedCompareExchange8(Destination, Exchange, Comperand);
+}
+
 #endif
 
 namespace SPTAG

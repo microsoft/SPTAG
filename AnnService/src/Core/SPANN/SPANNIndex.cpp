@@ -100,7 +100,17 @@ namespace SPTAG
             }
             else
             {
-                m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                if (m_options.m_useKV) {
+                    if (m_options.m_inPlace) {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit));
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit));
+                    }
+                }
+                else {
+                    m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                }
             }
             
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
@@ -129,7 +139,17 @@ namespace SPTAG
             }
             else
             {
-                m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                if (m_options.m_useKV) {
+                    if (m_options.m_inPlace) {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit));
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit));
+                    }
+                }
+                else {
+                    m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                }
             }
 
             if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
@@ -191,7 +211,7 @@ namespace SPTAG
             if ((ret = m_index->SaveIndexData(p_indexStreams)) != ErrorCode::Success) return ret;
 
             IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], WriteBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
-            m_versionMap.Save(m_options.m_fullDeletedIDFile);
+            m_versionMap.Save(m_options.m_deleteIDFile);
             return ErrorCode::Success;
         }
 
@@ -966,18 +986,62 @@ namespace SPTAG
                                      std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex,
                                      bool p_normalized)
         {
-            if (m_extraSearcher == nullptr) {
-                LOG(Helper::LogLevel::LL_Error, "Only Support Extra Update");
+            if (!m_options.m_useKV || m_extraSearcher == nullptr) {
+                LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update");
                 return ErrorCode::Fail;
             }
 
-            std::vector<QueryResult> queryResults(p_vectorNum, QueryResult(nullptr, m_options.m_internalResultNum, false));
-            for (int v = 0; v < p_vectorNum; v++)
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+            if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
+
+            SizeType begin, end;
+            ErrorCode ret;
             {
-                queryResults[v].SetTarget(reinterpret_cast<T*>(p_data) + v * p_dimension);
-                m_index->SearchIndex(queryResults[v]);
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
+
+                begin = m_versionMap.GetVectorNum();
+                end = begin + p_vectorNum;
+
+                if (begin == 0) { return ErrorCode::EmptyIndex; }
+
+                if (m_versionMap.AddBatch(p_vectorSet->Count()) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                    exit(1);
+                }
+
+                if (m_pMetadata != nullptr) {
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (HasMetaMapping()) {
+                            for (SizeType i = begin; i < end; i++) {
+                                ByteArray meta = m_pMetadata->GetMetadata(i);
+                                std::string metastr((char*)meta.Data(), meta.Length());
+                                UpdateMetaMapping(metastr, i);
+                            }
+                        }
+                    }
+                    else {
+                        for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
+                    }
+                }
             }
-            return m_extraSearcher->AddIndex(queryResults, m_index);
+
+            std::shared_ptr<VectorSet> vectorSet;
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                int base = COMMON::Utils::GetBase<T>();
+                for (SizeType i = 0; i < p_vectorNum; i++) {
+                    COMMON::Utils::Normalize((T*)(vectorSet->GetVector(i)), p_dimension, base);
+                }
+            }
+            else {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            }
+
+            return m_extraSearcher->AddIndex(vectorSet, m_index, m_options, begin);
         }
 
         template <typename T>

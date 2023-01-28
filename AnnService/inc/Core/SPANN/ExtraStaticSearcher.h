@@ -128,7 +128,7 @@ namespace SPTAG
             {
             }
 
-            virtual bool LoadIndex(Options& p_opt) {
+            virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
                 p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
@@ -401,7 +401,7 @@ namespace SPTAG
                 return postingListFullData;
             }
 
-            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, SizeType upperBound = -1) {
+            bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::VersionLabel& p_versionMap, SizeType upperBound = -1) {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
                 {

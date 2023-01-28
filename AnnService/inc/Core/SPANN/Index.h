@@ -44,74 +44,6 @@ namespace SPTAG
 
     namespace SPANN
     {
-        struct IndexStat {
-            std::atomic_uint32_t m_headMiss{ 0 };
-            uint32_t m_appendTaskNum{ 0 };
-            uint32_t m_splitNum{ 0 };
-            uint32_t m_theSameHeadNum{ 0 };
-            uint32_t m_reAssignNum{ 0 };
-            uint32_t m_garbageNum{ 0 };
-            uint64_t m_reAssignScanNum{ 0 };
-
-            //Split
-            double m_splitCost{ 0 };
-            double m_clusteringCost{ 0 };
-            double m_updateHeadCost{ 0 };
-            double m_reassignScanCost{ 0 };
-            double m_reassignScanIOCost{ 0 };
-
-            // Append
-            double m_appendCost{ 0 };
-            double m_appendIOCost{ 0 };
-
-            // reAssign
-            double m_reAssignCost{ 0 };
-            double m_selectCost{ 0 };
-            double m_reAssignAppendCost{ 0 };
-
-            // GC
-            double m_garbageCost{ 0 };
-
-            void PrintStat(int finishedInsert) {
-                LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n", 
-                    finishedInsert, m_splitNum, m_headMiss, m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum);
-
-                LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost / m_appendTaskNum);
-                LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, AppendIO TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendIOCost, m_appendIOCost / m_appendTaskNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost, m_splitCost / m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Clustering TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_clusteringCost, m_clusteringCost / m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, UpdateHead TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_updateHeadCost, m_updateHeadCost / m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScan TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanCost, m_reassignScanCost / m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScanIO TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanIOCost, m_reassignScanIOCost / m_splitNum);
-                LOG(Helper::LogLevel::LL_Info, "GCNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_garbageNum, m_garbageCost, m_garbageCost / m_garbageNum);
-                LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_reAssignCost, m_reAssignCost / m_reAssignNum);
-                LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, Select TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_selectCost, m_selectCost / m_reAssignNum);
-                LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, ReassignAppend TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_reAssignAppendCost, m_reAssignAppendCost / m_reAssignNum);
-            }
-
-            void ResetStat()
-            {
-                m_splitNum = 0;
-                m_headMiss = 0;
-                m_theSameHeadNum = 0;
-                m_reAssignNum = 0;
-                m_reAssignScanNum = 0;
-                m_garbageNum = 0;
-                m_appendTaskNum = 0;
-                m_splitCost = 0;
-                m_clusteringCost = 0;
-                m_garbageCost = 0;
-                m_updateHeadCost = 0;
-                m_reassignScanCost = 0;
-                m_reassignScanIOCost = 0;
-                m_appendCost = 0;
-                m_appendIOCost = 0;
-                m_reAssignCost = 0;
-                m_selectCost = 0;
-                m_reAssignAppendCost = 0;
-            }
-        };
-
         template<typename T>
         class Index : public VectorIndex
         {
@@ -128,8 +60,10 @@ namespace SPTAG
             std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
 
+            std::mutex m_dataAddLock;
+            COMMON::VersionLabel m_versionMap;
+
         public:
-            IndexStat m_stat;
             static thread_local std::shared_ptr<ExtraWorkSpace> m_workspace;
 
         public:
@@ -214,9 +148,6 @@ namespace SPTAG
             inline const void* GetSample(const SizeType idx) const { return nullptr; }
             inline SizeType GetNumDeleted() const { return 0; }
             inline bool NeedRefine() const { return false; }
-            inline bool CheckIdDeleted(const SizeType& p_id) { return m_versionMap.Contains(p_id); }
-            inline bool CheckVersionValid(const SizeType& p_id, const uint8_t version) {return m_versionMap.GetVersion(p_id) == version;}
-
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const { return ErrorCode::Undefined; }
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
@@ -275,8 +206,10 @@ namespace SPTAG
         public:
             bool AllFinished() { if (m_options.m_useKV) m_extraSearcher->AllFinished(); }
 
-            void GetDBStat() { if (m_options.m_useKV) m_extraSearcher->GetStats(); }
+            void GetDBStat() { if (m_options.m_useKV) m_extraSearcher->GetDBStats(); }
 
+            bool GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
+            
             void ForceCompaction() { if (m_options.m_useKV) m_extraSearcher->ForceCompaction(); }
         };
     } // namespace SPANN

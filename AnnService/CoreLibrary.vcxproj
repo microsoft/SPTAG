@@ -149,6 +149,7 @@
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\SIMDUtils.h" />
     <ClInclude Include="inc\Core\Common\TruthSet.h" />
+    <ClInclude Include="inc\Core\Common\VersionLabel.h" />
     <ClInclude Include="inc\Core\Common\WorkSpace.h" />
     <ClInclude Include="inc\Core\Common\CommonUtils.h" />
     <ClInclude Include="inc\Core\Common\Dataset.h" />

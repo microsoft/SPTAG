@@ -31,47 +31,31 @@ namespace SPTAG
 
             inline size_t Count() const { return m_data.R() - m_deleted.load(); }
 
-            inline bool Contains(const SizeType& key) const
+            inline bool Deleted(const SizeType& key) const
             {
-                return *m_data[key] == 1;
+                return *m_data[key] == 0xfe;
             }
 
             inline bool Delete(const SizeType& key)
             {
-                char oldvalue = InterlockedExchange8(m_data[key], 1);
-                if (oldvalue == 1) return false;
+                uint8_t oldvalue = (uint8_t)InterlockedExchange8((char*)(m_data[key]), (char)0xfe);
+                if (oldvalue == 0xfe) return false;
                 m_deleted++;
                 return true;
             }
 
             inline uint8_t GetVersion(const SizeType& key)
             {
-                return (*m_data[key] + 1) & 0x7f;
-            }
-
-            inline bool UpdateVersion(const SizeType& key, uint8_t newVersion)
-            {
-                // *m_data[key] = ((newVersion - 1) & 0x7f) | 0x80;
-                while (true) {
-                    if (Contains(key)) return false;
-                    uint8_t oldVersion = GetVersion(key);
-                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
-                    uint8_t newVersionMask = ((newVersion - 1) & 0x7f) | 0x80;
-                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
-                        return true;
-                    }
-                }
+                return *m_data[key];
             }
 
             inline bool IncVersion(const SizeType& key, uint8_t* newVersion)
             {
                 while (true) {
-                    if (Contains(key)) return false;
+                    if (Deleted(key)) return false;
                     uint8_t oldVersion = GetVersion(key);
-                    *newVersion = oldVersion+1;
-                    uint8_t oldVersionMask = ((oldVersion - 1) & 0x7f) | 0x80;
-                    uint8_t newVersionMask = ((*newVersion - 1) & 0x7f) | 0x80;
-                    if (InterlockedCompareExchange(m_data[key], newVersionMask, oldVersionMask) == oldVersionMask) {
+                    *newVersion = (oldVersion+1) & 0x7f;
+                    if (((uint8_t)InterlockedCompareExchange((char*)m_data[key], (char)*newVersion, (char)oldVersion)) == oldVersion) {
                         return true;
                     }
                 }
