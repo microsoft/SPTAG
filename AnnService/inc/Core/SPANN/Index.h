@@ -13,12 +13,6 @@
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/Common/BKTree.h"
 #include "inc/Core/Common/WorkSpacePool.h"
-<<<<<<< HEAD
-#include "inc/Core/Common/FineGrainedLock.h"
-#include "inc/Core/Common/VersionLabel.h"
-#include "inc/Core/Common/PostingSizeRecord.h"
-=======
->>>>>>> 4b82577 (backup)
 
 #include "inc/Core/Common/Labelset.h"
 #include "inc/Helper/SimpleIniReader.h"
@@ -72,7 +66,6 @@ namespace SPTAG
                 m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
-                m_metaDataSize = sizeof(int) + sizeof(uint8_t);
             }
 
             ~Index() {}
@@ -204,11 +197,11 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
         public:
-            bool AllFinished() { if (m_options.m_useKV) m_extraSearcher->AllFinished(); }
+            bool AllFinished() { if (m_options.m_useKV) return m_extraSearcher->AllFinished(); return true; }
 
             void GetDBStat() { if (m_options.m_useKV) m_extraSearcher->GetDBStats(); }
 
-            bool GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
+            void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
             
             void ForceCompaction() { if (m_options.m_useKV) m_extraSearcher->ForceCompaction(); }
         };

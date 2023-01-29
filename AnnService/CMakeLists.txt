@@ -24,11 +24,7 @@ list(REMOVE_ITEM SRC_FILES
     )
 
 add_library (DistanceUtils STATIC 
-<<<<<<< HEAD
     inc/Core/Common/DistanceUtils.h
-=======
-    inc/Core/Common/DistanceUtils.h 
->>>>>>> b33fdc2 (init from update version)
     inc/Core/Common/SIMDUtils.h
     inc/Core/Common/InstructionUtils.h
     inc/Core/Common/CommonUtils.h
@@ -48,18 +44,15 @@ if((DEFINED RocksDB_DIR) AND RocksDB_DIR)
     message (STATUS "Found RocksDB ${RocksDB_VERSION}")
     message (STATUS "RocksDB: ${RocksDB_DIR}")
 else()
+    set(RocksDB_LIBRARIES "")
+    set(uring_LIBRARIES "")
     message (FATAL_ERROR "Could not find RocksDB!")
 endif()
 
-find_package(TBB REQUIRED)
-if (TBB_FOUND)
-    message (STATUS "Found TBB")
-endif()
-
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} tbb libzstd_shared ${NUMA_LIBRARY})
+target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} tbb libzstd_static ${NUMA_LIBRARY_STATIC})
+target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC})
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()

@@ -36,7 +36,7 @@ namespace SPTAG
             {
                 while (true) {
                     int oldSize = GetSize(headID);
-                    if (InterlockedCompareExchange(m_data[headID], newSize, oldSize) == oldSize) {
+                    if (InterlockedCompareExchange((unsigned*)m_data[headID], (unsigned)newSize, (unsigned)oldSize) == oldSize) {
                         return true;
                     }
                 }
@@ -47,7 +47,7 @@ namespace SPTAG
                 while (true) {
                     int oldSize = GetSize(headID);
                     int newSize = oldSize + appendNum;
-                    if (InterlockedCompareExchange(m_data[headID], newSize, oldSize) == oldSize) {
+                    if (InterlockedCompareExchange((unsigned*)m_data[headID], (unsigned)newSize, (unsigned)oldSize) == oldSize) {
                         return true;
                     }
                 }
@@ -58,7 +58,7 @@ namespace SPTAG
                 return m_data.R();
             }
 
-            inline ErrorCode Save(std::shared_ptr<Helper::DiskPriorityIO> output)
+            inline ErrorCode Save(std::shared_ptr<Helper::DiskIO> output)
             {
                 return m_data.Save(output);
             }
@@ -71,7 +71,7 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskPriorityIO> input, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
             {
                 return m_data.Load(input, blockSize, capacity);
             }

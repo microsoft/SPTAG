@@ -117,6 +117,7 @@ endif()
 
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
+option(ROCKSDB "ROCKSDB" ON)
 
 add_subdirectory (ThirdParty/zstd/build/cmake)
 

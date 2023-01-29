@@ -105,7 +105,7 @@ namespace SPTAG {
 
             void PrintStat(int finishedInsert, bool cost = false, bool reset = false) {
                 LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n",
-                    finishedInsert, m_splitNum, m_headMiss, m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum);
+                    finishedInsert, m_splitNum, m_headMiss.load(), m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum);
 
                 if (cost) {
                     LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost / m_appendTaskNum);
@@ -283,16 +283,15 @@ namespace SPTAG {
             virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) = 0;
             
             virtual void RefineIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader,
-                std::shared_ptr<VectorIndex> p_index,
-                Options& p_opt) { return; }
+                std::shared_ptr<VectorIndex> p_index) { return; }
             virtual ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,
-                std::shared_ptr<VectorIndex> p_index, SizeType begin) { return ErrorCode::Undefined; }
+                std::shared_ptr<VectorIndex> p_index, SizeType p_begin) { return ErrorCode::Undefined; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
 
             virtual bool AllFinished() { return false; }
             virtual void GetDBStats() { return; }
             virtual void GetIndexStats(int finishedInsert, bool cost, bool reset) { return; }
-            virtual void ForceCompaction() = 0 { return; }
+            virtual void ForceCompaction() { return; }
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
         };

@@ -26,25 +26,44 @@ namespace SPTAG::SPANN
 {
     class RocksDBIO : public Helper::KeyValueIO
     {
-        class AnnMergeOperator : public rocksdb::AssociativeMergeOperator
+        class AnnMergeOperator : public rocksdb::MergeOperator
         {
         public:
-            bool Merge(const rocksdb::Slice& key, const rocksdb::Slice* existing_value,
-                const rocksdb::Slice& value, std::string* new_value,
-                rocksdb::Logger* logger) const override {
-                std::string newPosting;
-                if (existing_value)
-                {
-                    newPosting += (*existing_value).ToString();
-                    newPosting += value.ToString();
+            bool FullMergeV2(const rocksdb::MergeOperator::MergeOperationInput& merge_in,
+                rocksdb::MergeOperator::MergeOperationOutput* merge_out) const override
+            {
+                size_t length = (merge_in.existing_value)->size();
+                for (rocksdb::Slice& s : merge_in.operand_list) {
+                    length += s.size();
                 }
-                else
-                {
-                    newPosting += value.ToString();
+                (merge_out->new_value).resize(length);
+                memcpy((char*)((merge_out->new_value).c_str()), 
+                    (merge_in.existing_value)->data(), (merge_in.existing_value)->size());
+                size_t start = (merge_in.existing_value)->size();
+                for (rocksdb::Slice& s : merge_in.operand_list) {
+                    memcpy((char*)((merge_out->new_value).c_str() + start), s.data(), s.size());
+                    start += s.size();
                 }
-                *new_value = newPosting;
                 return true;
             }
+
+            bool PartialMergeMulti(const rocksdb::Slice& key,
+                const std::deque<rocksdb::Slice>& operand_list,
+                std::string* new_value, rocksdb::Logger* logger) const override
+            {
+                size_t length = 0;
+                for (rocksdb::Slice& s : operand_list) {
+                    length += s.size();
+                }
+                new_value->resize(length);
+                size_t start = 0;
+                for (rocksdb::Slice& s : operand_list) {
+                    memcpy((char*)(new_value->c_str() + start), s.data(), s.size());
+                    start += s.size();
+                }
+                return true;
+            }
+
             const char* Name() const override {
                 return "AnnMergeOperator";
             }

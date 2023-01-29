@@ -112,8 +112,8 @@ namespace SPTAG
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
                 }
             }
-            
-            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
+
+            if (!m_extraSearcher->LoadIndex(m_options, m_versionMap)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset((std::uint64_t*)(p_indexBlobs.back().Data()), [=](std::uint64_t* ptr) {});
            
@@ -152,7 +152,7 @@ namespace SPTAG
                 }
             }
 
-            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
+            if (!m_extraSearcher->LoadIndex(m_options, m_versionMap)) return ErrorCode::Fail;
 
             m_versionMap.Load(m_options.m_fullDeletedIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
 
@@ -828,12 +828,17 @@ namespace SPTAG
                         }
                     }
 
-                    if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
+                    if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options, m_versionMap)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
-                        return ErrorCode::Fail;
+                        if (m_options.m_buildSsdIndex) {
+                            return ErrorCode::Fail;
+                        }
+                        else {
+                            m_extraSearcher.reset();
+                        }
                     }
                 }
-                if (!m_extraSearcher->LoadIndex(m_options)) {
+                if (!m_extraSearcher->LoadIndex(m_options, m_versionMap)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
                     if (m_options.m_buildSsdIndex) {
                         return ErrorCode::Fail;
@@ -852,7 +857,7 @@ namespace SPTAG
                     }
                     else {
                         if (m_options.m_preReassign) {
-                            m_extraSearcher->RefineIndex(p_reader, m_index, m_options);
+                            m_extraSearcher->RefineIndex(p_reader, m_index);
                         }
                     }
                 }
@@ -995,7 +1000,6 @@ namespace SPTAG
             if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
             SizeType begin, end;
-            ErrorCode ret;
             {
                 std::lock_guard<std::mutex> lock(m_dataAddLock);
 
@@ -1004,7 +1008,7 @@ namespace SPTAG
 
                 if (begin == 0) { return ErrorCode::EmptyIndex; }
 
-                if (m_versionMap.AddBatch(p_vectorSet->Count()) != ErrorCode::Success) {
+                if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
                     exit(1);
                 }
@@ -1041,17 +1045,14 @@ namespace SPTAG
                     GetEnumValueType<T>(), p_dimension, p_vectorNum));
             }
 
-            return m_extraSearcher->AddIndex(vectorSet, m_index, m_options, begin);
+            return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
         }
 
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType &p_id)
         {
-            if (m_extraSearcher == nullptr) {
-                LOG(Helper::LogLevel::LL_Error, "Only Support Extra Update");
-                return ErrorCode::Fail;
-            }
-            return m_extraSearcher->DeleteIndex(p_id);
+            if (m_versionMap.Delete(p_id)) return ErrorCode::Success;
+            return ErrorCode::VectorNotFound;
         }
     }
 }

@@ -43,6 +43,12 @@ namespace SPTAG
             }
             void Initialize(SizeType rows_, DimensionType cols_, SizeType rowsInBlock_, SizeType capacity_, T* data_ = nullptr, bool shareOwnership_ = true)
             {
+                if (data != nullptr) {
+                    if (ownData) ALIGN_FREE(data);
+                    for (T* ptr : incBlocks) ALIGN_FREE(ptr);
+                    incBlocks.clear();
+                }
+
                 rows = rows_;
                 cols = cols_;
                 data = data_;
