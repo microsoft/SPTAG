@@ -113,7 +113,7 @@ namespace SPTAG::SPANN {
             p_index->SearchIndex(headCandidates);
             int replicaCount = 0;
             BasicResult* queryResults = headCandidates.GetResults();
-            std::vector<EdgeInsert> selections(static_cast<size_t>(m_opt->m_replicaCount));
+            std::vector<Edge> selections(static_cast<size_t>(m_opt->m_replicaCount));
             for (int i = 0; i < headCandidates.GetResultNum() && replicaCount < m_opt->m_replicaCount; ++i) {
                 if (queryResults[i].VID == -1) {
                     break;
@@ -123,8 +123,8 @@ namespace SPTAG::SPANN {
                 for (int j = 0; j < replicaCount; ++j) {
                     float nnDist = p_index->ComputeDistance(
                         p_index->GetSample(queryResults[i].VID),
-                        p_index->GetSample(selections[j].headID));
-                    if (nnDist <= queryResults[i].Dist) {
+                        p_index->GetSample(selections[j].node));
+                    if (nnDist < queryResults[i].Dist) {
                         rngAccpeted = false;
                         break;
                     }
@@ -132,9 +132,9 @@ namespace SPTAG::SPANN {
                 if (!rngAccpeted)
                     continue;
 
-                selections[replicaCount].headID = queryResults[i].VID;
+                selections[replicaCount].node = queryResults[i].VID;
                 // LOG(Helper::LogLevel::LL_Info, "head:%d\n", queryResults[i].VID);
-                if (selections[replicaCount].headID == headID) return false;
+                if (selections[replicaCount].node == headID) return false;
                 ++replicaCount;
             }
             return true;
@@ -144,7 +144,6 @@ namespace SPTAG::SPANN {
         int QuantifyAssumptionBroken(VectorIndex* p_index, SizeType headID, std::string& postingList, SizeType SplitHead, std::vector<SizeType>& newHeads, std::set<int>& brokenID, int topK = 0, float ratio = 1.0)
         {
             int assumptionBrokenNum = 0;
-            int m_vectorInfoSize = sizeof(T) * m_opt->m_dim + m_metaDataSize;
             int postVectorNum = postingList.size() / m_vectorInfoSize;
             uint8_t* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
             float minDist;
@@ -156,15 +155,12 @@ namespace SPTAG::SPANN {
                 uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                 SizeType vid = *(reinterpret_cast<int*>(vectorId));
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
-                // float_t dist = *(reinterpret_cast<float*>(vectorId + sizeof(int) + sizeof(uint8_t)));
                 float_t dist = p_index->ComputeDistance(reinterpret_cast<T*>(vectorId + m_metaDataSize), p_index->GetSample(headID));
                 // if (dist < Epsilon) LOG(Helper::LogLevel::LL_Info, "head found: vid: %d, head: %d\n", vid, headID);
                 avgDist += dist;
                 distanceSet.push_back(dist);
                 if (m_versionMap->Deleted(vid) || m_versionMap->GetVersion(vid) != version) continue;
-                COMMON::QueryResultSet<T> headCandidates(NULL, 64);
-                headCandidates.SetTarget(reinterpret_cast<T*>(vectorId + m_metaDataSize));
-                headCandidates.Reset();
+                COMMON::QueryResultSet<ValueType> headCandidates(reinterpret_cast<ValueType*>(vectorId + m_metaDataSize), 64);
                 if (brokenID.find(vid) == brokenID.end() && IsAssumptionBroken(headID, headCandidates, vid)) {
                     /*
                     float_t headDist = p_index->ComputeDistance(headCandidates.GetTarget(), p_index->GetSample(SplitHead));
@@ -189,7 +185,7 @@ namespace SPTAG::SPANN {
             if (assumptionBrokenNum != 0) {
                 std::sort(distanceSet.begin(), distanceSet.end());
                 minDist = distanceSet[1];
-                maxDist = distanceSet[distanceSet.size() - 1];
+                maxDist = distanceSet.back();
                 // LOG(Helper::LogLevel::LL_Info, "distance: min: %f, max: %f, avg: %f, 50th: %f\n", minDist, maxDist, avgDist/postVectorNum, distanceSet[distanceSet.size() * 0.5]);
                 // LOG(Helper::LogLevel::LL_Info, "assumption broken num: %d\n", assumptionBrokenNum);
                 float_t splitDist = p_index->ComputeDistance(p_index->GetSample(SplitHead), p_index->GetSample(headID));
@@ -209,7 +205,7 @@ namespace SPTAG::SPANN {
             int assumptionBrokenNum = 0;
             assumptionBrokenNum += QuantifyAssumptionBroken(newHeads[0], postingLists[0], SplitHead, newHeads, brokenID);
             assumptionBrokenNum += QuantifyAssumptionBroken(newHeads[1], postingLists[1], SplitHead, newHeads, brokenID);
-            int vectorNum = (postingLists[0].size() + postingLists[1].size()) / (sizeof(T) * m_opt->m_dim + m_metaDataSize);
+            int vectorNum = (postingLists[0].size() + postingLists[1].size()) / m_vectorInfoSize;
             LOG(Helper::LogLevel::LL_Info, "After Split%d, Top0 nearby posting lists, caseA : %d/%d\n", split_order, assumptionBrokenNum, vectorNum);
             return assumptionBrokenNum;
         }
@@ -218,10 +214,7 @@ namespace SPTAG::SPANN {
         //"headID" is the head vector before split
         void QuantifySplitCaseB(VectorIndex* p_index, SizeType headID, std::vector<SizeType>& newHeads, SizeType SplitHead, int split_order, int assumptionBrokenNum_top0, std::set<int>& brokenID)
         {
-            auto headVector = reinterpret_cast<const T*>(p_index->GetSample(headID));
-            COMMON::QueryResultSet<T> nearbyHeads(NULL, 64);
-            nearbyHeads.SetTarget(headVector);
-            nearbyHeads.Reset();
+            COMMON::QueryResultSet<ValueType> nearbyHeads(reinterpret_cast<const T*>(p_index->GetSample(headID)), 64);
             std::vector<std::string> postingLists;
             p_index->SearchIndex(nearbyHeads);
             std::string postingList;
@@ -245,7 +238,7 @@ namespace SPTAG::SPANN {
                 }
                 if (queryResults[i].VID == newHeads[0] || queryResults[i].VID == newHeads[1]) continue;
                 db->Get(queryResults[i].VID, postingList);
-                vectorNum += postingList.size() / (sizeof(T) * m_opt->m_dim + m_metaDataSize);
+                vectorNum += postingList.size() / m_vectorInfoSize;
                 int tempNum = QuantifyAssumptionBroken(queryResults[i].VID, postingList, SplitHead, newHeads, brokenID, i, queryResults[i].Dist / queryResults[1].Dist);
                 assumptionBrokenNum += tempNum;
                 if (tempNum != 0) containedHead++;
