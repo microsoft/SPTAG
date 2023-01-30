@@ -155,7 +155,7 @@ namespace SPTAG::SPANN {
                 uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                 SizeType vid = *(reinterpret_cast<int*>(vectorId));
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
-                float_t dist = p_index->ComputeDistance(reinterpret_cast<T*>(vectorId + m_metaDataSize), p_index->GetSample(headID));
+                float_t dist = p_index->ComputeDistance(reinterpret_cast<ValueType*>(vectorId + m_metaDataSize), p_index->GetSample(headID));
                 // if (dist < Epsilon) LOG(Helper::LogLevel::LL_Info, "head found: vid: %d, head: %d\n", vid, headID);
                 avgDist += dist;
                 distanceSet.push_back(dist);
@@ -214,7 +214,7 @@ namespace SPTAG::SPANN {
         //"headID" is the head vector before split
         void QuantifySplitCaseB(VectorIndex* p_index, SizeType headID, std::vector<SizeType>& newHeads, SizeType SplitHead, int split_order, int assumptionBrokenNum_top0, std::set<int>& brokenID)
         {
-            COMMON::QueryResultSet<ValueType> nearbyHeads(reinterpret_cast<const T*>(p_index->GetSample(headID)), 64);
+            COMMON::QueryResultSet<ValueType> nearbyHeads(reinterpret_cast<const ValueType*>(p_index->GetSample(headID)), 64);
             std::vector<std::string> postingLists;
             p_index->SearchIndex(nearbyHeads);
             std::string postingList;
@@ -237,7 +237,7 @@ namespace SPTAG::SPANN {
                     topk *= 2;
                 }
                 if (queryResults[i].VID == newHeads[0] || queryResults[i].VID == newHeads[1]) continue;
-                db->Get(queryResults[i].VID, postingList);
+                db->Get(queryResults[i].VID, &postingList);
                 vectorNum += postingList.size() / m_vectorInfoSize;
                 int tempNum = QuantifyAssumptionBroken(queryResults[i].VID, postingList, SplitHead, newHeads, brokenID, i, queryResults[i].Dist / queryResults[1].Dist);
                 assumptionBrokenNum += tempNum;
@@ -526,7 +526,7 @@ namespace SPTAG::SPANN {
                     m_postingSizes.UpdateSize(headID, 0);
                 }
             }
-            int split_order = ++m_stat.m_splitNum;
+            // int split_order = ++m_stat.m_splitNum;
             // if (theSameHead) LOG(Helper::LogLevel::LL_Info, "The Same Head\n");
             // LOG(Helper::LogLevel::LL_Info, "head1:%d, head2:%d\n", newHeadsID[0], newHeadsID[1]);
 
@@ -1131,7 +1131,6 @@ namespace SPTAG::SPANN {
         }
 
         void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, std::shared_ptr<VectorSet> p_fullVectors) {
-            size_t dim = p_fullVectors->Dimension();
     #pragma omp parallel for num_threads(10)
             for (int id = 0; id < p_postingListSizes.size(); id++)
             {
