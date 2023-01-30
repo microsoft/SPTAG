@@ -898,6 +898,27 @@ namespace SPTAG::SPANN {
 
             int numThreads = m_opt->m_iSSDNumberOfThreads;
             int candidateNum = m_opt->m_internalResultNum;
+            std::unordered_set<SizeType> headVectorIDS;
+            if (m_opt->m_headIDFile.empty()) {
+                LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
+                return false;
+            }
+
+            if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile).c_str()))
+            {
+                auto ptr = SPTAG::f_createIO();
+                if (ptr == nullptr || !ptr->Initialize((m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "failed open VectorIDTranslate: %s\n", m_opt->m_headIDFile.c_str());
+                    return false;
+                }
+
+                std::uint64_t vid;
+                while (ptr->ReadBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) == sizeof(vid))
+                {
+                    headVectorIDS.insert(static_cast<SizeType>(vid));
+                }
+                LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
+            }
 
             SizeType fullCount = 0;
             {
@@ -921,7 +942,13 @@ namespace SPTAG::SPANN {
             SizeType batchSize = (fullCount + m_opt->m_batches - 1) / m_opt->m_batches;
 
             auto t1 = std::chrono::high_resolution_clock::now();
-            if (m_opt->m_batches > 1) selections.SaveBatch();
+            if (p_opt.m_batches > 1)
+            {
+                if (selections.SaveBatch() != ErrorCode::Success)
+                {
+                    return false;
+                }
+            }
             {
                 LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
                 SizeType sampleSize = m_opt->m_samples;
@@ -932,27 +959,69 @@ namespace SPTAG::SPANN {
                     auto fullVectors = p_reader->GetVectorSet(start, end);
                     if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-                    emptySet.clear();
+                    if (p_opt.m_batches > 1) {
+                        if (selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount) != ErrorCode::Success)
+                        {
+                            return false;
+                        }
+                        emptySet.clear();
+                        for (auto vid : headVectorIDS) {
+                            if (vid >= start && vid < end) emptySet.insert(vid - start);
+                        }
+                    }
+                    else {
+                        emptySet = headVectorIDS;
+                    }
+
+                    int sampleNum = 0;
+                    for (int j = start; j < end && sampleNum < sampleSize; j++)
+                    {
+                        if (headVectorIDS.count(j) == 0) samples[sampleNum++] = j - start;
+                    }
+
+                    float acc = 0;
+#pragma omp parallel for schedule(dynamic)
+                    for (int j = 0; j < sampleNum; j++)
+                    {
+                        COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+                    }
+                    acc = acc / sampleNum;
+                    LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                     p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), m_opt->m_replicaCount, numThreads, m_opt->m_gpuSSDNumTrees, m_opt->m_gpuSSDLeafSize, m_opt->m_rngFactor, m_opt->m_numGPUs);
+                    LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
 
                     for (SizeType j = start; j < end; j++) {
                         replicaCount[j] = 0;
                         size_t vecOffset = j * (size_t)m_opt->m_replicaCount;
-                        for (int resNum = 0; resNum < m_opt->m_replicaCount && selections[vecOffset + resNum].node != INT_MAX; resNum++) {
-                            ++postingListSize[selections[vecOffset + resNum].node];
-                            selections[vecOffset + resNum].tonode = j;
-                            ++replicaCount[j];
+                        if (headVectorIDS.count(j) == 0) {
+                            for (int resNum = 0; resNum < m_opt->m_replicaCount && selections[vecOffset + resNum].node != INT_MAX; resNum++) {
+                                ++postingListSize[selections[vecOffset + resNum].node];
+                                selections[vecOffset + resNum].tonode = j;
+                                ++replicaCount[j];
+                            }
                         }
                     }
 
-                    if (m_opt->m_batches > 1) selections.SaveBatch();
+                    if (p_opt.m_batches > 1)
+                    {
+                        if (selections.SaveBatch() != ErrorCode::Success)
+                        {
+                            return false;
+                        }
+                    }
                 }
             }
             auto t2 = std::chrono::high_resolution_clock::now();
             LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) / 60.0);
 
-            if (m_opt->m_batches > 1) selections.LoadBatch(0, static_cast<size_t>(fullCount) * m_opt->m_replicaCount);
+            if (p_opt.m_batches > 1)
+            {
+                if (selections.LoadBatch(0, static_cast<size_t>(fullCount) * p_opt.m_replicaCount) != ErrorCode::Success)
+                {
+                    return false;
+                }
+            }
 
             // Sort results either in CPU or GPU
             VectorIndex::SortSelections(&selections.m_selections);
@@ -961,7 +1030,6 @@ namespace SPTAG::SPANN {
             LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count()) / 1000);
 
             auto postingSizeLimit = m_postingSizeLimit;
-
             if (m_opt->m_postingPageLimit > 0)
             {
                 postingSizeLimit = static_cast<int>(m_opt->m_postingPageLimit * PageSize / m_vectorInfoSize);
@@ -974,6 +1042,7 @@ namespace SPTAG::SPANN {
                 std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
                 for (int i = 0; i < replicaCount.size(); ++i)
                 {
+                    if (headVectorIDS.count(i) > 0) continue;
                     ++replicaCountDist[replicaCount[i]];
                 }
 
@@ -999,20 +1068,6 @@ namespace SPTAG::SPANN {
                 postingListSize[i] = postingSizeLimit;
             }
 
-            {
-                std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
-                for (int i = 0; i < replicaCount.size(); ++i)
-                {
-                    ++replicaCountDist[replicaCount[i]];
-                }
-
-                LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
-                for (int i = 0; i < replicaCountDist.size(); ++i)
-                {
-                    LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
-                }
-            }
-
             if (m_opt->m_outputEmptyReplicaID)
             {
                 std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
@@ -1023,6 +1078,7 @@ namespace SPTAG::SPANN {
                 }
                 for (int i = 0; i < replicaCount.size(); ++i)
                 {
+                    if (headVectorIDS.count(i) > 0) continue;
 
                     ++replicaCountDist[replicaCount[i]];
 
@@ -1035,6 +1091,7 @@ namespace SPTAG::SPANN {
                         }
                     }
                 }
+
                 LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
                 for (int i = 0; i < replicaCountDist.size(); ++i)
                 {
@@ -1045,8 +1102,6 @@ namespace SPTAG::SPANN {
 
             auto t4 = std::chrono::high_resolution_clock::now();
             LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()) / 1000);
-
-            if (m_opt->m_ssdIndexFileNum > 1) selections.SaveBatch();
 
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
