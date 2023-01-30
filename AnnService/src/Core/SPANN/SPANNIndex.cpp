@@ -363,7 +363,7 @@ namespace SPTAG
                 newResults->Reverse();
             }
             else {
-                newResults.reset(new COMMON::QueryResultSet<T>(p_query.GetTarget(), p_query.GetResultNum()));
+                newResults.reset(new COMMON::QueryResultSet<T>((T*)p_query.GetTarget(), p_query.GetResultNum()));
             }
 
             auto workSpace = m_workSpaceFactory->GetWorkSpace();
