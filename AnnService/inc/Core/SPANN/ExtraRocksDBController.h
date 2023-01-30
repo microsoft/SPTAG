@@ -5,6 +5,7 @@
 #define _SPTAG_SPANN_EXTRAROCKSDBCONTROLLER_H_
 
 #include "inc/Helper/KeyValueIO.h"
+#include "inc/Helper/StringConvert.h"
 
 #include "rocksdb/db.h"
 #include "rocksdb/filter_policy.h"
@@ -33,14 +34,14 @@ namespace SPTAG::SPANN
                 rocksdb::MergeOperator::MergeOperationOutput* merge_out) const override
             {
                 size_t length = (merge_in.existing_value)->size();
-                for (rocksdb::Slice& s : merge_in.operand_list) {
+                for (const rocksdb::Slice& s : merge_in.operand_list) {
                     length += s.size();
                 }
                 (merge_out->new_value).resize(length);
                 memcpy((char*)((merge_out->new_value).c_str()), 
                     (merge_in.existing_value)->data(), (merge_in.existing_value)->size());
                 size_t start = (merge_in.existing_value)->size();
-                for (rocksdb::Slice& s : merge_in.operand_list) {
+                for (const rocksdb::Slice& s : merge_in.operand_list) {
                     memcpy((char*)((merge_out->new_value).c_str() + start), s.data(), s.size());
                     start += s.size();
                 }
@@ -52,12 +53,12 @@ namespace SPTAG::SPANN
                 std::string* new_value, rocksdb::Logger* logger) const override
             {
                 size_t length = 0;
-                for (rocksdb::Slice& s : operand_list) {
+                for (const rocksdb::Slice& s : operand_list) {
                     length += s.size();
                 }
                 new_value->resize(length);
                 size_t start = 0;
-                for (rocksdb::Slice& s : operand_list) {
+                for (const rocksdb::Slice& s : operand_list) {
                     memcpy((char*)(new_value->c_str() + start), s.data(), s.size());
                     start += s.size();
                 }

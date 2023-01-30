@@ -21,6 +21,25 @@ namespace Helper
 namespace Convert
 {
 
+template <typename T>
+std::string Serialize(const void* data, std::size_t len = 1)
+{
+    std::string d(sizeof(T) * len, L'\0');
+    memcpy(&d[0], data, d.length());
+    return d;
+}
+
+template <typename T>
+std::unique_ptr<T> Unserialize(const std::string& data)
+{
+    if (data.size() != sizeof(T))
+        return nullptr;
+
+    auto d = std::make_unique<T>();
+    memcpy(d.get(), data.data(), data.size());
+    return d;
+}
+
 template <typename DataType>
 inline bool ConvertStringTo(const char* p_str, DataType& p_value)
 {

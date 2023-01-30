@@ -119,6 +119,10 @@ option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
 option(ROCKSDB "ROCKSDB" ON)
 
+if (ROCKSDB)
+    add_definitions(-DROCKSDB)
+endif()
+
 add_subdirectory (ThirdParty/zstd/build/cmake)
 
 add_subdirectory (AnnService)

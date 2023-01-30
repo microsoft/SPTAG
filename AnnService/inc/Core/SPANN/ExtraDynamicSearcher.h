@@ -21,7 +21,7 @@
 #include <utility>
 #include <random>
 
-#ifdef ROCKDB
+#ifdef ROCKSDB
 #include "ExtraRocksDBController.h"
 #endif
 
