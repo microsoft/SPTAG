@@ -83,6 +83,7 @@ namespace SPTAG {
             uint32_t m_reAssignNum{ 0 };
             uint32_t m_garbageNum{ 0 };
             uint64_t m_reAssignScanNum{ 0 };
+            uint32_t m_mergeNum{ 0 };
 
             //Split
             double m_splitCost{ 0 };
@@ -104,8 +105,8 @@ namespace SPTAG {
             double m_garbageCost{ 0 };
 
             void PrintStat(int finishedInsert, bool cost = false, bool reset = false) {
-                LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times\n",
-                    finishedInsert, m_splitNum, m_headMiss.load(), m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum);
+                LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times, merge %d times\n",
+                    finishedInsert, m_splitNum, m_headMiss.load(), m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum, m_mergeNum);
 
                 if (cost) {
                     LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost / m_appendTaskNum);
@@ -127,6 +128,7 @@ namespace SPTAG {
                     m_theSameHeadNum = 0;
                     m_reAssignNum = 0;
                     m_reAssignScanNum = 0;
+                    m_mergeNum = 0;
                     m_garbageNum = 0;
                     m_appendTaskNum = 0;
                     m_splitCost = 0;

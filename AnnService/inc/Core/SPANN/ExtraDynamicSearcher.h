@@ -20,6 +20,7 @@
 #include <numeric>
 #include <utility>
 #include <random>
+#include <tbb/concurrent_hash_map.h>
 
 #ifdef ROCKSDB
 #include "ExtraRocksDBController.h"
@@ -29,6 +30,28 @@ namespace SPTAG::SPANN {
     template <typename ValueType>
     class ExtraDynamicSearcher : public IExtraSearcher
     {
+        class MergeAsyncJob : public Helper::ThreadPool::Job
+        {
+        private:
+            VectorIndex* m_index;
+            ExtraDynamicSearcher<ValueType>* m_extraIndex;
+            SizeType headID;
+            bool disableReassign;
+            std::function<void()> m_callback;
+        public:
+            MergeAsyncJob(VectorIndex* headIndex, ExtraDynamicSearcher<ValueType>* extraIndex, SizeType headID, bool disableReassign, std::function<void()> p_callback)
+                : m_index(headIndex), m_extraIndex(extraIndex), headID(headID), disableReassign(disableReassign), m_callback(std::move(p_callback)) {}
+
+            ~MergeAsyncJob() {}
+
+            inline void exec(IAbortOperation* p_abort) override {
+                m_extraIndex->MergePostings(m_index, headID, !disableReassign);
+                if (m_callback != nullptr) {
+                    m_callback();
+                }
+            }
+        };
+
         class SplitAsyncJob : public Helper::ThreadPool::Job
         {
         private:
@@ -90,6 +113,9 @@ namespace SPTAG::SPANN {
         std::shared_ptr<Helper::ThreadPool> m_reassignThreadPool;
 
         IndexStats m_stat;
+
+        tbb::concurrent_hash_map<SizeType, SizeType> m_splitList;
+        tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int vectorlimit, bool useDirectIO, float searchLatencyHardLimit) {
@@ -438,6 +464,7 @@ namespace SPTAG::SPANN {
                     auto GCEnd = std::chrono::high_resolution_clock::now();
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
                     m_stat.m_garbageCost += elapsedMSeconds;
+                    m_splitList.erase(headID);
                     return ErrorCode::Success;
                 }
                 //LOG(Helper::LogLevel::LL_Info, "Resize\n");
@@ -470,6 +497,7 @@ namespace SPTAG::SPANN {
                         LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
                         exit(0);
                     }
+                    m_splitList.erase(headID);
                     return ErrorCode::Success;
                 }
 
@@ -526,7 +554,8 @@ namespace SPTAG::SPANN {
                     m_postingSizes.UpdateSize(headID, 0);
                 }
             }
-            // int split_order = ++m_stat.m_splitNum;
+            m_splitList.erase(headID);
+            m_stat.m_splitNum++;
             // if (theSameHead) LOG(Helper::LogLevel::LL_Info, "The Same Head\n");
             // LOG(Helper::LogLevel::LL_Info, "head1:%d, head2:%d\n", newHeadsID[0], newHeadsID[1]);
 
@@ -551,9 +580,133 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
+        ErrorCode MergePostings(VectorIndex* p_index, SizeType headID, bool reassign = false)
+        {
+            {
+                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
+                
+                QueryResult queryResults(p_index->GetSample(headID), m_opt->m_internalResultNum, false);
+                p_index->SearchIndex(queryResults);
+
+                std::string mergedPostingList;
+                std::set<SizeType> vectorIdSet;
+
+                std::string currentPostingList;
+                if (db->Get(headID, &currentPostingList) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Info, "Split fail to get to be merged postings: %d\n", headID);
+                    exit(0);
+                }
+
+                auto* postingP = reinterpret_cast<uint8_t*>(&currentPostingList.front());
+                size_t postVectorNum = currentPostingList.size() / m_vectorInfoSize;
+                int currentLength = 0;
+                uint8_t* vectorId = postingP;
+                for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+                {
+                    int VID = *((int*)(vectorId));
+                    uint8_t version = *(vectorId + sizeof(int));
+                    if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                    vectorIdSet.insert(VID);
+                    mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
+                    currentLength++;
+                }
+                int totalLength = currentLength;
+
+                if (currentLength > m_mergeThreshold)
+                {
+                    m_postingSizes.UpdateSize(headID, currentLength);
+                    if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Info, "Split Fail to write back postings\n");
+                        exit(0);
+                    }
+                    m_mergeList.erase(headID);
+                    return ErrorCode::Success;
+                }
+
+                std::string nextPostingList;
+
+                for (int i = 1; i < queryResults.GetResultNum(); ++i)
+                {
+                    BasicResult* queryResult = queryResults.GetResult(i);
+                    int nextLength = m_postingSizes.GetSize(queryResult->VID);
+                    tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+                    if (currentLength + nextLength < m_postingSizeLimit && !m_mergeList.find(headIDAccessor, queryResult->VID))
+                    {
+                        std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[queryResult->VID]);
+                        if (!p_index->ContainSample(queryResult->VID)) continue;
+                        if (db->Get(queryResult->VID, &nextPostingList) != ErrorCode::Success) {
+                            LOG(Helper::LogLevel::LL_Info, "Split fail to get to be merged postings: %d\n", queryResult->VID);
+                            exit(0);
+                        }
+
+                        postingP = reinterpret_cast<uint8_t*>(&nextPostingList.front());
+                        postVectorNum = nextPostingList.size() / m_vectorInfoSize;
+                        nextLength = 0;
+                        vectorId = postingP;
+                        for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+                        {
+                            int VID = *((int*)(vectorId));
+                            uint8_t version = *(vectorId + sizeof(int));
+                            if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                            if (vectorIdSet.find(VID) == vectorIdSet.end()) {
+                                mergedPostingList += nextPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
+                                totalLength++;
+                            }
+                            nextLength++;
+                        }
+                        if (currentLength > nextLength) 
+                        {
+                            p_index->DeleteIndex(queryResult->VID);
+                            if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
+                                LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
+                                exit(0);
+                            }
+                            m_postingSizes.UpdateSize(queryResult->VID, 0);
+                            m_postingSizes.UpdateSize(headID, totalLength);
+                        } else
+                        {
+                            p_index->DeleteIndex(headID);
+                            if (db->Put(queryResult->VID, mergedPostingList) != ErrorCode::Success) {
+                                LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
+                                exit(0);
+                            }
+                            m_postingSizes.UpdateSize(queryResult->VID, totalLength);
+                        }
+
+                        if (reassign) /* ReAssign */
+                        m_mergeList.erase(headID);
+                        m_stat.m_mergeNum++;
+
+                        return ErrorCode::Success;
+                    }
+                }
+            }
+        }
+
         inline void SplitAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+            if (m_splitList.find(headIDAccessor, headID)) {
+                return;
+            }
+            tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
+            m_splitList.insert(workPair);
+
             auto* curJob = new SplitAsyncJob(p_index, this, headID, m_opt->m_disableReassign, p_callback);
+            m_splitThreadPool->add(curJob);
+
+        }
+
+        inline void MergeAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
+        {
+            tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+            if (m_mergeList.find(headIDAccessor, headID)) {
+                return;
+            }
+            tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
+            m_mergeList.insert(workPair);
+
+            auto* curJob = new MergeAsyncJob(p_index, this, headID, m_opt->m_disableReassign, p_callback);
             m_splitThreadPool->add(curJob);
         }
 
@@ -848,6 +1001,8 @@ namespace SPTAG::SPANN {
 
                 int vectorNum = (int)(postingList.size() / m_vectorInfoSize);
 
+                int realNum = vectorNum;
+
                 diskRead += (int)(postingList.size());
                 listElements += vectorNum;
 
@@ -855,7 +1010,12 @@ namespace SPTAG::SPANN {
                 for (int i = 0; i < vectorNum; i++) {
                     char* vectorInfo = postingList.data() + i * m_vectorInfoSize;
                     int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-                    if (m_versionMap->Deleted(vectorID) || p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
+                    if (m_versionMap->Deleted(vectorID)) {
+                        realNum--;
+                        listElements--;
+                        continue;
+                    }
+                    if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
@@ -863,6 +1023,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
+                if (realNum <= m_mergeThreshold) MergeAsync(p_index.get(), curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -1195,6 +1356,8 @@ namespace SPTAG::SPANN {
         int m_postingSizeLimit = INT_MAX;
 
         float m_hardLatencyLimit = 2;
+
+        int m_mergeThreshold = 10;
     };
 } // namespace SPTAG
 #endif // _SPTAG_SPANN_EXTRADYNAMICSEARCHER_H_
