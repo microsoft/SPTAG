@@ -584,9 +584,8 @@ namespace SPTAG::SPANN {
         {
             {
                 std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
-                
-                QueryResult queryResults(p_index->GetSample(headID), m_opt->m_internalResultNum, false);
-                p_index->SearchIndex(queryResults);
+
+                if (!p_index->ContainSample(headID)) return ErrorCode::Success;
 
                 std::string mergedPostingList;
                 std::set<SizeType> vectorIdSet;
@@ -622,6 +621,9 @@ namespace SPTAG::SPANN {
                     m_mergeList.erase(headID);
                     return ErrorCode::Success;
                 }
+
+                QueryResult queryResults(p_index->GetSample(headID), m_opt->m_internalResultNum, false);
+                p_index->SearchIndex(queryResults);
 
                 std::string nextPostingList;
 
@@ -671,9 +673,41 @@ namespace SPTAG::SPANN {
                                 exit(0);
                             }
                             m_postingSizes.UpdateSize(queryResult->VID, totalLength);
+                            m_postingSizes.UpdateSize(headID, 0);
                         }
 
-                        if (reassign) /* ReAssign */
+                        if (reassign) 
+                        {
+                            /* ReAssign */
+                            if (currentLength > nextLength) 
+                            {
+                                /* ReAssign queryResult->VID*/
+                                postingP = reinterpret_cast<uint8_t*>(&nextPostingList.front());
+                                for (int j = 0; j < nextLength; j++) {
+                                    uint8_t* vectorId = postingP + j * m_vectorInfoSize;
+                                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                                    ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                                    float origin_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
+                                    float current_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
+                                    if (current_dist > origin_dist)
+                                        ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), headID);
+                                }
+                            } else
+                            {
+                                /* ReAssign headID*/
+                                postingP = reinterpret_cast<uint8_t*>(&currentPostingList.front());
+                                for (int j = 0; j < currentLength; j++) {
+                                    uint8_t* vectorId = postingP + j * m_vectorInfoSize;
+                                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                                    ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                                    float origin_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
+                                    float current_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
+                                    if (current_dist > origin_dist)
+                                        ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), queryResult->VID);
+                                }
+                            }
+                        }
+
                         m_mergeList.erase(headID);
                         m_stat.m_mergeNum++;
 
@@ -718,6 +752,7 @@ namespace SPTAG::SPANN {
 
         ErrorCode CollectReAssign(VectorIndex* p_index, SizeType headID, std::vector<std::string>& postingLists, std::vector<SizeType>& newHeadsID) {
             auto headVector = reinterpret_cast<const ValueType*>(p_index->GetSample(headID));
+            int newHeadsNum = newHeadsID.size();
             std::vector<SizeType> HeadPrevTopK;
             std::vector<float> newHeadsDist;
             newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[0])));
@@ -760,7 +795,7 @@ namespace SPTAG::SPANN {
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
                         float dist = p_index->ComputeDistance(p_index->GetSample(newHeadsID[i]), vector);
-                        if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, i < 2, newHeadsID[i])) {
+                        if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, i < newHeadsNum, newHeadsID[i])) {
                             ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), newHeadsID[i]);
                             reAssignVectorsTopK.insert(vid);
                         }
@@ -788,7 +823,7 @@ namespace SPTAG::SPANN {
                 {
                     float nnDist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID),
                         p_index->GetSample(selections[j].node));
-                    if (m_opt->m_rngFactor * nnDist < queryResult->Dist)
+                    if (m_opt->m_rngFactor * nnDist <= queryResult->Dist)
                     {
                         rngAccpeted = false;
                         break;
