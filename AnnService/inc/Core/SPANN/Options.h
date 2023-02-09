@@ -163,6 +163,11 @@ namespace SPTAG {
             int m_batch;
             std::string m_fullVectorPath;
 
+            // Steady State Update
+            std::string m_updateFilePrefix;
+            int m_days;
+
+
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \
