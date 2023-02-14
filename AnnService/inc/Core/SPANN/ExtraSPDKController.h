@@ -22,21 +22,17 @@ namespace SPTAG::SPANN
         public:
             bool Initialize() {}
 
-            // get p_size blocks from front, and fill in p_data array
+            // get from front
             bool GetBlocks(AddressType* p_data, int p_size) {}
 
-            // release p_size blocks, put them at the end of the queue
+            // put at the end of the queue
             bool ReleaseBlocks(AddressType* p_data, int p_size) {}
 
-            // read a posting list. p_data[0] is the total data size, 
-            // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
-            // concat all the block contents together into p_value string.
+            // p_data[0] is the total data size
             bool ReadBlocks(AddressType* p_data, std::string* p_value) {}
 
-            // parallel read a list of posting lists.
             bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {}
 
-            // write p_value into p_size blocks start from p_data
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {}
 
         };
@@ -63,7 +59,7 @@ namespace SPTAG::SPANN
             m_blockLimit = postingBlocks + 1;
             m_bufferLimit = bufferSize;
             if (fileexists(m_mappingPath.c_str())) {
-                Load(m_mappingPath, blockSize, capacity);
+                Load(m_mappingPath, m_blockLimit, blockSize, capacity);
             }
             else {
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
@@ -156,6 +152,7 @@ namespace SPTAG::SPANN
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
+            //TODO: add lock
             if (key >= m_pBlockMapping.R()) return ErrorCode::Fail;
 
             int64_t* postingSize = (int64_t*)At(key);
@@ -214,22 +211,22 @@ namespace SPTAG::SPANN
 
         }
 
-        ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
+        ErrorCode Load(std::string path, SizeType cols, SizeType blockSize, SizeType capacity) {
             LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
 
-            SizeType CR, mycols;
+            SizeType CR, cols;
             IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
-            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
-            if (mycols > m_blockLimit) m_blockLimit = mycols;
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&cols);
+            if (cols > m_blockLimit) m_blockLimit = cols;
 
             m_pBlockMapping.Initialize(CR, 1, blockSize, capacity);
             for (int i = 0; i < CR; i++) {
                 At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
-                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * cols, (char*)At(i));
             }
-            LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
+            LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, cols);
             return ErrorCode::Success;
         }
         
