@@ -120,9 +120,8 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int vectorlimit, bool useDirectIO, float searchLatencyHardLimit) {
 #ifdef ROCKSDB
-            db.reset(new RocksDBIO());
+            db.reset(new RocksDBIO(dbPath, useDirectIO));
 #endif
-            db->Initialize(dbPath, useDirectIO);
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;
             m_postingSizeLimit = vectorlimit;
@@ -715,6 +714,7 @@ namespace SPTAG::SPANN {
                     }
                 }
             }
+            return ErrorCode::Success;
         }
 
         inline void SplitAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
@@ -752,7 +752,7 @@ namespace SPTAG::SPANN {
 
         ErrorCode CollectReAssign(VectorIndex* p_index, SizeType headID, std::vector<std::string>& postingLists, std::vector<SizeType>& newHeadsID) {
             auto headVector = reinterpret_cast<const ValueType*>(p_index->GetSample(headID));
-            int newHeadsNum = newHeadsID.size();
+            size_t newHeadsNum = newHeadsID.size();
             std::vector<SizeType> HeadPrevTopK;
             std::vector<float> newHeadsDist;
             newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[0])));

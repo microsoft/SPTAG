@@ -13,23 +13,19 @@ namespace SPTAG
 
             virtual ~KeyValueIO() {}
 
-            virtual bool Initialize(const char* filePath, bool usdDirectIO, bool wal = false) = 0;
-
             virtual void ShutDown() = 0;
 
-            virtual ErrorCode Get(const std::string& key, std::string* value) = 0;
+            virtual ErrorCode Get(const std::string& key, std::string* value) { return ErrorCode::Undefined; }
 
             virtual ErrorCode Get(SizeType key, std::string* value) = 0;
 
-            virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) = 0;
+            virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) { return ErrorCode::Undefined; }
 
             virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) = 0;
 
-            virtual ErrorCode Put(const std::string& key, const std::string& value) = 0;
+            virtual ErrorCode Put(const std::string& key, const std::string& value) { return ErrorCode::Undefined; }
 
             virtual ErrorCode Put(SizeType key, const std::string& value) = 0;
-
-            virtual ErrorCode Put(SizeType key, SizeType id, const void* vector, SizeType dim) = 0;
 
             virtual  ErrorCode Merge(SizeType key, const std::string& value) = 0;
 

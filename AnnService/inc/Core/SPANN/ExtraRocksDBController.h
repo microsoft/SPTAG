@@ -71,21 +71,7 @@ namespace SPTAG::SPANN
         };
 
     public:
-        RocksDBIO() = default;
-
-        ~RocksDBIO() override {
-            /*
-            std::string stats;
-            db->GetProperty("rocksdb.stats", &stats);
-            LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
-            */
-            db->Close();
-            // DestroyDB(dbPath, dbOptions);
-            delete db;
-        }
-
-        bool Initialize(const char* filePath, bool usdDirectIO, bool wal = false) override
-        {
+        RocksDBIO(const char* filePath, bool usdDirectIO, bool wal = false) {
             dbPath = std::string(filePath);
             //dbOptions.statistics = rocksdb::CreateDBStatistics();
             dbOptions.create_if_missing = true;
@@ -152,7 +138,17 @@ namespace SPTAG::SPANN
             if (s != rocksdb::Status::OK()) {
                 LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
             }
-            return s == rocksdb::Status::OK();
+        }
+
+        ~RocksDBIO() override {
+            /*
+            std::string stats;
+            db->GetProperty("rocksdb.stats", &stats);
+            LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
+            */
+            db->Close();
+            // DestroyDB(dbPath, dbOptions);
+            delete db;
         }
 
         void ShutDown() override {
@@ -167,14 +163,14 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
             else {
-                auto key_int = Helper::Convert::Unserialize<SizeType>(key);
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Get\e[0m: %s, key: %d\n", s.getState(), *(key_int.get()));
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Get\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
                 return ErrorCode::Fail;
             }
         }
 
         ErrorCode Get(SizeType key, std::string* value) override {
-            return Get(Helper::Convert::Serialize<SizeType>(&key), value);
+            std::string k((char*)&key, sizeof(SizeType));
+            return Get(k, value);
         }
 
         ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) {
@@ -196,8 +192,7 @@ namespace SPTAG::SPANN
                     delete[] slice_keys;
                     delete[] slice_values;
                     delete[] statuses;
-                    auto key = Helper::Convert::Unserialize<SizeType>(keys[i]);
-                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), *(key.get()));
+                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), *((SizeType*)(keys[i].data())));
                     return ErrorCode::Fail;
                 }
                 values->push_back(slice_values[i].ToString());
@@ -213,7 +208,7 @@ namespace SPTAG::SPANN
             std::vector<std::string> str_keys;
 
             for (const auto& key : keys) {
-                str_keys.push_back(Helper::Convert::Serialize<SizeType>(&key));
+                str_keys.emplace_back((char*)(&key), sizeof(SizeType));
             }
 
             return MultiGet(str_keys, values);
@@ -225,27 +220,22 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
             else {
-                auto key_int = Helper::Convert::Unserialize<SizeType>(key);
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Put\e[0m: %s, key: %d\n", s.getState(), *(key_int.get()));
+                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Put\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
                 return ErrorCode::Fail;
             }
         }
 
         ErrorCode Put(SizeType key, const std::string& value) override {
-            return Put(Helper::Convert::Serialize<SizeType>(&key), value);
-        }
-
-        ErrorCode Put(SizeType key, SizeType id, const void* vector, SizeType dim) override {
-            using Helper::Convert::Serialize;
-            std::string posting(Serialize<SizeType>(&id) + Serialize<SizeType>(vector, dim));
-            return Put(key, posting);
+            std::string k((char*)&key, sizeof(SizeType));
+            return Put(k, value);
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
             if (value.empty()) {
                 LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
-            auto s = db->Merge(rocksdb::WriteOptions(), Helper::Convert::Serialize<int>(&key, 1), value);
+            std::string k((char*)&key, sizeof(SizeType));
+            auto s = db->Merge(rocksdb::WriteOptions(), k, value);
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             }
@@ -256,7 +246,8 @@ namespace SPTAG::SPANN
         }
 
         ErrorCode Delete(SizeType key) override {
-            auto s = db->Delete(rocksdb::WriteOptions(), Helper::Convert::Serialize<int>(&key, 1));
+            std::string k((char*)&key, sizeof(SizeType));
+            auto s = db->Delete(rocksdb::WriteOptions(), k);
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             }
