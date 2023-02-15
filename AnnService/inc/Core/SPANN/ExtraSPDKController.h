@@ -22,17 +22,21 @@ namespace SPTAG::SPANN
         public:
             bool Initialize() {}
 
-            // get from front
+            // get p_size blocks from front, and fill in p_data array
             bool GetBlocks(AddressType* p_data, int p_size) {}
 
-            // put at the end of the queue
+            // release p_size blocks, put them at the end of the queue
             bool ReleaseBlocks(AddressType* p_data, int p_size) {}
 
-            // p_data[0] is the total data size
+            // read a posting list. p_data[0] is the total data size, 
+            // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
+            // concat all the block contents together into p_value string.
             bool ReadBlocks(AddressType* p_data, std::string* p_value) {}
 
+            // parallel read a list of posting lists.
             bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {}
 
+            // write p_value into p_size blocks start from p_data
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {}
 
         };
@@ -152,7 +156,6 @@ namespace SPTAG::SPANN
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
-            //TODO: add lock
             if (key >= m_pBlockMapping.R()) return ErrorCode::Fail;
 
             int64_t* postingSize = (int64_t*)At(key);

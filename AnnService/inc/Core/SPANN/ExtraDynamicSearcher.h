@@ -423,10 +423,12 @@ namespace SPTAG::SPANN {
                 // postingList += appendPosting;
                 // reinterpret postingList to vectors and IDs
                 auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
-                size_t postVectorNum = postingList.size() / m_vectorInfoSize;
-                COMMON::Dataset<ValueType> smallSample(0, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity);  // smallSample[i] -> VID
-                std::vector<int> localIndicesInsert(postVectorNum);  // smallSample[i] = j <-> localindices[j] = i
-                std::vector<uint8_t> localIndicesInsertVersion(postVectorNum);
+                SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
+               
+                COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity, (const void*)postingP, true, nullptr, m_metaDataSize, m_vectorInfoSize);
+                //COMMON::Dataset<ValueType> smallSample(0, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity);  // smallSample[i] -> VID
+                //std::vector<int> localIndicesInsert(postVectorNum);  // smallSample[i] = j <-> localindices[j] = i
+                //std::vector<uint8_t> localIndicesInsertVersion(postVectorNum);
                 std::vector<int> localIndices(postVectorNum);
                 int index = 0;
                 uint8_t* vectorId = postingP;
@@ -437,23 +439,24 @@ namespace SPTAG::SPANN {
                     uint8_t version = *(vectorId + sizeof(int));
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
 
-                    localIndicesInsert[index] = VID;
-                    localIndicesInsertVersion[index] = version;
-                    localIndices[index] = index;
-                    smallSample.AddBatch((ValueType*)(vectorId + m_metaDataSize), 1);
+                    //localIndicesInsert[index] = VID;
+                    //localIndicesInsertVersion[index] = version;
+                    //smallSample.AddBatch(1, (ValueType*)(vectorId + m_metaDataSize));
+                    localIndices[index] = j;
                     index++;
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
                 if (index < m_postingSizeLimit)
                 {
-                    postingList.resize(index * m_vectorInfoSize);
                     char* ptr = (char*)(postingList.c_str());
-                    for (int j = 0; j < index; j++)
+                    for (int j = 0; j < index; j++, ptr += m_vectorInfoSize)
                     {
-                        Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
-                        ptr += m_vectorInfoSize;
+                        if (j == localIndices[j]) continue;
+                        memcpy(ptr, postingList.c_str() + localIndices[j] * m_vectorInfoSize, m_vectorInfoSize);
+                        //Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
                     }
+                    postingList.resize(index * m_vectorInfoSize);
                     m_postingSizes.UpdateSize(headID, index);
                     if (db->Put(headID, postingList) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Info, "Split Fail to write back postings\n");
@@ -484,15 +487,15 @@ namespace SPTAG::SPANN {
                 if (numClusters <= 1)
                 {
                     LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Cut to limit\n");
-                    postingList.resize(m_postingSizeLimit * m_vectorInfoSize);
-                    char* ptr = (char*)(postingList.c_str());
-                    for (int j = 0; j < m_postingSizeLimit; j++)
+                    std::string newpostingList(m_postingSizeLimit * m_vectorInfoSize, '\0');
+                    char* ptr = (char*)(newpostingList.c_str());
+                    for (int j = 0; j < m_postingSizeLimit; j++, ptr += m_vectorInfoSize)
                     {
-                        Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
-                        ptr += m_vectorInfoSize;
+                        memcpy(ptr, postingList.c_str() + localIndices[j] * m_vectorInfoSize, m_vectorInfoSize);
+                        //Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
                     }
                     m_postingSizes.UpdateSize(headID, m_postingSizeLimit);
-                    if (db->Put(headID, postingList) != ErrorCode::Success) {
+                    if (db->Put(headID, newpostingList) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
                         exit(0);
                     }
@@ -503,20 +506,22 @@ namespace SPTAG::SPANN {
                 long long newHeadVID = -1;
                 int first = 0;
                 bool theSameHead = false;
+                newPostingLists.resize(2);
                 for (int k = 0; k < 2; k++) {
                     if (args.counts[k] == 0)	continue;
-                    postingList.resize(args.counts[k] * m_vectorInfoSize);
-                    char* ptr = (char*)(postingList.c_str());
-                    for (int j = 0; j < args.counts[k]; j++)
+                    
+                    newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
+                    char* ptr = (char*)(newPostingLists[k].c_str());
+                    for (int j = 0; j < args.counts[k]; j++, ptr += m_vectorInfoSize)
                     {
-                        Serialize(ptr, localIndicesInsert[localIndices[first + j]], localIndicesInsertVersion[localIndices[first + j]], smallSample[localIndices[first + j]]);
-                        ptr += m_vectorInfoSize;
+                        memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
+                        //Serialize(ptr, localIndicesInsert[localIndices[first + j]], localIndicesInsertVersion[localIndices[first + j]], smallSample[localIndices[first + j]]);
                     }
                     if (!theSameHead && p_index->ComputeDistance(args.centers + k * args._D, p_index->GetSample(headID)) < Epsilon) {
                         newHeadsID.push_back(headID);
                         newHeadVID = headID;
                         theSameHead = true;
-                        if (db->Put(newHeadVID, postingList) != ErrorCode::Success) {
+                        if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to override postings\n");
                             exit(0);
                         }
@@ -527,7 +532,7 @@ namespace SPTAG::SPANN {
                         p_index->AddIndexId(args.centers + k * args._D, 1, m_opt->m_dim, begin, end);
                         newHeadVID = begin;
                         newHeadsID.push_back(begin);
-                        if (db->Put(newHeadVID, postingList) != ErrorCode::Success) {
+                        if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to add new postings\n");
                             exit(0);
                         }
@@ -543,7 +548,6 @@ namespace SPTAG::SPANN {
                             exit(1);
                         }
                     }
-                    newPostingLists.push_back(postingList);
                     // LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                     first += args.counts[k];
                     m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
@@ -880,7 +884,8 @@ namespace SPTAG::SPANN {
             // } else {
             double appendIOSeconds = 0;
             {
-                std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
+                //std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]); //ROCKSDB
+                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]); //SPDK
                 if (!p_index->ContainSample(headID)) {
                     goto checkDeleted;
                 }
