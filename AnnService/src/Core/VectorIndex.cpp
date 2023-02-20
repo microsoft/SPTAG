@@ -16,7 +16,7 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 using namespace SPTAG;
 
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger;
-std::shared_ptr<Helper::Logger> GetLogger() {
+std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
   if (SPTAG::g_pLogger == nullptr) {
 #ifdef DEBUG
     SPTAG::g_pLogger.reset(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
