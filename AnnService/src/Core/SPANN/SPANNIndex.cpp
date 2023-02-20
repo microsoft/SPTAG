@@ -1050,6 +1050,30 @@ namespace SPTAG
             if (m_versionMap.Delete(p_id)) return ErrorCode::Success;
             return ErrorCode::VectorNotFound;
         }
+
+        template <typename T>
+        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, SizeType p_vectorNum)
+        {
+            // TODO: Support batch delete
+            DimensionType p_dimension = GetFeatureDim();
+            std::shared_ptr<VectorSet> vectorSet;
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine) {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_vectors, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                int base = COMMON::Utils::GetBase<T>();
+                for (SizeType i = 0; i < p_vectorNum; i++) {
+                    COMMON::Utils::Normalize((T*)(vectorSet->GetVector(i)), p_dimension, base);
+                }
+            }
+            else {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_vectors, sizeof(T) * p_vectorNum * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            }
+            SizeType p_id = m_extraSearcher->SearchVector(vectorSet, m_index);
+            if (p_id == -1) return ErrorCode::VectorNotFound;
+            else return DeleteIndex(p_id);
+        }
     }
 }
 

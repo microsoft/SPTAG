@@ -296,6 +296,8 @@ namespace SPTAG {
             virtual void ForceCompaction() { return; }
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
+            virtual SizeType SearchVector(std::shared_ptr<VectorSet>& p_vectorSet,
+                std::shared_ptr<VectorIndex> p_index) { return -1; }
         };
     } // SPANN
 } // SPTAG

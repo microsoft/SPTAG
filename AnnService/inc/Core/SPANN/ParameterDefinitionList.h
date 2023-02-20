@@ -164,6 +164,12 @@ DefineSSDParameter(m_reassignThreadNum, int, 16, "ReassignThreadNum")
 DefineSSDParameter(m_batch, int, 1000, "Batch")
 // Total Vector Path
 DefineSSDParameter(m_fullVectorPath, std::string, std::string(""), "FullVectorPath")
+// Steady State: update trace
+DefineSSDParameter(m_updateFilePrefix, std::string, std::string(""), "UpdateFilePrefix")
+// Steady State: update mapping
+DefineSSDParameter(m_updateMappingPrefix, std::string, std::string(""), "UpdateMappingPrefix")
+// Steady State: days
+DefineSSDParameter(m_days, int, 0, "Days")
 
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")

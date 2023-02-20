@@ -165,6 +165,7 @@ namespace SPTAG {
 
             // Steady State Update
             std::string m_updateFilePrefix;
+            std::string m_updateMappingPrefix;
             int m_days;
 
 
