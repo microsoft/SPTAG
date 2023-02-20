@@ -1375,12 +1375,12 @@ namespace SPTAG::SPANN {
         }
 
         SizeType SearchVector(std::shared_ptr<VectorSet>& p_vectorSet,
-            std::shared_ptr<VectorIndex> p_index) override {
+            std::shared_ptr<VectorIndex> p_index ) override {
             
             QueryResult queryResults(p_vectorSet->GetVector(0), m_opt->m_internalResultNum, false);
             p_index->SearchIndex(queryResults);
-            COMMON::OptHashPosVector m_deduper;
-            m_deduper.clear();
+            
+            std::set<SizeType> checked;
             std::string postingList;
             for (int i = 0; i < queryResults.GetResultNum(); ++i)
             {
@@ -1390,9 +1390,10 @@ namespace SPTAG::SPANN {
                 for (int i = 0; i < vectorNum; i++) {
                     char* vectorInfo = postingList.data() + i * m_vectorInfoSize;
                     int vectorID = *(reinterpret_cast<int*>(vectorInfo));
-                    if(m_deduper.CheckAndSet(vectorID)) {
+                    if(checked.find(vectorID) != checked.end() || m_versionMap->Deleted(vectorID)) {
                         continue;
                     }
+                    checked.insert(vectorID);
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     if (distance2leaf < 1e-6) return vectorID;
                 }
