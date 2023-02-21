@@ -244,7 +244,9 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     ErrorCode ret = ErrorCode::Success;
     {
         std::shared_ptr<Helper::DiskIO> p_configStream(new Helper::SimpleBufferIO());
-        if (p_configStream == nullptr || !p_configStream->Initialize(nullptr, std::ios::out)) return ErrorCode::EmptyDiskIO;
+        auto bufsize = 2 << 20;
+        std::vector<char> buf(bufsize); // Allocate 1 MB scratch space
+        if (p_configStream == nullptr || !p_configStream->Initialize(buf.data(), std::ios::out, bufsize)) return ErrorCode::EmptyDiskIO;
         if ((ret = SaveIndexConfig(p_configStream)) != ErrorCode::Success) return ret;
         p_config.resize(p_configStream->TellP());
         IOBINARY(p_configStream, ReadBinary, p_config.size(), (char*)p_config.c_str(), 0);
@@ -365,7 +367,9 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
     auto mp = std::shared_ptr<Helper::DiskIO>(new Helper::SimpleBufferIO());
-    if (mp == nullptr || !mp->Initialize(nullptr, std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+    auto bufsize = 2 << 20;
+    std::vector<char> buf(bufsize); // Allocate 1 MB scratch space
+    if (mp == nullptr || !mp->Initialize(buf.data(), std::ios::binary | std::ios::out, bufsize)) return ErrorCode::FailedCreateFile;
     ErrorCode ret = ErrorCode::Success;
     if ((ret = SaveIndexConfig(mp)) != ErrorCode::Success) return ret;
 
