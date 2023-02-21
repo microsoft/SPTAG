@@ -16,14 +16,15 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 using namespace SPTAG;
 
 std::shared_ptr<Helper::Logger> SPTAG::g_pLogger;
+std::once_flag g_initLogger;
 std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
-  if (SPTAG::g_pLogger == nullptr) {
+  std::call_once(g_initLogger, []() {
 #ifdef DEBUG
     SPTAG::g_pLogger.reset(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
 #else
     SPTAG::g_pLogger.reset(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
 #endif
-  }
+    });
   return SPTAG::g_pLogger;
 }
 std::mt19937 SPTAG::rg;
