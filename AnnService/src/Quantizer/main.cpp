@@ -68,7 +68,7 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader>& vectorRead
 
 int main(int argc, char* argv[])
 {
-    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0, SPTAG::QuantizerType::None, std::string(), -1, std::string(), std::string());
+    std::shared_ptr<QuantizerOptions> options = std::make_shared<QuantizerOptions>(10000, true, 0.0f, SPTAG::QuantizerType::None, std::string(), -1, std::string(), std::string());
 
     if (!options->Parse(argc - 1, argv + 1))
     {
