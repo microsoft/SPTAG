@@ -21,11 +21,13 @@ std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
 #else
   auto logLevel = Helper::LogLevel::LL_Info;
 #endif
+#ifdef  _WINDOWS_
   if (auto exeHandle = GetModuleHandleW(nullptr)) {
     if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
       logLevel = SPTAG_GetLoggerLevel();
     }
   }
+#endif //  _WINDOWS_
 
   static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
   return s_pLogger;
