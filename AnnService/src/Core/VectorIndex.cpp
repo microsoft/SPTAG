@@ -15,18 +15,16 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 
 using namespace SPTAG;
 
-std::shared_ptr<Helper::Logger> SPTAG::g_pLogger;
-std::once_flag g_initLogger;
 std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
-  std::call_once(g_initLogger, []() {
 #ifdef DEBUG
-    SPTAG::g_pLogger.reset(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
+  constexpr auto logLevel = Helper::LogLevel::LL_Debug;
 #else
-    SPTAG::g_pLogger.reset(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
+  constexpr auto logLevel = Helper::LogLevel::LL_Info;
 #endif
-    });
-  return SPTAG::g_pLogger;
+  static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
+  return s_pLogger;
 }
+
 std::mt19937 SPTAG::rg;
 
 std::shared_ptr<Helper::DiskIO>(*SPTAG::f_createIO)() = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::SimpleFileIO()); };
