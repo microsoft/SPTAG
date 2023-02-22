@@ -1067,8 +1067,8 @@ namespace SPTAG
                 }
             }
             else {
-                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_vectors, sizeof(T) * p_vectorNum * p_dimension, false),
-                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_vectors, sizeof(T) * 1 * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, 1));
             }
             SizeType p_id = m_extraSearcher->SearchVector(vectorSet, m_index);
             if (p_id == -1) return ErrorCode::VectorNotFound;
