@@ -15,11 +15,23 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 
 using namespace SPTAG;
 
+std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
 #ifdef DEBUG
-std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
+  auto logLevel = Helper::LogLevel::LL_Debug;
 #else
-std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
+  auto logLevel = Helper::LogLevel::LL_Info;
 #endif
+#ifdef  _WINDOWS_
+  if (auto exeHandle = GetModuleHandleW(nullptr)) {
+    if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
+      logLevel = SPTAG_GetLoggerLevel();
+    }
+  }
+#endif //  _WINDOWS_
+
+  static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
+  return s_pLogger;
+}
 
 std::mt19937 SPTAG::rg;
 

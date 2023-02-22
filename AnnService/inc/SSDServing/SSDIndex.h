@@ -174,7 +174,7 @@ namespace SPTAG {
 
                 if (!p_opts.m_logFile.empty())
                 {
-                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+                    GetLogger().reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
                 }
                 int numThreads = p_opts.m_iSSDNumberOfThreads;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
