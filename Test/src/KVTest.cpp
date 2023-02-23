@@ -11,14 +11,15 @@
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
 
-void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int totalSize, int times, bool debug = false) { 
+void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int times, bool debug = false) { 
     std::vector<SizeType> headIDs(internalResultNum, 0);
+    for (int i = 0; i < internalResultNum; i++) headIDs[i] = i;
 
     std::vector<std::string> values;
     double latency = 0;
     for (int i = 0; i < times; i++) {
         values.clear();
-        for (int j = 0; j < internalResultNum; j++) headIDs[j] = (j + i * internalResultNum) % totalSize;
+        for (int j = 0; j < internalResultNum; j++) headIDs[j] += times * internalResultNum;
         auto t1 = std::chrono::high_resolution_clock::now();
         db->MultiGet(headIDs, &values);
         auto t2 = std::chrono::high_resolution_clock::now();
@@ -26,7 +27,7 @@ void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int t
 
         if (debug) {
             for (int j = 0; j < internalResultNum; j++) {
-                std::cout << values[j].substr(PageSize) << std::endl;
+                std::cout << values[j].c_str() + PageSize - std::to_string(headIDs[j]).size() << std::endl;
             }
         }
     }
@@ -46,14 +47,12 @@ void Test(std::string path, std::string type, bool debug = false)
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < totalNum; i++) {
-        int len = std::to_string(i).length();
-        std::string val(PageSize - len, '0');
+        int len = std::to_string(i).size();
+        std::string val('0', PageSize - len);
         db->Put(i, val);
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "avg put time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum)) << "us" << std::endl;
-
-    db->ForceCompaction();
 
     t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < totalNum; i++) {
@@ -62,25 +61,25 @@ void Test(std::string path, std::string type, bool debug = false)
         }
     }
     t2 = std::chrono::high_resolution_clock::now();
+    auto t2 = std::chrono::high_resolution_clock::now();
     std::cout << "avg merge time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum * mergeIters)) << "us" << std::endl;
 
-    Search(db, internalResultNum, totalNum, 10, debug);
+    Search(db, internalResultNum, 10, debug);
 
-    db->ForceCompaction();
     db->ShutDown();
 
     if (type == "RocksDB") {
         db.reset(new RocksDBIO(path.c_str(), true));
     }
 
-    Search(db, internalResultNum, totalNum, 10, debug);
+    Search(db, internalResultNum, 10, debug);
 }
 
 BOOST_AUTO_TEST_SUITE(KVTest)
 
 BOOST_AUTO_TEST_CASE(RocksDBTest)
 {
-    Test("tmp_rocksdb", "RocksDB", false);
+    Test("tmp_rocksdb", "RocksDB", true);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
