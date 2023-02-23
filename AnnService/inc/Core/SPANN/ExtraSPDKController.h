@@ -63,7 +63,7 @@ namespace SPTAG::SPANN
             m_blockLimit = postingBlocks + 1;
             m_bufferLimit = bufferSize;
             if (fileexists(m_mappingPath.c_str())) {
-                Load(m_mappingPath, m_blockLimit, blockSize, capacity);
+                Load(m_mappingPath, blockSize, capacity);
             }
             else {
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
@@ -214,22 +214,22 @@ namespace SPTAG::SPANN
 
         }
 
-        ErrorCode Load(std::string path, SizeType cols, SizeType blockSize, SizeType capacity) {
+        ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
             LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
 
-            SizeType CR, cols;
+            SizeType CR, mycols;
             IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
-            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&cols);
-            if (cols > m_blockLimit) m_blockLimit = cols;
+            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&mycols);
+            if (mycols > m_blockLimit) m_blockLimit = mycols;
 
             m_pBlockMapping.Initialize(CR, 1, blockSize, capacity);
             for (int i = 0; i < CR; i++) {
                 At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
-                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * cols, (char*)At(i));
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
             }
-            LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, cols);
+            LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
             return ErrorCode::Success;
         }
         
