@@ -146,15 +146,17 @@ namespace SPTAG::SPANN
             db->GetProperty("rocksdb.stats", &stats);
             LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
             */
-            db->Close();
-            // DestroyDB(dbPath, dbOptions);
-            delete db;
+
+            if (db) {
+                ShutDown();
+	    }
         }
 
         void ShutDown() override {
             db->Close();
-            DestroyDB(dbPath, dbOptions);
+            //DestroyDB(dbPath, dbOptions);
             delete db;
+	    db = nullptr;
         }
 
         ErrorCode Get(const std::string& key, std::string* value) override {

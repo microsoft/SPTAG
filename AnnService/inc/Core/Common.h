@@ -126,6 +126,8 @@ namespace SPTAG
 #define PAGE_FREE(ptr) ::operator delete(ptr, (std::align_val_t)512)
 #endif
 
+#define ALIGN_ROUND(size) ((size) + 31) / 32 * 32
+
 typedef std::int32_t SizeType;
 typedef std::int32_t DimensionType;
 
