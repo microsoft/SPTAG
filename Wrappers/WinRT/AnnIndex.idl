@@ -1,0 +1,37 @@
+namespace SPTAG
+{
+
+  enum LogLevel
+  {
+    Debug = 0,
+    Info,
+    Status,
+    Warning,
+    Error,
+    Assert,
+    Count,
+    Empty
+  };
+
+  [default_interface]
+  runtimeclass SearchResult
+  {
+    Windows.Data.Json.JsonValue Metadata {get; };
+    Single Distance{ get; };
+    Guid Guid{ get; };
+  };
+
+  [default_interface]
+  runtimeclass AnnIndex 
+  {
+    AnnIndex();
+    [default_overload]
+    void AddWithMetadata(Single[] data, Windows.Data.Json.JsonValue metadata);
+    void AddWithMetadata(Single[] data, Guid metadata);
+    void AddWithMetadata(Single[] data, String metadata);
+
+    void Save(Windows.Storage.StorageFile file);
+    void Load(Windows.Storage.StorageFile file);
+    Windows.Foundation.Collections.IVector<SearchResult> Search(Single[] vector, UInt8 neighborCount);
+  }
+}
