@@ -4,7 +4,7 @@ WORKDIR /app
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get -y install wget build-essential \
-    swig cmake git \
+    swig cmake git libnuma libnuma-dev \
     libboost-filesystem-dev libboost-test-dev libboost-serialization-dev libboost-regex-dev libboost-serialization-dev libboost-regex-dev libboost-thread-dev libboost-system-dev
 
 ENV PYTHONPATH=/app/Release

@@ -18,8 +18,6 @@
 #define ASYNC_READ 1
 #define BATCH_READ 1
 
-#define NUMA 1
-
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
@@ -36,7 +34,7 @@ namespace SPTAG
 {
     namespace Helper
     {
-        void SetThreadAffinity(int threadID, std::thread& thread, char socketStrategy = 0, char idStrategy = 0);
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy = NumaStrategy::LOCAL, OrderStrategy idStrategy = OrderStrategy::ASC);
 #ifdef _MSC_VER
         namespace DiskUtils
         {
@@ -381,7 +379,7 @@ namespace SPTAG
 
             void ListionIOCP(int i)
             {
-                SetThreadAffinity(i, m_fileIocpThreads[i], 1, 1);
+                SetThreadAffinity(i, m_fileIocpThreads[i], NumaStrategy::SCATTER, OrderStrategy::DESC); // avoid IO threads overlap with search threads
 
                 DWORD cBytes;
                 ULONG_PTR key;

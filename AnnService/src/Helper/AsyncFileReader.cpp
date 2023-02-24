@@ -6,7 +6,7 @@
 namespace SPTAG {
     namespace Helper {
 #ifndef _MSC_VER
-        void SetThreadAffinity(int threadID, std::thread& thread, char socketStrategy, char idStrategy)
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy, OrderStrategy idStrategy)
         {
 #ifdef NUMA
             int numGroups = numa_num_task_nodes();
@@ -14,7 +14,7 @@ namespace SPTAG {
 
             int group = threadID / numCpus;
             int cpuid = threadID % numCpus;
-            if (socketStrategy == 1) {
+            if (socketStrategy == NumaStrategy::SCATTER) {
                 group = threadID % numGroups;
                 cpuid = (threadID / numGroups) % numCpus;
             }
@@ -135,7 +135,7 @@ namespace SPTAG {
             return masks;
         }
 
-        void SetThreadAffinity(int threadID, std::thread& thread, char socketStrategy, char idStrategy)
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy, OrderStrategy idStrategy)
         {
             WORD numGroups = GetActiveProcessorGroupCount();
             DWORD numCpus = GetActiveProcessorCount(0);
@@ -147,7 +147,7 @@ namespace SPTAG {
 
             WORD group = (WORD)(threadID / numCpus);
             pn.Number = (BYTE)(threadID % numCpus);
-            if (socketStrategy == 1) {
+            if (socketStrategy == NumaStrategy::SCATTER) {
                 group = (WORD)(threadID % numGroups);
                 pn.Number = (BYTE)((threadID / numGroups) % numCpus);
             }
@@ -161,7 +161,7 @@ namespace SPTAG {
                 return;
             }
             pn.Group = group;
-            if (idStrategy == 1) {
+            if (idStrategy == OrderStrategy::DESC) {
                 pn.Number = (BYTE)(numCpus - 1 - pn.Number);
             }
             res = SetThreadIdealProcessorEx(GetCurrentThread(), &pn, NULL);
@@ -170,6 +170,8 @@ namespace SPTAG {
                 LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
                 return;
             }
+
+            //LOG(Helper::LogLevel::LL_Info, "numGroup:%d numCPUs:%d threadID:%d group:%d cpuid:%d\n", (int)(numGroups), (int)numCpus, threadID, (int)(group), (int)(pn.Number));
             YieldProcessor();
         }
 
