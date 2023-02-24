@@ -59,7 +59,7 @@ namespace winrt::SPTAG::implementation
 
     SPTAG::SearchResult GetResultFromMetadata(const sptag::BasicResult& r) const;
 
-    winrt::Windows::Foundation::Collections::IVector<SPTAG::SearchResult> Search(EmbeddingVector p_data, uint8_t p_resultNum) const;
+    winrt::Windows::Foundation::Collections::IVector<SPTAG::SearchResult> Search(EmbeddingVector p_data, uint32_t p_resultNum) const;
 
     std::shared_ptr<sptag::VectorIndex> m_index;
     template<typename T>

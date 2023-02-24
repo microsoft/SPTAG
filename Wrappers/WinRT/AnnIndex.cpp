@@ -140,9 +140,9 @@ namespace winrt::SPTAG::implementation
   }
 
 
-  winrt::Windows::Foundation::Collections::IVector<SPTAG::SearchResult> AnnIndex::Search(EmbeddingVector p_data, uint8_t p_resultNum) const {
+  winrt::Windows::Foundation::Collections::IVector<SPTAG::SearchResult> AnnIndex::Search(EmbeddingVector p_data, uint32_t p_resultNum) const {
     auto vec = std::vector<SPTAG::SearchResult>{};
-    p_resultNum = static_cast<decltype(p_resultNum)>((std::min)(static_cast<sptag::SizeType>(p_resultNum), m_index->GetNumSamples()));
+    p_resultNum = (std::min)(static_cast<sptag::SizeType>(p_resultNum), m_index->GetNumSamples());
     auto results = std::make_shared<sptag::QueryResult>(p_data.data(), p_resultNum, true);
 
     if (nullptr != m_index) {

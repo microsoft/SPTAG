@@ -32,6 +32,6 @@ namespace SPTAG
 
     void Save(Windows.Storage.StorageFile file);
     void Load(Windows.Storage.StorageFile file);
-    Windows.Foundation.Collections.IVector<SearchResult> Search(Single[] vector, UInt8 neighborCount);
+    Windows.Foundation.Collections.IVector<SearchResult> Search(Single[] vector, UInt32 neighborCount);
   }
 }
