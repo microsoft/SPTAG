@@ -7,7 +7,7 @@
     <CppWinRTGenerateWindowsMetadata>true</CppWinRTGenerateWindowsMetadata>
     <MinimalCoreWin>true</MinimalCoreWin>
     <ProjectGuid>{8dc74c33-6e15-43ed-9300-2a140589e3da}</ProjectGuid>
-    <ProjectName>WinRT</ProjectName>
+    <ProjectName>SPTAG</ProjectName>
     <RootNamespace>SPTAG</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
     <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>

@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <winrt/Windows.Storage.h>
-#include <winrt/Windows.Data.Json.h>
 
 template<typename T>
 struct ReadOnlyProperty {
@@ -26,17 +25,16 @@ struct Property : ReadOnlyProperty<T> {
 namespace sptag = ::SPTAG;
 namespace winrt::SPTAG::implementation
 {
-  using namespace winrt::Windows::Data::Json;
   using EmbeddingVector = winrt::array_view<const float>;
 
   struct SearchResult : SearchResultT<SearchResult> {
-    ReadOnlyProperty<JsonValue> Metadata;
+    winrt::com_array<uint8_t> Metadata() { return winrt::com_array(m_metadata); }
+    std::vector<uint8_t> m_metadata;
     ReadOnlyProperty<float> Distance;
-    ReadOnlyProperty<winrt::guid> Guid;
 
     SearchResult() = default;
-    SearchResult(JsonValue v, float d) : Metadata(v), Distance(d) {}
-    SearchResult(winrt::guid g, float d) : Metadata(nullptr), Distance(d), Guid(g) {}
+    SearchResult(winrt::array_view<uint8_t> metadata, float d) : m_metadata(metadata.begin(), metadata.end()), Distance(d) {}
+    SearchResult(uint8_t* metadata, size_t length, float d) : m_metadata(metadata, metadata + length), Distance(d) {}
   };
 
 
@@ -50,11 +48,10 @@ namespace winrt::SPTAG::implementation
       sptag::GetLogger().reset(new sptag::Helper::SimpleLogger(sptag::Helper::LogLevel::LL_Empty));
       m_index = sptag::VectorIndex::CreateInstance(sptag::IndexAlgoType::BKT, sptag::GetEnumValueType<float>());
     }
+    
+    void AddWithMetadata(array_view<float const> data, array_view<uint8_t const> metadata);
 
     void Save(winrt::Windows::Storage::StorageFile file);
-    void AddWithMetadata(EmbeddingVector p_data, JsonValue metadata);
-    void AddWithMetadata(EmbeddingVector p_data, winrt::hstring metadata);
-    void AddWithMetadata(EmbeddingVector p_data, const winrt::guid& guid);
     void Load(winrt::Windows::Storage::StorageFile file);
 
     SPTAG::SearchResult GetResultFromMetadata(const sptag::BasicResult& r) const;
@@ -65,11 +62,10 @@ namespace winrt::SPTAG::implementation
     template<typename T>
     void _AddWithMetadataImpl(EmbeddingVector p_data, T metadata);
   };
+
 }
 
 namespace winrt::SPTAG::factory_implementation
 {
-    struct AnnIndex : AnnIndexT<AnnIndex, implementation::AnnIndex>
-    {
-    };
+  struct AnnIndex : AnnIndexT<AnnIndex, implementation::AnnIndex> {};
 }

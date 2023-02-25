@@ -16,9 +16,8 @@ namespace SPTAG
   [default_interface]
   runtimeclass SearchResult
   {
-    Windows.Data.Json.JsonValue Metadata {get; };
+    UInt8[] Metadata {get; };
     Single Distance{ get; };
-    Guid Guid{ get; };
   };
 
   [default_interface]
@@ -26,9 +25,7 @@ namespace SPTAG
   {
     AnnIndex();
     [default_overload]
-    void AddWithMetadata(Single[] data, Windows.Data.Json.JsonValue metadata);
-    void AddWithMetadata(Single[] data, Guid metadata);
-    void AddWithMetadata(Single[] data, String metadata);
+    void AddWithMetadata(Single[] data, UInt8[] metadata);
 
     void Save(Windows.Storage.StorageFile file);
     void Load(Windows.Storage.StorageFile file);
