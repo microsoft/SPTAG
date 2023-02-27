@@ -35,7 +35,7 @@ winrt::hstring Deserialize(winrt::array_view<uint8_t> v) {
   if (JsonObject::TryParse(wstr, js)) {
     auto value = js.GetNamedValue(L"value");
     return value.Stringify();
-  } else { 
+  } else {
     return winrt::hstring{ wstr };
   }
 }
@@ -51,11 +51,11 @@ int main()
   idx.AddWithMetadata(embedding_t{ 0, 0.7f, 0.5f, 0 }, Serialize(true));
   idx.AddWithMetadata(embedding_t{ 0, 0.7f, 0.8f, 0 }, Serialize(L"fifth"));
 
-  
+
 
   auto res = idx.Search(embedding_t{ 0.f, 0.99f, 0.01f }, 12);
   for (const winrt::SPTAG::SearchResult& r : res) {
-      std::wcout << Deserialize(r.Metadata());
+    std::wcout << Deserialize(r.Metadata());
     std::wcout << L" -- " << r.Distance() << L"\n";
 
   }
