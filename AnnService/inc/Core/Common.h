@@ -123,32 +123,32 @@ extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 
-    extern std::shared_ptr<Helper::Logger> g_pLogger;
+extern std::shared_ptr<Helper::Logger> g_pLogger;
 
 #define LOG(l, ...) g_pLogger->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
-    class MyException : public std::exception
-    {
-    private:
-        std::string Exp;
-    public:
-        MyException(std::string e) { Exp = e; }
+class MyException : public std::exception
+{
+private:
+    std::string Exp;
+public:
+    MyException(std::string e) { Exp = e; }
 #ifdef _MSC_VER
-        const char* what() const { return Exp.c_str(); }
+    const char* what() const { return Exp.c_str(); }
 #else
-        const char* what() const noexcept { return Exp.c_str(); }
+    const char* what() const noexcept { return Exp.c_str(); }
 #endif
-    };
+};
 
-    enum class ErrorCode : std::uint16_t
-    {
+enum class ErrorCode : std::uint16_t
+{
 #define DefineErrorCode(Name, Value) Name = Value,
 #include "DefinitionList.h"
 #undef DefineErrorCode
 
-        Undefined
-    };
-    static_assert(static_cast<std::uint16_t>(ErrorCode::Undefined) != 0, "Empty ErrorCode!");
+    Undefined
+};
+static_assert(static_cast<std::uint16_t>(ErrorCode::Undefined) != 0, "Empty ErrorCode!");
 
 
 enum class DistCalcMethod : std::uint8_t
@@ -226,8 +226,8 @@ inline std::size_t GetValueTypeSize(VectorValueType p_valueType)
     switch (p_valueType)
     {
 #define DefineVectorValueType(Name, Type) \
-case VectorValueType::Name: \
-    return sizeof(Type); \
+    case VectorValueType::Name: \
+        return sizeof(Type); \
 
 #include "DefinitionList.h"
 #undef DefineVectorValueType

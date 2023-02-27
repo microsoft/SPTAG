@@ -94,7 +94,7 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
-            if (m_workspace.get() != nullptr) {
+            if (m_workspace != nullptr) {
                 m_iHashTableExp = m_workspace->HashTableExponent();
             }
 
@@ -275,7 +275,7 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
-            if (m_workspace.get() == nullptr) {
+            if (m_workspace == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
@@ -296,7 +296,7 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
-            if (m_workspace.get() == nullptr) {
+            if (m_workspace == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
@@ -309,7 +309,7 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
-            if (m_workspace.get() == nullptr) {
+            if (m_workspace == nullptr) {
                 m_workspace.reset(new COMMON::WorkSpace());
                 m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }

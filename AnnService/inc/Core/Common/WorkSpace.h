@@ -232,8 +232,8 @@ namespace SPTAG
             void Reset(int maxCheck, int resultNum)
             {
                 nodeCheckStatus.clear();
-                m_SPTQueue.clear();
-                m_NGQueue.clear();
+                m_SPTQueue.clear(maxCheck * 10);
+                m_NGQueue.clear(maxCheck * 30);
                 m_Results.clear(max(maxCheck / 16, resultNum));
 
                 m_iNumOfContinuousNoBetterPropagation = 0;

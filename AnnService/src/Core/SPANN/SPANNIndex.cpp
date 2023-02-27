@@ -202,9 +202,12 @@ namespace SPTAG
             m_index->SearchIndex(*p_queryResults);
             
             if (m_extraSearcher != nullptr) {
-                if (m_workspace.get() == nullptr) {
+                if (m_workspace == nullptr) {
                     m_workspace.reset(new ExtraWorkSpace());
                     m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+                }
+                else {
+                    m_workspace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
                 }
                 m_workspace->m_deduper.clear();
                 m_workspace->m_postingIDs.clear();
@@ -258,9 +261,12 @@ namespace SPTAG
 
             COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
 
-            if (m_workspace.get() == nullptr) {
+            if (m_workspace == nullptr) {
                 m_workspace.reset(new ExtraWorkSpace());
                 m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
+            else {
+                m_workspace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
             }
             m_workspace->m_deduper.clear();
             m_workspace->m_postingIDs.clear();
@@ -323,9 +329,12 @@ namespace SPTAG
             }
             newResults.Reverse();
 
-            if (m_workspace.get() == nullptr) {
+            if (m_workspace == nullptr) {
                 m_workspace.reset(new ExtraWorkSpace());
                 m_workspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
+            else {
+                m_workspace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
             }
             m_workspace->m_deduper.clear();
 

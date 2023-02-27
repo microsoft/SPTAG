@@ -139,6 +139,28 @@ namespace SPTAG {
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages, enableDataCompression);
             }
 
+            void Clear(int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
+                if (p_internalResultNum > m_pageBuffers.size()) {
+                    m_postingIDs.reserve(p_internalResultNum);
+                    m_processIocp.reset(p_internalResultNum);
+                    m_pageBuffers.resize(p_internalResultNum);
+                    for (int pi = 0; pi < p_internalResultNum; pi++) {
+                        m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
+                    }
+                    m_diskRequests.resize(p_internalResultNum);
+                    for (int pi = 0; pi < p_internalResultNum; pi++) {
+                        m_diskRequests[pi].m_extension = m_processIocp.handle();
+                    }
+                } else if (p_maxPages > m_pageBuffers[0].GetPageSize()) {
+                    for (int pi = 0; pi < m_pageBuffers.size(); pi++) m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
+                }
+
+                m_enableDataCompression = enableDataCompression;
+                if (enableDataCompression) {
+                    m_decompressBuffer.ReservePageBuffer(p_maxPages);
+                }
+            }
+
             static void Reset() { g_spaceCount = 0; }
 
             std::vector<int> m_postingIDs;
