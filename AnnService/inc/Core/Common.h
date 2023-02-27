@@ -123,9 +123,9 @@ extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 
-extern std::shared_ptr<Helper::Logger> g_pLogger;
+extern std::shared_ptr<Helper::Logger> GetLogger();
 
-#define LOG(l, ...) g_pLogger->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
+#define LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
 class MyException : public std::exception
 {

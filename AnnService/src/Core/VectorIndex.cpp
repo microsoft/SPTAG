@@ -15,11 +15,23 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 
 using namespace SPTAG;
 
+std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
 #ifdef DEBUG
-std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Debug));
+  auto logLevel = Helper::LogLevel::LL_Debug;
 #else
-std::shared_ptr<Helper::Logger> SPTAG::g_pLogger(new Helper::SimpleLogger(Helper::LogLevel::LL_Info));
+  auto logLevel = Helper::LogLevel::LL_Info;
 #endif
+#ifdef  _WINDOWS_
+  if (auto exeHandle = GetModuleHandleW(nullptr)) {
+    if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
+      logLevel = SPTAG_GetLoggerLevel();
+    }
+  }
+#endif //  _WINDOWS_
+
+  static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
+  return s_pLogger;
+}
 
 std::mt19937 SPTAG::rg;
 
@@ -244,7 +256,9 @@ VectorIndex::SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_in
     ErrorCode ret = ErrorCode::Success;
     {
         std::shared_ptr<Helper::DiskIO> p_configStream(new Helper::SimpleBufferIO());
-        if (p_configStream == nullptr || !p_configStream->Initialize(nullptr, std::ios::out)) return ErrorCode::EmptyDiskIO;
+        auto bufsize = 2 << 20;
+        std::vector<char> buf(bufsize); // Allocate 1 MB scratch space
+        if (p_configStream == nullptr || !p_configStream->Initialize(buf.data(), std::ios::out, bufsize)) return ErrorCode::EmptyDiskIO;
         if ((ret = SaveIndexConfig(p_configStream)) != ErrorCode::Success) return ret;
         p_config.resize(p_configStream->TellP());
         IOBINARY(p_configStream, ReadBinary, p_config.size(), (char*)p_config.c_str(), 0);
@@ -365,7 +379,9 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     if (fp == nullptr || !fp->Initialize(p_file.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
     auto mp = std::shared_ptr<Helper::DiskIO>(new Helper::SimpleBufferIO());
-    if (mp == nullptr || !mp->Initialize(nullptr, std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+    auto bufsize = 2 << 20;
+    std::vector<char> buf(bufsize); // Allocate 1 MB scratch space
+    if (mp == nullptr || !mp->Initialize(buf.data(), std::ios::binary | std::ios::out, bufsize)) return ErrorCode::FailedCreateFile;
     ErrorCode ret = ErrorCode::Success;
     if ((ret = SaveIndexConfig(mp)) != ErrorCode::Success) return ret;
 
