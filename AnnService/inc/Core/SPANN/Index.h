@@ -74,7 +74,7 @@ namespace SPTAG
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex() { return m_extraSearcher; }
             inline Options* GetOptions() { return &m_options; }
 
-            inline SizeType GetNumSamples() const { return m_vectorNum.load(); }
+            inline SizeType GetNumSamples() const { return m_versionMap.Count(); }
             inline DimensionType GetFeatureDim() const { return m_pQuantizer ? m_pQuantizer->ReconstructDim() : m_index->GetFeatureDim(); }
             inline SizeType GetValueSize() const { return m_options.m_dim * sizeof(T); }
 
@@ -139,7 +139,7 @@ namespace SPTAG
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;
 
             inline const void* GetSample(const SizeType idx) const { return nullptr; }
-            inline SizeType GetNumDeleted() const { return 0; }
+            inline SizeType GetNumDeleted() const { return m_versionMap.GetDeleteCount(); }
             inline bool NeedRefine() const { return false; }
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const { return ErrorCode::Undefined; }
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }
@@ -199,7 +199,10 @@ namespace SPTAG
         public:
             bool AllFinished() { if (m_options.m_useKV) return m_extraSearcher->AllFinished(); return true; }
 
-            void GetDBStat() { if (m_options.m_useKV) m_extraSearcher->GetDBStats(); }
+            void GetDBStat() { 
+                if (m_options.m_useKV) m_extraSearcher->GetDBStats(); 
+                LOG(Helper::LogLevel::LL_Info, "Current Vector Num: %d, Deleted: %d .\n", GetNumSamples(), GetNumDeleted());
+            }
 
             void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
             

@@ -297,7 +297,7 @@ namespace SPTAG {
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
             virtual SizeType SearchVector(std::shared_ptr<VectorSet>& p_vectorSet,
-                std::shared_ptr<VectorIndex> p_index) { return -1; }
+                std::shared_ptr<VectorIndex> p_index, int testNum = 64, SizeType VID = -1) { return -1; }
         };
     } // SPANN
 } // SPTAG

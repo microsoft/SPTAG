@@ -55,14 +55,14 @@ namespace SPTAG
                 unsigned index = hash_func((unsigned)idx);
                 return m_locks[index];
             }
-        private:
-            static const int PoolSize = 32767;
-            std::unique_ptr<std::shared_timed_mutex[]> m_locks;
 
             inline unsigned hash_func(unsigned idx) const
             {
                 return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & PoolSize;
             }
+        private:
+            static const int PoolSize = 32767;
+            std::unique_ptr<std::shared_timed_mutex[]> m_locks;
         };
     }
 }

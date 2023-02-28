@@ -434,9 +434,12 @@ namespace SPTAG::SPANN {
                 uint8_t* vectorId = postingP;
                 for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                 {
-                    int VID = *((int*)(vectorId));
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(int));
+                    int VID = *((int*)(vectorId));
+                    // if (VID == 1807015) {
+                    //     LOG(Helper::LogLevel::LL_Info, "Split: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
+                    // }
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
 
                     //localIndicesInsert[index] = VID;
@@ -595,7 +598,7 @@ namespace SPTAG::SPANN {
 
                 std::string currentPostingList;
                 if (db->Get(headID, &currentPostingList) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Info, "Split fail to get to be merged postings: %d\n", headID);
+                    LOG(Helper::LogLevel::LL_Info, "Fail to get to be merged postings: %d\n", headID);
                     exit(0);
                 }
 
@@ -607,6 +610,9 @@ namespace SPTAG::SPANN {
                 {
                     int VID = *((int*)(vectorId));
                     uint8_t version = *(vectorId + sizeof(int));
+                    // if (VID == 1807015) {
+                    //     LOG(Helper::LogLevel::LL_Info, "Merge: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
+                    // }
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
                     vectorIdSet.insert(VID);
                     mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
@@ -618,7 +624,7 @@ namespace SPTAG::SPANN {
                 {
                     m_postingSizes.UpdateSize(headID, currentLength);
                     if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
-                        LOG(Helper::LogLevel::LL_Info, "Split Fail to write back postings\n");
+                        LOG(Helper::LogLevel::LL_Info, "Merge Fail to write back postings\n");
                         exit(0);
                     }
                     m_mergeList.erase(headID);
@@ -637,47 +643,57 @@ namespace SPTAG::SPANN {
                     tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
                     if (currentLength + nextLength < m_postingSizeLimit && !m_mergeList.find(headIDAccessor, queryResult->VID))
                     {
-                        std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[queryResult->VID]);
-                        if (!p_index->ContainSample(queryResult->VID)) continue;
-                        if (db->Get(queryResult->VID, &nextPostingList) != ErrorCode::Success) {
-                            LOG(Helper::LogLevel::LL_Info, "Split fail to get to be merged postings: %d\n", queryResult->VID);
-                            exit(0);
+                        {
+                            // LOG(Helper::LogLevel::LL_Info,"Locked: %d, to be lock: %d\n", headID, queryResult->VID);
+                            if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID))
+                                std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID]);
+                            if (!p_index->ContainSample(queryResult->VID)) continue;
+                            if (db->Get(queryResult->VID, &nextPostingList) != ErrorCode::Success) {
+                                LOG(Helper::LogLevel::LL_Info, "Fail to get to be merged postings: %d\n", queryResult->VID);
+                                exit(0);
+                            }
+
+                            postingP = reinterpret_cast<uint8_t*>(&nextPostingList.front());
+                            postVectorNum = nextPostingList.size() / m_vectorInfoSize;
+                            nextLength = 0;
+                            vectorId = postingP;
+                            for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+                            {
+                                int VID = *((int*)(vectorId));
+                                uint8_t version = *(vectorId + sizeof(int));
+                                // if (VID == 1807015) {
+                                //     LOG(Helper::LogLevel::LL_Info, "Merge: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
+                                // }
+                                if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                                if (vectorIdSet.find(VID) == vectorIdSet.end()) {
+                                    mergedPostingList += nextPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
+                                    totalLength++;
+                                }
+                                nextLength++;
+                            }
+                            if (currentLength > nextLength) 
+                            {
+                                p_index->DeleteIndex(queryResult->VID);
+                                if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
+                                    LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
+                                    exit(0);
+                                }
+                                m_postingSizes.UpdateSize(queryResult->VID, 0);
+                                m_postingSizes.UpdateSize(headID, totalLength);
+                            } else
+                            {
+                                p_index->DeleteIndex(headID);
+                                if (db->Put(queryResult->VID, mergedPostingList) != ErrorCode::Success) {
+                                    LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
+                                    exit(0);
+                                }
+                                m_postingSizes.UpdateSize(queryResult->VID, totalLength);
+                                m_postingSizes.UpdateSize(headID, 0);
+                            }
                         }
 
-                        postingP = reinterpret_cast<uint8_t*>(&nextPostingList.front());
-                        postVectorNum = nextPostingList.size() / m_vectorInfoSize;
-                        nextLength = 0;
-                        vectorId = postingP;
-                        for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
-                        {
-                            int VID = *((int*)(vectorId));
-                            uint8_t version = *(vectorId + sizeof(int));
-                            if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
-                            if (vectorIdSet.find(VID) == vectorIdSet.end()) {
-                                mergedPostingList += nextPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
-                                totalLength++;
-                            }
-                            nextLength++;
-                        }
-                        if (currentLength > nextLength) 
-                        {
-                            p_index->DeleteIndex(queryResult->VID);
-                            if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
-                                LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
-                                exit(0);
-                            }
-                            m_postingSizes.UpdateSize(queryResult->VID, 0);
-                            m_postingSizes.UpdateSize(headID, totalLength);
-                        } else
-                        {
-                            p_index->DeleteIndex(headID);
-                            if (db->Put(queryResult->VID, mergedPostingList) != ErrorCode::Success) {
-                                LOG(Helper::LogLevel::LL_Info, "Split fail to override postings after merge\n");
-                                exit(0);
-                            }
-                            m_postingSizes.UpdateSize(queryResult->VID, totalLength);
-                            m_postingSizes.UpdateSize(headID, 0);
-                        }
+                        // LOG(Helper::LogLevel::LL_Info,"Release: %d, Release: %d\n", headID, queryResult->VID);
+                        lock.unlock();
 
                         if (reassign) 
                         {
@@ -795,6 +811,9 @@ namespace SPTAG::SPANN {
                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                     SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
+                    // if (vid == 1807015) {
+                    //     LOG(Helper::LogLevel::LL_Info, "Split: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(vid), version);
+                    // }
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
@@ -982,6 +1001,13 @@ namespace SPTAG::SPANN {
 
             LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
             LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
+
+            for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
+                while (m_versionMap->GetVersion(i) != 0) {
+                    uint8_t newVersion;
+                    m_versionMap->IncVersion(i, &newVersion);
+                }
+            }
 
             if (m_opt->m_update) {
                 //LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
@@ -1268,29 +1294,11 @@ namespace SPTAG::SPANN {
                 }
                 postingListSize[i] = postingSizeLimit;
             }
-
-            if (m_opt->m_outputEmptyReplicaID)
             {
                 std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
-                auto ptr = SPTAG::f_createIO();
-                if (ptr == nullptr || !ptr->Initialize("EmptyReplicaID.bin", std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
-                    return false;
-                }
                 for (int i = 0; i < replicaCount.size(); ++i)
                 {
-                    if (headVectorIDS.count(i) > 0) continue;
-
                     ++replicaCountDist[replicaCount[i]];
-
-                    if (replicaCount[i] < 2)
-                    {
-                        long long vid = i;
-                        if (ptr->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
-                            return false;
-                        }
-                    }
                 }
 
                 LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
@@ -1299,6 +1307,37 @@ namespace SPTAG::SPANN {
                     LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                 }
             }
+
+    //         if (m_opt->m_outputEmptyReplicaID)
+    //         {
+    //             std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
+    //             auto ptr = SPTAG::f_createIO();
+    //             if (ptr == nullptr || !ptr->Initialize("EmptyReplicaID.bin", std::ios::binary | std::ios::out)) {
+    //                 LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
+    //                 return false;
+    //             }
+    //             for (int i = 0; i < replicaCount.size(); ++i)
+    //             {
+    //                 if (headVectorIDS.count(i) > 0) continue;
+
+    //                 ++replicaCountDist[replicaCount[i]];
+
+    //                 if (replicaCount[i] < 2)
+    //                 {
+    //                     long long vid = i;
+    //                     if (ptr->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
+    //                         LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
+    //                         return false;
+    //                     }
+    //                 }
+    //             }
+
+    //             LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
+    //             for (int i = 0; i < replicaCountDist.size(); ++i)
+    //             {
+    //                 LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+    //             }
+    //         }
 
 
             auto t4 = std::chrono::high_resolution_clock::now();
@@ -1375,9 +1414,9 @@ namespace SPTAG::SPANN {
         }
 
         SizeType SearchVector(std::shared_ptr<VectorSet>& p_vectorSet,
-            std::shared_ptr<VectorIndex> p_index ) override {
+            std::shared_ptr<VectorIndex> p_index, int testNum = 64, SizeType VID = -1) override {
             
-            QueryResult queryResults(p_vectorSet->GetVector(0), m_opt->m_internalResultNum, false);
+            QueryResult queryResults(p_vectorSet->GetVector(0), testNum, false);
             p_index->SearchIndex(queryResults);
             
             std::set<SizeType> checked;
@@ -1387,13 +1426,14 @@ namespace SPTAG::SPANN {
                 db->Get(queryResults.GetResult(i)->VID, &postingList);
                 int vectorNum = (int)(postingList.size() / m_vectorInfoSize);
 
-                for (int i = 0; i < vectorNum; i++) {
-                    char* vectorInfo = postingList.data() + i * m_vectorInfoSize;
+                for (int j = 0; j < vectorNum; j++) {
+                    char* vectorInfo = postingList.data() + j * m_vectorInfoSize;
                     int vectorID = *(reinterpret_cast<int*>(vectorInfo));
                     if(checked.find(vectorID) != checked.end() || m_versionMap->Deleted(vectorID)) {
                         continue;
                     }
                     checked.insert(vectorID);
+                    if (VID != -1 && VID == vectorID) LOG(Helper::LogLevel::LL_Info, "Find %d in %dth posting\n", VID, i);
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     if (distance2leaf < 1e-6) return vectorID;
                 }
@@ -1405,7 +1445,7 @@ namespace SPTAG::SPANN {
         void ForceCompaction() override { db->ForceCompaction(); }
         void GetDBStats() override { 
             db->GetStat();
-            LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d\n", m_splitThreadPool->jobsize(), m_reassignThreadPool->jobsize());
+            LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d, running split: %d, running reassign: %d\n", m_splitThreadPool->jobsize(), m_reassignThreadPool->jobsize(), m_splitThreadPool->runningJobs(), m_reassignThreadPool->runningJobs());
         }
 
         void GetIndexStats(int finishedInsert, bool cost, bool reset) override { m_stat.PrintStat(finishedInsert, cost, reset); }

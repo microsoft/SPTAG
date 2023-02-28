@@ -31,6 +31,8 @@ namespace SPTAG
 
             inline size_t Count() const { return m_data.R() - m_deleted.load(); }
 
+            inline size_t GetDeleteCount() const { return m_deleted.load();}
+
             inline bool Deleted(const SizeType& key) const
             {
                 return *m_data[key] == 0xfe;
