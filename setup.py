@@ -111,6 +111,42 @@ def _find_python_packages():
 ''' % (nuget_release)
         f.write(spec)
         f.close()
+
+        fwinrt = open('sptag.winrt.nuspec', 'w')
+        spec = '''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>MSSPTAG.WinRT</id>
+    <version>%s</version>
+    <title>MSSPTAG.WinRT</title>
+    <authors>cheqi,haidwa,mingqli</authors>
+    <owners>cheqi,haidwa,mingqli</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
+    <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
+    <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
+    <copyright>Copyright @ Microsoft</copyright>
+    <dependencies>
+      <group targetFramework="uap10.0">
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+      </group>
+      <group targetFramework="native">
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="Wrappers\\WinRT\\SPTAG.WinRT.targets" target="build\\native" />
+    <file src="x64\Release\\SPTAG.WinRT\\SPTAG.winmd" target="lib\\uap10.0" />
+    <file src="x64\Release\\SPTAG.WinRT\\SPTAG.dll" target="runtimes\\win10-x64\\native" />
+    <file src="readme.md" />
+    <file src="LICENSE" />
+  </files>
+</package>
+''' % (nuget_release)
+        fwinrt.write(spec)
+        fwinrt.close()
+
     f = open(os.path.join('sptag', '__init__.py'), 'w')
     f.close()
     return ['sptag']
