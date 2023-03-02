@@ -102,7 +102,7 @@ namespace SPTAG::SPANN
                 dbOptions.blob_compression_type = rocksdb::CompressionType::kNoCompression;
                 dbOptions.enable_blob_garbage_collection = true;
                 dbOptions.compaction_pri = rocksdb::CompactionPri::kRoundRobin;
-                dbOptions.blob_garbage_collection_age_cutoff = 0.02;
+                dbOptions.blob_garbage_collection_age_cutoff = 0.4;
                 // dbOptions.blob_garbage_collection_force_threshold = 0.5;
                 // dbOptions.blob_cache = rocksdb::NewLRUCache(5UL << 30);
                 // dbOptions.prepopulate_blob_cache = rocksdb::PrepopulateBlobCache::kFlushOnly;

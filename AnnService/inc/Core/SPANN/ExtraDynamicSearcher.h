@@ -437,9 +437,6 @@ namespace SPTAG::SPANN {
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(int));
                     int VID = *((int*)(vectorId));
-                    // if (VID == 1807015) {
-                    //     LOG(Helper::LogLevel::LL_Info, "Split: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
-                    // }
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
 
                     //localIndicesInsert[index] = VID;
@@ -562,11 +559,6 @@ namespace SPTAG::SPANN {
             }
             m_splitList.erase(headID);
             m_stat.m_splitNum++;
-            // if (theSameHead) LOG(Helper::LogLevel::LL_Info, "The Same Head\n");
-            // LOG(Helper::LogLevel::LL_Info, "head1:%d, head2:%d\n", newHeadsID[0], newHeadsID[1]);
-
-            // QuantifySplit(headID, newPostingLists, newHeadsID, headID, split_order);
-            // QuantifyAssumptionBrokenTotally();
             if (reassign) {
                 auto reassignScanBegin = std::chrono::high_resolution_clock::now();
 
@@ -577,9 +569,6 @@ namespace SPTAG::SPANN {
 
                 m_stat.m_reassignScanCost += elapsedMSeconds;
             }
-            // LOG(Helper::LogLevel::LL_Info, "After ReAssign\n");
-
-            // QuantifySplit(headID, newPostingLists, newHeadsID, headID, split_order);
             auto splitEnd = std::chrono::high_resolution_clock::now();
             elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - splitBegin).count();
             m_stat.m_splitCost += elapsedMSeconds;
@@ -610,9 +599,6 @@ namespace SPTAG::SPANN {
                 {
                     int VID = *((int*)(vectorId));
                     uint8_t version = *(vectorId + sizeof(int));
-                    // if (VID == 1807015) {
-                    //     LOG(Helper::LogLevel::LL_Info, "Merge: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
-                    // }
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
                     vectorIdSet.insert(VID);
                     mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
@@ -661,9 +647,6 @@ namespace SPTAG::SPANN {
                             {
                                 int VID = *((int*)(vectorId));
                                 uint8_t version = *(vectorId + sizeof(int));
-                                // if (VID == 1807015) {
-                                //     LOG(Helper::LogLevel::LL_Info, "Merge: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(VID), version);
-                                // }
                                 if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
                                 if (vectorIdSet.find(VID) == vectorIdSet.end()) {
                                     mergedPostingList += nextPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
@@ -1002,12 +985,12 @@ namespace SPTAG::SPANN {
             LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
             LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
 
-            for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
-                while (m_versionMap->GetVersion(i) != 0) {
-                    uint8_t newVersion;
-                    m_versionMap->IncVersion(i, &newVersion);
-                }
-            }
+            // for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
+            //     while (m_versionMap->GetVersion(i) != 0) {
+            //         uint8_t newVersion;
+            //         m_versionMap->IncVersion(i, &newVersion);
+            //     }
+            // }
 
             if (m_opt->m_update) {
                 //LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
@@ -1089,7 +1072,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                if (realNum <= m_mergeThreshold) MergeAsync(p_index.get(), curPostingID);
+                if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 

@@ -1072,7 +1072,7 @@ namespace SPTAG
             }
             SizeType p_id = m_extraSearcher->SearchVector(vectorSet, m_index);
             if (p_id == -1) return ErrorCode::VectorNotFound;
-            else return DeleteIndex(p_id);
+            return DeleteIndex(p_id);
         }
     }
 }
