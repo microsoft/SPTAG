@@ -150,8 +150,17 @@ namespace SPTAG
                 SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>*>(raw_generic_ptr);
                 if (!raw_specialized_ptr)
                 {
-                    delete raw_generic_ptr;
-                    return ErrorCode::Fail;
+                    // If it is of type SPTAG::COMMON::WorkSpace, we should pass on to child index
+                    if (!m_index) 
+                    {
+                        delete raw_generic_ptr;
+                        return ErrorCode::Fail;
+                    }
+                    else
+                    {
+                        return m_index->SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>>(raw_generic_ptr));
+                    }
+                    
                 }
                 else
                 {
