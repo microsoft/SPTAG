@@ -82,6 +82,7 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
+            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
             static thread_local std::shared_ptr<COMMON::WorkSpace> m_workspace;
@@ -98,6 +99,7 @@ namespace SPTAG
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>();
             }
 
             ~Index() {}
@@ -166,6 +168,24 @@ namespace SPTAG
 
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
+            bool SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
+            {
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();
+                if (!raw_generic_ptr) return false;
+
+
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>*>(raw_generic_ptr);
+                if (!raw_specialized_ptr)
+                {
+                    delete raw_generic_ptr;
+                    return false;
+                }
+                else
+                {
+                    m_workSpaceFactory = std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>(raw_specialized_ptr);
+                    return true;
+                }
+            }
 
         private:
             template <typename Q>
