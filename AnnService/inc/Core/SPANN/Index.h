@@ -141,22 +141,22 @@ namespace SPTAG
             ErrorCode DeleteIndex(const SizeType& p_id) { return ErrorCode::Undefined; }
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) { return ErrorCode::Undefined; }
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) { return ErrorCode::Undefined; }
-            bool SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
+            ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {
                 SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();
-                if (!raw_generic_ptr) return false;
+                if (!raw_generic_ptr) return ErrorCode::Fail;
 
 
                 SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>*>(raw_generic_ptr);
                 if (!raw_specialized_ptr)
                 {
                     delete raw_generic_ptr;
-                    return false;
+                    return ErrorCode::Fail;
                 }
                 else
                 {
                     m_workSpaceFactory = std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>>(raw_specialized_ptr);
-                    return true;
+                    return ErrorCode::Success;
                 }
             }
         private:
