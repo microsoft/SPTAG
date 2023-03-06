@@ -8,6 +8,9 @@
 #include <memory>
 #include <chrono>
 
+// enable rocksdb io_uring
+extern "C" bool RocksDbIOUringEnable() { return true; }
+
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
 
@@ -42,6 +45,8 @@ void Test(std::string path, std::string type, bool debug = false)
     std::shared_ptr<Helper::KeyValueIO> db;
     if (type == "RocksDB") {
         db.reset(new RocksDBIO(path.c_str(), true));
+    } else if (type == "SPDK") {
+        db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -71,9 +76,13 @@ void Test(std::string path, std::string type, bool debug = false)
 
     if (type == "RocksDB") {
         db.reset(new RocksDBIO(path.c_str(), true));
+    } else if (type == "SPDK") {
+        db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
     }
 
     Search(db, internalResultNum, totalNum, 10, debug);
+    db->ForceCompaction();
+    db->ShutDown();
 }
 
 BOOST_AUTO_TEST_SUITE(KVTest)
@@ -81,6 +90,11 @@ BOOST_AUTO_TEST_SUITE(KVTest)
 BOOST_AUTO_TEST_CASE(RocksDBTest)
 {
     Test("tmp_rocksdb", "RocksDB", false);
+}
+
+BOOST_AUTO_TEST_CASE(SPDKTest)
+{
+    Test("tmp_spdk", "SPDK", false);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

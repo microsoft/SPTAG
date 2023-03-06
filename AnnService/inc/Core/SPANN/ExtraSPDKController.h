@@ -20,25 +20,36 @@ namespace SPTAG::SPANN
     {
         class BlockController {
         public:
-            bool Initialize() {}
+            bool Initialize() {
+                return true;
+            }
 
             // get p_size blocks from front, and fill in p_data array
-            bool GetBlocks(AddressType* p_data, int p_size) {}
+            bool GetBlocks(AddressType* p_data, int p_size) {
+                return true;
+            }
 
             // release p_size blocks, put them at the end of the queue
-            bool ReleaseBlocks(AddressType* p_data, int p_size) {}
+            bool ReleaseBlocks(AddressType* p_data, int p_size) {
+                return true;
+            }
 
             // read a posting list. p_data[0] is the total data size, 
             // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
             // concat all the block contents together into p_value string.
-            bool ReadBlocks(AddressType* p_data, std::string* p_value) {}
+            bool ReadBlocks(AddressType* p_data, std::string* p_value) {
+                return true;
+            }
 
             // parallel read a list of posting lists.
-            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {}
+            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {
+                return true;
+            }
 
             // write p_value into p_size blocks start from p_data
-            bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {}
-
+            bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {
+                return true;
+            }
         };
 
         class CompactionJob : public Helper::ThreadPool::Job
@@ -74,6 +85,7 @@ namespace SPTAG::SPANN
             m_compactionThreadPool = std::make_shared<Helper::ThreadPool>();
             m_compactionThreadPool->init(compactionThreads);
             m_pBlockController.Initialize();
+            m_shutdownCalled = false;
         }
 
         ~SPDKIO() {
@@ -81,13 +93,18 @@ namespace SPTAG::SPANN
         }
 
         void ShutDown() override {
+            if (m_shutdownCalled) {
+                return;
+            }
             Save(m_mappingPath);
-            for (int i = 0; i < m_pBlockMapping.R(); i++) 
-                if (At(i) != 0) delete[]((AddressType*)At(i));
+            for (int i = 0; i < m_pBlockMapping.R(); i++) {
+                if (At(i) != 0xffffffffffffffff) delete[]((AddressType*)At(i));
+            }
             while (!m_buffer.empty()) {
                 uintptr_t ptr;
                 if (m_buffer.try_pop(ptr)) delete[]((AddressType*)ptr);
             }
+            m_shutdownCalled = true;
         }
 
         inline uintptr_t& At(SizeType key) {
@@ -153,6 +170,7 @@ namespace SPTAG::SPANN
                 }
                 m_buffer.push((uintptr_t)postingSize);
             }
+            return ErrorCode::Success;
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
@@ -193,6 +211,7 @@ namespace SPTAG::SPANN
                 m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
                 *postingSize = newSize;
             }
+            return ErrorCode::Success;
         }
 
         ErrorCode Delete(SizeType key) override {
@@ -204,6 +223,7 @@ namespace SPTAG::SPANN
             m_pBlockController.ReleaseBlocks(postingSize + 1, blocks);
             m_buffer.push((uintptr_t)postingSize);
             At(key) = 0xffffffffffffffff;
+            return ErrorCode::Success;
         }
 
         void ForceCompaction() {
@@ -265,6 +285,8 @@ namespace SPTAG::SPANN
         //tbb::concurrent_hash_map<SizeType, std::string> *m_pCurrentCache, *m_pNextCache;
         std::shared_ptr<Helper::ThreadPool> m_compactionThreadPool;
         BlockController m_pBlockController;
+
+        bool m_shutdownCalled;
     };
 }
 #endif // _SPTAG_SPANN_EXTRASPDKCONTROLLER_H_
