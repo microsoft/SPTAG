@@ -96,6 +96,7 @@ namespace SPTAG
             {
                 m_iHashTableExp = workspace->HashTableExponent();
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
 
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
@@ -214,7 +215,9 @@ case VectorValueType::Name: \
                 SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
 
-            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+            
+                if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
@@ -222,6 +225,7 @@ case VectorValueType::Name: \
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
+
             return ErrorCode::Success;
         }
 
@@ -259,6 +263,7 @@ case VectorValueType::Name: \
             {
                 SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
             return ErrorCode::Success;
         }
@@ -307,6 +312,8 @@ case VectorValueType::Name: \
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
             return ErrorCode::Success;
         }
 #pragma endregion

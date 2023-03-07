@@ -234,6 +234,7 @@ namespace SPTAG
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
+                m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
                 p_queryResults->SortResult();
             }
 
@@ -303,6 +304,7 @@ namespace SPTAG
 
             p_queryResults->Reverse();
             m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
             p_queryResults->SortResult();
             return ErrorCode::Success;
         }
@@ -356,7 +358,7 @@ namespace SPTAG
 
                 m_extraSearcher->SearchIndex(workSpace.get(), newResults, m_index, p_stats, truth, found);
             }
-
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
             newResults.SortResult();
             std::copy(newResults.GetResults(), newResults.GetResults() + newResults.GetResultNum(), p_query.GetResults());
             return ErrorCode::Success;

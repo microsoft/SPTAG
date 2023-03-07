@@ -18,18 +18,25 @@ namespace SPTAG
         class IWorkSpaceFactory
         {
         public:
-            virtual std::shared_ptr<WorkSpaceType> GetWorkSpace() = 0;
+            virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() = 0;
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) = 0;
         };
 
         template <typename WorkSpaceType>
         class ThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
         {
-            static thread_local std::shared_ptr<WorkSpaceType> m_workspace;
+            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
         public:
-            virtual std::shared_ptr<WorkSpaceType> GetWorkSpace() override
+            virtual std::unique_ptr< WorkSpaceType> GetWorkSpace() override
             {
-                return m_workspace;
+                return std::move(m_workspace);
             }
+
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) override
+            {
+                m_workspace = std::move(ws);
+            }
+
         };
 
         class OptHashPosVector

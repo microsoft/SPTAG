@@ -97,6 +97,7 @@ namespace SPTAG
             {
                 m_iHashTableExp = workspace->HashTableExponent();
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
 
 #define DefineBKTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
@@ -284,6 +285,8 @@ namespace SPTAG
 
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
 
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
             if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
@@ -305,6 +308,7 @@ namespace SPTAG
             }
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, false);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
             return ErrorCode::Success;
         }
@@ -329,6 +333,8 @@ namespace SPTAG
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
             return ErrorCode::Success;
         }
 #pragma endregion
