@@ -276,18 +276,12 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
 // Enable dimension of dataset that you will be using for maximum performance
   if(quantizer == NULL) {
-    if(dim > MAX_SHAPE) {
-      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
-    }
     // Add specific vector dimension needed if not already listed here
     RUN_KERNEL(64);
     RUN_KERNEL(100);
     RUN_KERNEL(MAX_SHAPE);
   }
   else {
-    if(dim > MAX_PQ_SHAPE) {
-      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
-    }
     RUN_KERNEL_QUANTIZED(50);
     RUN_KERNEL_QUANTIZED(MAX_PQ_SHAPE);
   }
@@ -323,6 +317,13 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
     CUDA_CHECK(cudaDeviceSynchronize());
 
     auto after_tpt = std::chrono::high_resolution_clock::now();
+
+    if(quantizer == NULL && dim > MAX_PQ_SHAPE) {
+      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
+    }
+    else if(dim > MAX_SHAPE) {
+      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
+    }
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
       CUDA_CHECK(cudaSetDevice(gpuNum));
