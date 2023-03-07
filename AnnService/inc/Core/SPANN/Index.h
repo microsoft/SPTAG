@@ -53,8 +53,6 @@ namespace SPTAG
             std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
-        public:
-            static thread_local std::shared_ptr<ExtraWorkSpace> m_workspace;
 
         public:
             Index()

@@ -85,9 +85,6 @@ namespace SPTAG
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
-            static thread_local std::shared_ptr<COMMON::WorkSpace> m_workspace;
-
-        public:
             Index()
             {
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
