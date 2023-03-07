@@ -266,7 +266,8 @@ __device__ void findRNG(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results,
     return; \
   } 
 
-#define MAX_SHAPE 1024
+#define MAX_SHAPE 384
+#define MAX_PQ_SHAPE 100
 
 template<typename T, typename SUMTYPE, int metric>
 __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int* results, size_t min_id, size_t max_id, int dim, GPU_Quantizer* quantizer) {
@@ -275,16 +276,20 @@ __global__ void findRNG_selector(PointSet<T>* ps, TPtree* tptree, int KVAL, int*
 
 // Enable dimension of dataset that you will be using for maximum performance
   if(quantizer == NULL) {
+    if(dim > MAX_SHAPE) {
+      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
+    }
+    // Add specific vector dimension needed if not already listed here
     RUN_KERNEL(64);
     RUN_KERNEL(100);
-//    RUN_KERNEL(200);
-//    RUN_KERNEL(MAX_SHAPE);
+    RUN_KERNEL(MAX_SHAPE);
   }
   else {
-//    RUN_KERNEL_QUANTIZED(25);
+    if(dim > MAX_PQ_SHAPE) {
+      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
+    }
     RUN_KERNEL_QUANTIZED(50);
-//    RUN_KERNEL_QUANTIZED(64);
-    RUN_KERNEL_QUANTIZED(100);
+    RUN_KERNEL_QUANTIZED(MAX_PQ_SHAPE);
   }
 
 }
@@ -563,7 +568,7 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
     resMemAvail = (freeMem*0.9) - (rawDataSize+pointSetSize+treeSize); // Only use 90% of total memory to be safe
     maxEltsPerBatch = resMemAvail / (dim*sizeof(T) + KVAL*sizeof(int));
 
-    batchSize[gpuNum] = std::min(maxEltsPerBatch, resPerGPU[gpuNum]);
+    batchSize[gpuNum] = (std::min)(maxEltsPerBatch, resPerGPU[gpuNum]);
 
     LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory for rawData:%lu MiB, pointSet structure:%lu MiB, Memory for TP trees:%lu MiB, Memory left for results:%lu MiB, total vectors:%lu, batch size:%d, total batches:%d\n", rawSize/1000000, pointSetSize/1000000, treeSize/1000000, resMemAvail/1000000, resPerGPU[gpuNum], batchSize[gpuNum], (((batchSize[gpuNum]-1)+resPerGPU[gpuNum]) / batchSize[gpuNum]));
 
