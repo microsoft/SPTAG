@@ -985,12 +985,12 @@ namespace SPTAG::SPANN {
             LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
             LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
 
-            // for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
-            //     while (m_versionMap->GetVersion(i) != 0) {
-            //         uint8_t newVersion;
-            //         m_versionMap->IncVersion(i, &newVersion);
-            //     }
-            // }
+            for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
+                while (m_versionMap->GetVersion(i) != 0) {
+                    uint8_t newVersion;
+                    m_versionMap->IncVersion(i, &newVersion);
+                }
+            }
 
             if (m_opt->m_update) {
                 //LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
