@@ -529,14 +529,15 @@ namespace SPTAG {
                 int internalResultNum,
                 std::string& truthFileName,
                 SPANN::Options& p_opts,
-                double second = 0)
+                double second = 0,
+                bool showStatus = true)
             {
                 if (avgStatsNum == 0) return;
                 int numQueries = querySet->Count();
 
                 std::vector<QueryResult> results(numQueries, QueryResult(NULL, internalResultNum, false));
 
-                LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d, searchTimes: %d.\n", numThreads, numQueries, avgStatsNum);
+                if (showStatus) LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d, searchTimes: %d.\n", numThreads, numQueries, avgStatsNum);
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 std::vector<SPANN::SearchStats> TotalStats(numQueries);
                 ResetStats(TotalStats);
@@ -552,11 +553,11 @@ namespace SPTAG {
                     //PrintStats<ValueType>(stats);
                     AddStats(TotalStats, stats);
                 }
-                LOG(Helper::LogLevel::LL_Info, "Current time: %.0lf, Searching Times: %d, AvgQPS: %.2lf.\n", second, avgStatsNum, totalQPS/avgStatsNum);
+                if (showStatus) LOG(Helper::LogLevel::LL_Info, "Current time: %.0lf, Searching Times: %d, AvgQPS: %.2lf.\n", second, avgStatsNum, totalQPS/avgStatsNum);
 
                 AvgStats(TotalStats, avgStatsNum);
 
-                PrintStats<ValueType>(TotalStats);
+                if (showStatus) PrintStats<ValueType>(TotalStats);
 
                 if (p_opts.m_calTruth)
                 {
@@ -567,173 +568,6 @@ namespace SPTAG {
                         CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
                     } else {
                         OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, second), results, p_opts.m_resultNum);
-                    }
-                }
-            }
-
-            template <typename ValueType>
-            void InsertVectors(SPANN::Index<ValueType>* p_index, 
-                int insertThreads, 
-                std::shared_ptr<SPTAG::VectorSet> vectorSet, 
-                int curCount, 
-                int step,
-                SPANN::Options& p_opts)
-            {
-                StopWSPFresh sw;
-                std::vector<std::thread> threads;
-
-                std::atomic_size_t vectorsSent(0);
-
-                auto func = [&]()
-                {
-                    size_t index = 0;
-                    while (true)
-                    {
-                        index = vectorsSent.fetch_add(1);
-                        if (index < step)
-                        {
-                            if ((index & ((1 << 14) - 1)) == 0)
-                            {
-                                LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
-                            }
-                            p_index->AddIndex(vectorSet->GetVector((SizeType)(index + curCount)), 1, p_opts.m_dim, nullptr);
-                        }
-                        else
-                        {
-                            return;
-                        }
-                    }
-                };
-                for (int j = 0; j < insertThreads; j++) { threads.emplace_back(func); }
-                for (auto& thread : threads) { thread.join(); }
-
-                double sendingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
-                "Finish sending in %.3lf seconds, sending throughput is %.2lf , insertion count %u.\n",
-                sendingCost,
-                step/ sendingCost,
-                static_cast<uint32_t>(step));
-
-                LOG(Helper::LogLevel::LL_Info,"During Update\n");
-
-                while(!p_index->AllFinished())
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                }
-                double syncingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
-                "Finish syncing in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
-                syncingCost,
-                step / syncingCost,
-                static_cast<uint32_t>(step));
-            }
-
-            template <typename ValueType>
-            void UpdateSPFresh(SPANN::Index<ValueType>* p_index)
-            {
-                SPANN::Options& p_opts = *(p_index->GetOptions());
-                int step = p_opts.m_step;
-                if (step == 0)
-                {
-                    LOG(Helper::LogLevel::LL_Error, "Incremental Test Error, Need to set step.\n");
-                    exit(1);
-                }
-                StopWSPFresh sw;
-
-                int numThreads = p_opts.m_searchThreadNum;
-                int internalResultNum = p_opts.m_searchInternalResultNum;
-                int searchTimes = p_opts.m_searchTimes;
-
-                auto vectorSet = LoadVectorSet(p_opts, numThreads);
-
-                auto querySet = LoadQuerySet(p_opts);
-
-                int curCount = p_index->GetNumSamples();
-                int insertCount = vectorSet->Count() - curCount;
-
-                bool calTruthOrigin = p_opts.m_calTruth;
-
-                if (p_opts.m_endVectorNum != -1)
-                {
-                    insertCount = p_opts.m_endVectorNum - curCount;
-                }
-
-                p_index->ForceCompaction();
-
-                p_index->GetDBStat();
-
-                if (!p_opts.m_onlySearchFinalBatch) {
-                    if (p_opts.m_maxInternalResultNum != -1) 
-                    {
-                        for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
-                        {
-                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), p_opts, sw.getElapsedSec());
-                        }
-                    }
-                    else 
-                    {
-                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), p_opts, sw.getElapsedSec());
-                    }
-                }
-
-                ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                p_index->GetDBStat();
-
-                int batch;
-                if (step == 0) {
-                    batch = 0;
-                } else {
-                    batch = insertCount / step;
-                }
-                
-                int finishedInsert = 0;
-                int insertThreads = p_opts.m_insertThreadNum;
-
-                LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, totalBatch: %d.\n", insertThreads, step, batch);
-
-                LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
-                for (int i = 0; i < batch; i++)
-                {   
-                    LOG(Helper::LogLevel::LL_Info, "Updating Batch %d: numThread: %d, step: %d.\n", i, insertThreads, step);
-
-                    std::future<void> insert_future =
-                        std::async(std::launch::async, InsertVectors<ValueType>, p_index,
-                                insertThreads, vectorSet, curCount, step, std::ref(p_opts));
-
-                    std::future_status insert_status;
-
-                    std::string tempFileName;
-                    p_opts.m_calTruth = false;
-                    do {
-                        insert_status = insert_future.wait_for(std::chrono::seconds(3));
-                        if (insert_status == std::future_status::timeout) {
-                            ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                            p_index->GetIndexStat(-1, false, false);
-                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec());
-                            p_index->GetDBStat();
-                        }
-                    }while (insert_status != std::future_status::ready);
-
-                    curCount += step;
-                    finishedInsert += step;
-                    LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
-
-                    p_index->GetIndexStat(finishedInsert, true, true);
-
-                    ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-
-                    p_opts.m_calTruth = calTruthOrigin;
-                    if (p_opts.m_onlySearchFinalBatch && batch - 1 != i) continue;
-                    if (p_opts.m_maxInternalResultNum != -1) 
-                    {
-                        for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
-                        {
-                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), p_opts, sw.getElapsedSec());
-                        }
-                    }
-                    else 
-                    {
-                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, GetTruthFileName(p_opts.m_truthFilePrefix, curCount), p_opts, sw.getElapsedSec());
                     }
                 }
             }
@@ -826,7 +660,7 @@ namespace SPTAG {
                         index = vectorsSent.fetch_add(1);
                         if (index < updateSize)
                         {
-                            if ((index & ((1 << 14) - 1)) == 0)
+                            if ((index & ((1 << 14) - 1)) == 0 && p_opts.m_showUpdateProgress)
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Insert: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
@@ -911,7 +745,7 @@ namespace SPTAG {
                         index = vectorsSent.fetch_add(1);
                         if (index < updateSize)
                         {
-                            if ((index & ((1 << 14) - 1)) == 0)
+                            if ((index & ((1 << 14) - 1)) == 0 && p_opts.m_showUpdateProgress)
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Delete: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
@@ -1014,6 +848,12 @@ namespace SPTAG {
                     LoadUpdateTrace(traceFileName, updateSize, insertSet, deleteSet);
                     LOG(Helper::LogLevel::LL_Info, "Updating day: %d: numThread: %d, updateSize: %d,total days: %d.\n", i, insertThreads, updateSize, days);
 
+                    int sampleSize = updateSize / p_opts.m_sampling;
+
+                    int nextSamplePoint = sampleSize + updateSize * i;
+
+                    bool showStatus = false;
+
                     std::future<void> delete_future =
                         std::async(std::launch::async, DeleteVectorsBySet<ValueType>, p_index,
                                 1, vectorSet, std::ref(deleteSet), updateSize, std::ref(p_opts), i);
@@ -1029,20 +869,27 @@ namespace SPTAG {
                     std::string tempFileName;
                     p_opts.m_calTruth = false;
                     do {
-                        insert_status = insert_future.wait_for(std::chrono::seconds(10));
-                        delete_status = delete_future.wait_for(std::chrono::seconds(10));
+                        insert_status = insert_future.wait_for(std::chrono::milliseconds(20));
+                        delete_status = delete_future.wait_for(std::chrono::milliseconds(20));
                         if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
-                            ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                            p_index->GetIndexStat(-1, false, false);
-                            p_index->GetDBStat();
-                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec());
-                            p_index->GetDBStat();
+                            if (p_index->GetNumDeleted() >= nextSamplePoint) {
+                                LOG(Helper::LogLevel::LL_Info, "Samppling Size: %d\n", nextSamplePoint);
+                                showStatus = true;
+                                nextSamplePoint += sampleSize;
+                                ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                                p_index->GetIndexStat(-1, false, false);
+                                p_index->GetDBStat();
+                            } else {
+                                showStatus = false;
+                            }
+                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec(), showStatus);
                         }
                     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
 
                     curCount += updateSize;
 
                     p_index->GetIndexStat(updateSize, true, true);
+                    p_index->GetDBStat();
 
                     ShowMemoryStatus(vectorSet, sw.getElapsedSec());
 
@@ -1061,7 +908,7 @@ namespace SPTAG {
                     {
                         StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, truthFileName, p_opts, sw.getElapsedSec());
                     }
-                    // p_index->ForceCompaction();
+                    p_index->ForceCompaction();
                 }
             }
 

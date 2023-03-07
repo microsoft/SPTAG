@@ -105,6 +105,8 @@ namespace SPTAG::SPANN {
 
         std::mutex m_dataAddLock;
 
+        std::mutex m_mergeLock;
+
         COMMON::FineGrainedRWLock m_rwLocks;
 
         COMMON::PostingSizeRecord m_postingSizes;
@@ -578,6 +580,7 @@ namespace SPTAG::SPANN {
         ErrorCode MergePostings(VectorIndex* p_index, SizeType headID, bool reassign = false)
         {
             {
+                std::unique_lock<std::mutex> mergelock(m_mergeLock);
                 std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
                 if (!p_index->ContainSample(headID)) return ErrorCode::Success;
@@ -677,6 +680,7 @@ namespace SPTAG::SPANN {
 
                         // LOG(Helper::LogLevel::LL_Info,"Release: %d, Release: %d\n", headID, queryResult->VID);
                         lock.unlock();
+                        mergelock.unlock();
 
                         if (reassign) 
                         {
@@ -985,12 +989,12 @@ namespace SPTAG::SPANN {
             LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
             LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
 
-            for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
-                while (m_versionMap->GetVersion(i) != 0) {
-                    uint8_t newVersion;
-                    m_versionMap->IncVersion(i, &newVersion);
-                }
-            }
+            // for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
+            //     while (m_versionMap->GetVersion(i) != 0) {
+            //         uint8_t newVersion;
+            //         m_versionMap->IncVersion(i, &newVersion);
+            //     }
+            // }
 
             if (m_opt->m_update) {
                 //LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");

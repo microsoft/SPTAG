@@ -167,6 +167,8 @@ namespace SPTAG {
             std::string m_updateMappingPrefix;
             int m_days;
             int m_deleteQPS;
+            int m_sampling;
+            bool m_showUpdateProgress;
 
 
             Options() {

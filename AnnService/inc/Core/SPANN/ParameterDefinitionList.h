@@ -170,7 +170,12 @@ DefineSSDParameter(m_updateFilePrefix, std::string, std::string(""), "UpdateFile
 DefineSSDParameter(m_updateMappingPrefix, std::string, std::string(""), "UpdateMappingPrefix")
 // Steady State: days
 DefineSSDParameter(m_days, int, 0, "Days")
+// Steady State: deleteQPS
 DefineSSDParameter(m_deleteQPS, int, -1, "DeleteQPS")
+// Steady State: sampling
+DefineSSDParameter(m_sampling, int, -1, "Sampling")
+// Steady State: showUpdateProgress
+DefineSSDParameter(m_showUpdateProgress, bool, true, "ShowUpdateProgress")
 
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")
