@@ -12,6 +12,7 @@
 
 namespace SPTAG
 {
+    template <>
     thread_local std::unique_ptr<SPANN::ExtraWorkSpace> COMMON::ThreadLocalWorkSpaceFactory<SPANN::ExtraWorkSpace>::m_workspace;
     namespace SPANN
     {
