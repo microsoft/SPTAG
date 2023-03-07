@@ -10,6 +10,7 @@
 
 namespace SPTAG
 {
+    thread_local std::unique_ptr<COMMON::WorkSpace> COMMON::ThreadLocalWorkSpaceFactory<COMMON::WorkSpace>::m_workspace;
     namespace BKT
     {
 

@@ -25,8 +25,9 @@ namespace SPTAG
         template <typename WorkSpaceType>
         class ThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
         {
-            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
         public:
+            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
+
             virtual std::unique_ptr< WorkSpaceType> GetWorkSpace() override
             {
                 return std::move(m_workspace);
