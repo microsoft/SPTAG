@@ -8,6 +8,7 @@
 #include "inc/Core/Common/Dataset.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/ThreadPool.h"
+#include <cstdlib>
 #include <memory>
 #include <atomic>
 #include <tbb/concurrent_queue.h>
@@ -19,36 +20,115 @@ namespace SPTAG::SPANN
     class SPDKIO : public Helper::KeyValueIO
     {
         class BlockController {
+        private:
+            static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
+            static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx;
+            tbb::concurrent_queue<AddressType> m_blockAddresses;
+            bool m_useMemImpl = false;
+            char* m_memBuffer = nullptr;
         public:
             bool Initialize() {
-                return true;
+                const char* kUseMemImplEnvStr = getenv(kUseMemImplEnv);
+                m_useMemImpl = kUseMemImplEnvStr && !strcmp(kUseMemImplEnvStr, "1");
+                if (m_useMemImpl) {
+                    m_memBuffer = new char[kMemImplMaxNumBlocks * PageSize];
+                    for (AddressType i = 0; i < kMemImplMaxNumBlocks; i++) {
+                        m_blockAddresses.push(i);
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
+                    return false;
+                }
             }
 
             // get p_size blocks from front, and fill in p_data array
             bool GetBlocks(AddressType* p_data, int p_size) {
-                return true;
+                AddressType currBlockAddress = 0;
+                if (m_useMemImpl) {
+                    for (int i = 0; i < p_size; i++) {
+                        while (!m_blockAddresses.try_pop(currBlockAddress));
+                        p_data[i] = currBlockAddress;
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::GetBlocks failed\n");
+                    return false;
+                }
             }
 
             // release p_size blocks, put them at the end of the queue
             bool ReleaseBlocks(AddressType* p_data, int p_size) {
-                return true;
+                if (m_useMemImpl) {
+                    for (int i = 0; i < p_size; i++) {
+                        m_blockAddresses.push(p_data[i]);
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::ReleaseBlocks failed\n");
+                    return false;
+                }
             }
 
             // read a posting list. p_data[0] is the total data size, 
             // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
             // concat all the block contents together into p_value string.
             bool ReadBlocks(AddressType* p_data, std::string* p_value) {
-                return true;
+                if (m_useMemImpl) {
+                    AddressType numBlocks = (p_data[0] + PageSize - 1) >> PageSizeEx;
+                    p_value->resize(numBlocks << PageSizeEx);
+                    for (AddressType i = 0; i < numBlocks; i++) {
+                        memcpy(p_value->data() + i * PageSize, m_memBuffer + p_data[i + 1] * PageSize, PageSize);
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
+                    return false;
+                }
             }
 
             // parallel read a list of posting lists.
             bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {
-                return true;
+                if (m_useMemImpl) {
+                    p_values->resize(p_data.size());
+                    for (size_t i = 0; i < p_data.size(); i++) {
+                        ReadBlocks(p_data[i], &((*p_values)[i]));
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::ReadBlocks batch failed\n");
+                    return false;
+                }
             }
 
             // write p_value into p_size blocks start from p_data
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {
-                return true;
+                if (m_useMemImpl) {
+                    for (int i = 0; i < p_size; i++) {
+                        memcpy(m_memBuffer + p_data[i] * PageSize, p_value.data() + i * PageSize, PageSize);
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
+                    return false;
+                }
+            }
+
+            bool ShutDown() {
+                if (m_useMemImpl) {
+                    while (!m_blockAddresses.empty()) {
+                        AddressType currBlockAddress;
+                        m_blockAddresses.try_pop(currBlockAddress);
+                    }
+                    if (m_memBuffer) {
+                        delete [] m_memBuffer;
+                        m_memBuffer = nullptr;
+                    }
+                    return true;
+                } else {
+                    fprintf(stderr, "SPDKIO::BlockController::ShutDown failed\n");
+                    return false;
+                }
             }
         };
 
@@ -104,6 +184,7 @@ namespace SPTAG::SPANN
                 uintptr_t ptr;
                 if (m_buffer.try_pop(ptr)) delete[]((AddressType*)ptr);
             }
+            m_pBlockController.ShutDown();
             m_shutdownCalled = true;
         }
 
