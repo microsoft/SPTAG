@@ -170,12 +170,12 @@ DefineSSDParameter(m_updateFilePrefix, std::string, std::string(""), "UpdateFile
 DefineSSDParameter(m_updateMappingPrefix, std::string, std::string(""), "UpdateMappingPrefix")
 // Steady State: days
 DefineSSDParameter(m_days, int, 0, "Days")
+DefineSSDParameter(m_deleteQPS, int, -1, "DeleteQPS")
 
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")
 DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
 DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
 DefineSSDParameter(m_reassignK, int, 0, "ReassignK")
-DefineSSDParameter(m_maxHeadNode, int, 200000000, "MaxHeadNode")
 DefineSSDParameter(m_virtualHead, bool, false, "VirtualHead")
 #endif

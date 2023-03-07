@@ -146,7 +146,6 @@ namespace SPTAG {
             bool m_disableReassign;
             bool m_searchDuringUpdate;
             int m_reassignK;
-            int m_maxHeadNode;
             bool m_virtualHead;
 
             // Updating(SPFresh Update Test)
@@ -167,6 +166,7 @@ namespace SPTAG {
             std::string m_updateFilePrefix;
             std::string m_updateMappingPrefix;
             int m_days;
+            int m_deleteQPS;
 
 
             Options() {
