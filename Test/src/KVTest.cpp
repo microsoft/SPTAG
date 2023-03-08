@@ -14,6 +14,8 @@ extern "C" bool RocksDbIOUringEnable() { return true; }
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
 
+char* SPDKIO::BlockController::m_memBuffer = nullptr;
+
 void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int totalSize, int times, bool debug = false) { 
     std::vector<SizeType> headIDs(internalResultNum, 0);
 

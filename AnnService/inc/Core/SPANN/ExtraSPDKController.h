@@ -25,13 +25,15 @@ namespace SPTAG::SPANN
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx;
             tbb::concurrent_queue<AddressType> m_blockAddresses;
             bool m_useMemImpl = false;
-            char* m_memBuffer = nullptr;
+            static char* m_memBuffer;
         public:
             bool Initialize() {
                 const char* kUseMemImplEnvStr = getenv(kUseMemImplEnv);
                 m_useMemImpl = kUseMemImplEnvStr && !strcmp(kUseMemImplEnvStr, "1");
                 if (m_useMemImpl) {
-                    m_memBuffer = new char[kMemImplMaxNumBlocks * PageSize];
+                    if (m_memBuffer == nullptr) {
+                        m_memBuffer = new char[kMemImplMaxNumBlocks * PageSize];
+                    }
                     for (AddressType i = 0; i < kMemImplMaxNumBlocks; i++) {
                         m_blockAddresses.push(i);
                     }
@@ -75,10 +77,14 @@ namespace SPTAG::SPANN
             // concat all the block contents together into p_value string.
             bool ReadBlocks(AddressType* p_data, std::string* p_value) {
                 if (m_useMemImpl) {
-                    AddressType numBlocks = (p_data[0] + PageSize - 1) >> PageSizeEx;
-                    p_value->resize(numBlocks << PageSizeEx);
-                    for (AddressType i = 0; i < numBlocks; i++) {
-                        memcpy(p_value->data() + i * PageSize, m_memBuffer + p_data[i + 1] * PageSize, PageSize);
+                    p_value->resize(p_data[0]);
+                    AddressType currOffset = 0;
+                    AddressType dataIdx = 1;
+                    while (currOffset < p_data[0]) {
+                        AddressType readSize = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
+                        memcpy(p_value->data() + currOffset, m_memBuffer + p_data[dataIdx] * PageSize, readSize);
+                        currOffset += PageSize;
+                        dataIdx++;
                     }
                     return true;
                 } else {
@@ -119,10 +125,6 @@ namespace SPTAG::SPANN
                     while (!m_blockAddresses.empty()) {
                         AddressType currBlockAddress;
                         m_blockAddresses.try_pop(currBlockAddress);
-                    }
-                    if (m_memBuffer) {
-                        delete [] m_memBuffer;
-                        m_memBuffer = nullptr;
                     }
                     return true;
                 } else {
