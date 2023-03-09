@@ -79,7 +79,7 @@ SearchService::Initialize(int p_argNum, char* p_args[])
     }
     else
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed parse Serve Mode!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed parse Serve Mode!\n");
         return false;
     }
 
@@ -137,7 +137,7 @@ SearchService::RunSocketMode()
                                             handlerMap,
                                             m_serviceContext->GetServiceSettings()->m_socketThreadNum));
 
-    LOG(Helper::LogLevel::LL_Info,
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "Start to listen %s:%s ...\n",
             m_serviceContext->GetServiceSettings()->m_listenAddr.c_str(),
             m_serviceContext->GetServiceSettings()->m_listenPort.c_str());
@@ -150,11 +150,11 @@ SearchService::RunSocketMode()
 
     m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
                                  {
-                                     LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
+                                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
                                  });
 
     m_ioContext.run();
-    LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
 
     m_socketServer.reset();
     m_threadPool->stop();
@@ -215,7 +215,7 @@ SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::P
 {
     if (p_packet.Header().m_bodyLength == 0)
     {
-        LOG(Helper::LogLevel::LL_Error, "Empty package with body length equals 0!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty package with body length equals 0!\n");
         return;
     }
 
@@ -226,7 +226,7 @@ SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::P
 
     Socket::RemoteQuery remoteQuery;
     if(remoteQuery.Read(p_packet.Body()) == nullptr) {
-        LOG(Helper::LogLevel::LL_Error, "majorVersion is not match!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "majorVersion is not match!\n");
         return;
     }
 

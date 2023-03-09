@@ -169,7 +169,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
         signal->Wait();
     }
     else {
-        LOG(Helper::LogLevel::LL_Error, "Error connection or data type!");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error connection or data type!");
     }
     return std::make_shared<RemoteSearchResult>(ret);
 }

@@ -78,17 +78,17 @@ public:
 template <typename T>
 int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 {
-    std::ofstream log("Recall-result.out", std::ios::app);
+    std::ofstream SPTAGLIB_LOG("Recall-result.out", std::ios::app);
     if (!log.is_open())
     {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open logging file!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open logging file!\n");
         exit(-1);
     }
 
     auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
     if (ErrorCode::Success != vectorReader->LoadFile(options->m_queryFile))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
         exit(1);
     }
     auto queryVectors = vectorReader->GetVectorSet(0, options->m_debugQuery);
@@ -101,7 +101,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     {
         if (ErrorCode::Success != dataReader->LoadFile(options->m_dataFile))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read data file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read data file.\n");
             exit(1);
         }
         dataVectors = dataReader->GetVectorSet();
@@ -113,7 +113,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     {
         if (options->m_genTruth) {
             if (dataVectors == nullptr) {
-                LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please speicify data vector file by setting -df option.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please speicify data vector file by setting -df option.\n");
                 exit(1);
             }
             COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
@@ -122,14 +122,14 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
         ftruth = SPTAG::f_createIO();
         if (ftruth == nullptr || !ftruth->Initialize(options->m_truthFile.c_str(), std::ios::in | std::ios::binary)) {
-            LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
             exit(1);
         }
         if (options->m_truthFile.find("bin") != std::string::npos) {
-            LOG(Helper::LogLevel::LL_Info, "Load binary truth...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load binary truth...\n");
         }
         else {
-            LOG(Helper::LogLevel::LL_Info, "Load txt truth...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load txt truth...\n");
         }
     }
 
@@ -138,20 +138,20 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     {
         fp = SPTAG::f_createIO();
         if (fp == nullptr || !fp->Initialize(options->m_resultFile.c_str(), std::ios::out | std::ios::binary)) {
-            LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_resultFile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_resultFile.c_str());
         }
 
         if (options->m_outputformat == 1) {
-            LOG(Helper::LogLevel::LL_Info, "Using output format binary...");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using output format binary...");
 
             int32_t i32Val = queryVectors->Count();
             if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                 exit(1);
             }
             i32Val = options->m_K;
             if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                 exit(1);
             }
         }
@@ -171,7 +171,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     std::vector<float> latencies(options->m_batch, 0);
     int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
 
-    LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0), totalLatency(maxCheck.size(), 0.0);
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
@@ -250,7 +250,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
-            LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
             totalAvg[mc] += timeMean * numQuerys;
             total95[mc] += l95 * numQuerys;
             total99[mc] += l99 * numQuerys;
@@ -266,14 +266,14 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     if (queryMetas != nullptr) {
                         ByteArray qmeta = queryMetas->GetMetadata(startQuery + i);
                         if (fp->WriteBinary(qmeta.Length(), (const char*)qmeta.Data()) != qmeta.Length()) {
-                            LOG(Helper::LogLevel::LL_Error, "Cannot write qmeta %d bytes!\n", qmeta.Length());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write qmeta %d bytes!\n", qmeta.Length());
                             exit(1);
                         }
                     }
                     else {
                         std::string qid = std::to_string(i);
                         if (fp->WriteBinary(qid.length(), qid.c_str()) != qid.length()) {
-                            LOG(Helper::LogLevel::LL_Error, "Cannot write qid %d bytes!\n", qid.length());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write qid %d bytes!\n", qid.length());
                             exit(1);
                         }
                     }
@@ -282,7 +282,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     {
                         std::string sd = std::to_string(results[i].GetResult(j)->Dist / baseSquare);
                         if (fp->WriteBinary(sd.length(), sd.c_str()) != sd.length()) {
-                            LOG(Helper::LogLevel::LL_Error, "Cannot write dist %d bytes!\n", sd.length());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write dist %d bytes!\n", sd.length());
                             exit(1);
                         }
                         fp->WriteString("@");
@@ -294,14 +294,14 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                         if (!options->m_withMeta) {
                             std::string vid = std::to_string(results[i].GetResult(j)->VID);
                             if (fp->WriteBinary(vid.length(), vid.c_str()) != vid.length()) {
-                                LOG(Helper::LogLevel::LL_Error, "Cannot write vid %d bytes!\n", sd.length());
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write vid %d bytes!\n", sd.length());
                                 exit(1);
                             }
                         }
                         else {
                             ByteArray vm = index.GetMetadata(results[i].GetResult(j)->VID);
                             if (fp->WriteBinary(vm.Length(), (const char*)vm.Data()) != vm.Length()) {
-                                LOG(Helper::LogLevel::LL_Error, "Cannot write vmeta %d bytes!\n", vm.Length());
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write vmeta %d bytes!\n", vm.Length());
                                 exit(1);
                             }
                         }
@@ -317,13 +317,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     {
                         SizeType i32Val = results[i].GetResult(j)->VID;
                         if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                             exit(1);
                         }
 
                         float fVal = results[i].GetResult(j)->Dist;
                         if (fp->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
-                            LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                             exit(1);
                         }
                     }
@@ -332,9 +332,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
     for (int mc = 0; mc < maxCheck.size(); mc++)
-        LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
 
-    LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
     if (fp != nullptr) fp->ShutDown();
     log.close();
@@ -353,7 +353,7 @@ int main(int argc, char** argv)
     auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
     {
-        LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
     vecIndex->SetQuantizerADC(options->m_enableADC);
@@ -374,7 +374,7 @@ int main(int argc, char** argv)
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
     std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };

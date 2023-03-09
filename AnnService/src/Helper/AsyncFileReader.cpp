@@ -30,7 +30,7 @@ namespace SPTAG {
                             CPU_SET(i, &cpuset);
                             int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
                             if (rc != 0) {
-                                LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
                             }
                             break;
                         }
@@ -44,7 +44,7 @@ namespace SPTAG {
             CPU_SET(threadID, &cpuset);
             int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
             if (rc != 0) {
-                LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
             }
 #endif
         }
@@ -88,7 +88,7 @@ namespace SPTAG {
                                 totalSubmitted += s;
                             }
                             else {
-                                LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "fid:%d channel %d, to submit:%d, submitted:%s\n", i, channel, iocbs[i].size() - submitted[i], strerror(-s));
                             }
                         }
                     }
@@ -157,7 +157,7 @@ namespace SPTAG {
             BOOL res = SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL);
             if (!res)
             {
-                LOG(Helper::LogLevel::LL_Error, "Failed SetThreadGroupAffinity for group %d and mask %I64x for thread %d.\n", ga.Group, ga.Mask, threadID);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed SetThreadGroupAffinity for group %d and mask %I64x for thread %d.\n", ga.Group, ga.Mask, threadID);
                 return;
             }
             pn.Group = group;
@@ -167,11 +167,11 @@ namespace SPTAG {
             res = SetThreadIdealProcessorEx(GetCurrentThread(), &pn, NULL);
             if (!res)
             {
-                LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
                 return;
             }
 
-            //LOG(Helper::LogLevel::LL_Info, "numGroup:%d numCPUs:%d threadID:%d group:%d cpuid:%d\n", (int)(numGroups), (int)numCpus, threadID, (int)(group), (int)(pn.Number));
+            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "numGroup:%d numCPUs:%d threadID:%d group:%d cpuid:%d\n", (int)(numGroups), (int)numCpus, threadID, (int)(group), (int)(pn.Number));
             YieldProcessor();
         }
 

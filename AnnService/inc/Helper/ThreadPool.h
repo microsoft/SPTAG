@@ -60,7 +60,7 @@ namespace SPTAG
                                 j->exec(&m_abort);
                             }
                             catch (std::exception& e) {
-                                LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
                             }
                             
                             delete j;

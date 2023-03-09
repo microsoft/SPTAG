@@ -39,7 +39,7 @@ MetadataSet::RefineMetadata(std::vector<SizeType>& indices, std::shared_ptr<Help
         ByteArray meta = GetMetadata(indices[i]);
         IOBINARY(p_metaOut, WriteBinary, sizeof(uint8_t) * meta.Length(), (const char*)meta.Data());
     }
-    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%d) Meta(%llu)\n", R, offset);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%d) Meta(%llu)\n", R, offset);
     return ErrorCode::Success;
 }
 
@@ -95,7 +95,7 @@ bool MetadataSet::GetMetadataOffsets(const std::uint8_t* p_meta, const std::uint
         p_offsets[current++] = p_metaLength;
 
     if (current < p_offsetLength) {
-        LOG(Helper::LogLevel::LL_Error, "The metadata(%d) and vector(%d) numbers are not match! Check whether it is unicode encoding issue.\n", current-1, p_offsetLength-1);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "The metadata(%d) and vector(%d) numbers are not match! Check whether it is unicode encoding issue.\n", current-1, p_offsetLength-1);
         return false;
     }
     return true;
@@ -107,24 +107,24 @@ FileMetadataSet::FileMetadataSet(const std::string& p_metafile, const std::strin
     m_fp = f_createIO();
     auto fpidx = f_createIO();
     if (m_fp == nullptr || fpidx == nullptr || !m_fp->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !fpidx->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(), p_metaindexfile.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(), p_metaindexfile.c_str());
         throw std::runtime_error("Cannot open meta files");
     }
 
     if (fpidx->ReadBinary(sizeof(m_count), (char*)&m_count) != sizeof(m_count)) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
         throw std::runtime_error("Cannot read meta files");
     }
 
     m_offsets.reserve(p_blockSize);
     m_offsets.resize(m_count + 1);
     if (fpidx->ReadBinary(sizeof(std::uint64_t) * (m_count + 1), (char*)m_offsets.data()) != sizeof(std::uint64_t) * (m_count + 1)) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read FileMetadataSet!\n");
         throw std::runtime_error("Cannot read meta files");
     }
     m_newdata.reserve(p_blockSize * p_metaSize);
     m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
-    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
 }
 
 
@@ -223,7 +223,7 @@ FileMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::sh
     if (m_newdata.size() > 0) {
         IOBINARY(p_metaOut, WriteBinary, m_newdata.size(), (const char*)m_newdata.data());
     }
-    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 
@@ -283,7 +283,7 @@ MemMetadataSet::Init(std::shared_ptr<Helper::DiskIO> p_metain, std::shared_ptr<H
 
     m_newdata.reserve(p_blockSize * p_metaSize);
     m_lock.reset(new std::shared_timed_mutex, std::default_delete<std::shared_timed_mutex>());
-    LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load MetaIndex(%d) Meta(%llu)\n", m_count, m_offsets[m_count]);
     return ErrorCode::Success;
 }
 
@@ -292,7 +292,7 @@ MemMetadataSet::MemMetadataSet(std::shared_ptr<Helper::DiskIO> p_metain, std::sh
     std::uint64_t p_blockSize, std::uint64_t p_capacity, std::uint64_t p_metaSize)
 {
     if (Init(p_metain, p_metaindexin, p_blockSize, p_capacity, p_metaSize) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
         throw std::runtime_error("Cannot read MemMetadataSet");
     }
 }
@@ -302,11 +302,11 @@ MemMetadataSet::MemMetadataSet(const std::string& p_metafile, const std::string&
 {
     std::shared_ptr<Helper::DiskIO> ptrMeta = f_createIO(), ptrMetaIndex = f_createIO();
     if (ptrMeta == nullptr || ptrMetaIndex == nullptr || !ptrMeta->Initialize(p_metafile.c_str(), std::ios::binary | std::ios::in) || !ptrMetaIndex->Initialize(p_metaindexfile.c_str(), std::ios::binary | std::ios::in)) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(),  p_metaindexfile.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open meta files %s or %s!\n", p_metafile.c_str(),  p_metaindexfile.c_str());
         throw std::runtime_error("Cannot open MemMetadataSet files");
     }
     if (Init(ptrMeta, ptrMetaIndex, p_blockSize, p_capacity, p_metaSize) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot read MemMetadataSet!\n");
         throw std::runtime_error("Cannot read MemMetadataSet");
     }
 }
@@ -409,7 +409,7 @@ MemMetadataSet::Add(const ByteArray& data)
     std::unique_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
     m_newdata.insert(m_newdata.end(), data.Data(), data.Data() + data.Length());
     if (!m_offsets.push_back(m_offsets.back() + data.Length())) {
-        LOG(Helper::LogLevel::LL_Error, "Insert MetaIndex error! DataCapacity overflow!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Insert MetaIndex error! DataCapacity overflow!\n");
         m_newdata.resize(m_newdata.size() - data.Length());
     }
 }
@@ -430,7 +430,7 @@ MemMetadataSet::SaveMetadata(std::shared_ptr<Helper::DiskIO> p_metaOut, std::sha
         std::shared_lock<std::shared_timed_mutex> lock(*static_cast<std::shared_timed_mutex*>(m_lock.get()));
         IOBINARY(p_metaOut, WriteBinary, m_offsets[count] - m_offsets[m_count], (const char*)m_newdata.data());
     }
-    LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save MetaIndex(%llu) Meta(%llu)\n", m_offsets.size() - 1, m_offsets.back());
     return ErrorCode::Success;
 }
 

@@ -26,22 +26,22 @@ namespace SPTAG
             const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
             if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
             {
-                LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
                 exit(1);
             }
 
-            LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
             std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
             std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
 
             GenerateTruthGPU<T>(querySet, vectorSet, truthFile, distMethod, K, p_truthFileType, quantizer, truthset, distset);
 
-            LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
             writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
 
             auto ptr = SPTAG::f_createIO();
             if (ptr == nullptr || !ptr->Initialize((truthFile + ".dist.bin").c_str(), std::ios::out | std::ios::binary)) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
                 exit(1);
             }
 
@@ -53,11 +53,11 @@ namespace SPTAG
             {
                 for (int k = 0; k < K; k++) {
                     if (ptr->WriteBinary(4, (char*)(&(truthset[i][k]))) != 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
                         exit(1);
                     }
                     if (ptr->WriteBinary(4, (char*)(&(distset[i][k]))) != 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
                         exit(1);
                     }
                 }
@@ -69,11 +69,11 @@ namespace SPTAG
             const SPTAG::DistCalcMethod distMethod, const int K, const SPTAG::TruthFileType p_truthFileType, const std::shared_ptr<IQuantizer>& quantizer) {
             if (querySet->Dimension() != vectorSet->Dimension() && !quantizer)
             {
-                LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "query and vector have different dimensions.");
                 exit(1);
             }
 
-            LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin to generate truth for query(%d,%d) and doc(%d,%d)...\n", querySet->Count(), querySet->Dimension(), vectorSet->Count(), vectorSet->Dimension());
             std::vector< std::vector<SPTAG::SizeType> > truthset(querySet->Count(), std::vector<SPTAG::SizeType>(K, 0));
             std::vector< std::vector<float> > distset(querySet->Count(), std::vector<float>(K, 0));
             auto fComputeDistance = quantizer ? quantizer->DistanceCalcSelector<T>(distMethod) : COMMON::DistanceCalcSelector<T>(distMethod);
@@ -96,12 +96,12 @@ namespace SPTAG
                 }
 
             }
-            LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to write truth file...\n");
             writeTruthFile(truthFile, querySet->Count(), K, truthset, distset, p_truthFileType);
 
             auto ptr = SPTAG::f_createIO();
             if (ptr == nullptr || !ptr->Initialize((truthFile + ".dist.bin").c_str(), std::ios::out | std::ios::binary)) {
-                LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to create the file:%s\n", (truthFile + ".dist.bin").c_str());
                 exit(1);
             }
 
@@ -113,11 +113,11 @@ namespace SPTAG
             {
                 for (int k = 0; k < K; k++) {
                     if (ptr->WriteBinary(4, (char*)(&(truthset[i][k]))) != 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
                         exit(1);
                     }
                     if (ptr->WriteBinary(4, (char*)(&(distset[i][k]))) != 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write the truth dist file!\n");
                         exit(1);
                     }
                 }
