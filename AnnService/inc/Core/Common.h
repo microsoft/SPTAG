@@ -127,7 +127,7 @@ extern std::shared_ptr<Helper::Logger> GetLogger();
 
 #define LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
-class MyException : public std::exception 
+class MyException : public std::exception
 {
 private:
     std::string Exp;
@@ -248,6 +248,26 @@ enum class QuantizerType : std::uint8_t
     Undefined
 };
 static_assert(static_cast<std::uint8_t>(QuantizerType::Undefined) != 0, "Empty QuantizerType!");
+
+enum class NumaStrategy : std::uint8_t
+{
+#define DefineNumaStrategy(Name) Name,
+#include "DefinitionList.h"
+#undef DefineNumaStrategy
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(NumaStrategy::Undefined) != 0, "Empty NumaStrategy!");
+
+enum class OrderStrategy : std::uint8_t
+{
+#define DefineOrderStrategy(Name) Name,
+#include "DefinitionList.h"
+#undef DefineOrderStrategy
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(OrderStrategy::Undefined) != 0, "Empty OrderStrategy!");
 
 } // namespace SPTAG
 

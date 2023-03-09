@@ -5,6 +5,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/StringConvert.h"
+#include "inc/Helper/AsyncFileReader.h"
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -187,29 +188,32 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
             std::atomic_size_t queriesSent(0);
             std::vector<std::thread> threads;
-            auto func = [&]()
-            {
-                size_t qid = 0;
-                while (true)
-                {
-                    qid = queriesSent.fetch_add(1);
-                    if (qid < numQuerys)
-                    {
-                        auto t1 = std::chrono::high_resolution_clock::now();
-                        index.SearchIndex(results[qid]);
-                        auto t2 = std::chrono::high_resolution_clock::now();
-                        latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
-                    }
-                    else
-                    {
-                        return;
-                    }
-                }
-            };
 
             auto batchstart = std::chrono::high_resolution_clock::now();
 
-            for (std::uint32_t i = 0; i < options->m_threadNum; i++) { threads.emplace_back(func); }
+            for (std::uint32_t i = 0; i < options->m_threadNum; i++) { 
+                threads.emplace_back([&, i] {
+                    NumaStrategy ns = (index.GetIndexAlgoType() == IndexAlgoType::SPANN)? NumaStrategy::SCATTER: NumaStrategy::LOCAL; // Only for SPANN, we need to avoid IO threads overlap with search threads.
+                    Helper::SetThreadAffinity(i, threads[i], ns, OrderStrategy::ASC);
+
+                    size_t qid = 0;
+                    while (true)
+                    {
+                        qid = queriesSent.fetch_add(1);
+                        if (qid < numQuerys)
+                        {
+                            auto t1 = std::chrono::high_resolution_clock::now();
+                            index.SearchIndex(results[qid]);
+                            auto t2 = std::chrono::high_resolution_clock::now();
+                            latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                });
+            }
             for (auto& thread : threads) { thread.join(); }
 
             auto batchend = std::chrono::high_resolution_clock::now();

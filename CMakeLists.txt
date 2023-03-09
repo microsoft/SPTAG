@@ -26,6 +26,31 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     set (CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++14 -fopenmp")
     set (CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -march=native")
     set (CMAKE_CXX_FLAGS_DEBUG   "-g -DDEBUG")
+
+
+    find_path(NUMA_INCLUDE_DIR NAME numa.h
+      HINTS $ENV{HOME}/local/include /opt/local/include /usr/local/include /usr/include)
+  
+    find_library(NUMA_LIBRARY NAME libnuma.so
+      HINTS $ENV{HOME}/local/lib64 $ENV{HOME}/local/lib /usr/local/lib64 /usr/local/lib /opt/local/lib64 /opt/local/lib /usr/lib64 /usr/lib)
+
+    find_library(NUMA_LIBRARY_STATIC NAME libnuma.a
+      HINTS $ENV{HOME}/local/lib64 $ENV{HOME}/local/lib /usr/local/lib64 /usr/local/lib /opt/local/lib64 /opt/local/lib /usr/lib64 /usr/lib)
+  
+    if (NUMA_INCLUDE_DIR AND NUMA_LIBRARY AND NUMA_LIBRARY_STATIC)
+        set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -lnuma")
+        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lnuma")
+
+        include_directories (${NUMA_INCLUDE_DIR})
+        message (STATUS "Found numa library: inc=${NUMA_INCLUDE_DIR}, lib=${NUMA_LIBRARY}, staticlib=${NUMA_LIBRARY_STATIC}")
+        add_definitions(-DNUMA)
+    else ()
+        set (NUMA_LIBRARY "")
+        set (NUMA_LIBRARY_STATIC "")
+        message (STATUS "WARNING: Numa library not found.")
+        message (STATUS "Try: 'sudo yum install numactl numactl-devel' (or sudo apt-get install libnuma libnuma-dev)")
+    endif ()
+
 elseif(WIN32)
     if(NOT MSVC14)
          message(FATAL_ERROR "On Windows, only MSVC version 14 are supported!") 

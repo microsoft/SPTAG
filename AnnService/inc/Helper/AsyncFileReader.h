@@ -16,23 +16,25 @@
 #include <stdint.h>
 
 #define ASYNC_READ 1
+#define BATCH_READ 1
 
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
-#define BATCH_READ 1
 #else
-#define BATCH_READ 1
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <linux/aio_abi.h>
+#ifdef NUMA
+#include <numa.h>
+#endif
 #endif
 
 namespace SPTAG
 {
     namespace Helper
     {
-
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy = NumaStrategy::LOCAL, OrderStrategy idStrategy = OrderStrategy::ASC);
 #ifdef _MSC_VER
         namespace DiskUtils
         {
@@ -168,7 +170,7 @@ namespace SPTAG
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
                 {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
                 return m_fileIocp.IsValid();
             }
@@ -375,8 +377,10 @@ namespace SPTAG
                 ExitProcess(dw);
             }
 
-            void ListionIOCP()
+            void ListionIOCP(int i)
             {
+                SetThreadAffinity(i, m_fileIocpThreads[i], NumaStrategy::SCATTER, OrderStrategy::DESC); // avoid IO threads overlap with search threads
+
                 DWORD cBytes;
                 ULONG_PTR key;
                 OVERLAPPED* ol;

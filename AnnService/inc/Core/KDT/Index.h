@@ -70,7 +70,6 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             COMMON::Labelset m_deletedID;
             
-            std::unique_ptr<COMMON::WorkSpacePool<COMMON::WorkSpace>> m_workSpacePool;
             Helper::ThreadPool m_threadPool;
             int m_iNumberOfThreads;
 
@@ -83,6 +82,7 @@ namespace SPTAG
             int m_iNumberOfInitialDynamicPivots;
             int m_iNumberOfOtherDynamicPivots;
             int m_iHashTableExp;
+            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
         public:
             Index()
@@ -96,6 +96,7 @@ namespace SPTAG
                 m_pSamples.SetName("Vector");
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_iDistCalcMethod));
                 m_iBaseSquare = (m_iDistCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
+                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>();
             }
 
             ~Index() {}
@@ -164,6 +165,24 @@ namespace SPTAG
 
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
+            ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
+            {
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();
+                if (!raw_generic_ptr) return ErrorCode::Fail;
+
+
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>*>(raw_generic_ptr);
+                if (!raw_specialized_ptr)
+                {
+                    delete raw_generic_ptr;
+                    return ErrorCode::Fail;
+                }
+                else
+                {
+                    m_workSpaceFactory = std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>>(raw_specialized_ptr);
+                    return ErrorCode::Success;
+                }
+            }
 
         private:
             template <typename Q>
