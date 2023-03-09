@@ -6,6 +6,49 @@
 namespace SPTAG {
     namespace Helper {
 #ifndef _MSC_VER
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy, OrderStrategy idStrategy)
+        {
+#ifdef NUMA
+            int numGroups = numa_num_task_nodes();
+            int numCpus = numa_num_task_cpus() / numGroups;
+
+            int group = threadID / numCpus;
+            int cpuid = threadID % numCpus;
+            if (socketStrategy == NumaStrategy::SCATTER) {
+                group = threadID % numGroups;
+                cpuid = (threadID / numGroups) % numCpus;
+            }
+
+            struct bitmask* cpumask = numa_allocate_cpumask();
+            if (!numa_node_to_cpus(group, cpumask)) {
+                unsigned int nodecpu = 0;
+                for (unsigned int i = 0; i < cpumask->size; i++) {
+                    if (numa_bitmask_isbitset(cpumask, i)) {
+                        if (cpuid == nodecpu) {
+                            cpu_set_t cpuset;
+                            CPU_ZERO(&cpuset);
+                            CPU_SET(i, &cpuset);
+                            int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
+                            if (rc != 0) {
+                                LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+                            }
+                            break;
+                        }
+                        nodecpu++;
+                    }
+                }
+            }
+#else
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(threadID, &cpuset);
+            int rc = pthread_setaffinity_np(thread.native_handle(), sizeof(cpu_set_t), &cpuset);
+            if (rc != 0) {
+                LOG(Helper::LogLevel::LL_Error, "Error calling pthread_setaffinity_np for thread %d: %d\n", threadID, rc);
+            }
+#endif
+        }
+
         struct timespec AIOTimeout {0, 30000};
         void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
@@ -80,6 +123,58 @@ namespace SPTAG {
             }
         }
 #else
+        ULONGLONG GetCpuMasks(WORD group, DWORD numCpus)
+        {
+            ULONGLONG masks = 0, mask = 1;
+            for (DWORD i = 0; i < numCpus; ++i)
+            {
+                masks |= mask;
+                mask <<= 1;
+            }
+
+            return masks;
+        }
+
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy, OrderStrategy idStrategy)
+        {
+            WORD numGroups = GetActiveProcessorGroupCount();
+            DWORD numCpus = GetActiveProcessorCount(0);
+
+            GROUP_AFFINITY ga;
+            memset(&ga, 0, sizeof(ga));
+            PROCESSOR_NUMBER pn;
+            memset(&pn, 0, sizeof(pn));
+
+            WORD group = (WORD)(threadID / numCpus);
+            pn.Number = (BYTE)(threadID % numCpus);
+            if (socketStrategy == NumaStrategy::SCATTER) {
+                group = (WORD)(threadID % numGroups);
+                pn.Number = (BYTE)((threadID / numGroups) % numCpus);
+            }
+
+            ga.Group = group;
+            ga.Mask = GetCpuMasks(group, numCpus);
+            BOOL res = SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL);
+            if (!res)
+            {
+                LOG(Helper::LogLevel::LL_Error, "Failed SetThreadGroupAffinity for group %d and mask %I64x for thread %d.\n", ga.Group, ga.Mask, threadID);
+                return;
+            }
+            pn.Group = group;
+            if (idStrategy == OrderStrategy::DESC) {
+                pn.Number = (BYTE)(numCpus - 1 - pn.Number);
+            }
+            res = SetThreadIdealProcessorEx(GetCurrentThread(), &pn, NULL);
+            if (!res)
+            {
+                LOG(Helper::LogLevel::LL_Error, "Unable to set ideal processor for thread %d.\n", threadID);
+                return;
+            }
+
+            //LOG(Helper::LogLevel::LL_Info, "numGroup:%d numCPUs:%d threadID:%d group:%d cpuid:%d\n", (int)(numGroups), (int)numCpus, threadID, (int)(group), (int)(pn.Number));
+            YieldProcessor();
+        }
+
         void BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num)
         {
             if (handlers.size() == 1) {
