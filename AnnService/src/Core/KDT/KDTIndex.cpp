@@ -10,10 +10,10 @@
 
 namespace SPTAG
 {
+    template <typename T>
+    thread_local std::unique_ptr<T> COMMON::ThreadLocalWorkSpaceFactory<T>::m_workspace;
     namespace KDT
     {
-        template <typename T>
-        thread_local std::shared_ptr<COMMON::WorkSpace> Index<T>::m_workspace;
 
         template <typename T>
         ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
@@ -93,9 +93,12 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
-            if (m_workspace != nullptr) {
-                m_iHashTableExp = m_workspace->HashTableExponent();
+            auto workspace = m_workSpaceFactory->GetWorkSpace();
+            if (workspace)
+            {
+                m_iHashTableExp = workspace->HashTableExponent();
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
 
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
@@ -182,11 +185,12 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
-            if (m_workspace == nullptr) {
-                m_workspace.reset(new COMMON::WorkSpace());
-                m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            m_workspace->Reset(m_iMaxCheck, p_query.GetResultNum());
+            workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
 
@@ -199,7 +203,7 @@ namespace SPTAG
                 {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-                SearchIndex<Type>(*p_results, *m_workspace, p_searchDeleted); \
+                SearchIndex<Type>(*p_results, *workSpace, p_searchDeleted); \
                 break; \
 
 #include "inc/Core/DefinitionList.h"
@@ -210,10 +214,12 @@ case VectorValueType::Name: \
             }
             else
             {            
-                SearchIndex<T>(*p_results, *m_workspace, p_searchDeleted);
+                SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
 
-            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+            
+                if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
@@ -221,17 +227,19 @@ case VectorValueType::Name: \
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
+
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
-            if (m_workspace == nullptr) {
-                m_workspace.reset(new COMMON::WorkSpace());
-                m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            m_workspace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
 
@@ -244,7 +252,7 @@ case VectorValueType::Name: \
                 {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-                SearchIndex<Type>(*p_results, *m_workspace, p_searchDeleted); \
+                SearchIndex<Type>(*p_results, *workSpace, p_searchDeleted); \
                 break; \
 
 #include "inc/Core/DefinitionList.h"
@@ -255,8 +263,9 @@ case VectorValueType::Name: \
             }
             else
             {
-                SearchIndex<T>(*p_results, *m_workspace, p_searchDeleted);
+                SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
             return ErrorCode::Success;
         }
@@ -264,11 +273,12 @@ case VectorValueType::Name: \
         template <typename T>
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
-            if (m_workspace == nullptr) {
-                m_workspace.reset(new COMMON::WorkSpace());
-                m_workspace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             }
-            m_workspace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
+            workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
 
@@ -281,8 +291,8 @@ case VectorValueType::Name: \
                 {
 #define DefineVectorValueType(Name, Type) \
 case VectorValueType::Name: \
-                    m_pTrees.InitSearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *m_workspace); \
-                    m_pTrees.SearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *m_workspace, m_iNumberOfInitialDynamicPivots); \
+                    m_pTrees.InitSearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *workSpace); \
+                    m_pTrees.SearchTrees<T, Type>(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots); \
                     break; \
 
 #include "inc/Core/DefinitionList.h"
@@ -293,17 +303,19 @@ case VectorValueType::Name: \
             }
             else
             {
-                m_pTrees.InitSearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *m_workspace);
-                m_pTrees.SearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *m_workspace, m_iNumberOfInitialDynamicPivots);
+                m_pTrees.InitSearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *workSpace);
+                m_pTrees.SearchTrees<T, T>(m_pSamples, m_fComputeDistance, *p_results, *workSpace, m_iNumberOfInitialDynamicPivots);
             }
 
             BasicResult * res = p_query.GetResults();
             for (int i = 0; i < p_query.GetResultNum(); i++)
             {
-                auto& cell = m_workspace->m_NGQueue.pop();
+                auto& cell = workSpace->m_NGQueue.pop();
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
             return ErrorCode::Success;
         }
 #pragma endregion

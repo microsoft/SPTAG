@@ -14,6 +14,32 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename WorkSpaceType>
+        class IWorkSpaceFactory
+        {
+        public:
+            virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() = 0;
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) = 0;
+        };
+
+        template <typename WorkSpaceType>
+        class ThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
+        {
+        public:
+            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
+
+            virtual std::unique_ptr< WorkSpaceType> GetWorkSpace() override
+            {
+                return std::move(m_workspace);
+            }
+
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) override
+            {
+                m_workspace = std::move(ws);
+            }
+
+        };
+
         class OptHashPosVector
         {
         protected:
@@ -198,8 +224,10 @@ namespace SPTAG
             }
         };
 
+        class IWorkSpace {};
+
         // Variables for each single NN search
-        struct WorkSpace
+        struct WorkSpace : public IWorkSpace
         {
             WorkSpace() {}
 

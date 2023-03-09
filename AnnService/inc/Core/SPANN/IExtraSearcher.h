@@ -101,7 +101,7 @@ namespace SPTAG {
             std::size_t m_pageBufferSize;
         };
 
-        struct ExtraWorkSpace
+        struct ExtraWorkSpace : public SPTAG::COMMON::IWorkSpace
         {
             ExtraWorkSpace() {}
 
