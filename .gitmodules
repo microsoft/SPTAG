@@ -2,3 +2,6 @@
 	path = ThirdParty/zstd
 	url = https://github.com/facebook/zstd
 	branch = release
+[submodule "ThirdParty/spdk"]
+	path = ThirdParty/spdk
+	url = https://github.com/spdk/spdk
