@@ -14,6 +14,14 @@
 #include <tbb/concurrent_queue.h>
 #include <tbb/concurrent_hash_map.h>
 
+extern "C" {
+#include "spdk/env.h"
+#include "spdk/event.h"
+#include "spdk/log.h"
+#include "spdk/thread.h"
+#include "spdk/bdev.h"
+}
+
 namespace SPTAG::SPANN
 {
     typedef std::int64_t AddressType;
@@ -22,10 +30,31 @@ namespace SPTAG::SPANN
         class BlockController {
         private:
             static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
-            static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx;
+            static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
+            static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
+            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 38) >> PageSizeEx; // 256GB
+            static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
+            static constexpr const char* kSpdkBdevEnv = "SPFRESH_SPDK_BDEV";
+
             tbb::concurrent_queue<AddressType> m_blockAddresses;
+
+            bool m_useSsdImpl = false;
+            const char* m_ssdBdevName = nullptr;
+            pthread_t m_ssdSpdkTid;
+            volatile bool m_ssdSpdkThreadStartFailed = false;
+            volatile bool m_ssdSpdkThreadReady = false;
+            struct spdk_bdev *m_ssdSpdkBdev;
+            struct spdk_bdev_desc *m_ssdSpdkBdevDesc;
+            struct spdk_io_channel *m_ssdSpdkBdevIoChannel;
+
             bool m_useMemImpl = false;
             static std::unique_ptr<char[]> m_memBuffer;
+
+            static void* InitializeSpdk(void* args);
+
+            static void SpdkStart(void* args);
+
+            static void SpdkBdevEventCallback(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx);
         public:
             bool Initialize();
 
