@@ -5,3 +5,6 @@
 [submodule "ThirdParty/spdk"]
 	path = ThirdParty/spdk
 	url = https://github.com/spdk/spdk
+[submodule "ThirdParty/isal-l_crypto"]
+	path = ThirdParty/isal-l_crypto
+	url = https://github.com/intel/isa-l_crypto
