@@ -6,13 +6,65 @@
 namespace SPTAG::SPANN
 {
 
-thread_local std::vector<SPDKIO::BlockController::SubIoRequest> SPDKIO::BlockController::m_ssdSpdkThreadLocalSubRequests;
-thread_local tbb::concurrent_queue<SPDKIO::BlockController::SubIoRequest *> SPDKIO::BlockController::m_ssdSpdkSubRequestQueue;
-thread_local struct SPDKIO::BlockController::IoRequest SPDKIO::BlockController::m_currIoRequest;
+thread_local struct SPDKIO::BlockController::IoContext SPDKIO::BlockController::m_currIoContext;
+int SPDKIO::BlockController::m_ssdInflight = 0;
 std::unique_ptr<char[]> SPDKIO::BlockController::m_memBuffer;
 
 void SPDKIO::BlockController::SpdkBdevEventCallback(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx) {
     fprintf(stderr, "SpdkBdevEventCallback: supported bdev event type %d\n", type);
+}
+
+void SPDKIO::BlockController::SpdkBdevIoCallback(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg) {
+    SubIoRequest* currSubIo = (SubIoRequest *)cb_arg;
+    if (success) {
+        spdk_bdev_free_io(bdev_io);
+        currSubIo->completed_sub_io_requests->push(currSubIo);
+        m_ssdInflight--;
+        SpdkIoLoop(currSubIo->ctrl);
+    } else {
+        fprintf(stderr, "SpdkBdevIoCallback: I/O failed %p\n", currSubIo);
+        spdk_app_stop(-1);
+    }
+}
+
+void SPDKIO::BlockController::SpdkStop(void *arg) {
+    SPDKIO::BlockController* ctrl = (SPDKIO::BlockController *)arg;
+    // Close I/O channel and bdev
+    spdk_put_io_channel(ctrl->m_ssdSpdkBdevIoChannel);
+    spdk_bdev_close(ctrl->m_ssdSpdkBdevDesc);
+    fprintf(stdout, "SPDKIO::BlockController::SpdkStop: finalized\n");
+}
+
+void SPDKIO::BlockController::SpdkIoLoop(void *arg) {
+    SPDKIO::BlockController* ctrl = (SPDKIO::BlockController *)arg;
+    int rc = 0;
+    SubIoRequest* currSubIo = nullptr;
+    while (!ctrl->m_ssdSpdkThreadExiting) {
+        if (ctrl->m_submittedSubIoRequests.try_pop(currSubIo)) {
+            if (currSubIo->is_read) {
+                rc = spdk_bdev_read(
+                    ctrl->m_ssdSpdkBdevDesc, ctrl->m_ssdSpdkBdevIoChannel,
+                    currSubIo->dma_buff, currSubIo->offset, PageSize, SpdkBdevIoCallback, currSubIo);
+            } else {
+                rc = spdk_bdev_write(
+                    ctrl->m_ssdSpdkBdevDesc, ctrl->m_ssdSpdkBdevIoChannel,
+                    currSubIo->dma_buff, currSubIo->offset, PageSize, SpdkBdevIoCallback, currSubIo);
+            }
+            if (rc && rc != -ENOMEM) {
+                fprintf(stderr, "SPDKIO::BlockController::SpdkStart %s failed: %d, shutting down\n",
+                    currSubIo->is_read ? "spdk_bdev_read" : "spdk_bdev_write", rc);
+                spdk_app_stop(-1);
+                break;
+            } else {
+                m_ssdInflight++;
+            }
+        } else if (m_ssdInflight) {
+            break;
+        }
+    }
+    if (ctrl->m_ssdSpdkThreadExiting) {
+        SpdkStop(ctrl);
+    }
 }
 
 void SPDKIO::BlockController::SpdkStart(void *arg) {
@@ -45,13 +97,9 @@ void SPDKIO::BlockController::SpdkStart(void *arg) {
     }
 
     ctrl->m_ssdSpdkThreadReady = true;
+    m_ssdInflight = 0;
 
-    while (!ctrl->m_ssdSpdkThreadExiting) {}
-
-    // Close I/O channel and bdev
-    spdk_put_io_channel(ctrl->m_ssdSpdkBdevIoChannel);
-    spdk_bdev_close(ctrl->m_ssdSpdkBdevDesc);
-    fprintf(stdout, "SPDKIO::BlockController::SpdkStart: finalized\n");
+    SpdkIoLoop(ctrl);
 }
 
 void* SPDKIO::BlockController::InitializeSpdk(void *arg) {
@@ -97,6 +145,9 @@ bool SPDKIO::BlockController::Initialize() {
         return true;
     } else if (m_useSsdImpl) {
         if (m_numInitCalled == 1) {
+            for (AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
+                m_blockAddresses.push(i);
+            }
             pthread_create(&m_ssdSpdkTid, NULL, &InitializeSpdk, this);
             while (!m_ssdSpdkThreadReady && !m_ssdSpdkThreadStartFailed);
             if (m_ssdSpdkThreadStartFailed) {
@@ -105,14 +156,15 @@ bool SPDKIO::BlockController::Initialize() {
             }
         }
         // Create sub I/O request pool
-        m_ssdSpdkThreadLocalSubRequests.resize(m_ssdSpdkIoDepth);
+        m_currIoContext.sub_io_requests.resize(m_ssdSpdkIoDepth);
         uint32_t buf_align;
         buf_align = spdk_bdev_get_buf_align(m_ssdSpdkBdev);
-        for (auto &sr : m_ssdSpdkThreadLocalSubRequests) {
-            sr.request = nullptr;
+        for (auto &sr : m_currIoContext.sub_io_requests) {
+            sr.completed_sub_io_requests = &(m_currIoContext.completed_sub_io_requests);
             sr.app_buff = nullptr;
             sr.dma_buff = spdk_dma_zmalloc(PageSize, buf_align, NULL);
-            m_ssdSpdkSubRequestQueue.push(&sr);
+            sr.ctrl = this;
+            m_currIoContext.free_sub_io_requests.push_back(&sr);
         }
         return true;
     } else {
@@ -165,6 +217,34 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         }
         return true;
     } else if (m_useSsdImpl) {
+        p_value->resize(p_data[0]);
+        AddressType currOffset = 0;
+        AddressType dataIdx = 1;
+        int inflight = 0;
+        SubIoRequest* currSubIo;
+        // Submit all I/Os
+        while (currOffset < p_data[0] || inflight) {
+            // Try submit
+            if (currOffset < p_data[0] && m_currIoContext.free_sub_io_requests.size()) {
+                currSubIo = m_currIoContext.free_sub_io_requests.back();
+                m_currIoContext.free_sub_io_requests.pop_back();
+                currSubIo->app_buff = p_value->data() + currOffset;
+                currSubIo->real_size = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
+                currSubIo->is_read = true;
+                currSubIo->offset = p_data[dataIdx] * PageSize;
+                m_submittedSubIoRequests.push(currSubIo);
+                currOffset += PageSize;
+                dataIdx++;
+                inflight++;
+            }
+            // Try complete
+            if (inflight && m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+                memcpy(currSubIo->app_buff, currSubIo->dma_buff, currSubIo->real_size);
+                currSubIo->app_buff = nullptr;
+                m_currIoContext.free_sub_io_requests.push_back(currSubIo);
+                inflight--;
+            }
+        }
         return true;
     } else {
         fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
@@ -181,7 +261,11 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
         }
         return true;
     } else if (m_useSsdImpl) {
+        // TODO: optimize
         p_values->resize(p_data.size());
+        for (size_t i = 0; i < p_data.size(); i++) {
+            ReadBlocks(p_data[i], &((*p_values)[i]));
+        }
         return true;
     } else {
         fprintf(stderr, "SPDKIO::BlockController::ReadBlocks batch failed\n");
@@ -197,6 +281,31 @@ bool SPDKIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
         }
         return true;
     } else if (m_useSsdImpl) {
+        AddressType currBlockIdx = 0;
+        int inflight = 0;
+        SubIoRequest* currSubIo;
+        // Submit all I/Os
+        while (currBlockIdx < p_size || inflight) {
+            // Try submit
+            if (currBlockIdx < p_size && m_currIoContext.free_sub_io_requests.size()) {
+                currSubIo = m_currIoContext.free_sub_io_requests.back();
+                m_currIoContext.free_sub_io_requests.pop_back();
+                currSubIo->app_buff = const_cast<char *>(p_value.data()) + currBlockIdx * PageSize;
+                currSubIo->real_size = PageSize;
+                currSubIo->is_read = false;
+                currSubIo->offset = p_data[currBlockIdx] * PageSize;
+                memcpy(currSubIo->dma_buff, currSubIo->app_buff, currSubIo->real_size);
+                m_submittedSubIoRequests.push(currSubIo);
+                currBlockIdx++;
+                inflight++;
+            }
+            // Try complete
+            if (inflight && m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+                currSubIo->app_buff = nullptr;
+                m_currIoContext.free_sub_io_requests.push_back(currSubIo);
+                inflight--;
+            }
+        }
         return true;
     } else {
         fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
@@ -221,16 +330,19 @@ bool SPDKIO::BlockController::ShutDown() {
             m_ssdSpdkThreadExiting = true;
             spdk_app_start_shutdown();
             pthread_join(m_ssdSpdkTid, NULL);
+            while (!m_blockAddresses.empty()) {
+                AddressType currBlockAddress;
+                m_blockAddresses.try_pop(currBlockAddress);
+            }
         }
         // Free memory buffers
-        SubIoRequest* tmpIr = nullptr;
-        for (auto &sr : m_ssdSpdkThreadLocalSubRequests) {
-            sr.request = nullptr;
+        for (auto &sr : m_currIoContext.sub_io_requests) {
+            sr.completed_sub_io_requests = nullptr;
             sr.app_buff = nullptr;
             spdk_free(sr.dma_buff);
             sr.dma_buff = nullptr;
-            while (!m_ssdSpdkSubRequestQueue.try_pop(tmpIr));
         }
+        m_currIoContext.free_sub_io_requests.clear();
         return true;
     } else {
         fprintf(stderr, "SPDKIO::BlockController::ShutDown failed\n");

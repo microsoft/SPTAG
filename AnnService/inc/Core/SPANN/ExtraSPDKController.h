@@ -51,35 +51,25 @@ namespace SPTAG::SPANN
             struct spdk_bdev_desc *m_ssdSpdkBdevDesc = nullptr;
             struct spdk_io_channel *m_ssdSpdkBdevIoChannel = nullptr;
 
-            struct IoRequest;
-
+            int m_ssdSpdkIoDepth = kSsdSpdkDefaultIoDepth;
             struct SubIoRequest {
-                IoRequest* request;
+                tbb::concurrent_queue<SubIoRequest *>* completed_sub_io_requests;
                 void* app_buff;
                 void* dma_buff;
+                AddressType real_size;
+                AddressType offset;
+                bool is_read;
+                BlockController* ctrl;
             };
-            int m_ssdSpdkIoDepth = kSsdSpdkDefaultIoDepth;
-            static thread_local std::vector<SubIoRequest> m_ssdSpdkThreadLocalSubRequests;
-            static thread_local tbb::concurrent_queue<SubIoRequest *> m_ssdSpdkSubRequestQueue;
+            tbb::concurrent_queue<SubIoRequest *> m_submittedSubIoRequests;
+            struct IoContext {
+                std::vector<SubIoRequest> sub_io_requests;
+                std::vector<SubIoRequest *> free_sub_io_requests;
+                tbb::concurrent_queue<SubIoRequest *> completed_sub_io_requests;
+            };
+            static thread_local struct IoContext m_currIoContext;
 
-            enum IoRequestType {
-                ReadSingle = 0,
-                ReadBatch,
-                WriteBatch
-            };
-            struct IoRequest {
-                enum IoRequestType type;
-                union {
-                    AddressType* p_data;
-                    std::vector<AddressType*>* p_data_batch;
-                } offset;
-                union {
-                    std::string* p_value;
-                    std::vector<std::string>* p_value_batch;
-                } buff;
-                tbb::concurrent_queue<SubIoRequest *> completion_queue;
-            };
-            static thread_local struct IoRequest m_currIoRequest;
+            static int m_ssdInflight;
 
             bool m_useMemImpl = false;
             static std::unique_ptr<char[]> m_memBuffer;
@@ -91,7 +81,13 @@ namespace SPTAG::SPANN
 
             static void SpdkStart(void* args);
 
+            static void SpdkIoLoop(void *arg);
+
             static void SpdkBdevEventCallback(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx);
+
+            static void SpdkBdevIoCallback(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg);
+
+            static void SpdkStop(void* args);
         public:
             bool Initialize();
 

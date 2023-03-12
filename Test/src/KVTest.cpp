@@ -39,8 +39,8 @@ void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int t
 
 void Test(std::string path, std::string type, bool debug = false)
 {
-    int internalResultNum = 2;
-    int totalNum = 10;
+    int internalResultNum = 64;
+    int totalNum = 1024;
     int mergeIters = 3;
     std::shared_ptr<Helper::KeyValueIO> db;
     if (type == "RocksDB") {
@@ -49,40 +49,37 @@ void Test(std::string path, std::string type, bool debug = false)
         db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
     }
 
-    // auto t1 = std::chrono::high_resolution_clock::now();
-    // for (int i = 0; i < totalNum; i++) {
-    //     int len = std::to_string(i).length();
-    //     std::string val(PageSize - len, '0');
-    //     db->Put(i, val);
-    // }
-    // auto t2 = std::chrono::high_resolution_clock::now();
-    // std::cout << "avg put time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum)) << "us" << std::endl;
+    auto t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < totalNum; i++) {
+        int len = std::to_string(i).length();
+        std::string val(PageSize - len, '0');
+        db->Put(i, val);
+    }
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "avg put time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum)) << "us" << std::endl;
 
-    // db->ForceCompaction();
+    db->ForceCompaction();
 
-    // t1 = std::chrono::high_resolution_clock::now();
-    // for (int i = 0; i < totalNum; i++) {
-    //     for (int j = 0; j < mergeIters; j++) {
-    //         db->Merge(i, std::to_string(i));
-    //     }
-    // }
-    // t2 = std::chrono::high_resolution_clock::now();
-    // std::cout << "avg merge time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum * mergeIters)) << "us" << std::endl;
+    t1 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < totalNum; i++) {
+        for (int j = 0; j < mergeIters; j++) {
+            db->Merge(i, std::to_string(i));
+        }
+    }
+    t2 = std::chrono::high_resolution_clock::now();
+    std::cout << "avg merge time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum * mergeIters)) << "us" << std::endl;
 
-    // Search(db, internalResultNum, totalNum, 10, debug);
+    Search(db, internalResultNum, totalNum, 10, debug);
 
-    // db->ForceCompaction();
-    // db->ShutDown();
-
-    // if (type == "RocksDB") {
-    //     db.reset(new RocksDBIO(path.c_str(), true));
-    // } else if (type == "SPDK") {
-    //     db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
-    // }
-
-    // Search(db, internalResultNum, totalNum, 10, debug);
-    // db->ForceCompaction();
+    db->ForceCompaction();
     db->ShutDown();
+
+    if (type == "RocksDB") {
+        db.reset(new RocksDBIO(path.c_str(), true));
+        Search(db, internalResultNum, totalNum, 10, debug);
+        db->ForceCompaction();
+        db->ShutDown();
+    }
 }
 
 BOOST_AUTO_TEST_SUITE(KVTest)
