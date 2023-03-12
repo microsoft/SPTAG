@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include <atomic>
+#include <mutex>
 #include <tbb/concurrent_queue.h>
 #include <tbb/concurrent_hash_map.h>
 
@@ -34,21 +35,57 @@ namespace SPTAG::SPANN
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
             static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 38) >> PageSizeEx; // 256GB
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
-            static constexpr const char* kSpdkBdevEnv = "SPFRESH_SPDK_BDEV";
+            static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
+            static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
+            static constexpr int kSsdSpdkDefaultIoDepth = 1024;
 
             tbb::concurrent_queue<AddressType> m_blockAddresses;
 
             bool m_useSsdImpl = false;
-            const char* m_ssdBdevName = nullptr;
+            const char* m_ssdSpdkBdevName = nullptr;
             pthread_t m_ssdSpdkTid;
             volatile bool m_ssdSpdkThreadStartFailed = false;
             volatile bool m_ssdSpdkThreadReady = false;
-            struct spdk_bdev *m_ssdSpdkBdev;
-            struct spdk_bdev_desc *m_ssdSpdkBdevDesc;
-            struct spdk_io_channel *m_ssdSpdkBdevIoChannel;
+            volatile bool m_ssdSpdkThreadExiting = false;
+            struct spdk_bdev *m_ssdSpdkBdev = nullptr;
+            struct spdk_bdev_desc *m_ssdSpdkBdevDesc = nullptr;
+            struct spdk_io_channel *m_ssdSpdkBdevIoChannel = nullptr;
+
+            struct IoRequest;
+
+            struct SubIoRequest {
+                IoRequest* request;
+                void* app_buff;
+                void* dma_buff;
+            };
+            int m_ssdSpdkIoDepth = kSsdSpdkDefaultIoDepth;
+            static thread_local std::vector<SubIoRequest> m_ssdSpdkThreadLocalSubRequests;
+            static thread_local tbb::concurrent_queue<SubIoRequest *> m_ssdSpdkSubRequestQueue;
+
+            enum IoRequestType {
+                ReadSingle = 0,
+                ReadBatch,
+                WriteBatch
+            };
+            struct IoRequest {
+                enum IoRequestType type;
+                union {
+                    AddressType* p_data;
+                    std::vector<AddressType*>* p_data_batch;
+                } offset;
+                union {
+                    std::string* p_value;
+                    std::vector<std::string>* p_value_batch;
+                } buff;
+                tbb::concurrent_queue<SubIoRequest *> completion_queue;
+            };
+            static thread_local struct IoRequest m_currIoRequest;
 
             bool m_useMemImpl = false;
             static std::unique_ptr<char[]> m_memBuffer;
+
+            std::mutex m_initMutex;
+            int m_numInitCalled;
 
             static void* InitializeSpdk(void* args);
 
