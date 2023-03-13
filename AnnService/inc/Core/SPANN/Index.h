@@ -207,6 +207,12 @@ namespace SPTAG
             void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
             
             void ForceCompaction() { if (m_options.m_useKV) m_extraSearcher->ForceCompaction(); }
+
+            void StopMerge() { m_options.m_inPlace = true; }
+
+            void OpenMerge() { m_options.m_inPlace = false; }
+
+            void ForceGC() { m_extraSearcher->ForceGC(m_index.get()); }
         };
     } // namespace SPANN
 } // namespace SPTAG

@@ -120,7 +120,7 @@ namespace SPTAG::SPANN {
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
-        ExtraDynamicSearcher(const char* dbPath, int dim, int vectorlimit, bool useDirectIO, float searchLatencyHardLimit) {
+        ExtraDynamicSearcher(const char* dbPath, int dim, int vectorlimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold) {
 #ifdef ROCKSDB
             db.reset(new RocksDBIO(dbPath, useDirectIO));
 #endif
@@ -128,7 +128,8 @@ namespace SPTAG::SPANN {
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;
             m_postingSizeLimit = vectorlimit;
             m_hardLatencyLimit = searchLatencyHardLimit;
-            LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", m_postingSizeLimit);
+            m_mergeThreshold = mergeThreshold;
+            LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, m_hardLatencyLimit, m_mergeThreshold);
         }
 
         ~ExtraDynamicSearcher() {}
@@ -375,7 +376,7 @@ namespace SPTAG::SPANN {
                             if (m_postingSizes.GetSize(index) >= limit)
                             {
                                 doneReassign = false;
-                                Split(p_index.get(), index, false);
+                                Split(p_index.get(), index, false, true);
                             }
                         }
                         else
@@ -394,12 +395,12 @@ namespace SPTAG::SPANN {
                 //LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
                 //m_postingSizes.Save(m_opt->m_ssdInfoFile);
 
-                for (int i = 0; i < p_index->GetNumSamples(); i++) {
-                    db->Delete(i);
-                }
-                ForceCompaction();
+                // for (int i = 0; i < p_index->GetNumSamples(); i++) {
+                //     db->Delete(i);
+                // }
+                // ForceCompaction();
                 BuildIndex(p_reader, p_index, *m_opt, *m_versionMap);
-                ForceCompaction();
+                // ForceCompaction();
                 CalculatePostingDistribution(p_index.get());
 
                 p_index->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder);
@@ -408,7 +409,7 @@ namespace SPTAG::SPANN {
             }
         }
 
-        ErrorCode Split(VectorIndex* p_index, const SizeType headID, bool reassign = false)
+        ErrorCode Split(VectorIndex* p_index, const SizeType headID, bool reassign = false, bool preReassign = false)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
             std::vector<SizeType> newHeadsID;
@@ -449,7 +450,7 @@ namespace SPTAG::SPANN {
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
-                if (index < m_postingSizeLimit)
+                if (!preReassign && index < m_postingSizeLimit)
                 {
                     char* ptr = (char*)(postingList.c_str());
                     for (int j = 0; j < index; j++, ptr += m_vectorInfoSize)
@@ -1426,6 +1427,13 @@ namespace SPTAG::SPANN {
                 }
             }
             return -1;
+        }
+
+        void ForceGC(VectorIndex* p_index) override {
+            for (int i = 0; i < p_index->GetNumSamples(); i++) {
+                if (!p_index->ContainSample(i)) continue;
+                Split(p_index, i, false);
+            }
         }
 
         bool AllFinished() { return m_splitThreadPool->allClear() && m_reassignThreadPool->allClear(); }

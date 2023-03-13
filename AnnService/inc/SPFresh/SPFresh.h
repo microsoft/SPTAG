@@ -896,9 +896,14 @@ namespace SPTAG {
                     std::string truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
 
                     p_opts.m_calTruth = calTruthOrigin;
+                    p_index->ForceCompaction();
                     if (p_opts.m_onlySearchFinalBatch && days - 1 != i) continue;
+                    p_index->ForceGC();
+                    p_index->ForceCompaction();
+                    p_index->StopMerge();
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
+                        LOG(Helper::LogLevel::LL_Info, "Latency & Recall Tradeoff\n");
                         for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
                         {
                             StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, truthFileName, p_opts, sw.getElapsedSec());
@@ -908,7 +913,7 @@ namespace SPTAG {
                     {
                         StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, truthFileName, p_opts, sw.getElapsedSec());
                     }
-                    p_index->ForceCompaction();
+                    p_index->OpenMerge();
                 }
             }
 

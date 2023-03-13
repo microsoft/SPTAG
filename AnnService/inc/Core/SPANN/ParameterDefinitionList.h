@@ -176,6 +176,8 @@ DefineSSDParameter(m_deleteQPS, int, -1, "DeleteQPS")
 DefineSSDParameter(m_sampling, int, -1, "Sampling")
 // Steady State: showUpdateProgress
 DefineSSDParameter(m_showUpdateProgress, bool, true, "ShowUpdateProgress")
+// Steady State: Merge Threshold
+DefineSSDParameter(m_mergeThreshold, int, 10, "MergeThreshold")
 
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")

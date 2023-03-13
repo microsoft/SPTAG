@@ -169,6 +169,7 @@ namespace SPTAG {
             int m_deleteQPS;
             int m_sampling;
             bool m_showUpdateProgress;
+            int m_mergeThreshold;
 
 
             Options() {
