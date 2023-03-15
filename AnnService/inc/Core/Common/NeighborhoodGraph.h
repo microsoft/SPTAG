@@ -553,6 +553,7 @@ break;
                     {
                         BasicResult* item = query.GetResult(j);
                         if (item->VID < 0) break;
+                        if (item->VID >= index->GetNumSamples()) continue;
                         if (item->VID == node) continue;
 
                         InsertNeighbors(index, item->VID, node, item->Dist);

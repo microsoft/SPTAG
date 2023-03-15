@@ -20,6 +20,7 @@ namespace SPTAG
                 for (int j = 0; j < numResults && count < m_iNeighborhoodSize; j++) {
                     const BasicResult& item = queryResults[j];
                     if (item.VID < 0) break;
+                    if (item.VID >= index->GetNumSamples()) continue;
                     if (item.VID == node) continue;
                     nodes[count++] = item.VID;
                 }

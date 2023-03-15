@@ -76,7 +76,7 @@ namespace SPTAG
 
             inline const T* At(SizeType index) const
             {
-                if (index > R())
+                if (index >= R())
                 {
                     throw std::out_of_range((std::ostringstream() << "Index out of range in Dataset. Index: " << index << " Size: " << R()).str());
                 }
