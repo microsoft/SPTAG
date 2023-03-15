@@ -256,6 +256,13 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
+        {
+            LOG(Helper::LogLevel::LL_Error, "Not Support Filter on SPANN Index!\n");
+            return ErrorCode::Fail;
+        }
+
         template <typename T>
         ErrorCode Index<T>::SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats) const
         {
