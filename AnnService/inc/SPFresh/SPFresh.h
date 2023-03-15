@@ -616,7 +616,7 @@ namespace SPTAG {
                         LoadTruth(p_opts, truth, numQueries, truthFileName, truthK);
                         CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
                     } else {
-                        OutputResult<ValueType>(GetTruthFileName(p_opts.m_searchResult, second), results, p_opts.m_resultNum);
+                        OutputResult<ValueType>(p_opts.m_searchResult + std::to_string(second), results, p_opts.m_resultNum);
                     }
                 }
             }

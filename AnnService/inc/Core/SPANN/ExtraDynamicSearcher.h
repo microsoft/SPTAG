@@ -581,10 +581,17 @@ namespace SPTAG::SPANN {
         ErrorCode MergePostings(VectorIndex* p_index, SizeType headID, bool reassign = false)
         {
             {
-                std::unique_lock<std::mutex> mergelock(m_mergeLock);
+                if (!m_mergeLock.try_lock()) {
+                    auto* curJob = new MergeAsyncJob(p_index, this, headID, reassign, nullptr);
+                    m_splitThreadPool->add(curJob);
+                    return ErrorCode::Success;
+                }
                 std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
-                if (!p_index->ContainSample(headID)) return ErrorCode::Success;
+                if (!p_index->ContainSample(headID)) {
+                    m_mergeLock.unlock();
+                    return ErrorCode::Success;
+                }
 
                 std::string mergedPostingList;
                 std::set<SizeType> vectorIdSet;
@@ -618,6 +625,7 @@ namespace SPTAG::SPANN {
                         exit(0);
                     }
                     m_mergeList.erase(headID);
+                    m_mergeLock.unlock();
                     return ErrorCode::Success;
                 }
 
@@ -681,7 +689,7 @@ namespace SPTAG::SPANN {
 
                         // LOG(Helper::LogLevel::LL_Info,"Release: %d, Release: %d\n", headID, queryResult->VID);
                         lock.unlock();
-                        mergelock.unlock();
+                        m_mergeLock.unlock();
 
                         if (reassign) 
                         {
@@ -721,6 +729,13 @@ namespace SPTAG::SPANN {
                         return ErrorCode::Success;
                     }
                 }
+                m_postingSizes.UpdateSize(headID, currentLength);
+                if (db->Put(headID, mergedPostingList) != ErrorCode::Success) {
+                    LOG(Helper::LogLevel::LL_Info, "Merge Fail to write back postings\n");
+                    exit(0);
+                }
+                m_mergeList.erase(headID);
+                m_mergeLock.unlock();
             }
             return ErrorCode::Success;
         }
