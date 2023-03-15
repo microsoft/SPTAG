@@ -206,8 +206,11 @@ namespace SPTAG
                     do { \
                         CheckDeleted \
                         { \
-                            CheckDuplicated \
-                            break; \
+                            CheckFilter \
+                            { \
+                                CheckDuplicated \
+                                break; \
+                            } \
                         } \
                         tmpNode = m_pTrees[i].centerid; \
                     } while (i++ < tnode.childEnd); \
@@ -257,22 +260,50 @@ namespace SPTAG
             {
                 if (p_searchDuplicated)
                 {
-                    Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func == nullptr || func(m_pMetadata->GetMetadata(tmpNode))))
+                    if (func == nullptr)
+                    {
+                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
+                    }
+                    else
+                    {
+                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
                 else
                 {
-                    Search(;, p_query.AddPoint(tmpNode, gnode.distance);, if (func == nullptr || func(m_pMetadata->GetMetadata(tmpNode))))
+                    if (func == nullptr)
+                    {
+                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, ;)
+                    }
+                    else
+                    {
+                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
             }
             else
             {
                 if (p_searchDuplicated)
                 {
-                    Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), if(func == nullptr || func(m_pMetadata->GetMetadata(tmpNode))))
+                    if (func == nullptr)
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
+                    }
+                    else
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
                 else
                 {
-                    Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);, if (func == nullptr || func(m_pMetadata->GetMetadata(tmpNode))))
+                    if (func == nullptr)
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);, ;)
+                    }
+                    else
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance); , if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
             }
         }
