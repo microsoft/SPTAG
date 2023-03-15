@@ -73,6 +73,11 @@ namespace SPTAG
 
             inline const T* At(SizeType index) const
             {
+                if (index > R())
+                {
+                    LOG(LL_ERROR, "Index out of range: %i, max value: %i", index, R());
+                    throw std::out_of_range("Index out of range in Dataset");
+                }
                 if (index >= rows) {
                     SizeType incIndex = index - rows;
                     return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;

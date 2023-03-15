@@ -70,6 +70,12 @@ namespace SPTAG
             if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                LOG(Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
+
             omp_set_num_threads(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -86,6 +92,12 @@ namespace SPTAG
             if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                LOG(Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_threadPool.init();
@@ -228,6 +240,7 @@ namespace SPTAG
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
+                if (nn_index > m_pSamples.R()) break; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
