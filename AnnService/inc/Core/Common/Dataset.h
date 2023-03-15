@@ -4,6 +4,9 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+#include <stdexcept>
+#include <sstream>
+
 namespace SPTAG
 {
     namespace COMMON
@@ -75,9 +78,9 @@ namespace SPTAG
             {
                 if (index > R())
                 {
-                    LOG(LL_ERROR, "Index out of range: %i, max value: %i", index, R());
-                    throw std::out_of_range("Index out of range in Dataset");
+                    throw std::out_of_range((std::ostringstream() << "Index out of range in Dataset. Index: " << index << " Size: " << R()).str());
                 }
+
                 if (index >= rows) {
                     SizeType incIndex = index - rows;
                     return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
