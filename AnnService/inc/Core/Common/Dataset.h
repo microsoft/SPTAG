@@ -78,7 +78,9 @@ namespace SPTAG
             {
                 if (index >= R())
                 {
-                    throw std::out_of_range((std::ostringstream() << "Index out of range in Dataset. Index: " << index << " Size: " << R()).str());
+                    std::ostringstream oss;
+                    oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
+                    throw std::out_of_range(oss.str());
                 }
 
                 if (index >= rows) {
