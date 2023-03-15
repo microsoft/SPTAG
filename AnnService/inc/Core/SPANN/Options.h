@@ -170,6 +170,7 @@ namespace SPTAG {
             int m_sampling;
             bool m_showUpdateProgress;
             int m_mergeThreshold;
+            bool m_loadAllVectors;
 
 
             Options() {

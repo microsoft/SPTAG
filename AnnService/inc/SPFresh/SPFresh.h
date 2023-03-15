@@ -119,7 +119,11 @@ namespace SPTAG {
                 long page_size_kb = sysInfo.dwPageSize / 1024;
 #endif
                 long rss = resident * page_size_kb;
-                long vector_size = vectorSet->PerVectorDataSize() * (vectorSet->Count() / 1024);
+                long vector_size;
+                if (vectorSet != nullptr)
+                    vector_size = vectorSet->PerVectorDataSize() * (vectorSet->Count() / 1024);
+                else 
+                    vector_size = 0;
                 long vector_size_mb = vector_size / 1024;
 
                 LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %ld MB, Vector Set Size : %ld MB, True Size: %ld MB\n", second, rss / 1024, vector_size_mb, rss / 1024 - vector_size_mb);
@@ -466,18 +470,63 @@ namespace SPTAG {
             std::shared_ptr<VectorSet>  LoadVectorSet(SPANN::Options& p_opts, int numThreads)
             {
                 std::shared_ptr<VectorSet> vectorSet;
-                LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
-                if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
-                    std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
-                    auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
-                    if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_fullVectorPath))
-                    {
-                        vectorSet = vectorReader->GetVectorSet();
-                        if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
-                        LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
+                if (p_opts.m_loadAllVectors) {
+                    LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
+                    if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                        std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
+                        auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+                        if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_fullVectorPath))
+                        {
+                            vectorSet = vectorReader->GetVectorSet();
+                            if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
+                            LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
+                        }
                     }
+                } else {
+                    LOG(Helper::LogLevel::LL_Info, "Reduce memory usage\n");
                 }
                 return vectorSet;
+            }
+
+            std::shared_ptr<VectorSet>  LoadUpdateVectors(SPANN::Options& p_opts, std::vector<SizeType>& insertSet, SizeType updateSize)
+            {
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(p_opts.m_fullVectorPath.c_str(), std::ios::binary | std::ios::in)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", p_opts.m_fullVectorPath.c_str());
+                    throw std::runtime_error("Failed read file");
+                }
+
+                SizeType row;
+                DimensionType col;
+                if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                    throw std::runtime_error("Failed read file");
+                }
+                if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                    throw std::runtime_error("Failed read file");
+                }
+
+                std::uint64_t totalRecordVectorBytes = ((std::uint64_t)GetValueTypeSize(p_opts.m_valueType)) * updateSize * col;
+                ByteArray vectorSet;
+                if (totalRecordVectorBytes > 0) {
+                    vectorSet = ByteArray::Alloc(totalRecordVectorBytes);
+                    char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
+                    std::uint64_t readSize = ((std::uint64_t)GetValueTypeSize(p_opts.m_valueType)) * col;
+                    for (int i = 0; i < updateSize; i++) {
+                        std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(p_opts.m_valueType)) * insertSet[i] * col + sizeof(SizeType) + sizeof(DimensionType);
+                        if (ptr->ReadBinary(readSize, vecBuf + i*readSize, offset) != readSize) {
+                            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                            throw std::runtime_error("Failed read file");
+                        }
+                    }
+                }
+                LOG(Helper::LogLevel::LL_Info, "Load Vector(%d,%d)\n",updateSize, col);
+                return std::make_shared<BasicVectorSet>(vectorSet,
+                                                        p_opts.m_valueType,
+                                                        col,
+                                                        updateSize);
+
             }
 
             std::shared_ptr<VectorSet> LoadQuerySet(SPANN::Options& p_opts)
@@ -676,10 +725,10 @@ namespace SPTAG {
                                 SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
                                 1));
                             auto insertBegin = std::chrono::high_resolution_clock::now();
-                            p_index->AddIndex(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, metaset);
-                            // if (insertSet[index] == 0) {
-                            //     LOG(Helper::LogLevel::LL_Info, "batch: insert 0 to meta: %d\n", metaIndice[insertSet[index]]);
-                            // }
+                            if (p_opts.m_loadAllVectors)
+                                p_index->AddIndex(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, metaset);
+                            else
+                                p_index->AddIndex(vectorSet->GetVector(index), 1, p_opts.m_dim, metaset);
                             auto insertEnd = std::chrono::high_resolution_clock::now();
                             latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(insertEnd - insertBegin).count();
                         }
@@ -846,6 +895,9 @@ namespace SPTAG {
                     std::string traceFileName = p_opts.m_updateFilePrefix + std::to_string(i);
                     std::string mappingFileName = p_opts.m_updateMappingPrefix + std::to_string(i);
                     LoadUpdateTrace(traceFileName, updateSize, insertSet, deleteSet);
+                    if (!p_opts.m_loadAllVectors) {
+                        vectorSet = LoadUpdateVectors(p_opts, insertSet, updateSize);
+                    }
                     LOG(Helper::LogLevel::LL_Info, "Updating day: %d: numThread: %d, updateSize: %d,total days: %d.\n", i, insertThreads, updateSize, days);
 
                     int sampleSize = updateSize / p_opts.m_sampling;
@@ -904,6 +956,179 @@ namespace SPTAG {
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
                         LOG(Helper::LogLevel::LL_Info, "Latency & Recall Tradeoff\n");
+                        for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
+                        {
+                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, truthFileName, p_opts, sw.getElapsedSec());
+                        }
+                    }
+                    else 
+                    {
+                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, truthFileName, p_opts, sw.getElapsedSec());
+                    }
+                    p_index->OpenMerge();
+                }
+            }
+
+            template <typename ValueType>
+            void InsertVectors(SPANN::Index<ValueType>* p_index, 
+                int insertThreads, 
+                std::shared_ptr<SPTAG::VectorSet> vectorSet, 
+                int curCount, 
+                int step,
+                SPANN::Options& p_opts)
+            {
+                StopWSPFresh sw;
+                std::vector<std::thread> threads;
+
+                std::atomic_size_t vectorsSent(0);
+
+                auto func = [&]()
+                {
+                    size_t index = 0;
+                    while (true)
+                    {
+                        index = vectorsSent.fetch_add(1);
+                        if (index < step)
+                        {
+                            if ((index & ((1 << 14) - 1)) == 0)
+                            {
+                                LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
+                            }
+                            p_index->AddIndex(vectorSet->GetVector((SizeType)(index + curCount)), 1, p_opts.m_dim, nullptr);
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                };
+                for (int j = 0; j < insertThreads; j++) { threads.emplace_back(func); }
+                for (auto& thread : threads) { thread.join(); }
+
+                double sendingCost = sw.getElapsedSec();
+                LOG(Helper::LogLevel::LL_Info,
+                "Finish sending in %.3lf seconds, sending throughput is %.2lf , insertion count %u.\n",
+                sendingCost,
+                step/ sendingCost,
+                static_cast<uint32_t>(step));
+
+                LOG(Helper::LogLevel::LL_Info,"During Update\n");
+
+                while(!p_index->AllFinished())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
+                double syncingCost = sw.getElapsedSec();
+                LOG(Helper::LogLevel::LL_Info,
+                "Finish syncing in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
+                syncingCost,
+                step / syncingCost,
+                static_cast<uint32_t>(step));
+            }
+
+            template <typename ValueType>
+            void UpdateSPFresh(SPANN::Index<ValueType>* p_index)
+            {
+                SPANN::Options& p_opts = *(p_index->GetOptions());
+                int step = p_opts.m_step;
+                if (step == 0)
+                {
+                    LOG(Helper::LogLevel::LL_Error, "Incremental Test Error, Need to set step.\n");
+                    exit(1);
+                }
+                StopWSPFresh sw;
+
+                int numThreads = p_opts.m_searchThreadNum;
+                int internalResultNum = p_opts.m_searchInternalResultNum;
+                int searchTimes = p_opts.m_searchTimes;
+
+                auto vectorSet = LoadVectorSet(p_opts, numThreads);
+
+                auto querySet = LoadQuerySet(p_opts);
+
+                int curCount = p_index->GetNumSamples();
+                int insertCount = vectorSet->Count() - curCount;
+
+                bool calTruthOrigin = p_opts.m_calTruth;
+
+                if (p_opts.m_endVectorNum != -1)
+                {
+                    insertCount = p_opts.m_endVectorNum - curCount;
+                }
+
+                p_index->ForceCompaction();
+
+                p_index->GetDBStat();
+
+                if (!p_opts.m_onlySearchFinalBatch) {
+                    if (p_opts.m_maxInternalResultNum != -1) 
+                    {
+                        for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
+                        {
+                            StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, p_opts.m_truthPath, p_opts, sw.getElapsedSec());
+                        }
+                    }
+                    else 
+                    {
+                        StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, p_opts.m_truthPath, p_opts, sw.getElapsedSec());
+                    }
+                }
+
+                ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                p_index->GetDBStat();
+
+                int batch;
+                if (step == 0) {
+                    batch = 0;
+                } else {
+                    batch = insertCount / step;
+                }
+                
+                int finishedInsert = 0;
+                int insertThreads = p_opts.m_insertThreadNum;
+
+                LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, insertCount: %d, totalBatch: %d.\n", insertThreads, step, insertCount, batch);
+
+                LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
+                for (int i = 0; i < 1; i++)
+                {   
+                    LOG(Helper::LogLevel::LL_Info, "Updating Batch %d: numThread: %d, step: %d.\n", i, insertThreads, step);
+
+                    std::future<void> insert_future =
+                        std::async(std::launch::async, InsertVectors<ValueType>, p_index,
+                                insertThreads, vectorSet, curCount, step, std::ref(p_opts));
+
+                    std::future_status insert_status;
+
+                    std::string tempFileName;
+                    p_opts.m_calTruth = false;
+                    do {
+                        insert_status = insert_future.wait_for(std::chrono::seconds(3));
+                        if (insert_status == std::future_status::timeout) {
+                            ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                            p_index->GetIndexStat(-1, false, false);
+                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec());
+                            p_index->GetDBStat();
+                        }
+                    }while (insert_status != std::future_status::ready);
+
+                    curCount += step;
+                    finishedInsert += step;
+                    LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
+
+                    p_index->GetIndexStat(finishedInsert, true, true);
+
+                    ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+
+                    std::string truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
+
+                    p_opts.m_calTruth = calTruthOrigin;
+                    if (p_opts.m_onlySearchFinalBatch && batch - 1 != i) continue;
+                    // p_index->ForceGC();
+                    p_index->ForceCompaction();
+                    p_index->StopMerge();
+                    if (p_opts.m_maxInternalResultNum != -1) 
+                    {
                         for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
                         {
                             StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, truthFileName, p_opts, sw.getElapsedSec());
