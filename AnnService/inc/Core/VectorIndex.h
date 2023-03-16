@@ -39,6 +39,8 @@ public:
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
+    ErrorCode SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck = 0, bool p_searchDeleted = false) const;
+
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 
     virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) = 0;

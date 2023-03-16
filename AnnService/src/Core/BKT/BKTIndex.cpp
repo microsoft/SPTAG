@@ -197,7 +197,7 @@ namespace SPTAG
         p_query.SortResult(); \
 */
 
-#define Search(CheckDeleted, CheckDuplicated) \
+#define Search(CheckDeleted, CheckDuplicated, CheckFilter) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
         m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
@@ -218,15 +218,21 @@ namespace SPTAG
                     do { \
                         CheckDeleted \
                         { \
-                            CheckDuplicated \
-                            break; \
+                            CheckFilter \
+                            { \
+                                CheckDuplicated \
+                                break; \
+                            } \
                         } \
                         tmpNode = m_pTrees[i].centerid; \
                     } while (i++ < tnode.childEnd); \
                } else { \
                    CheckDeleted \
                    { \
-                       p_query.AddPoint(tmpNode, gnode.distance); \
+                       CheckFilter \
+                       { \
+                           p_query.AddPoint(tmpNode, gnode.distance); \
+                       } \
                    } \
                } \
             } else { \
@@ -256,7 +262,7 @@ namespace SPTAG
 
 
         template <typename T>
-        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray)) const
         {
             if (m_pQuantizer && !p_query.HasQuantizedTarget())
             {
@@ -267,22 +273,50 @@ namespace SPTAG
             {
                 if (p_searchDuplicated)
                 {
-                    Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                    if (func == nullptr)
+                    {
+                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
+                    }
+                    else
+                    {
+                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
                 else
                 {
-                    Search(;, p_query.AddPoint(tmpNode, gnode.distance);)
+                    if (func == nullptr)
+                    {
+                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, ;)
+                    }
+                    else
+                    {
+                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
             }
             else
             {
                 if (p_searchDuplicated)
                 {
-                    Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                    if (func == nullptr)
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
+                    }
+                    else
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
                 else
                 {
-                    Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);)
+                    if (func == nullptr)
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);, ;)
+                    }
+                    else
+                    {
+                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance); , if (func(m_pMetadata->GetMetadata(tmpNode))))
+                    }
                 }
             }
         }
@@ -300,6 +334,33 @@ namespace SPTAG
             workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
 
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
+
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
+			workSpace->Reset(maxCheck == 0 ? m_iMaxCheck : maxCheck, p_query.GetResultNum());
+
+            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_searchDeleted, true, func);
 
             m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
