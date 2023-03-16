@@ -72,7 +72,7 @@ namespace SPTAG
 
             if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
             {
-                LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
                 return ErrorCode::FailedParseValue;
             }
 
@@ -95,7 +95,7 @@ namespace SPTAG
 
             if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
             {
-                LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
                 return ErrorCode::FailedParseValue;
             }
 
