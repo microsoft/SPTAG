@@ -155,13 +155,13 @@ namespace SPTAG
 
                 SizeType remain = (incRows & rowsInBlock);
                 if (remain > 0) IOBINARY(p_out, WriteBinary, sizeof(T) * cols * remain, (char*)incBlocks[blocks]);
-                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", name.c_str(), CR, cols);
                 return ErrorCode::Success;
             }
 
             ErrorCode Save(std::string sDataPointsFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Save(ptr);
@@ -174,13 +174,13 @@ namespace SPTAG
 
                 Initialize(rows, cols, blockSize, capacity);
                 IOBINARY(pInput, ReadBinary, sizeof(T) * cols * rows, (char*)data);
-                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), rows, cols);
                 return ErrorCode::Success;
             }
 
             ErrorCode Load(std::string sDataPointsFileName, SizeType blockSize, SizeType capacity)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return Load(ptr, blockSize, capacity);
@@ -198,7 +198,7 @@ namespace SPTAG
                 pDataPointsMemFile += sizeof(DimensionType);
 
                 Initialize(R, C, blockSize, capacity, (T*)pDataPointsMemFile);
-                LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s (%d,%d) Finish!\n", name.c_str(), R, C);
                 return ErrorCode::Success;
             }
 
@@ -221,13 +221,13 @@ namespace SPTAG
                 for (SizeType i = 0; i < R; i++) {
                     IOBINARY(output, WriteBinary, sizeof(T) * cols, (char*)At(indices[i]));
                 }
-                LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), R, cols);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s (%d,%d) Finish!\n", name.c_str(), R, cols);
                 return ErrorCode::Success;
             }
 
             ErrorCode Refine(const std::vector<SizeType>& indices, std::string sDataPointsFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Refine %s To %s\n", name.c_str(), sDataPointsFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sDataPointsFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return Refine(indices, ptr);

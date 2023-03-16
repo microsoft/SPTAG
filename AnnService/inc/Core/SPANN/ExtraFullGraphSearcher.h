@@ -36,11 +36,11 @@ namespace SPTAG
             {
                 auto f_out = f_createIO();
                 if (f_out == nullptr || !f_out->Initialize(m_tmpfile.c_str(), std::ios::out | std::ios::binary | (fileexists(m_tmpfile.c_str()) ? std::ios::in : 0))) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot open %s to save selection for batching!\n", m_tmpfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to save selection for batching!\n", m_tmpfile.c_str());
                     return ErrorCode::FailedOpenFile;
                 }
                 if (f_out->WriteBinary(sizeof(Edge) * (m_end - m_start), (const char*)m_selections.data(), sizeof(Edge) * m_start) != sizeof(Edge) * (m_end - m_start)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot write to %s!\n", m_tmpfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write to %s!\n", m_tmpfile.c_str());
                     return ErrorCode::DiskIOFail;
                 }
                 std::vector<Edge> batch_selection;
@@ -53,14 +53,14 @@ namespace SPTAG
             {
                 auto f_in = f_createIO();
                 if (f_in == nullptr || !f_in->Initialize(m_tmpfile.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot open %s to load selection batch!\n", m_tmpfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to load selection batch!\n", m_tmpfile.c_str());
                     return ErrorCode::FailedOpenFile;
                 }
 
                 size_t readsize = end - start;
                 m_selections.resize(readsize);
                 if (f_in->ReadBinary(readsize * sizeof(Edge), (char*)m_selections.data(), start * sizeof(Edge)) != readsize * sizeof(Edge)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot read from %s! start:%zu size:%zu\n", m_tmpfile.c_str(), start, readsize);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot read from %s! start:%zu size:%zu\n", m_tmpfile.c_str(), start, readsize);
                     return ErrorCode::DiskIOFail;
                 }
                 m_start = start;
@@ -77,7 +77,7 @@ namespace SPTAG
             Edge& operator[](size_t offset)
             {
                 if (offset < m_start || offset >= m_end) {
-                    LOG(Helper::LogLevel::LL_Error, "Error read offset in selections:%zu\n", offset);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error read offset in selections:%zu\n", offset);
                 }
                 return m_selections[offset - m_start];
             }
@@ -91,11 +91,11 @@ namespace SPTAG
                 sizePostingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);\
             }\
             catch (std::runtime_error& err) {\
-                LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", listInfo - m_listInfos.data(), err.what());\
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", listInfo - m_listInfos.data(), err.what());\
                 return;\
             }\
             if (sizePostingListFullData != listInfo->listEleCount * m_vectorInfoSize) {\
-                LOG(Helper::LogLevel::LL_Error, "PostingList %d decompressed size not match! %zu, %d, \n", listInfo - m_listInfos.data(), sizePostingListFullData, listInfo->listEleCount * m_vectorInfoSize);\
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PostingList %d decompressed size not match! %zu, %d, \n", listInfo - m_listInfos.data(), sizePostingListFullData, listInfo->listEleCount * m_vectorInfoSize);\
                 return;\
             }\
         }\
@@ -151,7 +151,7 @@ namespace SPTAG
                         (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, (std::uint16_t)p_opt.m_ioThreads
 #endif
                     )) {
-                        LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file:%s!\n", curFile.c_str());
                         return false;
                     }
 
@@ -161,7 +161,7 @@ namespace SPTAG
                     } 
                     catch (std::exception& e)
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Error occurs when loading HeadInfo:%s\n", e.what());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error occurs when loading HeadInfo:%s\n", e.what());
                         return false;
                     }
 
@@ -255,14 +255,14 @@ namespace SPTAG
                     ++unprocessed;
                     if (!(indexFile->ReadFileAsync(request)))
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
                         unprocessed--;
                     }
 #endif
 #else // sync read
                     auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
                     if (numRead != totalBytes) {
-                        LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
                         throw std::runtime_error("File read mismatch");
                     }
                     // decompress posting list
@@ -317,7 +317,7 @@ namespace SPTAG
                                     m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);
                                 }
                                 catch (std::runtime_error& err) {
-                                    LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", curPostingID, err.what());
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", curPostingID, err.what());
                                     continue;
                                 }
                             }
@@ -357,7 +357,7 @@ namespace SPTAG
                 {
                     if (p_selections[selectIdx].node != postingListId)
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH! node:%d offset:%zu\n", postingListId, selectIdx);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH! node:%d offset:%zu\n", postingListId, selectIdx);
                         throw std::runtime_error("Selection ID mismatch");
                     }
                     std::string vectorID("");
@@ -403,7 +403,7 @@ namespace SPTAG
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Output file can't be empty!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Output file can't be empty!\n");
                     return false;
                 }
 
@@ -411,14 +411,14 @@ namespace SPTAG
                 int candidateNum = p_opt.m_internalResultNum;
                 std::unordered_set<SizeType> headVectorIDS;
                 if (p_opt.m_headIDFile.empty()) {
-                    LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
                     return false;
                 }
 
                 {
                     auto ptr = SPTAG::f_createIO();
                     if (ptr == nullptr || !ptr->Initialize((p_opt.m_indexDirectory + FolderSep +  p_opt.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
-                        LOG(Helper::LogLevel::LL_Error, "failed open VectorIDTranslate: %s\n", p_opt.m_headIDFile.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "failed open VectorIDTranslate: %s\n", p_opt.m_headIDFile.c_str());
                         return false;
                     }
 
@@ -427,7 +427,7 @@ namespace SPTAG
                     {
                         headVectorIDS.insert(static_cast<SizeType>(vid));
                     }
-                    LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
                 }
 
                 SizeType fullCount = 0;
@@ -439,7 +439,7 @@ namespace SPTAG
                 }
 
                 Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
-                LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
                 std::vector<std::atomic_int> replicaCount(fullCount);
                 std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
                 for (auto& pls : postingListSize) pls = 0;
@@ -455,7 +455,7 @@ namespace SPTAG
                     }
                 }
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
                     SizeType sampleSize = p_opt.m_samples;
                     std::vector<SizeType> samples(sampleSize, 0);
                     for (int i = 0; i < p_opt.m_batches; i++) {
@@ -491,10 +491,10 @@ namespace SPTAG
                             COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
                         }
                         acc = acc / sampleNum;
-                        LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
                         p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), p_opt.m_replicaCount, numThreads, p_opt.m_gpuSSDNumTrees, p_opt.m_gpuSSDLeafSize, p_opt.m_rngFactor, p_opt.m_numGPUs);
-                        LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
 
                         for (SizeType j = start; j < end; j++) {
                             replicaCount[j] = 0;
@@ -518,7 +518,7 @@ namespace SPTAG
                     }
                 }
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) / 60.0);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) / 60.0);
 
                 if (p_opt.m_batches > 1)
                 {
@@ -532,7 +532,7 @@ namespace SPTAG
                 VectorIndex::SortSelections(&selections.m_selections);
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count()) / 1000);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count()) / 1000);
 
                 int postingSizeLimit = INT_MAX;
                 if (p_opt.m_postingPageLimit > 0)
@@ -540,7 +540,7 @@ namespace SPTAG
                     postingSizeLimit = static_cast<int>(p_opt.m_postingPageLimit * PageSize / vectorInfoSize);
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", postingSizeLimit);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", postingSizeLimit);
 
                 {
                     std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
@@ -550,10 +550,10 @@ namespace SPTAG
                         ++replicaCountDist[replicaCount[i]];
                     }
 
-                    LOG(Helper::LogLevel::LL_Info, "Before Posting Cut:\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Before Posting Cut:\n");
                     for (int i = 0; i < replicaCountDist.size(); ++i)
                     {
-                        LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
 
@@ -577,7 +577,7 @@ namespace SPTAG
                     std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
                     auto ptr = SPTAG::f_createIO();
                     if (ptr == nullptr || !ptr->Initialize("EmptyReplicaID.bin", std::ios::binary | std::ios::out)) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to create EmptyReplicaID.bin!\n");
                         return false;
                     }
                     for (int i = 0; i < replicaCount.size(); ++i)
@@ -590,21 +590,21 @@ namespace SPTAG
                         {
                             long long vid = i;
                             if (ptr->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
-                                LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failt to write EmptyReplicaID.bin!");
                                 return false;
                             }
                         }
                     }
 
-                    LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
                     for (int i = 0; i < replicaCountDist.size(); ++i)
                     {
-                        LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Replica Count Dist: %d, %d\n", i, replicaCountDist[i]);
                     }
                 }
 
                 auto t4 = std::chrono::high_resolution_clock::now();
-                LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()) / 1000);
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()) / 1000);
 
                 // number of posting lists per file
                 size_t postingFileSize = (postingListSize.size() + p_opt.m_ssdIndexFileNum - 1) / p_opt.m_ssdIndexFileNum;
@@ -649,7 +649,7 @@ namespace SPTAG
                         m_pCompressor = std::make_unique<Compressor>(p_opt.m_zstdCompressLevel, p_opt.m_dictBufferCapacity);
                         // train dict
                         if (p_opt.m_enableDictTraining) {
-                            LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training dictionary...\n");
                             std::string samplesBuffer("");
                             std::vector<size_t> samplesSizes;
                             for (int j = 0; j < curPostingListSizes.size(); j++) {
@@ -668,14 +668,14 @@ namespace SPTAG
                                 samplesSizes.push_back(postingListFullData.size());
                                 if (samplesBuffer.size() > p_opt.m_minDictTraingBufferSize) break;
                             }
-                            LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using the first %zu postingLists to train dictionary... \n", samplesSizes.size());
                             std::size_t dictSize = m_pCompressor->TrainDict(samplesBuffer, &samplesSizes[0], (unsigned int)samplesSizes.size());
-                            LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Dictionary trained, dictionary size: %zu \n", dictSize);
                         }
                     }
 
                     if (p_opt.m_enableDataCompression) {
-                        LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Getting compressed size of each posting list...\n");
 #pragma omp parallel for schedule(dynamic)
                         for (int j = 0; j < curPostingListSizes.size(); j++) 
                         {
@@ -694,16 +694,16 @@ namespace SPTAG
                                 postingListId, postingListSize[postingListId], selections, fullVectors, p_opt.m_enableDeltaEncoding, p_opt.m_enablePostingListRearrange, headVector);
                             size_t sizeToCompress = postingListSize[postingListId] * vectorInfoSize;
                             if (sizeToCompress != postingListFullData.size()) {
-                                LOG(Helper::LogLevel::LL_Error, "Size to compress NOT MATCH! PostingListFullData size: %zu sizeToCompress: %zu \n", postingListFullData.size(), sizeToCompress);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Size to compress NOT MATCH! PostingListFullData size: %zu sizeToCompress: %zu \n", postingListFullData.size(), sizeToCompress);
                             }
                             curPostingListBytes[j] = m_pCompressor->GetCompressedSize(postingListFullData, p_opt.m_enableDictTraining);
                             if (postingListId % 10000 == 0 || curPostingListBytes[j] > static_cast<uint64_t>(p_opt.m_postingPageLimit) * PageSize) {
-                                LOG(Helper::LogLevel::LL_Info, "Posting list %d/%d, compressed size: %d, compression ratio: %.4f\n", postingListId, postingListSize.size(), curPostingListBytes[j], curPostingListBytes[j] / float(sizeToCompress));
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting list %d/%d, compressed size: %d, compression ratio: %.4f\n", postingListId, postingListSize.size(), curPostingListBytes[j], curPostingListBytes[j] / float(sizeToCompress));
                             }
                         }
-                        LOG(Helper::LogLevel::LL_Info, "Getted compressed size for all the %d posting lists in SSD Index file %d.\n", curPostingListBytes.size(), i);
-                        LOG(Helper::LogLevel::LL_Info, "Mean compressed size: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / curPostingListBytes.size());
-                        LOG(Helper::LogLevel::LL_Info, "Mean compression ratio: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / (std::accumulate(curPostingListSizes.begin(), curPostingListSizes.end(), 0.0) * vectorInfoSize));
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Getted compressed size for all the %d posting lists in SSD Index file %d.\n", curPostingListBytes.size(), i);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mean compressed size: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / curPostingListBytes.size());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mean compression ratio: %.4f \n", std::accumulate(curPostingListBytes.begin(), curPostingListBytes.end(), 0.0) / (std::accumulate(curPostingListSizes.begin(), curPostingListSizes.end(), 0.0) * vectorInfoSize));
                     }
                     else {
                         for (int j = 0; j < curPostingListSizes.size(); j++)
@@ -736,7 +736,7 @@ namespace SPTAG
 
                 auto t5 = std::chrono::high_resolution_clock::now();
                 auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t5 - t1).count();
-                LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
              
                 return true;
             }
@@ -764,7 +764,7 @@ namespace SPTAG
             {
                 auto ptr = SPTAG::f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_file.c_str(), std::ios::binary | std::ios::in)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to open file: %s\n", p_file.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open file: %s\n", p_file.c_str());
                     throw std::runtime_error("Failed open file in LoadingHeadInfo");
                 }
                 m_pCompressor = std::make_unique<Compressor>(); // no need compress level to decompress
@@ -774,25 +774,25 @@ namespace SPTAG
                 int m_listPageOffset;
 
                 if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
                 if (ptr->ReadBinary(sizeof(m_totalDocumentCount), reinterpret_cast<char*>(&m_totalDocumentCount)) != sizeof(m_totalDocumentCount)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
                 if (ptr->ReadBinary(sizeof(m_iDataDimension), reinterpret_cast<char*>(&m_iDataDimension)) != sizeof(m_iDataDimension)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
                 if (ptr->ReadBinary(sizeof(m_listPageOffset), reinterpret_cast<char*>(&m_listPageOffset)) != sizeof(m_listPageOffset)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
 
                 if (m_vectorInfoSize == 0) m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(int);
                 else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(int)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
                     throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
                 }
 
@@ -813,24 +813,24 @@ namespace SPTAG
                     if (m_enableDataCompression)
                     {
                         if (ptr->ReadBinary(sizeof(listInfo->listTotalBytes), reinterpret_cast<char*>(&(listInfo->listTotalBytes))) != sizeof(listInfo->listTotalBytes)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                             throw std::runtime_error("Failed read file in LoadingHeadInfo");
                         }
                     }
                     if (ptr->ReadBinary(sizeof(pageNum), reinterpret_cast<char*>(&(pageNum))) != sizeof(pageNum)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     if (ptr->ReadBinary(sizeof(listInfo->pageOffset), reinterpret_cast<char*>(&(listInfo->pageOffset))) != sizeof(listInfo->pageOffset)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     if (ptr->ReadBinary(sizeof(listInfo->listEleCount), reinterpret_cast<char*>(&(listInfo->listEleCount))) != sizeof(listInfo->listEleCount)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     if (ptr->ReadBinary(sizeof(listInfo->listPageCount), reinterpret_cast<char*>(&(listInfo->listPageCount))) != sizeof(listInfo->listPageCount)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     listInfo->listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
@@ -863,41 +863,41 @@ namespace SPTAG
                 {
                     size_t dictBufferSize;
                     if (ptr->ReadBinary(sizeof(size_t), reinterpret_cast<char*>(&dictBufferSize)) != sizeof(dictBufferSize)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     char* dictBuffer = new char[dictBufferSize];
                     if (ptr->ReadBinary(dictBufferSize, dictBuffer) != dictBufferSize) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     try {
                         m_pCompressor->SetDictBuffer(std::string(dictBuffer, dictBufferSize));
                     }
                     catch (std::runtime_error& err) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read head info file: %s \n", err.what());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file: %s \n", err.what());
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
                     delete[] dictBuffer;
                 }
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "Finish reading header info, list count %d, total doc count %d, dimension %d, list page offset %d.\n",
                     m_listCount,
                     m_totalDocumentCount,
                     m_iDataDimension,
                     m_listPageOffset);
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "Big page (>4K): list count %zu, total element count %zu.\n",
                     biglistCount,
                     biglistElementCount);
 
-                LOG(Helper::LogLevel::LL_Info, "Total Element Count: %llu\n", totalListElementCount);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total Element Count: %llu\n", totalListElementCount);
 
                 for (auto& ele : pageCountDist)
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Page Count Dist: %d %d\n", ele.first, ele.second);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Page Count Dist: %d %d\n", ele.first, ele.second);
                 }
 
                 return m_listCount;
@@ -990,7 +990,7 @@ namespace SPTAG
                         currOffset += iter->rest;
                         if (currOffset > PageSize)
                         {
-                            LOG(Helper::LogLevel::LL_Error, "Crossing extra pages\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Crossing extra pages\n");
                             throw std::runtime_error("Read too many pages");
                         }
 
@@ -1006,7 +1006,7 @@ namespace SPTAG
                     }
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "TotalPageNumbers: %d, IndexSize: %llu\n", currPageNum, static_cast<uint64_t>(currPageNum) * PageSize + currOffset);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TotalPageNumbers: %d, IndexSize: %llu\n", currPageNum, static_cast<uint64_t>(currPageNum) * PageSize + currOffset);
             }
 
             void OutputSSDIndexFile(const std::string& p_outputFile,
@@ -1025,7 +1025,7 @@ namespace SPTAG
                 std::shared_ptr<VectorSet> p_fullVectors,
                 size_t p_postingListOffset)
             {
-                LOG(Helper::LogLevel::LL_Info, "Start output...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start output...\n");
 
                 auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -1034,12 +1034,12 @@ namespace SPTAG
                 // open file 
                 while (retry > 0 && (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out)))
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open file %s, retrying...\n", p_outputFile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open file %s, retrying...\n", p_outputFile.c_str());
                     retry--;
                 }
 
                 if (ptr == nullptr || !ptr->Initialize(p_outputFile.c_str(), std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
                     throw std::runtime_error("Failed to open file for SSD index save");
                 }
                 // meta size of global info
@@ -1075,28 +1075,28 @@ namespace SPTAG
                 // Number of posting lists
                 int i32Val = static_cast<int>(p_postingListSizes.size());
                 if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                     throw std::runtime_error("Failed to write SSDIndex File");
                 }
 
                 // Number of vectors
                 i32Val = static_cast<int>(p_fullVectors->Count());
                 if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                     throw std::runtime_error("Failed to write SSDIndex File");
                 }
 
                 // Vector dimension
                 i32Val = static_cast<int>(p_fullVectors->Dimension());
                 if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                     throw std::runtime_error("Failed to write SSDIndex File");
                 }
 
                 // Page offset of list content section
                 i32Val = static_cast<int>(listOffset / PageSize);
                 if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                     throw std::runtime_error("Failed to write SSDIndex File");
                 }
 
@@ -1123,27 +1123,27 @@ namespace SPTAG
                     }
                     // Total bytes of the posting list, write only when enabled data compression
                     if (m_enableDataCompression && ptr->WriteBinary(sizeof(postingListByte), reinterpret_cast<char*>(&postingListByte)) != sizeof(postingListByte)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                     // Page number of the posting list
                     if (ptr->WriteBinary(sizeof(pageNum), reinterpret_cast<char*>(&pageNum)) != sizeof(pageNum)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                     // Page offset
                     if (ptr->WriteBinary(sizeof(pageOffset), reinterpret_cast<char*>(&pageOffset)) != sizeof(pageOffset)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                     // Number of vectors in the posting list
                     if (ptr->WriteBinary(sizeof(listEleCount), reinterpret_cast<char*>(&listEleCount)) != sizeof(listEleCount)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                     // Page count of the posting list
                     if (ptr->WriteBinary(sizeof(listPageCount), reinterpret_cast<char*>(&listPageCount)) != sizeof(listPageCount)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                 }
@@ -1155,13 +1155,13 @@ namespace SPTAG
                     size_t dictBufferSize = dictBuffer.size();
                     if (ptr->WriteBinary(sizeof(size_t), reinterpret_cast<char *>(&dictBufferSize)) != sizeof(dictBufferSize))
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                     // dict
                     if (ptr->WriteBinary(dictBuffer.size(), const_cast<char *>(dictBuffer.data())) != dictBuffer.size())
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                 }
@@ -1170,18 +1170,18 @@ namespace SPTAG
                 if (paddingSize > 0)
                 {
                     if (ptr->WriteBinary(paddingSize, reinterpret_cast<char*>(paddingVals.get())) != paddingSize) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                 }
 
                 if (static_cast<uint64_t>(ptr->TellP()) != listOffset)
                 {
-                    LOG(Helper::LogLevel::LL_Info, "List offset not match!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "List offset not match!\n");
                     throw std::runtime_error("List offset mismatch");
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "SubIndex Size: %llu bytes, %llu MBytes\n", listOffset, listOffset >> 20);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SubIndex Size: %llu bytes, %llu MBytes\n", listOffset, listOffset >> 20);
 
                 listOffset = 0;
 
@@ -1192,7 +1192,7 @@ namespace SPTAG
                     std::uint64_t targetOffset = static_cast<uint64_t>(p_postPageNum[id]) * PageSize + p_postPageOffset[id];
                     if (targetOffset < listOffset)
                     {
-                        LOG(Helper::LogLevel::LL_Info, "List offset not match, targetOffset < listOffset!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "List offset not match, targetOffset < listOffset!\n");
                         throw std::runtime_error("List offset mismatch");
                     }
                     // write padding vals before the posting list
@@ -1200,12 +1200,12 @@ namespace SPTAG
                     {
                         if (targetOffset - listOffset > PageSize)
                         {
-                            LOG(Helper::LogLevel::LL_Error, "Padding size greater than page size!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Padding size greater than page size!\n");
                             throw std::runtime_error("Padding size mismatch with page size");
                         }
 
                         if (ptr->WriteBinary(targetOffset - listOffset, reinterpret_cast<char*>(paddingVals.get())) != targetOffset - listOffset) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                             throw std::runtime_error("Failed to write SSDIndex File");
                         }
 
@@ -1230,7 +1230,7 @@ namespace SPTAG
                     size_t postingListFullSize = p_postingListSizes[id] * p_spacePerVector;
                     if (postingListFullSize != postingListFullData.size())
                     {
-                        LOG(Helper::LogLevel::LL_Error, "posting list full data size NOT MATCH! postingListFullData.size(): %zu postingListFullSize: %zu \n", postingListFullData.size(), postingListFullSize);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "posting list full data size NOT MATCH! postingListFullData.size(): %zu postingListFullSize: %zu \n", postingListFullData.size(), postingListFullSize);
                         throw std::runtime_error("Posting list full size mismatch");
                     }
                     if (m_enableDataCompression)
@@ -1239,12 +1239,12 @@ namespace SPTAG
                         size_t compressedSize = compressedData.size();
                         if (compressedSize != p_postingListBytes[id])
                         {
-                            LOG(Helper::LogLevel::LL_Error, "Compressed size NOT MATCH! compressed size:%zu, pre-calculated compressed size:%zu\n", compressedSize, p_postingListBytes[id]);
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Compressed size NOT MATCH! compressed size:%zu, pre-calculated compressed size:%zu\n", compressedSize, p_postingListBytes[id]);
                             throw std::runtime_error("Compression size mismatch");
                         }
                         if (ptr->WriteBinary(compressedSize, compressedData.data()) != compressedSize)
                         {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                             throw std::runtime_error("Failed to write SSDIndex File");
                         }
                         listOffset += compressedSize;
@@ -1253,7 +1253,7 @@ namespace SPTAG
                     {
                         if (ptr->WriteBinary(postingListFullSize, postingListFullData.data()) != postingListFullSize)
                         {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                             throw std::runtime_error("Failed to write SSDIndex File");
                         }
                         listOffset += postingListFullSize;
@@ -1275,16 +1275,16 @@ namespace SPTAG
                 {
                     if (ptr->WriteBinary(paddingSize, reinterpret_cast<char *>(paddingVals.get())) != paddingSize)
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
                     }
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "Padded Size: %llu, final total size: %llu.\n", paddedSize, listOffset);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Padded Size: %llu, final total size: %llu.\n", paddedSize, listOffset);
 
-                LOG(Helper::LogLevel::LL_Info, "Output done...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Output done...\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Time to write results:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to write results:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count()) / 1000);
             }
 
         private:
