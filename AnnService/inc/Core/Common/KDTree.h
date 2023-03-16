@@ -107,10 +107,10 @@ break;
                     std::shuffle(pindices.begin(), pindices.end(), rg);
 
                     m_pTreeStart[i] = i * (SizeType)pindices.size();
-                    LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
                     SizeType iTreeSize = m_pTreeStart[i];
                     DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
-                    LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
                 }
             }
 
@@ -128,13 +128,13 @@ break;
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
                 IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
                 IOBINARY(p_out, WriteBinary, sizeof(KDTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
-                LOG(Helper::LogLevel::LL_Info, "Save KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode SaveTrees(std::string sTreeFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save KDT to %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save KDT to %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveTrees(ptr);
@@ -152,7 +152,7 @@ break;
                 pKDTMemFile += sizeof(SizeType);
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pKDTMemFile, sizeof(KDTNode) * treeNodeSize);
-                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
@@ -186,7 +186,7 @@ break;
                         }
                         treeNodeSize += iNodeSize;
                     }
-                    LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                     return ErrorCode::Success;
                 }
                 IOBINARY(p_input, ReadBinary, sizeof(m_iTreeNumber), (char*)&m_iTreeNumber);
@@ -198,13 +198,13 @@ break;
                 m_pTreeRoots.resize(treeNodeSize);
                 IOBINARY(p_input, ReadBinary, sizeof(KDTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
 
-                LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode LoadTrees(std::string sTreeFileName)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load KDT From %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load KDT From %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return LoadTrees(ptr);

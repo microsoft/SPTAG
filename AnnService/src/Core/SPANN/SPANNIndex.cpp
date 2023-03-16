@@ -25,7 +25,7 @@ namespace SPTAG
         bool Index<T>::CheckHeadIndexType() {
             SPTAG::VectorValueType v1 = m_index->GetVectorValueType(), v2 = GetEnumValueType<T>();
             if (v1 != v2) {
-                LOG(Helper::LogLevel::LL_Error, "Head index and vectors don't have the same value types, which are %s %s\n",
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head index and vectors don't have the same value types, which are %s %s\n",
                     SPTAG::Helper::Convert::ConvertToString(v1).c_str(),
                     SPTAG::Helper::Convert::ConvertToString(v2).c_str()
                 );
@@ -259,7 +259,7 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
         {
-            LOG(Helper::LogLevel::LL_Error, "Not Support Filter on SPANN Index!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not Support Filter on SPANN Index!\n");
             return ErrorCode::Fail;
         }
 
@@ -376,7 +376,7 @@ namespace SPTAG
 
         template <typename T>
         void Index<T>::SelectHeadAdjustOptions(int p_vectorCount) {
-            LOG(Helper::LogLevel::LL_Info, "Begin Adjust Parameters...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Adjust Parameters...\n");
 
             if (m_options.m_headVectorCount != 0) m_options.m_ratio = m_options.m_headVectorCount * 1.0 / p_vectorCount;
             int headCnt = static_cast<int>(std::round(m_options.m_ratio * p_vectorCount));
@@ -388,31 +388,31 @@ namespace SPTAG
                     headCnt = static_cast<int>(std::round(m_options.m_ratio * p_vectorCount));
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "Setting requires to select none vectors as head, adjusted it to %d vectors\n", headCnt);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting requires to select none vectors as head, adjusted it to %d vectors\n", headCnt);
             }
 
             if (m_options.m_iBKTKmeansK > headCnt)
             {
                 m_options.m_iBKTKmeansK = headCnt;
-                LOG(Helper::LogLevel::LL_Info, "Setting of cluster number is less than head count, adjust it to %d\n", headCnt);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting of cluster number is less than head count, adjust it to %d\n", headCnt);
             }
 
             if (m_options.m_selectThreshold == 0)
             {
                 m_options.m_selectThreshold = min(p_vectorCount - 1, static_cast<int>(1 / m_options.m_ratio));
-                LOG(Helper::LogLevel::LL_Info, "Set SelectThreshold to %d\n", m_options.m_selectThreshold);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SelectThreshold to %d\n", m_options.m_selectThreshold);
             }
 
             if (m_options.m_splitThreshold == 0)
             {
                 m_options.m_splitThreshold = min(p_vectorCount - 1, static_cast<int>(m_options.m_selectThreshold * 2));
-                LOG(Helper::LogLevel::LL_Info, "Set SplitThreshold to %d\n", m_options.m_splitThreshold);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitThreshold to %d\n", m_options.m_splitThreshold);
             }
 
             if (m_options.m_splitFactor == 0)
             {
                 m_options.m_splitFactor = min(p_vectorCount - 1, static_cast<int>(std::round(1 / m_options.m_ratio) + 0.5));
-                LOG(Helper::LogLevel::LL_Info, "Set SplitFactor to %d\n", m_options.m_splitFactor);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set SplitFactor to %d\n", m_options.m_splitFactor);
             }
         }
 
@@ -505,7 +505,7 @@ namespace SPTAG
 
                     double diff = static_cast<double>(p_selected.size()) / p_vectorCount - m_options.m_ratio;
 
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "Select Threshold: %d, Split Threshold: %d, diff: %.2lf%%.\n",
                         opts.m_selectThreshold,
                         opts.m_splitThreshold,
@@ -533,7 +533,7 @@ namespace SPTAG
             opts.m_selectThreshold = selectThreshold;
             opts.m_splitThreshold = splitThreshold;
 
-            LOG(Helper::LogLevel::LL_Info,
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Final Select Threshold: %d, Split Threshold: %d.\n",
                 opts.m_selectThreshold,
                 opts.m_splitThreshold);
@@ -550,7 +550,7 @@ namespace SPTAG
             std::shared_ptr<VectorSet> vectorset = p_reader->GetVectorSet();
             if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized())
                 vectorset->Normalize(m_options.m_iSelectHeadNumberOfThreads);
-            LOG(Helper::LogLevel::LL_Info, "Begin initial data (%d,%d)...\n", vectorset->Count(), vectorset->Dimension());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin initial data (%d,%d)...\n", vectorset->Count(), vectorset->Dimension());
 
             COMMON::Dataset<InternalDataType> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(), vectorset->Count() + 1, (InternalDataType*)vectorset->GetData());
             
@@ -561,7 +561,7 @@ namespace SPTAG
                 selected.push_back(0); 
             }
             else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "Random")) {
-                LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating Random head.\n");
                 selected.resize(data.R());
                 for (int i = 0; i < data.R(); i++) selected[i] = i;
                 std::shuffle(selected.begin(), selected.end(), rg);
@@ -569,22 +569,22 @@ namespace SPTAG
                 selected.resize(headCnt);
             }
             else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "BKT")) {
-                LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating BKT.\n");
                 std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
                 bkt->m_iBKTKmeansK = m_options.m_iBKTKmeansK;
                 bkt->m_iBKTLeafSize = m_options.m_iBKTLeafSize;
                 bkt->m_iSamples = m_options.m_iSamples;
                 bkt->m_iTreeNumber = m_options.m_iTreeNumber;
                 bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-                LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
-                LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BKTKmeansK: %d, BKTLeafSize: %d, Samples: %d, BKTLambdaFactor:%f TreeNumber: %d, ThreadNum: %d.\n",
                     bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber, m_options.m_iSelectHeadNumberOfThreads);
 
                 bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads, nullptr, nullptr, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
-                LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
-                LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End invoking BuildTrees.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Invoking BuildTrees used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
 
                 if (m_options.m_saveBKT) {                
                     std::stringstream bktFileNameBuilder;
@@ -593,18 +593,18 @@ namespace SPTAG
                         << static_cast<int>(m_options.m_distCalcMethod) << ".bin";
                     bkt->SaveTrees(bktFileNameBuilder.str());
                 }
-                LOG(Helper::LogLevel::LL_Info, "Finish generating BKT.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish generating BKT.\n");
 
-                LOG(Helper::LogLevel::LL_Info, "Start selecting nodes...Select Head Dynamically...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start selecting nodes...Select Head Dynamically...\n");
                 SelectHeadDynamically(bkt, data.R(), selected);
 
                 if (selected.empty()) {
-                    LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
                     return false;
                 }
             }
 
-            LOG(Helper::LogLevel::LL_Info,
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Seleted Nodes: %u, about %.2lf%% of total.\n",
                 static_cast<unsigned int>(selected.size()),
                 selected.size() * 100.0 / data.R());
@@ -617,7 +617,7 @@ namespace SPTAG
                 if (output == nullptr || outputIDs == nullptr ||
                     !output->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str(), std::ios::binary | std::ios::out) ||
                     !outputIDs->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n", 
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n", 
                         (m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str(), 
                         (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                     return false;
@@ -625,12 +625,12 @@ namespace SPTAG
 
                 SizeType val = static_cast<SizeType>(selected.size());
                 if (output->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                     return false;
                 }
                 DimensionType dt = data.C();
                 if (output->WriteBinary(sizeof(dt), reinterpret_cast<char*>(&dt)) != sizeof(dt)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                     return false;
                 }
 
@@ -638,19 +638,19 @@ namespace SPTAG
                 {
                     uint64_t vid = static_cast<uint64_t>(selected[i]);
                     if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                         return false;
                     }
 
                     if (output->WriteBinary(sizeof(InternalDataType) * data.C(), (char*)(data[vid])) != sizeof(InternalDataType) * data.C()) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
                         return false;
                     }
                 }
             }
             auto t3 = std::chrono::high_resolution_clock::now();
             double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count();
-            LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
             return true;
         }
 
@@ -663,7 +663,7 @@ namespace SPTAG
                 }
             }
 
-            LOG(Helper::LogLevel::LL_Info, "Begin Select Head...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Select Head...\n");
             auto t1 = std::chrono::high_resolution_clock::now();
             if (m_options.m_selectHead) {
                 omp_set_num_threads(m_options.m_iSelectHeadNumberOfThreads);
@@ -677,15 +677,15 @@ namespace SPTAG
                     success = SelectHeadInternal<T>(p_reader);
                 }
                 if (!success) {
-                    LOG(Helper::LogLevel::LL_Error, "SelectHead Failed!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SelectHead Failed!\n");
                     return ErrorCode::Fail;
                 }
             }
             auto t2 = std::chrono::high_resolution_clock::now();
             double selectHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
-            LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
 
-            LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
             if (m_options.m_buildHead) {
                 auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
                 auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
@@ -702,36 +702,36 @@ namespace SPTAG
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile))
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read head vector file.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head vector file.\n");
                     return ErrorCode::Fail;
                 }
                 {
                     auto headvectorset = vectorReader->GetVectorSet();
                     if (m_index->BuildIndex(headvectorset, nullptr, false, true, true) != ErrorCode::Success) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build head index.\n");
                         return ErrorCode::Fail;
                     }
                     m_index->SetQuantizerFileName(m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
                     if (m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) != ErrorCode::Success) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save head index.\n");
                         return ErrorCode::Fail;
                     }
                 }
                 m_index.reset();
                 if (LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_index) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
                 }
             }
             auto t3 = std::chrono::high_resolution_clock::now();
             double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
-            LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs\n", selectHeadTime, buildHeadTime);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs\n", selectHeadTime, buildHeadTime);
 
-            LOG(Helper::LogLevel::LL_Info, "Begin Build SSDIndex...\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build SSDIndex...\n");
             if (m_options.m_enableSSD) {
                 omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
 
                 if (m_index == nullptr && LoadIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder, m_index) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
                     return ErrorCode::Fail;
                 }
                 m_index->SetQuantizer(m_pQuantizer);
@@ -752,10 +752,10 @@ namespace SPTAG
 
                 if (m_options.m_buildSsdIndex) {
                     if (!m_options.m_excludehead) {
-                        LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Include all vectors into SSD index...\n");
                         std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
                         if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::out)) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s for overwrite\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s for overwrite\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                             return ErrorCode::Fail;
                         }
                         std::uint64_t vid = (std::uint64_t)MaxSize;
@@ -765,12 +765,12 @@ namespace SPTAG
                     }
 
                     if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
-                        LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
                         return ErrorCode::Fail;
                     }
                 }
                 if (!m_extraSearcher->LoadIndex(m_options)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
                     if (m_options.m_buildSsdIndex) {
                         return ErrorCode::Fail;
                     }
@@ -783,7 +783,7 @@ namespace SPTAG
                     m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
                     std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
                     if (ptr == nullptr || !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                         return ErrorCode::Fail;
                     }
                     IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
@@ -791,12 +791,12 @@ namespace SPTAG
             }
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();
-            LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
 
             if (m_options.m_deleteHeadVectors) {
                 if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) && 
                     remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0) {
-                    LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
                 }
             }
 
@@ -812,12 +812,12 @@ namespace SPTAG
             auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
             if (m_options.m_vectorPath.empty())
             {
-                LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
             }
             else {
                 if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
                     return ErrorCode::Fail;
                 }
                 m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();

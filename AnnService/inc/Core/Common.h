@@ -125,7 +125,7 @@ extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 
 extern std::shared_ptr<Helper::Logger> GetLogger();
 
-#define LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
+#define SPTAGLIB_LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
 class MyException : public std::exception
 {

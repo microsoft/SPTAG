@@ -159,7 +159,7 @@ namespace SPTAG
                 }
 
                 DoubleSize();
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
