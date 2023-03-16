@@ -78,7 +78,7 @@ public:
 template <typename T>
 int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 {
-    std::ofstream SPTAGLIB_LOG("Recall-result.out", std::ios::app);
+    std::ofstream log("Recall-result.out", std::ios::app);
     if (!log.is_open())
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open logging file!\n");
