@@ -76,12 +76,14 @@ namespace SPTAG
 
             inline const T* At(SizeType index) const
             {
+#ifdef DEBUG
                 if (index >= R())
                 {
                     std::ostringstream oss;
                     oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
                     throw std::out_of_range(oss.str());
                 }
+#endif
 
                 if (index >= rows) {
                     SizeType incIndex = index - rows;

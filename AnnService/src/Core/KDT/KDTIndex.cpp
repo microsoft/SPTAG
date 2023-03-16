@@ -160,7 +160,7 @@ namespace SPTAG
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
-                if (nn_index >= m_pSamples.R()) break; \
+                IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )\
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
