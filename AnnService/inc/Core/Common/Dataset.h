@@ -76,20 +76,20 @@ namespace SPTAG
 
             inline const T* At(SizeType index) const
             {
-#ifdef DEBUG
-                if (index >= R())
+                if (index < R() && index >= 0)
+                {
+                    if (index >= rows) {
+                        SizeType incIndex = index - rows;
+                        return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
+                    }
+                    return data + ((size_t)index) * cols;
+                }
+                else
                 {
                     std::ostringstream oss;
                     oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
                     throw std::out_of_range(oss.str());
                 }
-#endif
-
-                if (index >= rows) {
-                    SizeType incIndex = index - rows;
-                    return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
-                }
-                return data + ((size_t)index) * cols;
             }
 
             T* operator[](SizeType index)
