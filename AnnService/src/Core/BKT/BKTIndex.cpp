@@ -227,7 +227,9 @@ namespace SPTAG
                 const SizeType* node = m_pGraph[tmpNode];
                 _mm_prefetch((const char*)node, _MM_HINT_T0);
                 for (DimensionType i = 0; i <= checkPos; i++) {
-                    _mm_prefetch((const char*)(m_pSamples)[node[i]], _MM_HINT_T0);
+                    auto futureNode = node[i];
+                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
+                    _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
                 }
 
                 if (gnode.distance <= p_query.worstDist()) {
