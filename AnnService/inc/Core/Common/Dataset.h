@@ -4,6 +4,7 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+#include "inc/Helper/Logging.h"
 #include <stdexcept>
 #include <sstream>
 
@@ -83,6 +84,11 @@ namespace SPTAG
                         return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
                     }
                     return data + ((size_t)index) * cols;
+                }
+                else if (index == -1) // Special case, breaks a lot
+                {
+                    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Debug, "Index == -1 in Dataset");
+                    return nullptr;
                 }
                 else
                 {
