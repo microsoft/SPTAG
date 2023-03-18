@@ -85,11 +85,6 @@ namespace SPTAG
                     }
                     return data + ((size_t)index) * cols;
                 }
-                else if (index == -1) // Special case, breaks a lot
-                {
-                    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index == -1 in Dataset");
-                    return nullptr;
-                }
                 else
                 {
                     std::ostringstream oss;
