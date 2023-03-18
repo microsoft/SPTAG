@@ -189,7 +189,9 @@ namespace SPTAG
 
         private:
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray) = nullptr) const;
-            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const COMMON::Labelset&, SizeType)> searchDeleted, std::function<bool(COMMON::QueryResultSet<T>&, SizeType, float)> searchDup, std::function<bool(const std::shared_ptr<MetadataSet>&, SizeType)> checkFilter) const;
+            
+            template <bool(*searchDeleted)(const COMMON::Labelset&, SizeType), bool(*searchDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, bool(*)(ByteArray))>
+            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool(*filterFunc)(ByteArray)) const;
         };
     } // namespace BKT
 } // namespace SPTAG

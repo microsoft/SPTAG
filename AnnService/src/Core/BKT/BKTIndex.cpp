@@ -211,10 +211,10 @@ namespace SPTAG
 
 
         template<typename T>
-        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, 
-            std::function<bool(const COMMON::Labelset&, SizeType)> searchDeleted, 
-            std::function<bool(COMMON::QueryResultSet<T>&, SizeType, float)> searchDup, 
-            std::function<bool(const std::shared_ptr<MetadataSet>&, SizeType)> checkFilter) const
+        template <bool(*searchDeleted)(const COMMON::Labelset&, SizeType), 
+            bool(*searchDup)(COMMON::QueryResultSet<T>&, SizeType, float), 
+            bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, bool(*)(ByteArray))>
+        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool(*filterFunc)(ByteArray)) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
             m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
@@ -240,7 +240,7 @@ namespace SPTAG
                         do {
                             if (searchDeleted(m_deletedID, tmpNode))
                             {
-                                if (checkFilter(m_pMetadata, tmpNode))
+                                if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                                 {
                                     if (searchDup(p_query, tmpNode, gnode.distance)) break;
                                 }
@@ -252,7 +252,7 @@ namespace SPTAG
 
                         if (searchDeleted(m_deletedID, tmpNode))
                         {
-                            if (checkFilter(m_pMetadata, tmpNode))
+                            if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                             {
                                 p_query.AddPoint(tmpNode, gnode.distance);
                             }
@@ -291,6 +291,46 @@ namespace SPTAG
             p_query.SortResult();
         }
 
+        namespace StaticDispatch
+        {
+             bool AlwaysTrue(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return true;
+            }
+
+            bool CheckIfDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return deletedIDs.Contains(node);
+            }
+
+            template <typename T>
+            bool CheckDup(COMMON::QueryResultSet<T>& query, SizeType node, float score) 
+            {
+                return !query.AddPoint(node, score);
+            }
+
+            template <typename T>
+            bool CheckDupTrue(COMMON::QueryResultSet<T>& query, SizeType node, float score)
+            {
+                query.AddPoint(node, score);
+                return true;
+            }
+
+            bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, bool(*filterFunc)(ByteArray))
+            {
+                if (!filterFunc)
+                {
+                    return true;
+                }
+                else
+                {
+                    return filterFunc(metadata->GetMetadata(node));
+                }
+            }
+
+
+        };
+
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray)) const
         {
@@ -299,56 +339,28 @@ namespace SPTAG
                 p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
             }
 
-            std::function<bool(const std::shared_ptr<MetadataSet>&, SizeType)> checkFilter;
-            if (func == nullptr)
-            {
-                checkFilter = [](const std::shared_ptr<MetadataSet>& meta, SizeType nodeID)
-                {
-                    return true;
-                };
-            }
-            else
-            {
-                checkFilter = [func](const std::shared_ptr<MetadataSet>& meta, SizeType nodeID)
-                {
-                    return func(meta->GetMetadata(nodeID));
-                };
-            }
-
-            std::function<bool(const COMMON::Labelset&, SizeType)> searchDeleted;
             if (m_deletedID.Count() == 0 || p_searchDeleted)
             {
-                searchDeleted = [](const COMMON::Labelset& deletedIDs, SizeType nodeID)
+                if (p_searchDuplicated)
                 {
-                    return true;
-                };
+                    Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                }
+                else
+                {
+                    Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                }
             }
             else
             {
-                searchDeleted = [](const COMMON::Labelset& deletedIDs, SizeType nodeID)
+                if (p_searchDuplicated)
                 {
-                    return !deletedIDs.Contains(nodeID);
-                };
-            }
-
-            
-            std::function<bool(COMMON::QueryResultSet<T>&, SizeType, float)> searchDup;
-            if (p_searchDuplicated)
-            {
-                searchDup = [](COMMON::QueryResultSet<T>& query, SizeType nodeID, float distance)
+                    Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                }
+                else
                 {
-                    return !query.AddPoint(nodeID, distance);
-                };
+                    Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                }
             }
-            else
-            {
-                searchDup = [](COMMON::QueryResultSet<T>& query, SizeType nodeID, float distance)
-                {
-                    query.AddPoint(nodeID, distance);
-                    return true;
-                };
-            }
-            Search(p_query, p_space, searchDeleted, searchDup, checkFilter);
         }
 
         template<typename T>
