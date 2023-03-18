@@ -293,7 +293,8 @@ namespace SPTAG
 
         namespace StaticDispatch
         {
-             bool AlwaysTrue(const COMMON::Labelset& deletedIDs, SizeType node)
+            template <typename... Args>
+             bool AlwaysTrue(Args...)
             {
                 return true;
             }
@@ -318,14 +319,7 @@ namespace SPTAG
 
             bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, bool(*filterFunc)(ByteArray))
             {
-                if (!filterFunc)
-                {
-                    return true;
-                }
-                else
-                {
-                    return filterFunc(metadata->GetMetadata(node));
-                }
+                return filterFunc(metadata->GetMetadata(node));
             }
 
 
@@ -339,27 +333,42 @@ namespace SPTAG
                 p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
             }
 
-            if (m_deletedID.Count() == 0 || p_searchDeleted)
+            // bitflags for which dispatch to take
+            uint8_t flags = 0;
+            flags += (m_deletedID.Count() == 0 || p_searchDeleted) << 2;
+            flags += p_searchDuplicated << 1;
+            flags += (func == nullptr);
+
+            switch (flags)
             {
-                if (p_searchDuplicated)
-                {
-                    Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
-                }
-                else
-                {
-                    Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
-                }
-            }
-            else
-            {
-                if (p_searchDuplicated)
-                {
-                    Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
-                }
-                else
-                {
-                    Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
-                }
+            case 0b000:
+                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                break;
+            case 0b001:
+                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                break;
+            case 0b010:
+                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                break;
+            case 0b011:
+                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                break;
+            case 0b100:
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                break;
+            case 0b101:
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                break;
+            case 0b110:
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                break;
+            case 0b111:
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                break;
+            default:
+                std::ostringstream oss;
+                oss << "Invalid flags in BKT SearchIndex dispatch: " << flags;
+                throw std::logic_error(oss.str());
             }
         }
 
