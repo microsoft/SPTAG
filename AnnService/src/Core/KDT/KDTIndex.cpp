@@ -181,8 +181,8 @@ namespace SPTAG
         p_query.SortResult(); \
 */
         template<typename T>
-        template<typename Q>
-        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const COMMON::Labelset&, SizeType)> searchDeleted) const
+        template<typename Q, bool(*searchDeleted)(const COMMON::Labelset&, SizeType)>
+        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
             m_pTrees.InitSearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space);
@@ -239,24 +239,29 @@ namespace SPTAG
             p_query.SortResult();
         }
 
+        namespace StaticDispatch
+        {
+            bool AlwaysTrue(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return true;
+            }
+
+            bool CheckIfDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return deletedIDs.Contains(node);
+            }
+        };
+
         template <typename T>
         template <typename Q>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const
         {
-            std::function<bool(const COMMON::Labelset&, SizeType)> searchDeleted;
             if (m_deletedID.Count() == 0 || p_searchDeleted) {
-                searchDeleted = [](const COMMON::Labelset& deletedIDs, SizeType node)
-                {
-                    return true;
-                };
+                Search<Q, StaticDispatch::AlwaysTrue>(p_query, p_space);
             }
             else {
-                searchDeleted = [](const COMMON::Labelset& deletedIDs, SizeType node)
-                {
-                    return !deletedIDs.Contains(node);
-                };
+                Search<Q, StaticDispatch::CheckIfDeleted>(p_query, p_space);
             }
-            Search<Q>(p_query, p_space, searchDeleted);
         }
 
         template<typename T>
