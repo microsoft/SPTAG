@@ -87,7 +87,7 @@ namespace SPTAG
                 }
                 else if (index == -1) // Special case, breaks a lot
                 {
-                    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Debug, "Index == -1 in Dataset");
+                    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index == -1 in Dataset");
                     return nullptr;
                 }
                 else
