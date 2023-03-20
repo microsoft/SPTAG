@@ -84,7 +84,7 @@ SearchService::Initialize(int p_argNum, char* p_args[])
     }
 
     if (!cmdOptions.m_logFile.empty()) {
-        GetLogger().reset(new Helper::FileLogger(Helper::LogLevel::LL_Debug, cmdOptions.m_logFile.c_str()));
+        SetLogger(std::make_shared<Helper::FileLogger>(Helper::LogLevel::LL_Debug, cmdOptions.m_logFile.c_str()));
     }
 
     m_serviceContext.reset(new ServiceContext(cmdOptions.m_configFile));

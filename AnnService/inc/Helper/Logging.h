@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <fstream>
+#include <shared_mutex>
 
 #pragma warning(disable:4996)
 
@@ -31,6 +32,27 @@ namespace SPTAG
         {
         public:
             virtual void Logging(const char* title, LogLevel level, const char* file, int line, const char* func, const char* format, ...) = 0;
+        };
+
+        class LoggerHolder
+        {
+        private:
+            std::shared_ptr<Logger> m_logger;
+            std::shared_mutex m_mutex;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                m_logger = p_logger;
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                std::shared_lock<std::shared_mutex> lock(m_mutex);
+                return m_logger;
+            }
         };
 
 
