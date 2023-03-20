@@ -181,14 +181,14 @@ namespace SPTAG
         p_query.SortResult(); \
 */
         template<typename T>
-        template<typename Q, bool(*searchDeleted)(const COMMON::Labelset&, SizeType)>
+        template<typename Q, bool(*notDeleted)(const COMMON::Labelset&, SizeType)>
         void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
             m_pTrees.InitSearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space);
             m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
-            while (!p_space.m_NGQueue.empty()) {
-
+            while (!p_space.m_NGQueue.empty()) 
+            {
                 NodeDistPair gnode = p_space.m_NGQueue.pop();
                 const SizeType* node = m_pGraph[gnode.node];
                 _mm_prefetch((const char*)node, _MM_HINT_T0);
@@ -199,7 +199,7 @@ namespace SPTAG
                     _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
                 }
                     
-                if (searchDeleted(m_deletedID, gnode.node))
+                if (notDeleted(m_deletedID, gnode.node))
                 {
                     if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) 
                     {
@@ -213,19 +213,24 @@ namespace SPTAG
                 for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) 
                 {
                     SizeType nn_index = node[i];
-                    if (nn_index < 0) break;
+                    if (nn_index < 0) 
+                        break;
                     IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )
                     //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
-                    if (p_space.CheckAndSet(nn_index)) continue;
+                    if (p_space.CheckAndSet(nn_index)) 
+                        continue;
                     float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
-                    if (distance2leaf <= upperBound) bLocalOpt = false;
+                    if (distance2leaf <= upperBound) 
+                        bLocalOpt = false;
                     p_space.m_iNumberOfCheckedLeaves++;
                     p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf));
                 }
-                if (bLocalOpt) p_space.m_iNumOfContinuousNoBetterPropagation++;
-                else p_space.m_iNumOfContinuousNoBetterPropagation = 0;
-                if (p_space.m_iNumOfContinuousNoBetterPropagation > m_iThresholdOfNumberOfContinuousNoBetterPropagation) {
-
+                if (bLocalOpt) 
+                    p_space.m_iNumOfContinuousNoBetterPropagation++;
+                else 
+                    p_space.m_iNumOfContinuousNoBetterPropagation = 0;
+                if (p_space.m_iNumOfContinuousNoBetterPropagation > m_iThresholdOfNumberOfContinuousNoBetterPropagation) 
+                {
                     if (p_space.m_iNumberOfTreeCheckedLeaves <= p_space.m_iNumberOfCheckedLeaves / 10) 
                     {
                         m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
@@ -246,9 +251,9 @@ namespace SPTAG
                 return true;
             }
 
-            bool CheckIfDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            bool CheckIfNotDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
             {
-                return deletedIDs.Contains(node);
+                return !deletedIDs.Contains(node);
             }
         };
 
@@ -260,7 +265,7 @@ namespace SPTAG
                 Search<Q, StaticDispatch::AlwaysTrue>(p_query, p_space);
             }
             else {
-                Search<Q, StaticDispatch::CheckIfDeleted>(p_query, p_space);
+                Search<Q, StaticDispatch::CheckIfNotDeleted>(p_query, p_space);
             }
         }
 

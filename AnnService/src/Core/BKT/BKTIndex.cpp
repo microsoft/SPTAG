@@ -211,8 +211,8 @@ namespace SPTAG
 
 
         template<typename T>
-        template <bool(*searchDeleted)(const COMMON::Labelset&, SizeType), 
-            bool(*searchDup)(COMMON::QueryResultSet<T>&, SizeType, float), 
+        template <bool(*notDeleted)(const COMMON::Labelset&, SizeType), 
+            bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), 
             bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, bool(*)(ByteArray))>
         void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool(*filterFunc)(ByteArray)) const
         {
@@ -232,17 +232,21 @@ namespace SPTAG
                     _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
                 }
 
-                if (gnode.distance <= p_query.worstDist()) {
+                if (gnode.distance <= p_query.worstDist()) 
+                {
                     SizeType checkNode = node[checkPos];
-                    if (checkNode < -1) {
+                    if (checkNode < -1) 
+                    {
                         const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
                         SizeType i = -tnode.childStart;
-                        do {
-                            if (searchDeleted(m_deletedID, tmpNode))
+                        do 
+                        {
+                            if (notDeleted(m_deletedID, tmpNode))
                             {
                                 if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                                 {
-                                    if (searchDup(p_query, tmpNode, gnode.distance)) break;
+                                    if (isDup(p_query, tmpNode, gnode.distance)) 
+                                        break;
                                 }
                             }
                             tmpNode = m_pTrees[i].centerid;
@@ -250,7 +254,7 @@ namespace SPTAG
                     }
                     else {
 
-                        if (searchDeleted(m_deletedID, tmpNode))
+                        if (notDeleted(m_deletedID, tmpNode))
                         {
                             if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                             {
@@ -259,9 +263,9 @@ namespace SPTAG
                         }
                     }
                 }
-                else {
-
-                    if (searchDeleted(m_deletedID, tmpNode))
+                else 
+                {
+                    if (notDeleted(m_deletedID, tmpNode))
                     {
                         if (gnode.distance > p_space.m_Results.worst() || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) 
                         {
@@ -270,9 +274,11 @@ namespace SPTAG
                         }
                     }
                 }
-                for (DimensionType i = 0; i <= checkPos; i++) {
+                for (DimensionType i = 0; i <= checkPos; i++) 
+                {
                     SizeType nn_index = node[i];
-                    if (nn_index < 0) break;
+                    if (nn_index < 0) 
+                        break;
                     IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )
                     //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
                     if (p_space.CheckAndSet(nn_index)) continue;
@@ -299,9 +305,9 @@ namespace SPTAG
                 return true;
             }
 
-            bool CheckIfDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            bool CheckIfNotDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
             {
-                return deletedIDs.Contains(node);
+                return !deletedIDs.Contains(node);
             }
 
             template <typename T>
@@ -311,10 +317,10 @@ namespace SPTAG
             }
 
             template <typename T>
-            bool CheckDupTrue(COMMON::QueryResultSet<T>& query, SizeType node, float score)
+            bool NeverDup(COMMON::QueryResultSet<T>& query, SizeType node, float score)
             {
                 query.AddPoint(node, score);
-                return true;
+                return false;
             }
 
             bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, bool(*filterFunc)(ByteArray))
@@ -342,22 +348,22 @@ namespace SPTAG
             switch (flags)
             {
             case 0b000:
-                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
                 break;
             case 0b001:
-                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDupTrue, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
                 break;
             case 0b010:
-                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
                 break;
             case 0b011:
-                Search<StaticDispatch::CheckIfDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
                 break;
             case 0b100:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
                 break;
             case 0b101:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDupTrue, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
                 break;
             case 0b110:
                 Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);

@@ -188,7 +188,7 @@ namespace SPTAG
         private:
             template <typename Q>
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const;
-            template <typename Q, bool(*searchDeleted)(const COMMON::Labelset&, SizeType)>
+            template <typename Q, bool(*notDeleted)(const COMMON::Labelset&, SizeType)>
             void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const;
         };
     } // namespace KDT
