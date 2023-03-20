@@ -45,7 +45,7 @@ namespace winrt::SPTAG::implementation
 
 
     AnnIndex() {
-      sptag::GetLogger().reset(new sptag::Helper::SimpleLogger(sptag::Helper::LogLevel::LL_Empty));
+      sptag::SetLogger(std::make_shared<sptag::Helper::SimpleLogger>(sptag::Helper::LogLevel::LL_Empty));
       m_index = sptag::VectorIndex::CreateInstance(sptag::IndexAlgoType::BKT, sptag::GetEnumValueType<float>());
     }
     
