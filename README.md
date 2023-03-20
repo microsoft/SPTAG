@@ -90,6 +90,36 @@ Run the SPTAGTest (or Test.exe) in the Release folder to verify all the tests ha
 The detailed usage can be found in [Get started](docs/GettingStart.md). There is also an end-to-end tutorial for building vector search online service using Python Wrapper in [Python Tutorial](docs/Tutorial.ipynb).
 The detailed parameters tunning can be found in [Parameters](docs/Parameters.md).
 
+## **Build**
+> Clone the repository and submodules
+```bash
+git clone git@github.com:MaggieQi/SPFresh.git
+git submodules update --init --recursive
+```
+
+> Compile SPDK
+```bash
+cd ThirdParty/spdk
+CC=gcc-9 ./configure
+CC=gcc-9 make -j
+```
+Remember to use higher version of gcc to do **both configure and compile**.
+
+> Compile isal-l_crypto
+```bash
+cd ThirdParty/isal-l_crypto
+./autogen.sh
+./configure
+make -j
+```
+
+> Build SPFresh
+```bash
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j
+```
+
 ## **References**
 Please cite SPTAG in your publications if it helps your research:
 ```
