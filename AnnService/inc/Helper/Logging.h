@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <fstream>
-#include <shared_mutex>
+#include <atomic>
 
 #pragma warning(disable:4996)
 
@@ -36,23 +36,37 @@ namespace SPTAG
 
         class LoggerHolder
         {
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 	202002L) || __cplusplus >= 	202002L)
         private:
-            std::shared_ptr<Logger> m_logger;
-            std::shared_mutex m_mutex;
+            std::atomic<std::shared_ptr<Logger>> m_logger;
         public:
             LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
 
             void SetLogger(std::shared_ptr<Logger> p_logger)
             {
-                std::unique_lock<std::shared_mutex> lock(m_mutex);
                 m_logger = p_logger;
             }
 
             std::shared_ptr<Logger> GetLogger()
             {
-                std::shared_lock<std::shared_mutex> lock(m_mutex);
                 return m_logger;
             }
+#else
+        private:
+            std::shared_ptr<Logger> m_logger;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                std::atomic_store(&m_logger, p_logger);
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                return std::atomic_load(&m_logger);
+            }
+#endif
         };
 
 
