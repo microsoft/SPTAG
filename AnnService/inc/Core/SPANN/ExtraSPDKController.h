@@ -187,7 +187,7 @@ namespace SPTAG::SPANN
                 }
             }
             if (m_pBlockController.ReadBlocks(blocks, values)) return ErrorCode::Success;
-            return ErrorCode::Fail;
+            return ErrorCode::Fail; 
         }
 
         ErrorCode Put(SizeType key, const std::string& value) override {
@@ -333,6 +333,11 @@ namespace SPTAG::SPANN
             }
             LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
             return ErrorCode::Success;
+        }
+
+        bool Initialize() override {
+            LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
+            return m_pBlockController.Initialize();
         }
 
     private:

@@ -213,6 +213,8 @@ namespace SPTAG
             void OpenMerge() { m_options.m_inPlace = false; }
 
             void ForceGC() { m_extraSearcher->ForceGC(m_index.get()); }
+
+            bool Initialize() { return m_extraSearcher->Initialize(); }
         };
     } // namespace SPANN
 } // namespace SPTAG

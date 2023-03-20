@@ -147,7 +147,9 @@ namespace SPTAG
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
                     }
                 }
-                else {
+                else if (m_options.m_useSPDK) {
+                    
+                } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
                 }
             }
@@ -803,7 +805,17 @@ namespace SPTAG
                     else {
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T)*m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
                     }
-                } else {
+                } else if (m_options.m_useSPDK)
+                {
+                    if (m_options.m_inPlace) {
+                        LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
+                        exit(1);
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true));
+                    }  
+                }
+                else {
                     if (m_pQuantizer) {
                         m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
                     }

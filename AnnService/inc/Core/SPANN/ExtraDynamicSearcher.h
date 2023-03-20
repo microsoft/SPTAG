@@ -13,6 +13,7 @@
 #include "inc/Core/Common/FineGrainedLock.h"
 #include "PersistentBuffer.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
+#include "ExtraSPDKController.h"
 #include <map>
 #include <cmath>
 #include <climits>
@@ -120,13 +121,18 @@ namespace SPTAG::SPANN {
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
-        ExtraDynamicSearcher(const char* dbPath, int dim, int vectorlimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold) {
+        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
+            if (useSPDK) {
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit));
+                m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType)*dim + sizeof(int) + sizeof(uint8_t));
+            } else {
 #ifdef ROCKSDB
-            db.reset(new RocksDBIO(dbPath, useDirectIO));
+                db.reset(new RocksDBIO(dbPath, useDirectIO));
+                m_postingSizeLimit = postingBlockLimit;
 #endif
+            }
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;
-            m_postingSizeLimit = vectorlimit;
             m_hardLatencyLimit = searchLatencyHardLimit;
             m_mergeThreshold = mergeThreshold;
             LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, m_hardLatencyLimit, m_mergeThreshold);
@@ -1060,7 +1066,9 @@ namespace SPTAG::SPANN {
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
-            diskIO += postingListCount;
+            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+                diskIO += ((postingLists[pi].size() + PageSize - 1) >> PageSizeEx);
+            }
 
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
@@ -1092,7 +1100,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
+                // if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -1210,11 +1218,11 @@ namespace SPTAG::SPANN {
                     }
 
                     float acc = 0;
-#pragma omp parallel for schedule(dynamic)
-                    for (int j = 0; j < sampleNum; j++)
-                    {
-                        COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
-                    }
+// #pragma omp parallel for schedule(dynamic)
+//                     for (int j = 0; j < sampleNum; j++)
+//                     {
+//                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+//                     }
                     acc = acc / sampleNum;
                     LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 
@@ -1374,7 +1382,7 @@ namespace SPTAG::SPANN {
         }
 
         void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, std::shared_ptr<VectorSet> p_fullVectors) {
-    #pragma omp parallel for num_threads(10)
+    // #pragma omp parallel for num_threads(10)
             for (int id = 0; id < p_postingListSizes.size(); id++)
             {
                 std::string postinglist(m_vectorInfoSize * p_postingListSizes[id], '\0');
@@ -1462,6 +1470,10 @@ namespace SPTAG::SPANN {
 
         bool CheckValidPosting(SizeType postingID) override {
             return m_postingSizes.GetSize(postingID) > 0;
+        }
+
+        bool Initialize() override {
+            return db->Initialize();
         }
 
     private:

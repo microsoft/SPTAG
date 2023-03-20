@@ -34,6 +34,8 @@ namespace SPTAG
             virtual void ForceCompaction() {}
 
             virtual void GetStat() {}
+
+            virtual bool Initialize() { return false; }
         };
     }
 }
