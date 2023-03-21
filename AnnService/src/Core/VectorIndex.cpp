@@ -15,22 +15,29 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 
 using namespace SPTAG;
 
-std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
+Helper::LoggerHolder& SPTAG::GetLoggerHolder() {
 #ifdef DEBUG
-  auto logLevel = Helper::LogLevel::LL_Debug;
+    auto logLevel = Helper::LogLevel::LL_Debug;
 #else
-  auto logLevel = Helper::LogLevel::LL_Info;
+    auto logLevel = Helper::LogLevel::LL_Info;
 #endif
 #ifdef  _WINDOWS_
-  if (auto exeHandle = GetModuleHandleW(nullptr)) {
-    if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
-      logLevel = SPTAG_GetLoggerLevel();
+    if (auto exeHandle = GetModuleHandleW(nullptr)) {
+        if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
+            logLevel = SPTAG_GetLoggerLevel();
+        }
     }
-  }
 #endif //  _WINDOWS_
+    static Helper::LoggerHolder s_pLoggerHolder(std::make_shared<Helper::SimpleLogger>(logLevel));
+    return s_pLoggerHolder;
+}
 
-  static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
-  return s_pLogger;
+std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
+    return GetLoggerHolder().GetLogger();
+}
+
+void SPTAG::SetLogger(std::shared_ptr<Helper::Logger> p_logger) {
+    GetLoggerHolder().SetLogger(p_logger);
 }
 
 std::mt19937 SPTAG::rg;
