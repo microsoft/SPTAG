@@ -33,7 +33,7 @@ namespace SPTAG::SPANN
             static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
-            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 38) >> PageSizeEx; // 256GB
+            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 256GB
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
             static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
@@ -193,7 +193,7 @@ namespace SPTAG::SPANN
         ErrorCode Put(SizeType key, const std::string& value) override {
             int blocks = ((value.size() + PageSize - 1) >> PageSizeEx);
             if (blocks >= m_blockLimit) {
-                LOG(Helper::LogLevel::LL_Error, "Failt to put key:%d value:%lz since value too long!\n", key, value.size());
+                LOG(Helper::LogLevel::LL_Error, "Failt to put key:%d value:%lld since value too long!\n", key, value.size());
                 return ErrorCode::Fail;
             }
             int delta = key + 1 - m_pBlockMapping.R();
@@ -241,6 +241,7 @@ namespace SPTAG::SPANN
             int newblocks = ((newSize + PageSize - 1) >> PageSizeEx);
             if (newblocks >= m_blockLimit) {
                 LOG(Helper::LogLevel::LL_Error, "Failt to merge key:%d value:%lld since value too long!\n", key, newSize);
+                LOG(Helper::LogLevel::LL_Error, "Origin Size: %lld, merge size: %lld\n", *postingSize, value.size());
                 return ErrorCode::Fail;
             }
 

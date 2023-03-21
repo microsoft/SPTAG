@@ -148,7 +148,13 @@ namespace SPTAG
                     }
                 }
                 else if (m_options.m_useSPDK) {
-                    
+                    if (m_options.m_inPlace) {
+                        LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
+                        exit(1);
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true));
+                    }  
                 } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
                 }
@@ -160,6 +166,52 @@ namespace SPTAG
             IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
 =======
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
+
+            if (m_options.m_useSPDK) {
+                int m_vectorLimit = m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t));
+                m_versionMap.Initialize(m_options.m_vectorSize, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+                int m_vectorInfoSize = sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t);
+                LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
+                std::shared_ptr<IExtraSearcher> storeExtraSearcher;
+                storeExtraSearcher.reset(new ExtraStaticSearcher<T>());
+                if (!storeExtraSearcher->LoadIndex(m_options, m_versionMap)) {
+                    LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
+                    exit(1);
+                }
+                int totalPostingNum = m_index->GetNumSamples();
+                m_extraSearcher->InitPostingRecord(m_index);
+            // #pragma omp parallel for num_threads(10)
+                for (int i = 0; i < totalPostingNum; i++) {
+                    std::string tempPosting;
+                    storeExtraSearcher->GetWritePosting(i, tempPosting);
+                    // LOG(Helper::LogLevel::LL_Info, "Origin Posting Size: %lld, vectorInforSize: %d\n", tempPosting.size(), m_vectorInfoSize);
+                    int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+                    // LOG(Helper::LogLevel::LL_Info, "Origin Vector Num: %d, vectorLimit: %d\n", vectorNum, m_vectorLimit);
+
+                    if (vectorNum > m_vectorLimit) vectorNum = m_vectorLimit;
+
+                    auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+                    std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+                    char* ptr = (char*)(newPosting.c_str());
+                    for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+                        // LOG(Helper::LogLevel::LL_Info,"Round\n");
+                        char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                        int VID = *(reinterpret_cast<int*>(vectorInfo));
+                        // LOG(Helper::LogLevel::LL_Info,"VID: %d\n", VID);
+                        uint8_t version = m_versionMap.GetVersion(VID);
+                        // LOG(Helper::LogLevel::LL_Info,"VID: %d, version: %d\n", VID, version);
+                        memcpy(ptr, &VID, sizeof(int));
+                        memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                        memcpy(ptr + sizeof(int) + sizeof(uint8_t), tempPosting.c_str() + j * m_vectorInfoSize + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                    }
+                    // LOG(Helper::LogLevel::LL_Info, "New Posting Size: %lld\n", newPosting.size());
+                    // exit(1);
+                    m_extraSearcher->GetWritePosting(i, newPosting, true);
+                }
+
+            } else {
+                m_versionMap.Load(m_options.m_deleteIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+            }
 
             return ErrorCode::Success;
         }
@@ -999,8 +1051,8 @@ namespace SPTAG
                                      std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex,
                                      bool p_normalized)
         {
-            if (!m_options.m_useKV || m_extraSearcher == nullptr) {
-                LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update");
+            if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
+                LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
                 return ErrorCode::Fail;
             }
 

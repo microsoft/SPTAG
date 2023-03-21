@@ -300,7 +300,11 @@ namespace SPTAG {
                 std::shared_ptr<VectorIndex> p_index, int testNum = 64, SizeType VID = -1) { return -1; }
             virtual void ForceGC(VectorIndex* p_index) { return; }
 
+            virtual void GetWritePosting(SizeType pid, std::string& posting, bool write = false) { return; }
+
             virtual bool Initialize() { return false; }
+
+            virtual void InitPostingRecord(std::shared_ptr<VectorIndex> p_index) { return; }
         };
     } // SPANN
 } // SPTAG

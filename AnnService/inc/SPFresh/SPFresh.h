@@ -270,6 +270,7 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
+                    p_index->Initialize();
                     StopWSPFresh threadws;
                     size_t index = 0;
                     while (true)
@@ -703,6 +704,7 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
+                    p_index->Initialize();
                     size_t index = 0;
                     while (true)
                     {

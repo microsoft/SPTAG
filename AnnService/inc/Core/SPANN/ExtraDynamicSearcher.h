@@ -98,6 +98,36 @@ namespace SPTAG::SPANN {
             }
         };
 
+        class SPDKThreadPool : public Helper::ThreadPool
+        {
+        public:
+            void initSPDK(int numberOfThreads, ExtraDynamicSearcher<ValueType>* extraIndex) 
+            {
+                m_abort.SetAbort(false);
+                for (int i = 0; i < numberOfThreads; i++)
+                {
+                    m_threads.emplace_back([this, extraIndex] {
+                        extraIndex->Initialize();
+                        Job *j;
+                        while (get(j))
+                        {
+                            try 
+                            {
+                                currentJobs++;
+                                j->exec(&m_abort);
+                                currentJobs--;
+                            }
+                            catch (std::exception& e) {
+                                LOG(Helper::LogLevel::LL_Error, "ThreadPool: exception in %s %s\n", typeid(*j).name(), e.what());
+                            }
+                            
+                            delete j;
+                        }
+                    });
+                }
+            }
+        };
+
     private:
         std::shared_ptr<Helper::KeyValueIO> db;
 
@@ -112,8 +142,8 @@ namespace SPTAG::SPANN {
 
         COMMON::PostingSizeRecord m_postingSizes;
 
-        std::shared_ptr<Helper::ThreadPool> m_splitThreadPool;
-        std::shared_ptr<Helper::ThreadPool> m_reassignThreadPool;
+        std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
+        std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;
 
         IndexStats m_stat;
 
@@ -123,8 +153,8 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit));
-                m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType)*dim + sizeof(int) + sizeof(uint8_t));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 1));
+                m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
                 db.reset(new RocksDBIO(dbPath, useDirectIO));
@@ -557,7 +587,7 @@ namespace SPTAG::SPANN {
                             exit(1);
                         }
                     }
-                    // LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
+                    LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                     first += args.counts[k];
                     m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
                 }
@@ -706,7 +736,7 @@ namespace SPTAG::SPANN {
                                 postingP = reinterpret_cast<uint8_t*>(&nextPostingList.front());
                                 for (int j = 0; j < nextLength; j++) {
                                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                                    // SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                                     float origin_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
                                     float current_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
@@ -719,7 +749,7 @@ namespace SPTAG::SPANN {
                                 postingP = reinterpret_cast<uint8_t*>(&currentPostingList.front());
                                 for (int j = 0; j < currentLength; j++) {
                                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                                    // SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                                     float origin_dist = p_index->ComputeDistance(p_index->GetSample(headID), vector);
                                     float current_dist = p_index->ComputeDistance(p_index->GetSample(queryResult->VID), vector);
@@ -748,6 +778,7 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
             tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
             if (m_splitList.find(headIDAccessor, headID)) {
                 return;
@@ -757,7 +788,7 @@ namespace SPTAG::SPANN {
 
             auto* curJob = new SplitAsyncJob(p_index, this, headID, m_opt->m_disableReassign, p_callback);
             m_splitThreadPool->add(curJob);
-
+            LOG(Helper::LogLevel::LL_Info, "Add to thread pool\n");
         }
 
         inline void MergeAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
@@ -901,15 +932,6 @@ namespace SPTAG::SPANN {
                 }
                 return ErrorCode::Undefined;
             }
-            // if (m_postingSizes.GetSize(headID) + appendNum > (m_postingSizeLimit + reassignThreshold)) {
-            //     if (Split(headID, appendNum, appendPosting) == ErrorCode::FailSplit) {
-            //         goto checkDeleted;
-            //     }
-            //     auto splitEnd = std::chrono::high_resolution_clock::now();
-            //     double elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(splitEnd - appendBegin).count();
-            //     m_splitCost += elapsedMSeconds;
-            //     return ErrorCode::Success;
-            // } else {
             double appendIOSeconds = 0;
             {
                 //std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]); //ROCKSDB
@@ -917,17 +939,9 @@ namespace SPTAG::SPANN {
                 if (!p_index->ContainSample(headID)) {
                     goto checkDeleted;
                 }
-                // for (int i = 0; i < appendNum; i++)
-                // {
-                //     uint32_t idx = i * m_vectorInfoSize;
-                //     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(int)]);
-                //     LOG(Helper::LogLevel::LL_Info, "Append: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
-
-                // }
-                // LOG(Helper::LogLevel::LL_Info, "Merge: headID: %d, appendNum:%d\n", headID, appendNum);
                 auto appendIOBegin = std::chrono::high_resolution_clock::now();
                 if (db->Merge(headID, appendPosting) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Merge failed!\n");
+                    LOG(Helper::LogLevel::LL_Error, "Merge failed! Posting Size:%d, limit: %d\n", m_postingSizes.GetSize(headID), m_postingSizeLimit);
                     exit(1);
                 }
                 auto appendIOEnd = std::chrono::high_resolution_clock::now();
@@ -935,6 +949,8 @@ namespace SPTAG::SPANN {
                 m_postingSizes.IncSize(headID, appendNum);
             }
             if (m_postingSizes.GetSize(headID) > (m_postingSizeLimit + reassignThreshold)) {
+                SizeType VID = *(int*)(&appendPosting[0]);
+                LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
                 SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
@@ -1005,32 +1021,19 @@ namespace SPTAG::SPANN {
             m_opt = &p_opt;
             LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 
-            m_versionMap->Load(m_opt->m_deleteIDFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-            m_postingSizes.Load(m_opt->m_ssdInfoFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-
-            LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
-            LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
-
-            // for (int i = 0; i < m_versionMap->GetVectorNum(); i++) {
-            //     while (m_versionMap->GetVersion(i) != 0) {
-            //         uint8_t newVersion;
-            //         m_versionMap->IncVersion(i, &newVersion);
-            //     }
-            // }
+            if (!m_opt->m_useSPDK) {
+                m_versionMap->Load(m_opt->m_deleteIDFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                m_postingSizes.Load(m_opt->m_ssdInfoFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
+                LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
+            }
 
             if (m_opt->m_update) {
-                //LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize persistent buffer\n");
-                //m_persistentBuffer = std::make_shared<PersistentBuffer>(m_opt->m_persistentBufferPath, db);
-                LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
-                m_splitThreadPool = std::make_shared<Helper::ThreadPool>();
-                m_splitThreadPool->init(m_opt->m_appendThreadNum);
-                m_reassignThreadPool = std::make_shared<Helper::ThreadPool>();
-                m_reassignThreadPool->init(m_opt->m_reassignThreadNum);
-
-                // LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize dispatcher\n");
-                // m_dispatcher = std::make_shared<Dispatcher>(m_persistentBuffer, m_opt->m_batch, m_splitThreadPool, m_reassignThreadPool, this);
-                // m_dispatcher->run();
+                m_splitThreadPool = std::make_shared<SPDKThreadPool>();
+                m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
+                m_reassignThreadPool = std::make_shared<SPDKThreadPool>();
+                m_reassignThreadPool->initSPDK(m_opt->m_reassignThreadNum, this);
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
             }
             return true;
@@ -1100,7 +1103,7 @@ namespace SPTAG::SPANN {
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                // if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
+                if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -1474,6 +1477,21 @@ namespace SPTAG::SPANN {
 
         bool Initialize() override {
             return db->Initialize();
+        }
+
+        void GetWritePosting(SizeType pid, std::string& posting, bool write = false) override { 
+            if (write) {
+                db->Put(pid, posting);
+                m_postingSizes.UpdateSize(pid, posting.size() / m_vectorInfoSize);
+                // LOG(Helper::LogLevel::LL_Info, "PostingSize: %d\n", m_postingSizes.GetSize(pid));
+                // exit(1);
+            } else {
+                db->Get(pid, &posting);
+            }
+        }
+
+        void InitPostingRecord(std::shared_ptr<VectorIndex> p_index) {
+            m_postingSizes.Initialize((SizeType)(p_index->GetNumSamples()), p_index->m_iDataBlockSize, p_index->m_iDataCapacity);
         }
 
     private:

@@ -200,11 +200,11 @@ namespace SPTAG
             bool AllFinished() { if (m_options.m_useKV) return m_extraSearcher->AllFinished(); return true; }
 
             void GetDBStat() { 
-                if (m_options.m_useKV) m_extraSearcher->GetDBStats(); 
+                if (m_options.m_useKV || m_options.m_useSPDK) m_extraSearcher->GetDBStats(); 
                 LOG(Helper::LogLevel::LL_Info, "Current Vector Num: %d, Deleted: %d .\n", GetNumSamples(), GetNumDeleted());
             }
 
-            void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
+            void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV || m_options.m_useSPDK) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
             
             void ForceCompaction() { if (m_options.m_useKV) m_extraSearcher->ForceCompaction(); }
 
