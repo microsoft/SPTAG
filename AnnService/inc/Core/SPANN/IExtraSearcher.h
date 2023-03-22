@@ -87,6 +87,8 @@ namespace SPTAG {
 
             //Split
             double m_splitCost{ 0 };
+            double m_getCost{ 0 };
+            double m_putCost{ 0 };
             double m_clusteringCost{ 0 };
             double m_updateHeadCost{ 0 };
             double m_reassignScanCost{ 0 };
@@ -112,10 +114,12 @@ namespace SPTAG {
                     LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendCost, m_appendCost / m_appendTaskNum);
                     LOG(Helper::LogLevel::LL_Info, "AppendTaskNum: %d, AppendIO TotalCost: %.3lf us, PerCost: %.3lf us\n", m_appendTaskNum, m_appendIOCost, m_appendIOCost / m_appendTaskNum);
                     LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_splitCost, m_splitCost / m_splitNum);
+                    LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Read TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_getCost, m_getCost / m_splitNum);
                     LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Clustering TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_clusteringCost, m_clusteringCost / m_splitNum);
                     LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, UpdateHead TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_updateHeadCost, m_updateHeadCost / m_splitNum);
+                    LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, Write TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_putCost, m_putCost / m_splitNum);
                     LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScan TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanCost, m_reassignScanCost / m_splitNum);
-                    LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScanIO TotalCost: %.3lf ms, PerCost: %.3lf ms\n", m_splitNum, m_reassignScanIOCost, m_reassignScanIOCost / m_splitNum);
+                    LOG(Helper::LogLevel::LL_Info, "SplitNum: %d, ReassignScanIO TotalCost: %.3lf us, PerCost: %.3lf us\n", m_splitNum, m_reassignScanIOCost, m_reassignScanIOCost / m_splitNum);
                     LOG(Helper::LogLevel::LL_Info, "GCNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_garbageNum, m_garbageCost, m_garbageCost / m_garbageNum);
                     LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_reAssignCost, m_reAssignCost / m_reAssignNum);
                     LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, Select TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_selectCost, m_selectCost / m_reAssignNum);
@@ -135,6 +139,8 @@ namespace SPTAG {
                     m_clusteringCost = 0;
                     m_garbageCost = 0;
                     m_updateHeadCost = 0;
+                    m_getCost = 0;
+                    m_putCost = 0;
                     m_reassignScanCost = 0;
                     m_reassignScanIOCost = 0;
                     m_appendCost = 0;
@@ -303,6 +309,8 @@ namespace SPTAG {
             virtual void GetWritePosting(SizeType pid, std::string& posting, bool write = false) { return; }
 
             virtual bool Initialize() { return false; }
+
+            virtual bool ExitBlockController() { return false; }
 
             virtual void InitPostingRecord(std::shared_ptr<VectorIndex> p_index) { return; }
         };

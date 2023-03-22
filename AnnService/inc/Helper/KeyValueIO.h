@@ -35,7 +35,9 @@ namespace SPTAG
 
             virtual void GetStat() {}
 
-            virtual bool Initialize() { return false; }
+            virtual bool Initialize(bool debug = false) { return false; }
+
+            virtual bool ExitBlockController(bool debug = false) { return false; }
         };
     }
 }

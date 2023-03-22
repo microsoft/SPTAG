@@ -197,7 +197,7 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
         public:
-            bool AllFinished() { if (m_options.m_useKV) return m_extraSearcher->AllFinished(); return true; }
+            bool AllFinished() { if (m_options.m_useKV || m_options.m_useSPDK) return m_extraSearcher->AllFinished(); return true; }
 
             void GetDBStat() { 
                 if (m_options.m_useKV || m_options.m_useSPDK) m_extraSearcher->GetDBStats(); 
@@ -215,6 +215,8 @@ namespace SPTAG
             void ForceGC() { m_extraSearcher->ForceGC(m_index.get()); }
 
             bool Initialize() { return m_extraSearcher->Initialize(); }
+
+            bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
         };
     } // namespace SPANN
 } // namespace SPTAG

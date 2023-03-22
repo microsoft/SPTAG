@@ -123,6 +123,7 @@ namespace SPTAG::SPANN {
                             
                             delete j;
                         }
+                        extraIndex->ExitBlockController();
                     });
                 }
             }
@@ -153,7 +154,7 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 1));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
@@ -455,11 +456,14 @@ namespace SPTAG::SPANN {
                 std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
                 std::string postingList;
+                auto splitGetBegin = std::chrono::high_resolution_clock::now();
                 if (db->Get(headID, &postingList) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Info, "Split fail to get oversized postings\n");
                     exit(0);
                 }
-                // postingList += appendPosting;
+                auto splitGetEnd = std::chrono::high_resolution_clock::now();
+                elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitGetEnd - splitGetBegin).count();
+                m_stat.m_getCost += elapsedMSeconds;
                 // reinterpret postingList to vectors and IDs
                 auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
@@ -506,6 +510,7 @@ namespace SPTAG::SPANN {
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
                     m_stat.m_garbageCost += elapsedMSeconds;
                     m_splitList.erase(headID);
+                    // LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
                     return ErrorCode::Success;
                 }
                 //LOG(Helper::LogLevel::LL_Info, "Resize\n");
@@ -560,10 +565,14 @@ namespace SPTAG::SPANN {
                         newHeadsID.push_back(headID);
                         newHeadVID = headID;
                         theSameHead = true;
+                        auto splitPutBegin = std::chrono::high_resolution_clock::now();
                         if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to override postings\n");
                             exit(0);
                         }
+                        auto splitPutEnd = std::chrono::high_resolution_clock::now();
+                        elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
+                        m_stat.m_putCost += elapsedMSeconds;
                         m_stat.m_theSameHeadNum++;
                     }
                     else {
@@ -571,10 +580,14 @@ namespace SPTAG::SPANN {
                         p_index->AddIndexId(args.centers + k * args._D, 1, m_opt->m_dim, begin, end);
                         newHeadVID = begin;
                         newHeadsID.push_back(begin);
+                        auto splitPutBegin = std::chrono::high_resolution_clock::now();
                         if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to add new postings\n");
                             exit(0);
                         }
+                        auto splitPutEnd = std::chrono::high_resolution_clock::now();
+                        elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
+                        m_stat.m_putCost += elapsedMSeconds;
                         auto updateHeadBegin = std::chrono::high_resolution_clock::now();
                         p_index->AddIndexIdx(begin, end);
                         auto updateHeadEnd = std::chrono::high_resolution_clock::now();
@@ -587,7 +600,7 @@ namespace SPTAG::SPANN {
                             exit(1);
                         }
                     }
-                    LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
+                    // LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                     first += args.counts[k];
                     m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
                 }
@@ -778,7 +791,7 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
         {
-            LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
+            // LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
             tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
             if (m_splitList.find(headIDAccessor, headID)) {
                 return;
@@ -788,7 +801,7 @@ namespace SPTAG::SPANN {
 
             auto* curJob = new SplitAsyncJob(p_index, this, headID, m_opt->m_disableReassign, p_callback);
             m_splitThreadPool->add(curJob);
-            LOG(Helper::LogLevel::LL_Info, "Add to thread pool\n");
+            // LOG(Helper::LogLevel::LL_Info, "Add to thread pool\n");
         }
 
         inline void MergeAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
@@ -837,7 +850,7 @@ namespace SPTAG::SPANN {
                     exit(0);
                 }
                 auto reassignScanIOEnd = std::chrono::high_resolution_clock::now();
-                auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
+                auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
                 m_stat.m_reassignScanIOCost += elapsedMSeconds;
             }
 
@@ -949,8 +962,10 @@ namespace SPTAG::SPANN {
                 m_postingSizes.IncSize(headID, appendNum);
             }
             if (m_postingSizes.GetSize(headID) > (m_postingSizeLimit + reassignThreshold)) {
-                SizeType VID = *(int*)(&appendPosting[0]);
-                LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
+                // SizeType VID = *(int*)(&appendPosting[0]);
+                // LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
+                // if (!reassignThreshold) SplitAsync(p_index, headID);
+                // else Split(p_index, headID, !m_opt->m_disableReassign);
                 SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
@@ -1397,6 +1412,7 @@ namespace SPTAG::SPANN {
                         exit(1);
                     }
                     SizeType fullID = p_postingSelections[selectIdx++].tonode;
+                    // if (id == 0) LOG(Helper::LogLevel::LL_Info, "ID: %d\n", fullID);
                     uint8_t version = m_versionMap->GetVersion(fullID);
                     // First Vector ID, then version, then Vector
                     Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
@@ -1477,6 +1493,10 @@ namespace SPTAG::SPANN {
 
         bool Initialize() override {
             return db->Initialize();
+        }
+
+        bool ExitBlockController() override {
+            return db->ExitBlockController();
         }
 
         void GetWritePosting(SizeType pid, std::string& posting, bool write = false) override { 

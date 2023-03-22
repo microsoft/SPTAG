@@ -336,9 +336,14 @@ namespace SPTAG::SPANN
             return ErrorCode::Success;
         }
 
-        bool Initialize() override {
-            LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
+        bool Initialize(bool debug = false) override {
+            if (debug) LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
             return m_pBlockController.Initialize();
+        }
+
+        bool ExitBlockController(bool debug = false) override { 
+            if (debug) LOG(Helper::LogLevel::LL_Info, "Exit SPDK for thread\n");
+            return m_pBlockController.ShutDown(); 
         }
 
     private:

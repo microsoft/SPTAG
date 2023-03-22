@@ -292,6 +292,7 @@ namespace SPTAG {
                         }
                         else
                         {
+                            p_index->ExitBlockController();
                             return;
                         }
                     }
@@ -339,7 +340,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nRocksDB Latency Distribution:\n");
+                LOG(Helper::LogLevel::LL_Info, "\nSPDK Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -736,6 +737,7 @@ namespace SPTAG {
                         }
                         else
                         {
+                            p_index->ExitBlockController();
                             return;
                         }
                     }
@@ -860,9 +862,9 @@ namespace SPTAG {
 
                 bool calTruthOrigin = p_opts.m_calTruth;
 
-                p_index->ForceCompaction();
+                // p_index->ForceCompaction();
 
-                p_index->GetDBStat();
+                // p_index->GetDBStat();
 
                 if (!p_opts.m_onlySearchFinalBatch) {
                     if (p_opts.m_maxInternalResultNum != -1) 
@@ -877,6 +879,7 @@ namespace SPTAG {
                         StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, p_opts.m_truthPath, p_opts, sw.getElapsedSec());
                     }
                 }
+                // exit(1);
 
                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                 p_index->GetDBStat();
@@ -923,20 +926,20 @@ namespace SPTAG {
                     std::string tempFileName;
                     p_opts.m_calTruth = false;
                     do {
-                        insert_status = insert_future.wait_for(std::chrono::milliseconds(20));
-                        delete_status = delete_future.wait_for(std::chrono::milliseconds(20));
+                        insert_status = insert_future.wait_for(std::chrono::seconds(2));
+                        delete_status = delete_future.wait_for(std::chrono::seconds(2));
                         if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
                             if (p_index->GetNumDeleted() >= nextSamplePoint) {
                                 LOG(Helper::LogLevel::LL_Info, "Samppling Size: %d\n", nextSamplePoint);
                                 showStatus = true;
                                 nextSamplePoint += sampleSize;
                                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
-                                p_index->GetIndexStat(-1, false, false);
-                                p_index->GetDBStat();
                             } else {
                                 showStatus = false;
                             }
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec(), showStatus);
+                            p_index->GetIndexStat(-1, false, false);
+                            p_index->GetDBStat();
                         }
                     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
 
@@ -950,10 +953,10 @@ namespace SPTAG {
                     std::string truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
 
                     p_opts.m_calTruth = calTruthOrigin;
-                    p_index->ForceCompaction();
+                    // p_index->ForceCompaction();
                     if (p_opts.m_onlySearchFinalBatch && days - 1 != i) continue;
-                    p_index->ForceGC();
-                    p_index->ForceCompaction();
+                    // p_index->ForceGC();
+                    // p_index->ForceCompaction();
                     p_index->StopMerge();
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {

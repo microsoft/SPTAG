@@ -741,6 +741,9 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::AddIndexIdx(SizeType begin, SizeType end)
         {
+            if (end - m_pTrees.sizePerTree() >= m_addCountForRebuild && m_threadPool.jobsize() == 0) {
+                m_threadPool.add(new RebuildJob(&m_pSamples, &m_pTrees, &m_pGraph, m_iDistCalcMethod));
+            }
 
             for (SizeType node = begin; node < end; node++)
             {

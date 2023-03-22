@@ -128,8 +128,8 @@ namespace SPTAG
             if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
@@ -180,35 +180,52 @@ namespace SPTAG
                 }
                 int totalPostingNum = m_index->GetNumSamples();
                 m_extraSearcher->InitPostingRecord(m_index);
-            // #pragma omp parallel for num_threads(10)
-                for (int i = 0; i < totalPostingNum; i++) {
-                    std::string tempPosting;
-                    storeExtraSearcher->GetWritePosting(i, tempPosting);
-                    // LOG(Helper::LogLevel::LL_Info, "Origin Posting Size: %lld, vectorInforSize: %d\n", tempPosting.size(), m_vectorInfoSize);
-                    int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
-                    // LOG(Helper::LogLevel::LL_Info, "Origin Vector Num: %d, vectorLimit: %d\n", vectorNum, m_vectorLimit);
 
-                    if (vectorNum > m_vectorLimit) vectorNum = m_vectorLimit;
+                std::vector<std::thread> threads;
+                std::atomic_size_t vectorsSent(0);
 
-                    auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
-                    std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
-                    char* ptr = (char*)(newPosting.c_str());
-                    for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
-                        // LOG(Helper::LogLevel::LL_Info,"Round\n");
-                        char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
-                        int VID = *(reinterpret_cast<int*>(vectorInfo));
-                        // LOG(Helper::LogLevel::LL_Info,"VID: %d\n", VID);
-                        uint8_t version = m_versionMap.GetVersion(VID);
-                        // LOG(Helper::LogLevel::LL_Info,"VID: %d, version: %d\n", VID, version);
-                        memcpy(ptr, &VID, sizeof(int));
-                        memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
-                        memcpy(ptr + sizeof(int) + sizeof(uint8_t), tempPosting.c_str() + j * m_vectorInfoSize + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                auto func = [&]()
+                {
+                    m_extraSearcher->Initialize();
+                    size_t index = 0;
+                    while (true)
+                    {
+                        index = vectorsSent.fetch_add(1);
+                        if (index < totalPostingNum)
+                        {
+
+                            if ((index & ((1 << 14) - 1)) == 0)
+                            {
+                                LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
+                            }
+                            std::string tempPosting;
+                            storeExtraSearcher->GetWritePosting(index, tempPosting);
+                            int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+
+                            if (vectorNum > m_vectorLimit) vectorNum = m_vectorLimit;
+
+                            auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+                            std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+                            char* ptr = (char*)(newPosting.c_str());
+                            for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+                                char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+                                int VID = *(reinterpret_cast<int*>(vectorInfo));
+                                uint8_t version = m_versionMap.GetVersion(VID);
+                                memcpy(ptr, &VID, sizeof(int));
+                                memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+                            }
+                            m_extraSearcher->GetWritePosting(index, newPosting, true);
+                        }
+                        else
+                        {
+                            m_extraSearcher->ExitBlockController();
+                            return;
+                        }
                     }
-                    // LOG(Helper::LogLevel::LL_Info, "New Posting Size: %lld\n", newPosting.size());
-                    // exit(1);
-                    m_extraSearcher->GetWritePosting(i, newPosting, true);
-                }
-
+                };
+            for (int j = 0; j < m_options.m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
+            for (auto& thread : threads) { thread.join(); }
             } else {
                 m_versionMap.Load(m_options.m_deleteIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
             }
