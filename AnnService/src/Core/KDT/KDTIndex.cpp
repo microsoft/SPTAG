@@ -232,7 +232,7 @@ case VectorValueType::Name: \
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck, bool p_searchDeleted) const
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not Support Filter on KDT Index!\n");
             return ErrorCode::Fail;
