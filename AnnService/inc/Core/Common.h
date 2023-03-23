@@ -4,6 +4,14 @@
 #ifndef _SPTAG_CORE_COMMONDEFS_H_
 #define _SPTAG_CORE_COMMONDEFS_H_
 
+#ifdef DEBUG
+#define IF_DEBUG(statement) statement
+#define IF_NDEBUG(statement)
+#else
+#define IF_DEBUG(statement)
+#define IF_NDEBUG(statement) statement
+#endif
+
 #include <cstdint>
 #include <type_traits>
 #include <memory>

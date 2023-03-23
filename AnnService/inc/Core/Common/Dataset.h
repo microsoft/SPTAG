@@ -4,6 +4,10 @@
 #ifndef _SPTAG_COMMON_DATASET_H_
 #define _SPTAG_COMMON_DATASET_H_
 
+#include "inc/Helper/Logging.h"
+#include <stdexcept>
+#include <sstream>
+
 namespace SPTAG
 {
     namespace COMMON
@@ -73,11 +77,20 @@ namespace SPTAG
 
             inline const T* At(SizeType index) const
             {
-                if (index >= rows) {
-                    SizeType incIndex = index - rows;
-                    return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
+                if (index < R() && index >= 0)
+                {
+                    if (index >= rows) {
+                        SizeType incIndex = index - rows;
+                        return incBlocks[incIndex >> rowsInBlockEx] + ((size_t)(incIndex & rowsInBlock)) * cols;
+                    }
+                    return data + ((size_t)index) * cols;
                 }
-                return data + ((size_t)index) * cols;
+                else
+                {
+                    std::ostringstream oss;
+                    oss << "Index out of range in Dataset. Index: " << index << " Size: " << R();
+                    throw std::out_of_range(oss.str());
+                }
             }
 
             T* operator[](SizeType index)

@@ -68,6 +68,12 @@ namespace SPTAG
             if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
+
             omp_set_num_threads(m_iNumberOfThreads);
             m_threadPool.init();
             return ErrorCode::Success;
@@ -84,6 +90,12 @@ namespace SPTAG
             if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
             else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
 
             omp_set_num_threads(m_iNumberOfThreads);
             m_threadPool.init();
@@ -127,7 +139,7 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
-
+        /*
 #define Search(CheckDeleted) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees<T,Q>(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -148,6 +160,8 @@ namespace SPTAG
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
+                IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )\
+                IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )\
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
@@ -165,17 +179,93 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
+*/
+        template<typename T>
+        template<typename Q, bool(*notDeleted)(const COMMON::Labelset&, SizeType)>
+        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
+            m_pTrees.InitSearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space);
+            m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
+            while (!p_space.m_NGQueue.empty()) 
+            {
+                NodeDistPair gnode = p_space.m_NGQueue.pop();
+                const SizeType* node = m_pGraph[gnode.node];
+                _mm_prefetch((const char*)node, _MM_HINT_T0);
+                for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++)
+                {
+                    auto futureNode = node[i];
+                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
+                    _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
+                }
+                    
+                if (notDeleted(m_deletedID, gnode.node))
+                {
+                    if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) 
+                    {
+                        p_query.SortResult();
+                        return;
+                    }
+                }
 
+                float upperBound = max(p_query.worstDist(), gnode.distance);
+                bool bLocalOpt = true;
+                for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) 
+                {
+                    SizeType nn_index = node[i];
+                    if (nn_index < 0) 
+                        break;
+                    IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )
+                    //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
+                    if (p_space.CheckAndSet(nn_index)) 
+                        continue;
+                    float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
+                    if (distance2leaf <= upperBound) 
+                        bLocalOpt = false;
+                    p_space.m_iNumberOfCheckedLeaves++;
+                    p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf));
+                }
+                if (bLocalOpt) 
+                    p_space.m_iNumOfContinuousNoBetterPropagation++;
+                else 
+                    p_space.m_iNumOfContinuousNoBetterPropagation = 0;
+                if (p_space.m_iNumOfContinuousNoBetterPropagation > m_iThresholdOfNumberOfContinuousNoBetterPropagation) 
+                {
+                    if (p_space.m_iNumberOfTreeCheckedLeaves <= p_space.m_iNumberOfCheckedLeaves / 10) 
+                    {
+                        m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
+                    }
+                    else if (gnode.distance > p_query.worstDist()) 
+                    {
+                        break;
+                    }
+                }
+            }
+            p_query.SortResult();
+        }
+
+        namespace StaticDispatch
+        {
+            bool AlwaysTrue(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return true;
+            }
+
+            bool CheckIfNotDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return !deletedIDs.Contains(node);
+            }
+        };
 
         template <typename T>
         template <typename Q>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const
         {
             if (m_deletedID.Count() == 0 || p_searchDeleted) {
-                Search(;)
+                Search<Q, StaticDispatch::AlwaysTrue>(p_query, p_space);
             }
             else {
-                Search(if (!m_deletedID.Contains(gnode.node)))
+                Search<Q, StaticDispatch::CheckIfNotDeleted>(p_query, p_space);
             }
         }
 
