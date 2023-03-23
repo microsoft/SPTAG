@@ -249,7 +249,7 @@ namespace SPTAG
 
 
         template <typename T>
-        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray)) const
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc) const
         {
             if (m_pQuantizer && !p_query.HasQuantizedTarget())
             {
@@ -260,24 +260,24 @@ namespace SPTAG
             {
                 if (p_searchDuplicated)
                 {
-                    if (func == nullptr)
+                    if (filterFunc == nullptr)
                     {
                         Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
                     }
                     else
                     {
-                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                        Search(;, if (!p_query.AddPoint(tmpNode, gnode.distance)), if (filterFunc(m_pMetadata->GetMetadata(tmpNode))))
                     }
                 }
                 else
                 {
-                    if (func == nullptr)
+                    if (filterFunc == nullptr)
                     {
                         Search(;, p_query.AddPoint(tmpNode, gnode.distance);, ;)
                     }
                     else
                     {
-                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, if (func(m_pMetadata->GetMetadata(tmpNode))))
+                        Search(;, p_query.AddPoint(tmpNode, gnode.distance);, if (filterFunc(m_pMetadata->GetMetadata(tmpNode))))
                     }
                 }
             }
@@ -285,24 +285,24 @@ namespace SPTAG
             {
                 if (p_searchDuplicated)
                 {
-                    if (func == nullptr)
+                    if (filterFunc == nullptr)
                     {
                         Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), ;)
                     }
                     else
                     {
-                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), if (func(m_pMetadata->GetMetadata(tmpNode))))
+                        Search(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)), if (filterFunc(m_pMetadata->GetMetadata(tmpNode))))
                     }
                 }
                 else
                 {
-                    if (func == nullptr)
+                    if (filterFunc == nullptr)
                     {
                         Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);, ;)
                     }
                     else
                     {
-                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance); , if (func(m_pMetadata->GetMetadata(tmpNode))))
+                        Search(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance); , if (filterFunc(m_pMetadata->GetMetadata(tmpNode))))
                     }
                 }
             }
@@ -336,7 +336,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck, bool p_searchDeleted) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
@@ -347,7 +347,7 @@ namespace SPTAG
             }
 			workSpace->Reset(maxCheck == 0 ? m_iMaxCheck : maxCheck, p_query.GetResultNum());
 
-            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_searchDeleted, true, func);
+            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_searchDeleted, true, filterFunc);
 
             m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
