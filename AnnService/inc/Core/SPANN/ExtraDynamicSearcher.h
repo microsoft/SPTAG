@@ -27,6 +27,9 @@
 #include "ExtraRocksDBController.h"
 #endif
 
+// enable rocksdb io_uring
+extern "C" bool RocksDbIOUringEnable() { return true; }
+
 namespace SPTAG::SPANN {
     template <typename ValueType>
     class ExtraDynamicSearcher : public IExtraSearcher
@@ -148,7 +151,11 @@ namespace SPTAG::SPANN {
 
         IndexStats m_stat;
 
-        tbb::concurrent_hash_map<SizeType, SizeType> m_splitList;
+        // tbb::concurrent_hash_map<SizeType, SizeType> m_splitList;
+
+        std::mutex m_runningLock;
+        std::unordered_set<SizeType>m_splitList;
+
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
@@ -509,7 +516,10 @@ namespace SPTAG::SPANN {
                     auto GCEnd = std::chrono::high_resolution_clock::now();
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
                     m_stat.m_garbageCost += elapsedMSeconds;
-                    m_splitList.erase(headID);
+                    {
+                        std::lock_guard<std::mutex> tmplock(m_runningLock);
+                        m_splitList.erase(headID);
+                    }
                     // LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
                     return ErrorCode::Success;
                 }
@@ -543,7 +553,10 @@ namespace SPTAG::SPANN {
                         LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
                         exit(0);
                     }
-                    m_splitList.erase(headID);
+                    {
+                        std::lock_guard<std::mutex> tmplock(m_runningLock);
+                        m_splitList.erase(headID);
+                    }
                     return ErrorCode::Success;
                 }
 
@@ -609,7 +622,10 @@ namespace SPTAG::SPANN {
                     m_postingSizes.UpdateSize(headID, 0);
                 }
             }
-            m_splitList.erase(headID);
+            {
+                std::lock_guard<std::mutex> tmplock(m_runningLock);
+                m_splitList.erase(headID);
+            }
             m_stat.m_splitNum++;
             if (reassign) {
                 auto reassignScanBegin = std::chrono::high_resolution_clock::now();
@@ -792,12 +808,18 @@ namespace SPTAG::SPANN {
         inline void SplitAsync(VectorIndex* p_index, SizeType headID, std::function<void()> p_callback = nullptr)
         {
             // LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
-            tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
-            if (m_splitList.find(headIDAccessor, headID)) {
-                return;
+            // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+            // if (m_splitList.find(headIDAccessor, headID)) {
+            //     return;
+            // }
+            // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
+            // m_splitList.insert(workPair);
+            {
+                std::lock_guard<std::mutex> tmplock(m_runningLock);
+
+                if (m_splitList.find(headID) != m_splitList.end()) return;
+                m_splitList.insert(headID);
             }
-            tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
-            m_splitList.insert(workPair);
 
             auto* curJob = new SplitAsyncJob(p_index, this, headID, m_opt->m_disableReassign, p_callback);
             m_splitThreadPool->add(curJob);
@@ -825,12 +847,36 @@ namespace SPTAG::SPANN {
 
         ErrorCode CollectReAssign(VectorIndex* p_index, SizeType headID, std::vector<std::string>& postingLists, std::vector<SizeType>& newHeadsID) {
             auto headVector = reinterpret_cast<const ValueType*>(p_index->GetSample(headID));
-            size_t newHeadsNum = newHeadsID.size();
-            std::vector<SizeType> HeadPrevTopK;
             std::vector<float> newHeadsDist;
+            std::set<SizeType> reAssignVectorsTopK;
             newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[0])));
             newHeadsDist.push_back(p_index->ComputeDistance(p_index->GetSample(headID), p_index->GetSample(newHeadsID[1])));
+            for (int i = 0; i < postingLists.size(); i++) {
+                auto& postingList = postingLists[i];
+                size_t postVectorNum = postingList.size() / m_vectorInfoSize;
+                auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
+                for (int j = 0; j < postVectorNum; j++) {
+                    uint8_t* vectorId = postingP + j * m_vectorInfoSize;
+                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                    // LOG(Helper::LogLevel::LL_Info, "VID: %d, Head: %d\n", vid, newHeadsID[i]);
+                    uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
+                    ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                    if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
+                        m_stat.m_reAssignScanNum++;
+                        float dist = p_index->ComputeDistance(p_index->GetSample(newHeadsID[i]), vector);
+                        if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, true, newHeadsID[i])) {
+                            ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), newHeadsID[i]);
+                            reAssignVectorsTopK.insert(vid);
+                        }
+                    }
+                }
+            }
             if (m_opt->m_reassignK > 0) {
+                std::vector<SizeType> HeadPrevTopK;
+                newHeadsDist.clear();
+                newHeadsDist.resize(0);
+                postingLists.clear();
+                postingLists.resize(0);
                 COMMON::QueryResultSet<ValueType> nearbyHeads(headVector, m_opt->m_reassignK);
                 p_index->SearchIndex(nearbyHeads);
                 BasicResult* queryResults = nearbyHeads.GetResults();
@@ -852,32 +898,29 @@ namespace SPTAG::SPANN {
                 auto reassignScanIOEnd = std::chrono::high_resolution_clock::now();
                 auto elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(reassignScanIOEnd - reassignScanIOBegin).count();
                 m_stat.m_reassignScanIOCost += elapsedMSeconds;
-            }
 
-            std::set<SizeType> reAssignVectorsTopK;
-
-            for (int i = 0; i < postingLists.size(); i++) {
-                auto& postingList = postingLists[i];
-                size_t postVectorNum = postingList.size() / m_vectorInfoSize;
-                auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
-                for (int j = 0; j < postVectorNum; j++) {
-                    uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
-                    uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
-                    // if (vid == 1807015) {
-                    //     LOG(Helper::LogLevel::LL_Info, "Split: version: %d, on-disk version: %d\n", m_versionMap->GetVersion(vid), version);
-                    // }
-                    ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
-                        m_stat.m_reAssignScanNum++;
-                        float dist = p_index->ComputeDistance(p_index->GetSample(newHeadsID[i]), vector);
-                        if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, i < newHeadsNum, newHeadsID[i])) {
-                            ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), newHeadsID[i]);
-                            reAssignVectorsTopK.insert(vid);
+                for (int i = 0; i < postingLists.size(); i++) {
+                    auto& postingList = postingLists[i];
+                    size_t postVectorNum = postingList.size() / m_vectorInfoSize;
+                    auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
+                    for (int j = 0; j < postVectorNum; j++) {
+                        uint8_t* vectorId = postingP + j * m_vectorInfoSize;
+                        SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                        // LOG(Helper::LogLevel::LL_Info, "%d: VID: %d, Head: %d, size:%d/%d\n", i, vid, HeadPrevTopK[i], postingLists.size(), HeadPrevTopK.size());
+                        uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(int)));
+                        ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                        if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
+                            m_stat.m_reAssignScanNum++;
+                            float dist = p_index->ComputeDistance(p_index->GetSample(HeadPrevTopK[i]), vector);
+                            if (CheckIsNeedReassign(p_index, newHeadsID, vector, headID, newHeadsDist[i], dist, false, HeadPrevTopK[i])) {
+                                ReassignAsync(p_index, std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), HeadPrevTopK[i]);
+                                reAssignVectorsTopK.insert(vid);
+                            }
                         }
                     }
                 }
             }
+            // exit(1);
             return ErrorCode::Success;
         }
 
@@ -975,6 +1018,9 @@ namespace SPTAG::SPANN {
                 m_stat.m_appendIOCost += appendIOSeconds;
                 m_stat.m_appendCost += elapsedMSeconds;
             }
+            // } else {
+            //     LOG(Helper::LogLevel::LL_Info, "ReAssign Append To: %d\n", headID);
+            // }
             return ErrorCode::Success;
         }
         
@@ -983,18 +1029,10 @@ namespace SPTAG::SPANN {
             SizeType VID = *((SizeType*)vectorInfo->c_str());
             uint8_t version = *((uint8_t*)(vectorInfo->c_str() + sizeof(VID)));
             // return;
+            // LOG(Helper::LogLevel::LL_Info, "ReassignID: %d, version: %d, current version: %d, HeadPrev: %d\n", VID, version, m_versionMap->GetVersion(VID), HeadPrev);
             if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) {
-                // LOG(Helper::LogLevel::LL_Info, "ReassignID: %d, version: %d, current version: %d\n", VID, version, m_versionMap->GetVersion(VID));
                 return;
             }
-
-
-            // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor VIDAccessor;
-            // if (m_reassignMap.find(VIDAccessor, VID) && VIDAccessor->second < version) {
-            //     return;
-            // }
-            // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(VID, version);
-            // m_reassignMap.insert(workPair);
             auto reassignBegin = std::chrono::high_resolution_clock::now();
 
             m_stat.m_reAssignNum++;
@@ -1008,6 +1046,7 @@ namespace SPTAG::SPANN {
             m_stat.m_selectCost += elapsedMSeconds;
 
             auto reassignAppendBegin = std::chrono::high_resolution_clock::now();
+            // LOG(Helper::LogLevel::LL_Info, "Need ReAssign\n");
             if (isNeedReassign && m_versionMap->GetVersion(VID) == version) {
                 // LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %d, version: %d, current version: %d\n", VID, version, m_versionMap.GetVersion(VID));
                 m_versionMap->IncVersion(VID, &version);

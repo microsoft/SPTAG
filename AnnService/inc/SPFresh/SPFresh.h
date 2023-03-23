@@ -474,7 +474,7 @@ namespace SPTAG {
                 std::shared_ptr<VectorSet> vectorSet;
                 if (p_opts.m_loadAllVectors) {
                     LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
-                    if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
+                    if (!p_opts.m_fullVectorPath.empty() && fileexists(p_opts.m_fullVectorPath.c_str())) {
                         std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
                         auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                         if (ErrorCode::Success == vectorReader->LoadFile(p_opts.m_fullVectorPath))
@@ -862,7 +862,7 @@ namespace SPTAG {
 
                 bool calTruthOrigin = p_opts.m_calTruth;
 
-                // p_index->ForceCompaction();
+                p_index->ForceCompaction();
 
                 // p_index->GetDBStat();
 
@@ -934,12 +934,12 @@ namespace SPTAG {
                                 showStatus = true;
                                 nextSamplePoint += sampleSize;
                                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
+                                p_index->GetIndexStat(-1, false, false);
+                                p_index->GetDBStat();
                             } else {
                                 showStatus = false;
                             }
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec(), showStatus);
-                            p_index->GetIndexStat(-1, false, false);
-                            p_index->GetDBStat();
                         }
                     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
 
@@ -989,6 +989,7 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
+                    p_index->Initialize();
                     size_t index = 0;
                     while (true)
                     {
@@ -1003,6 +1004,7 @@ namespace SPTAG {
                         }
                         else
                         {
+                            p_index->ExitBlockController();
                             return;
                         }
                     }
@@ -1112,8 +1114,8 @@ namespace SPTAG {
                         if (insert_status == std::future_status::timeout) {
                             ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                             p_index->GetIndexStat(-1, false, false);
-                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec());
                             p_index->GetDBStat();
+                            if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec());
                         }
                     }while (insert_status != std::future_status::ready);
 
@@ -1130,7 +1132,7 @@ namespace SPTAG {
                     p_opts.m_calTruth = calTruthOrigin;
                     if (p_opts.m_onlySearchFinalBatch && batch - 1 != i) continue;
                     // p_index->ForceGC();
-                    p_index->ForceCompaction();
+                    // p_index->ForceCompaction();
                     p_index->StopMerge();
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
@@ -1168,7 +1170,7 @@ namespace SPTAG {
 
             #define DefineVectorValueType(Name, Type) \
                 if (opts->m_valueType == VectorValueType::Name) { \
-                    SteadyStateSPFresh((SPANN::Index<Type>*)(index.get())); \
+                    UpdateSPFresh((SPANN::Index<Type>*)(index.get())); \
                 } \
 
             #include "inc/Core/DefinitionList.h"
