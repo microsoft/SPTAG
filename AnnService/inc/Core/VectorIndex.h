@@ -39,7 +39,7 @@ public:
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
-    ErrorCode SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck = 0, bool p_searchDeleted = false) const;
+    virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 

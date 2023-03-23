@@ -155,7 +155,7 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck = 0, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
@@ -188,10 +188,10 @@ namespace SPTAG
             }
 
         private:
-            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray) = nullptr) const;
+            void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc = nullptr) const;
             
-            template <bool(*notDeleted)(const COMMON::Labelset&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, bool(*)(ByteArray))>
-            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool(*filterFunc)(ByteArray)) const;
+            template <bool(*notDeleted)(const COMMON::Labelset&, SizeType), bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, std::function<bool(const ByteArray&)>)>
+            void Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const ByteArray&)> filterFunc) const;
         };
     } // namespace BKT
 } // namespace SPTAG

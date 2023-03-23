@@ -213,8 +213,8 @@ namespace SPTAG
         template<typename T>
         template <bool(*notDeleted)(const COMMON::Labelset&, SizeType), 
             bool(*isDup)(COMMON::QueryResultSet<T>&, SizeType, float), 
-            bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, bool(*)(ByteArray))>
-        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool(*filterFunc)(ByteArray)) const
+            bool(*checkFilter)(const std::shared_ptr<MetadataSet>&, SizeType, std::function<bool(const ByteArray&)>)>
+        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, std::function<bool(const ByteArray&)> filterFunc) const
         {
             std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
             m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
@@ -323,7 +323,7 @@ namespace SPTAG
                 return false;
             }
 
-            bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, bool(*filterFunc)(ByteArray))
+            bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, std::function<bool(const ByteArray&)> filterFunc)
             {
                 return filterFunc(metadata->GetMetadata(node));
             }
@@ -332,7 +332,7 @@ namespace SPTAG
         };
 
         template <typename T>
-        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, bool (*func)(ByteArray)) const
+        void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc) const
         {
             if (m_pQuantizer && !p_query.HasQuantizedTarget())
             {
@@ -343,33 +343,33 @@ namespace SPTAG
             uint8_t flags = 0;
             flags += (m_deletedID.Count() == 0 || p_searchDeleted) << 2;
             flags += p_searchDuplicated << 1;
-            flags += (func == nullptr);
+            flags += (filterFunc == nullptr);
 
             switch (flags)
             {
             case 0b000:
-                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, filterFunc);
                 break;
             case 0b001:
-                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, filterFunc);
                 break;
             case 0b010:
-                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, filterFunc);
                 break;
             case 0b011:
-                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::CheckIfNotDeleted, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, filterFunc);
                 break;
             case 0b100:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::CheckFilter>(p_query, p_space, filterFunc);
                 break;
             case 0b101:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::NeverDup, StaticDispatch::AlwaysTrue>(p_query, p_space, filterFunc);
                 break;
             case 0b110:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::CheckFilter>(p_query, p_space, filterFunc);
                 break;
             case 0b111:
-                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, func);
+                Search<StaticDispatch::AlwaysTrue, StaticDispatch::CheckDup, StaticDispatch::AlwaysTrue>(p_query, p_space, filterFunc);
                 break;
             default:
                 std::ostringstream oss;
@@ -406,7 +406,7 @@ namespace SPTAG
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, bool (*func)(ByteArray), int maxCheck, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck, bool p_searchDeleted) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
@@ -417,7 +417,7 @@ namespace SPTAG
             }
 			workSpace->Reset(maxCheck == 0 ? m_iMaxCheck : maxCheck, p_query.GetResultNum());
 
-            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_searchDeleted, true, func);
+            SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_searchDeleted, true, filterFunc);
 
             m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
