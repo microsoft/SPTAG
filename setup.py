@@ -79,15 +79,14 @@ def _find_python_packages():
 
     if os.path.exists('Release'):
         shutil.copytree('Release', 'sptag')
-    elif os.path.exists(os.path.join('x64', 'Release')):
-        shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
-
         if os.path.exists('lib'): shutil.rmtree('lib')
         os.mkdir('lib')
-        os.mkdir(os.path.join('lib', 'net472'))
-        for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
+        for file in glob.glob(r'Release//*.cs'):
             print (file)
-            shutil.copy(file, "lib\\net472\\")
+            shutil.copy(file, "lib//")
+        for file in glob.glob(r'Release//*.so*'):
+            print (file)
+            shutil.copy(file, "lib//")
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
@@ -104,8 +103,53 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" />
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" />
+    <file src="lib//libCSHARPSPTAG.so" target="lib//libCSHARPSPTAG.so" />
+    <file src="lib//libCSHARPSPTAGClient.so" target="lib//libCSHARPSPTAGClient.so" />
+    <file src="lib//libzstd.so.1.5.2" target="lib//libzstd.so.1.5.2" />
+    <file src="lib//libSPTAGLib.so" target="lib//libSPTAGLib.so" />
+    <file src="lib//AnnClient.cs" target="lib//AnnClient.cs" />
+    <file src="lib//AnnIndex.cs" target="lib//AnnIndex.cs" />
+    <file src="lib//BasicResult.cs" target="lib//BasicResult.cs" />
+    <file src="lib//CSHARPSPTAGClient.cs" target="lib//CSHARPSPTAGClient.cs" />
+    <file src="lib//CSHARPSPTAGClientPINVOKE.cs" target="lib//CSHARPSPTAGClientPINVOKE.cs" />
+    <file src="lib//CSHARPSPTAG.cs" target="lib//CSHARPSPTAG.cs" />
+    <file src="lib//CSHARPSPTAGPINVOKE.cs" target="lib//CSHARPSPTAGPINVOKE.cs" />
+    <file src="lib//EdgeCompare.cs" target="lib//EdgeCompare.cs" />
+    <file src="lib//Edge.cs" target="lib//Edge.cs" />
+    <file src="lib//NodeDistPair.cs" target="lib//NodeDistPair.cs" />
+  </files>
+</package>
+''' % (nuget_release)
+        f.write(spec)
+        f.close()
+    elif os.path.exists(os.path.join('x64', 'Release')):
+        shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
+
+        if os.path.exists('lib'): shutil.rmtree('lib')
+        os.mkdir('lib')
+        for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
+            print (file)
+            shutil.copy(file, "lib\\")
+        f = open('sptag.nuspec', 'w')
+        spec = '''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>MSSPTAG.Managed.Library</id>
+    <version>%s</version>
+    <title>MSSPTAG.Managed.Library</title>
+    <authors>cheqi,haidwa,mingqli</authors>
+    <owners>cheqi,haidwa,mingqli</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
+    <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
+    <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
+    <copyright>Copyright @ Microsoft</copyright>
+  </metadata>
+  <files>
+    <file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\Microsoft.ANN.SPTAGManaged.dll" />
+    <file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\Microsoft.ANN.SPTAGManaged.pdb" />
+    <file src="x64\Release\libzstd.dll" target="lib\\\libzstd.dll" />
+    <file src="x64\\Release\\libzstd.lib" target="lib\\libzstd.lib" />
   </files>
 </package>
 ''' % (nuget_release)
