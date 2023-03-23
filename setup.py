@@ -81,12 +81,13 @@ def _find_python_packages():
         shutil.copytree('Release', 'sptag')
         if os.path.exists('lib'): shutil.rmtree('lib')
         os.mkdir('lib')
-        for file in glob.glob(r'Release//*.cs'):
+        for file in glob.glob(r'Release/*.cs'):
             print (file)
-            shutil.copy(file, "lib//")
-        for file in glob.glob(r'Release//*.so*'):
+            shutil.copy(file, "lib/")
+        for file in glob.glob(r'Release/*.so*'):
             print (file)
-            shutil.copy(file, "lib//")
+            shutil.copy(file, "lib/")
+        print (os.listdir('lib'))
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
@@ -103,20 +104,20 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib//libCSHARPSPTAG.so" target="lib//libCSHARPSPTAG.so" />
-    <file src="lib//libCSHARPSPTAGClient.so" target="lib//libCSHARPSPTAGClient.so" />
-    <file src="lib//libzstd.so.1.5.2" target="lib//libzstd.so.1.5.2" />
-    <file src="lib//libSPTAGLib.so" target="lib//libSPTAGLib.so" />
-    <file src="lib//AnnClient.cs" target="lib//AnnClient.cs" />
-    <file src="lib//AnnIndex.cs" target="lib//AnnIndex.cs" />
-    <file src="lib//BasicResult.cs" target="lib//BasicResult.cs" />
-    <file src="lib//CSHARPSPTAGClient.cs" target="lib//CSHARPSPTAGClient.cs" />
-    <file src="lib//CSHARPSPTAGClientPINVOKE.cs" target="lib//CSHARPSPTAGClientPINVOKE.cs" />
-    <file src="lib//CSHARPSPTAG.cs" target="lib//CSHARPSPTAG.cs" />
-    <file src="lib//CSHARPSPTAGPINVOKE.cs" target="lib//CSHARPSPTAGPINVOKE.cs" />
-    <file src="lib//EdgeCompare.cs" target="lib//EdgeCompare.cs" />
-    <file src="lib//Edge.cs" target="lib//Edge.cs" />
-    <file src="lib//NodeDistPair.cs" target="lib//NodeDistPair.cs" />
+    <file src="lib/libCSHARPSPTAG.so" target="lib/libCSHARPSPTAG.so" />
+    <file src="lib/libCSHARPSPTAGClient.so" target="lib/libCSHARPSPTAGClient.so" />
+    <file src="lib/libzstd.so.1.5.2" target="lib/libzstd.so.1.5.2" />
+    <file src="lib/libSPTAGLib.so" target="lib/libSPTAGLib.so" />
+    <file src="lib/AnnClient.cs" target="lib/AnnClient.cs" />
+    <file src="lib/AnnIndex.cs" target="lib/AnnIndex.cs" />
+    <file src="lib/BasicResult.cs" target="lib/BasicResult.cs" />
+    <file src="lib/CSHARPSPTAGClient.cs" target="lib/CSHARPSPTAGClient.cs" />
+    <file src="lib/CSHARPSPTAGClientPINVOKE.cs" target="lib/CSHARPSPTAGClientPINVOKE.cs" />
+    <file src="lib/CSHARPSPTAG.cs" target="lib/CSHARPSPTAG.cs" />
+    <file src="lib/CSHARPSPTAGPINVOKE.cs" target="lib/CSHARPSPTAGPINVOKE.cs" />
+    <file src="lib/EdgeCompare.cs" target="lib/EdgeCompare.cs" />
+    <file src="lib/Edge.cs" target="lib/Edge.cs" />
+    <file src="lib/NodeDistPair.cs" target="lib/NodeDistPair.cs" />
   </files>
 </package>
 ''' % (nuget_release)
