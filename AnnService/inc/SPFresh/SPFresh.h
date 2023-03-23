@@ -1170,7 +1170,8 @@ namespace SPTAG {
 
             #define DefineVectorValueType(Name, Type) \
                 if (opts->m_valueType == VectorValueType::Name) { \
-                    UpdateSPFresh((SPANN::Index<Type>*)(index.get())); \
+                    if (opts->m_steadyState) SteadyStateSPFresh((SPANN::Index<Type>*)(index.get())); \
+                    else UpdateSPFresh((SPANN::Index<Type>*)(index.get())); \
                 } \
 
             #include "inc/Core/DefinitionList.h"

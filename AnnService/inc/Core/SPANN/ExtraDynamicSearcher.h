@@ -28,7 +28,7 @@
 #endif
 
 // enable rocksdb io_uring
-extern "C" bool RocksDbIOUringEnable() { return true; }
+// extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN {
     template <typename ValueType>
