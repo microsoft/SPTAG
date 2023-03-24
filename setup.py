@@ -92,9 +92,9 @@ def _find_python_packages():
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
   <metadata>
-    <id>MSSPTAG.Managed.Library</id>
+    <id>MSSPTAG.Managed.Library.Linux</id>
     <version>%s</version>
-    <title>MSSPTAG.Managed.Library</title>
+    <title>MSSPTAG.Managed.Library.Linux</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli</owners>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
@@ -135,9 +135,9 @@ def _find_python_packages():
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
   <metadata>
-    <id>MSSPTAG.Managed.Library</id>
+    <id>MSSPTAG.Managed.Library.Windows</id>
     <version>%s</version>
-    <title>MSSPTAG.Managed.Library</title>
+    <title>MSSPTAG.Managed.Library.Windows</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli</owners>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
