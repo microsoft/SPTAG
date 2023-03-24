@@ -66,6 +66,7 @@ namespace SPTAG::SPANN
                 std::vector<SubIoRequest> sub_io_requests;
                 std::vector<SubIoRequest *> free_sub_io_requests;
                 tbb::concurrent_queue<SubIoRequest *> completed_sub_io_requests;
+                int in_flight = 0;
             };
             static thread_local struct IoContext m_currIoContext;
 
@@ -100,10 +101,10 @@ namespace SPTAG::SPANN
             // read a posting list. p_data[0] is the total data size, 
             // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
             // concat all the block contents together into p_value string.
-            bool ReadBlocks(AddressType* p_data, std::string* p_value);
+            bool ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             // parallel read a list of posting lists.
-            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values);
+            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max());
 
             // write p_value into p_size blocks start from p_data
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);

@@ -157,6 +157,7 @@ bool SPDKIO::BlockController::Initialize() {
         }
         // Create sub I/O request pool
         m_currIoContext.sub_io_requests.resize(m_ssdSpdkIoDepth);
+        m_currIoContext.in_flight = 0;
         uint32_t buf_align;
         buf_align = spdk_bdev_get_buf_align(m_ssdSpdkBdev);
         for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -204,7 +205,7 @@ bool SPDKIO::BlockController::ReleaseBlocks(AddressType* p_data, int p_size) {
 // read a posting list. p_data[0] is the total data size,
 // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
 // concat all the block contents together into p_value string.
-bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_value) {
+bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout) {
     if (m_useMemImpl) {
         p_value->resize(p_data[0]);
         AddressType currOffset = 0;
@@ -220,10 +221,24 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         p_value->resize(p_data[0]);
         AddressType currOffset = 0;
         AddressType dataIdx = 1;
-        int inflight = 0;
         SubIoRequest* currSubIo;
+
+        // Clear timeout I/Os
+        while (m_currIoContext.in_flight) {
+            if (m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+                currSubIo->app_buff = nullptr;
+                m_currIoContext.free_sub_io_requests.push_back(currSubIo);
+                m_currIoContext.in_flight--;
+            }
+        }
+
+        auto t1 = std::chrono::high_resolution_clock::now();
         // Submit all I/Os
-        while (currOffset < p_data[0] || inflight) {
+        while (currOffset < p_data[0] || m_currIoContext.in_flight) {
+            auto t2 = std::chrono::high_resolution_clock::now();
+            if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1) > timeout) {
+                break;
+            }
             // Try submit
             if (currOffset < p_data[0] && m_currIoContext.free_sub_io_requests.size()) {
                 currSubIo = m_currIoContext.free_sub_io_requests.back();
@@ -235,14 +250,14 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
                 m_submittedSubIoRequests.push(currSubIo);
                 currOffset += PageSize;
                 dataIdx++;
-                inflight++;
+                m_currIoContext.in_flight++;
             }
             // Try complete
-            if (inflight && m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+            if (m_currIoContext.in_flight && m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
                 memcpy(currSubIo->app_buff, currSubIo->dma_buff, currSubIo->real_size);
                 currSubIo->app_buff = nullptr;
                 m_currIoContext.free_sub_io_requests.push_back(currSubIo);
-                inflight--;
+                m_currIoContext.in_flight--;
             }
         }
         return true;
@@ -253,7 +268,7 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
 }
 
 // parallel read a list of posting lists.
-bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values) {
+bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
     if (m_useMemImpl) {
         p_values->resize(p_data.size());
         for (size_t i = 0; i < p_data.size(); i++) {
@@ -262,9 +277,17 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
         return true;
     } else if (m_useSsdImpl) {
         // TODO: optimize
+        auto t1 = std::chrono::high_resolution_clock::now();
         p_values->resize(p_data.size());
         for (size_t i = 0; i < p_data.size(); i++) {
-            ReadBlocks(p_data[i], &((*p_values)[i]));
+            auto t2 = std::chrono::high_resolution_clock::now();
+            auto interval = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
+            if (interval > timeout) {
+                break;
+            } else {
+                auto rest = timeout - interval;
+                ReadBlocks(p_data[i], &((*p_values)[i]), rest);
+            }
         }
         return true;
     } else {
