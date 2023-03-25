@@ -79,6 +79,7 @@ def _find_python_packages():
 
     if os.path.exists('Release'):
         shutil.copytree('Release', 'sptag')
+
         if os.path.exists('lib'): shutil.rmtree('lib')
         os.mkdir('lib')
         for file in glob.glob(r'Release/*.cs'):
@@ -88,6 +89,10 @@ def _find_python_packages():
             print (file)
             shutil.copy(file, "lib/")
         print (os.listdir('lib'))
+        sfiles = ''
+        for framework in ['net5.0', 'netcoreapp2.0', 'netstandard2.0']:
+            for filename in os.listdir('lib'):
+                sfiles += '<file src="lib/%s" target="lib/%s/%s" />' % (filename, framework, filename)
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
@@ -104,23 +109,11 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib/libCSHARPSPTAG.so" target="lib/libCSHARPSPTAG.so" />
-    <file src="lib/libCSHARPSPTAGClient.so" target="lib/libCSHARPSPTAGClient.so" />
-    <file src="lib/libzstd.so.1.5.2" target="lib/libzstd.so.1.5.2" />
-    <file src="lib/libSPTAGLib.so" target="lib/libSPTAGLib.so" />
-    <file src="lib/AnnClient.cs" target="lib/AnnClient.cs" />
-    <file src="lib/AnnIndex.cs" target="lib/AnnIndex.cs" />
-    <file src="lib/BasicResult.cs" target="lib/BasicResult.cs" />
-    <file src="lib/CSHARPSPTAGClient.cs" target="lib/CSHARPSPTAGClient.cs" />
-    <file src="lib/CSHARPSPTAGClientPINVOKE.cs" target="lib/CSHARPSPTAGClientPINVOKE.cs" />
-    <file src="lib/CSHARPSPTAG.cs" target="lib/CSHARPSPTAG.cs" />
-    <file src="lib/CSHARPSPTAGPINVOKE.cs" target="lib/CSHARPSPTAGPINVOKE.cs" />
-    <file src="lib/EdgeCompare.cs" target="lib/EdgeCompare.cs" />
-    <file src="lib/Edge.cs" target="lib/Edge.cs" />
-    <file src="lib/NodeDistPair.cs" target="lib/NodeDistPair.cs" />
+%s
   </files>
 </package>
-''' % (nuget_release)
+''' % (nuget_release, sfiles)
+
         f.write(spec)
         f.close()
     elif os.path.exists(os.path.join('x64', 'Release')):
@@ -131,13 +124,22 @@ def _find_python_packages():
         for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
             print (file)
             shutil.copy(file, "lib\\")
+        shutil.copy('x64\\Release\\libzstd.dll', "lib\\")
+        shutil.copy('x64\\Release\\Ijwhost.dll', "lib\\")
+        sfiles = ''
+        for framework in ['net5.0', 'netcoreapp2.0', 'netstandard2.0']:
+            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % framework
+            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % framework
+            sfiles += '<file src="lib\\libzstd.dll" target="lib\\%s\\libzstd.dll" />' % framework
+            sfiles += '<file src="lib\\Ijwhost.dll" target="lib\\%s\\Ijwhost.dll" />' % framework
+
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
   <metadata>
-    <id>MSSPTAG.Managed.Library.Windows</id>
+    <id>MSSPTAG.Managed.Library</id>
     <version>%s</version>
-    <title>MSSPTAG.Managed.Library.Windows</title>
+    <title>MSSPTAG.Managed.Library</title>
     <authors>cheqi,haidwa,mingqli</authors>
     <owners>cheqi,haidwa,mingqli</owners>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
@@ -147,13 +149,10 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\Microsoft.ANN.SPTAGManaged.dll" />
-    <file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\Microsoft.ANN.SPTAGManaged.pdb" />
-    <file src="x64\Release\libzstd.dll" target="lib\\\libzstd.dll" />
-    <file src="x64\\Release\\libzstd.lib" target="lib\\libzstd.lib" />
+%s
   </files>
 </package>
-''' % (nuget_release)
+''' % (nuget_release, sfiles)
         f.write(spec)
         f.close()
 
@@ -173,10 +172,10 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
     <dependencies>
       <group targetFramework="uap10.0">
-        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
       </group>
       <group targetFramework="native">
-        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
       </group>
     </dependencies>
   </metadata>
