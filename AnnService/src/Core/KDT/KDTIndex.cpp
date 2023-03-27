@@ -589,7 +589,7 @@ case VectorValueType::Name: \
         }
 
         template <typename T>
-        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized)
+        ErrorCode Index<T>::AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, SizeType* vec_id)
         {
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
 
@@ -655,6 +655,14 @@ case VectorValueType::Name: \
             for (SizeType node = begin; node < end; node++)
             {
                 m_pGraph.RefineNode<T>(this, node, true, true, m_pGraph.m_iAddCEF);
+            }
+
+            if (vec_id){
+                for (SizeType node = begin; node < end; node++)
+                {
+                    *vec_id = node;
+                    vec_id ++;
+                }
             }
             return ErrorCode::Success;
         }

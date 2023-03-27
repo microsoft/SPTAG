@@ -528,6 +528,64 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
     return ret;
 }
 
+ErrorCode
+VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperation* p_abort, SizeType* old2New_ids)
+{
+    ErrorCode ret = ErrorCode::Success;
+#ifdef _ANN_ALLOCATOR
+    OmpParallelContext ctx;
+    if (p_addindex->m_pMetadata != nullptr) {
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128) firstprivate(ctx)
+#else
+    if (p_addindex->m_pMetadata != nullptr) {
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
+#endif
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
+        {
+            if (ret == ErrorCode::ExternalAbort) continue;
+
+            if (p_addindex->ContainSample(i))
+            {
+                ByteArray meta = p_addindex->GetMetadata(i);
+                std::uint64_t offsets[2] = { 0, meta.Length() };
+                std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
+                SizeType vec_id;
+                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet, false, false, &vec_id);
+                old2New_ids[i] = vec_id;
+            }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort()) 
+            {
+                ret = ErrorCode::ExternalAbort;
+            }
+        }
+    }
+    else {
+#ifdef _ANN_ALLOCATOR
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128) firstprivate(ctx)
+#else
+#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
+#endif
+        for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
+        {
+            if (ret == ErrorCode::ExternalAbort) continue;
+
+            if (p_addindex->ContainSample(i))
+            {
+                SizeType vec_id;
+                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr, false, false, &vec_id);
+                old2New_ids[i] = vec_id;
+            }
+
+            if (p_abort != nullptr && p_abort->ShouldAbort())
+            {
+                ret = ErrorCode::ExternalAbort;
+            }
+        }
+    }
+    return ret;
+}
+
 
 const void* VectorIndex::GetSample(ByteArray p_meta, bool& deleteFlag)
 {
