@@ -532,14 +532,8 @@ ErrorCode
 VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperation* p_abort, SizeType* old2New_ids)
 {
     ErrorCode ret = ErrorCode::Success;
-#ifdef _ANN_ALLOCATOR
-    OmpParallelContext ctx;
-    if (p_addindex->m_pMetadata != nullptr) {
-#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128) firstprivate(ctx)
-#else
     if (p_addindex->m_pMetadata != nullptr) {
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
-#endif
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++)
         {
             if (ret == ErrorCode::ExternalAbort) continue;
@@ -561,11 +555,7 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
         }
     }
     else {
-#ifdef _ANN_ALLOCATOR
-#pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128) firstprivate(ctx)
-#else
 #pragma omp parallel for num_threads(p_threadnum) schedule(dynamic,128)
-#endif
         for (SizeType i = 0; i < p_addindex->GetNumSamples(); i++) 
         {
             if (ret == ErrorCode::ExternalAbort) continue;
