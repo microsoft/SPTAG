@@ -27,7 +27,7 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_clusterNum, "-c", "--numclusters", "Number of clusters.");
-        AddOptionalOption(m_stopDifference, "-d", "--diff", "Clustering stop center difference.");
+        AddOptionalOption(m_stopDifference, "-df", "--diff", "Clustering stop center difference.");
         AddOptionalOption(m_maxIter, "-r", "--iters", "Max clustering iterations.");
         AddOptionalOption(m_localSamples, "-s", "--samples", "Number of samples for fast clustering.");
         AddOptionalOption(m_lambda, "-l", "--lambda", "lambda for balanced size level.");
@@ -754,6 +754,10 @@ void ProcessWithoutMPI() {
     }
     std::shared_ptr<VectorSet> vectors = vectorReader->GetVectorSet();
     std::shared_ptr<MetadataSet> metas = vectorReader->GetMetadataSet();
+    if (vectors->Dimension() != options.m_dimension) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "vector dimension %d is not equal to the dimension %d of the option.\n", vectors->Dimension(), options.m_dimension);
+        exit(1);
+    }
     if (options.m_distMethod == DistCalcMethod::Cosine) vectors->Normalize(options.m_threadNum);
 
     std::vector<float> weights(vectors->Count(), 0.0f);
