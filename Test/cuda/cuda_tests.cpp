@@ -9,12 +9,12 @@
 #include <boost/test/included/unit_test.hpp>
 #include <boost/filesystem.hpp>
 
-int GPUTestRandom_All();
+int GPUBuildKNNTest();
 
 BOOST_AUTO_TEST_CASE(RandomTests) {
   BOOST_CHECK(1 == 1);
 
-  int errors = GPUTestRandom_All();
+  int errors = GPUBuildKNNTest();
   BOOST_CHECK(errors == 0);
 }
 
