@@ -174,7 +174,7 @@ namespace SPTAG::SPANN {
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;
             m_hardLatencyLimit = std::chrono::microseconds((int)searchLatencyHardLimit * 1000);
             m_mergeThreshold = mergeThreshold;
-            LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, m_hardLatencyLimit, m_mergeThreshold);
+            LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, searchLatencyHardLimit, m_mergeThreshold);
         }
 
         ~ExtraDynamicSearcher() {}
@@ -1132,7 +1132,7 @@ namespace SPTAG::SPANN {
 
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
-            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+            for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 std::string& postingList = postingLists[pi];
 

@@ -237,7 +237,7 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         while (currOffset < p_data[0] || m_currIoContext.in_flight) {
             auto t2 = std::chrono::high_resolution_clock::now();
             if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1) > timeout) {
-                break;
+                return false;
             }
             // Try submit
             if (currOffset < p_data[0] && m_currIoContext.free_sub_io_requests.size()) {
@@ -286,7 +286,10 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
                 break;
             } else {
                 auto rest = timeout - interval;
-                ReadBlocks(p_data[i], &((*p_values)[i]), rest);
+                if (!ReadBlocks(p_data[i], &((*p_values)[i]), rest)) {
+                    p_values->resize(i);
+                    return true;
+                }
             }
         }
         return true;
