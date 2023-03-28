@@ -2,6 +2,7 @@
 #define _SPTAG_HELPER_KEYVALUEIO_H_
 
 #include "inc/Core/Common.h"
+#include <chrono>
 
 namespace SPTAG
 {
@@ -19,9 +20,9 @@ namespace SPTAG
 
             virtual ErrorCode Get(SizeType key, std::string* value) = 0;
 
-            virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) { return ErrorCode::Undefined; }
+            virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) { return ErrorCode::Undefined; }
 
-            virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) = 0;
+            virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) = 0;
 
             virtual ErrorCode Put(const std::string& key, const std::string& value) { return ErrorCode::Undefined; }
 

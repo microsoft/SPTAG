@@ -179,7 +179,7 @@ namespace SPTAG::SPANN
             return ErrorCode::Fail;
         }
 
-        ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) {
+        ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) {
             std::vector<AddressType*> blocks;
             for (SizeType key : keys) {
                 if (key < m_pBlockMapping.R()) blocks.push_back((AddressType*)At(key));
@@ -187,7 +187,7 @@ namespace SPTAG::SPANN
                     LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, m_pBlockMapping.R());
                 }
             }
-            if (m_pBlockController.ReadBlocks(blocks, values)) return ErrorCode::Success;
+            if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
             return ErrorCode::Fail; 
         }
 

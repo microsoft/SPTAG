@@ -172,7 +172,7 @@ namespace SPTAG::SPANN
             return Get(k, value);
         }
 
-        ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values) {
+        ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) {
             size_t num_keys = keys.size();
 
             rocksdb::Slice* slice_keys = new rocksdb::Slice[num_keys];
@@ -203,14 +203,14 @@ namespace SPTAG::SPANN
             return ErrorCode::Success;
         }
 
-        ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values) {
+        ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) {
             std::vector<std::string> str_keys;
 
             for (const auto& key : keys) {
                 str_keys.emplace_back((char*)(&key), sizeof(SizeType));
             }
 
-            return MultiGet(str_keys, values);
+            return MultiGet(str_keys, values, timeout);
         }
 
         ErrorCode Put(const std::string& key, const std::string& value) override {

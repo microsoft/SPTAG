@@ -14,6 +14,7 @@
 #include "PersistentBuffer.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
 #include "ExtraSPDKController.h"
+#include <chrono>
 #include <map>
 #include <cmath>
 #include <climits>
@@ -161,7 +162,7 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 3));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
@@ -171,7 +172,7 @@ namespace SPTAG::SPANN {
             }
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;
-            m_hardLatencyLimit = searchLatencyHardLimit;
+            m_hardLatencyLimit = std::chrono::microseconds((int)searchLatencyHardLimit * 1000);
             m_mergeThreshold = mergeThreshold;
             LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, m_hardLatencyLimit, m_mergeThreshold);
         }
@@ -1119,8 +1120,10 @@ namespace SPTAG::SPANN {
 
             std::vector<std::string> postingLists;
 
+            std::chrono::microseconds remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
+
             auto readStart = std::chrono::high_resolution_clock::now();
-            db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists);
+            db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
             for (uint32_t pi = 0; pi < postingListCount; ++pi) {
@@ -1160,12 +1163,6 @@ namespace SPTAG::SPANN {
                 if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
-
-                auto exEnd = std::chrono::high_resolution_clock::now();
-
-                if ((((double)std::chrono::duration_cast<std::chrono::microseconds>(exEnd - exStart).count()) / 1000 + p_stats->m_totalLatency) >= m_hardLatencyLimit) {
-                    break;
-                }
 
                 if (truth) {
                     for (int i = 0; i < vectorNum; ++i) {
@@ -1561,7 +1558,7 @@ namespace SPTAG::SPANN {
 
         int m_postingSizeLimit = INT_MAX;
 
-        float m_hardLatencyLimit = 2;
+        std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 
         int m_mergeThreshold = 10;
     };

@@ -986,6 +986,7 @@ namespace SPTAG {
                 std::vector<std::thread> threads;
 
                 std::atomic_size_t vectorsSent(0);
+                std::vector<double> latency_vector(step);
 
                 auto func = [&]()
                 {
@@ -1000,7 +1001,10 @@ namespace SPTAG {
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
                             }
+                            auto insertBegin = std::chrono::high_resolution_clock::now();
                             p_index->AddIndex(vectorSet->GetVector((SizeType)(index + curCount)), 1, p_opts.m_dim, nullptr);
+                            auto insertEnd = std::chrono::high_resolution_clock::now();
+                            latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(insertEnd - insertBegin).count();
                         }
                         else
                         {
@@ -1031,6 +1035,12 @@ namespace SPTAG {
                 syncingCost,
                 step / syncingCost,
                 static_cast<uint32_t>(step));
+                PrintPercentiles<double, double>(latency_vector,
+                [](const double& ss) -> double
+                {
+                    return ss;
+                },
+                "%.3lf");
             }
 
             template <typename ValueType>
