@@ -78,7 +78,7 @@ public:
     
     virtual ErrorCode BuildIndex(bool p_normalized = false) { return ErrorCode::Undefined; }
 
-    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
+    virtual ErrorCode AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, SizeType* vec_id = nullptr);
 
     virtual ErrorCode DeleteIndex(ByteArray p_meta);
 

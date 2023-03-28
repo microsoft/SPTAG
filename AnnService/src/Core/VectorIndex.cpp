@@ -463,13 +463,13 @@ VectorIndex::SearchIndex(const void* p_vector, int p_vectorCount, int p_neighbor
 
 
 ErrorCode 
-VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized) {
+VectorIndex::AddIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, SizeType* vec_id) {
     if (nullptr == p_vectorSet || p_vectorSet->GetValueType() != GetVectorValueType())
     {
         return ErrorCode::Fail;
     }
 
-    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex, p_normalized);
+    return AddIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_metadataSet, p_withMetaIndex, p_normalized, vec_id);
 }
 
 
