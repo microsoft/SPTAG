@@ -28,6 +28,7 @@ if (CUDA_FOUND)
     set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 
     include_directories(${AnnService})
+    include_directories(${PROJECT_SOURCE_DIR}/Test/cuda)
 
     include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/zstd/lib)   
 
@@ -38,12 +39,11 @@ if (CUDA_FOUND)
         ${AnnService}/inc/Core/Common/DistanceUtils.h
         ${AnnService}/inc/Core/Common/InstructionUtils.h
         ${AnnService}/inc/Core/Common/CommonUtils.h
-        ${AnnService}/inc/Core/Common/cuda/tests/
     )
     list(REMOVE_ITEM GPU_SRC_FILES
         ${AnnService}/src/Core/Common/DistanceUtils.cpp
         ${AnnService}/src/Core/Common/InstructionUtils.cpp
-        ${AnnService}/src/Core/Common/cuda/tests/
+        ${AnnService}/Test/cuda
     )
 
     set_source_files_properties(${GPU_SRC_FILES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
@@ -83,6 +83,15 @@ if (CUDA_FOUND)
     CUDA_ADD_EXECUTABLE(gpussdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
     target_link_libraries(gpussdserving GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(gpussdserving PRIVATE ${Definition} _exe)
+
+    CUDA_ADD_LIBRARY(GPUSPTAGTests SHARED ${AnnService}/../Test/cuda/random_tests.cu ${AnnService}/../Test/cuda/distance_tests.cu)
+    target_link_libraries(GPUSPTAGTests GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_compile_definitions(GPUSPTAGTests PRIVATE ${Definition})
+
+    CUDA_ADD_EXECUTABLE(gpu_test ${AnnService}/../Test/cuda/cuda_tests.cpp)
+    target_link_libraries(gpu_test GPUSPTAGTests ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_compile_definitions(gpu_test PRIVATE ${Definition} _exe)
+    
 else()
     message (STATUS "Could not find cuda.")
 endif()
