@@ -457,6 +457,7 @@ namespace SPTAG::SPANN {
         ErrorCode Split(VectorIndex* p_index, const SizeType headID, bool reassign = false, bool preReassign = false)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
+            // LOG(Helper::LogLevel::LL_Info, "into split: %d\n", headID);
             std::vector<SizeType> newHeadsID;
             std::vector<std::string> newPostingLists;
             double elapsedMSeconds;
@@ -519,6 +520,7 @@ namespace SPTAG::SPANN {
                     m_stat.m_garbageCost += elapsedMSeconds;
                     {
                         std::lock_guard<std::mutex> tmplock(m_runningLock);
+                        // LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
                         m_splitList.erase(headID);
                     }
                     // LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
@@ -625,6 +627,7 @@ namespace SPTAG::SPANN {
             }
             {
                 std::lock_guard<std::mutex> tmplock(m_runningLock);
+                // LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
                 m_splitList.erase(headID);
             }
             m_stat.m_splitNum++;
@@ -818,7 +821,10 @@ namespace SPTAG::SPANN {
             {
                 std::lock_guard<std::mutex> tmplock(m_runningLock);
 
-                if (m_splitList.find(headID) != m_splitList.end()) return;
+                if (m_splitList.find(headID) != m_splitList.end()) {
+                    // LOG(Helper::LogLevel::LL_Info,"Already in queue\n");
+                    return;
+                }
                 m_splitList.insert(headID);
             }
 
@@ -1006,11 +1012,16 @@ namespace SPTAG::SPANN {
                 m_postingSizes.IncSize(headID, appendNum);
             }
             if (m_postingSizes.GetSize(headID) > (m_postingSizeLimit + reassignThreshold)) {
-                // SizeType VID = *(int*)(&appendPosting[0]);
+                SizeType VID = *(int*)(&appendPosting[0]);
                 // LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
-                // if (!reassignThreshold) SplitAsync(p_index, headID);
-                // else Split(p_index, headID, !m_opt->m_disableReassign);
-                SplitAsync(p_index, headID);
+                // GetDBStats();
+                if (m_postingSizes.GetSize(headID) > 120) {
+                    GetDBStats();
+                    exit(1);
+                }
+                if (!reassignThreshold) SplitAsync(p_index, headID);
+                else Split(p_index, headID, !m_opt->m_disableReassign);
+                // SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();

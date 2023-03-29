@@ -310,6 +310,7 @@ bool SPDKIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
         AddressType currBlockIdx = 0;
         int inflight = 0;
         SubIoRequest* currSubIo;
+        int totalSize = p_value.size();
         // Submit all I/Os
         while (currBlockIdx < p_size || inflight) {
             // Try submit
@@ -317,7 +318,7 @@ bool SPDKIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
                 currSubIo = m_currIoContext.free_sub_io_requests.back();
                 m_currIoContext.free_sub_io_requests.pop_back();
                 currSubIo->app_buff = const_cast<char *>(p_value.data()) + currBlockIdx * PageSize;
-                currSubIo->real_size = PageSize;
+                currSubIo->real_size = (PageSize * (currBlockIdx + 1)) > totalSize ? (totalSize - currBlockIdx * PageSize): PageSize;
                 currSubIo->is_read = false;
                 currSubIo->offset = p_data[currBlockIdx] * PageSize;
                 memcpy(currSubIo->dma_buff, currSubIo->app_buff, currSubIo->real_size);
