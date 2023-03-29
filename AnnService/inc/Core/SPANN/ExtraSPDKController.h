@@ -60,6 +60,7 @@ namespace SPTAG::SPANN
                 AddressType offset;
                 bool is_read;
                 BlockController* ctrl;
+                int posting_id;
             };
             tbb::concurrent_queue<SubIoRequest *> m_submittedSubIoRequests;
             struct IoContext {
