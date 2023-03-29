@@ -76,7 +76,7 @@ namespace SPTAG::SPANN
             static std::unique_ptr<char[]> m_memBuffer;
 
             std::mutex m_initMutex;
-            int m_numInitCalled;
+            int m_numInitCalled = 0;
 
             static void* InitializeSpdk(void* args);
 
