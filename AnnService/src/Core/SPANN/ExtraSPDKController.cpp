@@ -276,19 +276,56 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
         }
         return true;
     } else if (m_useSsdImpl) {
-        // TODO: optimize
-        auto t1 = std::chrono::high_resolution_clock::now();
+        // Temporarily disable timeout
+
+        // Convert request format to SubIoRequests
         p_values->resize(p_data.size());
+        std::vector<SubIoRequest> subIoRequests;
+        subIoRequests.reserve(256);
         for (size_t i = 0; i < p_data.size(); i++) {
-            auto t2 = std::chrono::high_resolution_clock::now();
-            auto interval = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1);
-            if (interval > timeout) {
-                break;
-            } else {
-                auto rest = timeout - interval;
-                if (!ReadBlocks(p_data[i], &((*p_values)[i]), rest)) {
-                    p_values->resize(i);
-                    return true;
+            AddressType* p_data_i = p_data[i];
+            std::string* p_value = &((*p_values)[i]);
+
+            p_value->resize(p_data_i[0]);
+            AddressType currOffset = 0;
+            AddressType dataIdx = 1;
+
+            while (currOffset < p_data_i[0]) {
+                SubIoRequest currSubIo;
+                currSubIo.app_buff = p_value->data() + currOffset;
+                currSubIo.real_size = (p_data_i[0] - currOffset) < PageSize ? (p_data_i[0] - currOffset) : PageSize;
+                currSubIo.is_read = true;
+                currSubIo.offset = p_data_i[dataIdx] * PageSize;
+                subIoRequests.push_back(currSubIo);
+                currOffset += PageSize;
+                dataIdx++;
+            }
+        }
+
+        const int batch_size = 64;
+        for (int currSubIoStartId = 0; currSubIoStartId < subIoRequests.size(); currSubIoStartId += batch_size) {
+            int currSubIoEndId = (currSubIoStartId + batch_size) > subIoRequests.size() ? subIoRequests.size() : currSubIoStartId + batch_size;
+            int currSubIoIdx = currSubIoStartId;
+            SubIoRequest* currSubIo;
+            while (currSubIoIdx < currSubIoEndId || m_currIoContext.in_flight) {
+                // Try submit
+                if (currSubIoIdx < currSubIoEndId && m_currIoContext.free_sub_io_requests.size()) {
+                    currSubIo = m_currIoContext.free_sub_io_requests.back();
+                    m_currIoContext.free_sub_io_requests.pop_back();
+                    currSubIo->app_buff = subIoRequests[currSubIoIdx].app_buff;
+                    currSubIo->real_size = subIoRequests[currSubIoIdx].real_size;
+                    currSubIo->is_read = true;
+                    currSubIo->offset = subIoRequests[currSubIoIdx].offset;
+                    m_submittedSubIoRequests.push(currSubIo);
+                    m_currIoContext.in_flight++;
+                    currSubIoIdx++;
+                }
+                // Try complete
+                if (m_currIoContext.in_flight && m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+                    memcpy(currSubIo->app_buff, currSubIo->dma_buff, currSubIo->real_size);
+                    currSubIo->app_buff = nullptr;
+                    m_currIoContext.free_sub_io_requests.push_back(currSubIo);
+                    m_currIoContext.in_flight--;
                 }
             }
         }
