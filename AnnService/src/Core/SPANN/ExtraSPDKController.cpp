@@ -362,6 +362,15 @@ bool SPDKIO::BlockController::ShutDown() {
                 m_blockAddresses.try_pop(currBlockAddress);
             }
         }
+
+        SubIoRequest* currSubIo;
+        while (m_currIoContext.in_flight) {
+            if (m_currIoContext.completed_sub_io_requests.try_pop(currSubIo)) {
+                currSubIo->app_buff = nullptr;
+                m_currIoContext.free_sub_io_requests.push_back(currSubIo);
+                m_currIoContext.in_flight--;
+            }
+        }
         // Free memory buffers
         for (auto &sr : m_currIoContext.sub_io_requests) {
             sr.completed_sub_io_requests = nullptr;

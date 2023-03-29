@@ -162,7 +162,7 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 3));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
@@ -1015,13 +1015,13 @@ namespace SPTAG::SPANN {
                 SizeType VID = *(int*)(&appendPosting[0]);
                 // LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
                 // GetDBStats();
-                if (m_postingSizes.GetSize(headID) > 120) {
-                    GetDBStats();
-                    exit(1);
-                }
-                if (!reassignThreshold) SplitAsync(p_index, headID);
-                else Split(p_index, headID, !m_opt->m_disableReassign);
-                // SplitAsync(p_index, headID);
+                // if (m_postingSizes.GetSize(headID) > 120) {
+                //     GetDBStats();
+                //     exit(1);
+                // }
+                // if (!reassignThreshold) SplitAsync(p_index, headID);
+                // else Split(p_index, headID, !m_opt->m_disableReassign);
+                SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();
@@ -1137,7 +1137,7 @@ namespace SPTAG::SPANN {
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
-            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+            for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 diskIO += ((postingLists[pi].size() + PageSize - 1) >> PageSizeEx);
             }
 
