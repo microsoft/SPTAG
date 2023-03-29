@@ -160,9 +160,9 @@ namespace SPTAG::SPANN {
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
-        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false) {
+        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8, 1024, batchSize));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB

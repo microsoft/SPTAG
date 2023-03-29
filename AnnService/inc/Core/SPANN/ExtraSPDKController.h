@@ -78,6 +78,8 @@ namespace SPTAG::SPANN
             std::mutex m_initMutex;
             int m_numInitCalled = 0;
 
+            int m_batchSize;
+
             static void* InitializeSpdk(void* args);
 
             static void SpdkStart(void* args);
@@ -90,7 +92,7 @@ namespace SPTAG::SPANN
 
             static void SpdkStop(void* args);
         public:
-            bool Initialize();
+            bool Initialize(int batchSize);
 
             // get p_size blocks from front, and fill in p_data array
             bool GetBlocks(AddressType* p_data, int p_size);
@@ -128,7 +130,7 @@ namespace SPTAG::SPANN
         };
 
     public:
-        SPDKIO(const char* filePath, SizeType blockSize, SizeType capacity, SizeType postingBlocks, SizeType bufferSize = 1024, int compactionThreads = 1)
+        SPDKIO(const char* filePath, SizeType blockSize, SizeType capacity, SizeType postingBlocks, SizeType bufferSize = 1024, int batchSize = 64, int compactionThreads = 1)
         {
             m_mappingPath = std::string(filePath);
             m_blockLimit = postingBlocks + 1;
@@ -144,7 +146,7 @@ namespace SPTAG::SPANN
             }
             m_compactionThreadPool = std::make_shared<Helper::ThreadPool>();
             m_compactionThreadPool->init(compactionThreads);
-            m_pBlockController.Initialize();
+            m_pBlockController.Initialize(batchSize);
             m_shutdownCalled = false;
         }
 
@@ -339,7 +341,7 @@ namespace SPTAG::SPANN
 
         bool Initialize(bool debug = false) override {
             if (debug) LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
-            return m_pBlockController.Initialize();
+            return m_pBlockController.Initialize(64);
         }
 
         bool ExitBlockController(bool debug = false) override { 

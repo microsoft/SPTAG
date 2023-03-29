@@ -125,7 +125,7 @@ void* SPDKIO::BlockController::InitializeSpdk(void *arg) {
     pthread_exit(NULL);
 }
 
-bool SPDKIO::BlockController::Initialize() {
+bool SPDKIO::BlockController::Initialize(int batchSize) {
     std::lock_guard<std::mutex> lock(m_initMutex);
     m_numInitCalled++;
 
@@ -145,6 +145,7 @@ bool SPDKIO::BlockController::Initialize() {
         return true;
     } else if (m_useSsdImpl) {
         if (m_numInitCalled == 1) {
+            m_batchSize = batchSize;
             for (AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
                 m_blockAddresses.push(i);
             }
@@ -302,7 +303,7 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
             }
         }
 
-        const int batch_size = 64;
+        const int batch_size = m_batchSize;
         for (int currSubIoStartId = 0; currSubIoStartId < subIoRequests.size(); currSubIoStartId += batch_size) {
             int currSubIoEndId = (currSubIoStartId + batch_size) > subIoRequests.size() ? subIoRequests.size() : currSubIoStartId + batch_size;
             int currSubIoIdx = currSubIoStartId;
