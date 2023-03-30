@@ -187,6 +187,8 @@ DefineSSDParameter(m_loadAllVectors, bool, false, "LoadAllVectors")
 DefineSSDParameter(m_loadAllVectors, bool, false, "LoadAllVectors")
 // Steady State: steady state
 DefineSSDParameter(m_steadyState, bool, false, "SteadyState")
+// Steady State: stress test
+DefineSSDParameter(m_stressTest, bool, false, "StressTest")
 
 // SPANN
 DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")

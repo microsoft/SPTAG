@@ -689,6 +689,37 @@ namespace SPTAG {
                 }
             }
 
+            void LoadUpdateTraceStressTest(std::string fileName, SizeType& updateSize, std::vector<SizeType>& insertSet)
+            {
+                LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
+
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(fileName.c_str(), std::ios::in | std::ios::binary)) {
+                    LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
+                    exit(1);
+                }
+
+                int tempSize;
+
+                LOG(Helper::LogLevel::LL_Info, "Loading Size\n");
+                
+                if (ptr->ReadBinary(4, (char *)&tempSize) != 4) {
+                    LOG(Helper::LogLevel::LL_Error, "Update Size Error!\n");
+                }
+
+                updateSize = tempSize;
+
+                insertSet.clear();
+                insertSet.resize(updateSize);
+
+                LOG(Helper::LogLevel::LL_Info, "Loading insertSet\n");
+
+                if (ptr->ReadBinary(updateSize * 4, (char*)insertSet.data()) != updateSize * 4) {
+                    LOG(Helper::LogLevel::LL_Error, "Insert Set Error!\n");
+                    exit(1);
+                }
+            }
+
             template <typename ValueType>
             void InsertVectorsBySet(SPANN::Index<ValueType>* p_index, 
                 int insertThreads, 
@@ -899,7 +930,8 @@ namespace SPTAG {
 
                     std::string traceFileName = p_opts.m_updateFilePrefix + std::to_string(i);
                     std::string mappingFileName = p_opts.m_updateMappingPrefix + std::to_string(i);
-                    LoadUpdateTrace(traceFileName, updateSize, insertSet, deleteSet);
+                    if (!p_opts.m_stressTest) LoadUpdateTrace(traceFileName, updateSize, insertSet, deleteSet);
+                    else LoadUpdateTraceStressTest(traceFileName, updateSize, insertSet);
                     if (!p_opts.m_loadAllVectors) {
                         vectorSet = LoadUpdateVectors(p_opts, insertSet, updateSize);
                     }
@@ -911,9 +943,12 @@ namespace SPTAG {
 
                     bool showStatus = false;
 
-                    std::future<void> delete_future =
-                        std::async(std::launch::async, DeleteVectorsBySet<ValueType>, p_index,
-                                1, vectorSet, std::ref(deleteSet), updateSize, std::ref(p_opts), i);
+                    std::future<void> delete_future;
+                    if (!p_opts.m_stressTest) {
+                        delete_future =
+                            std::async(std::launch::async, DeleteVectorsBySet<ValueType>, p_index,
+                                    1, vectorSet, std::ref(deleteSet), updateSize, std::ref(p_opts), i);
+                    }
 
                     std::future_status delete_status;
 

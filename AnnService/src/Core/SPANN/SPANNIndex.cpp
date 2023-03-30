@@ -230,6 +230,24 @@ namespace SPTAG
                 m_versionMap.Load(m_options.m_deleteIDFile, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
             }
 
+            if ((m_options.m_useSPDK || m_options.m_useKV) && m_options.m_preReassign) {
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(m_options.m_valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads));
+                auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+                if (m_options.m_vectorPath.empty())
+                {
+                    LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
+                }
+                else {
+                    if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
+                    {
+                        LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                        return ErrorCode::Fail;
+                    }
+                    // m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
+                }
+                m_extraSearcher->RefineIndex(vectorReader, m_index);
+            }
+
             return ErrorCode::Success;
         }
 

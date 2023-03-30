@@ -1011,8 +1011,8 @@ namespace SPTAG::SPANN {
                 appendIOSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
                 m_postingSizes.IncSize(headID, appendNum);
             }
-            if (m_postingSizes.GetSize(headID) > (m_postingSizeLimit + reassignThreshold)) {
-                SizeType VID = *(int*)(&appendPosting[0]);
+            if (m_postingSizes.GetSize(headID) > (92 + reassignThreshold)) {
+                // SizeType VID = *(int*)(&appendPosting[0]);
                 // LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
                 // GetDBStats();
                 // if (m_postingSizes.GetSize(headID) > 120) {
