@@ -203,12 +203,12 @@ namespace SPTAG
                 return ErrorCode::Success;
             }
 
-            ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& data) const
+            ErrorCode Refine(const std::vector<SizeType>& indices, Dataset<T>& p_data) const
             {
                 SizeType R = (SizeType)(indices.size());
-                data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
+                p_data.Initialize(R, cols, rowsInBlock + 1, static_cast<SizeType>(incBlocks.capacity() * (rowsInBlock + 1)));
                 for (SizeType i = 0; i < R; i++) {
-                    std::memcpy((void*)data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
+                    std::memcpy((void*)p_data.At(i), (void*)this->At(indices[i]), sizeof(T) * cols);
                 }
                 return ErrorCode::Success;
             }

@@ -570,9 +570,9 @@ case VectorValueType::Name: \
                 COMMON::QueryResultSet<T> query(ptr_v + i * GetFeatureDim(), m_pGraph.m_iCEF);
                 SearchIndex(query);
 
-                for (int i = 0; i < m_pGraph.m_iCEF; i++) {
-                    if (query.GetResult(i)->Dist < 1e-6) {
-                        DeleteIndex(query.GetResult(i)->VID);
+                for (int j = 0; j < m_pGraph.m_iCEF; j++) {
+                    if (query.GetResult(j)->Dist < 1e-6) {
+                        DeleteIndex(query.GetResult(j)->VID);
                     }
                 }
             }
