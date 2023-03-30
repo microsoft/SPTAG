@@ -409,6 +409,7 @@ namespace SPTAG::SPANN {
                 auto func = [&]()
                 {
                     int index = 0;
+                    Initialize();
                     while (true)
                     {
                         index = nextPostingID.fetch_add(1);
@@ -426,6 +427,7 @@ namespace SPTAG::SPANN {
                         }
                         else
                         {
+                            ExitBlockController();
                             return;
                         }
                     }
@@ -1448,25 +1450,43 @@ namespace SPTAG::SPANN {
 
         void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, std::shared_ptr<VectorSet> p_fullVectors) {
     // #pragma omp parallel for num_threads(10)
-            for (int id = 0; id < p_postingListSizes.size(); id++)
+            std::vector<std::thread> threads;
+            std::atomic_size_t vectorsSent(0);
+            auto func = [&]()
             {
-                std::string postinglist(m_vectorInfoSize * p_postingListSizes[id], '\0');
-                char* ptr = (char*)postinglist.c_str();
-                std::size_t selectIdx = p_postingSelections.lower_bound(id);
-                for (int j = 0; j < p_postingListSizes[id]; ++j) {
-                    if (p_postingSelections[selectIdx].node != id) {
-                        LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
-                        exit(1);
+                Initialize();
+                size_t index = 0;
+                while (true)
+                {
+                    index = vectorsSent.fetch_add(1);
+                    if (index < p_postingListSizes.size()) {
+                        std::string postinglist(m_vectorInfoSize * p_postingListSizes[index], '\0');
+                        char* ptr = (char*)postinglist.c_str();
+                        std::size_t selectIdx = p_postingSelections.lower_bound(index);
+                        for (int j = 0; j < p_postingListSizes[index]; ++j) {
+                            if (p_postingSelections[selectIdx].node != index) {
+                                LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
+                                exit(1);
+                            }
+                            SizeType fullID = p_postingSelections[selectIdx++].tonode;
+                            // if (id == 0) LOG(Helper::LogLevel::LL_Info, "ID: %d\n", fullID);
+                            uint8_t version = m_versionMap->GetVersion(fullID);
+                            // First Vector ID, then version, then Vector
+                            Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
+                            ptr += m_vectorInfoSize;
+                        }
+                        db->Put(index, postinglist);
                     }
-                    SizeType fullID = p_postingSelections[selectIdx++].tonode;
-                    // if (id == 0) LOG(Helper::LogLevel::LL_Info, "ID: %d\n", fullID);
-                    uint8_t version = m_versionMap->GetVersion(fullID);
-                    // First Vector ID, then version, then Vector
-                    Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
-                    ptr += m_vectorInfoSize;
+                    else
+                    {
+                        ExitBlockController();
+                        return;
+                    }
                 }
-                db->Put(id, postinglist);
-            }
+            };
+
+            for (int j = 0; j < 20; j++) { threads.emplace_back(func); }
+            for (auto& thread : threads) { thread.join(); }
         }
 
         ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,

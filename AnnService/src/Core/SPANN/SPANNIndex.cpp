@@ -952,7 +952,7 @@ namespace SPTAG
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                         return ErrorCode::Fail;
                     }
-                    if (m_options.m_useKV && m_options.m_preReassign) {
+                    if ((m_options.m_useKV || m_options.m_useSPDK) && m_options.m_preReassign) {
                         m_extraSearcher->RefineIndex(p_reader, m_index);
                     }
                 }
