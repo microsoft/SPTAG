@@ -162,7 +162,7 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 8, 1024, batchSize));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 2, 1024, batchSize));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
@@ -446,11 +446,12 @@ namespace SPTAG::SPANN {
                 //     db->Delete(i);
                 // }
                 // ForceCompaction();
+                p_index->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder);
                 BuildIndex(p_reader, p_index, *m_opt, *m_versionMap);
                 // ForceCompaction();
                 CalculatePostingDistribution(p_index.get());
 
-                p_index->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder);
+                // p_index->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder);
                 LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
                 m_postingSizes.Save(m_opt->m_ssdInfoFile);
             }
@@ -1013,7 +1014,7 @@ namespace SPTAG::SPANN {
                 appendIOSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
                 m_postingSizes.IncSize(headID, appendNum);
             }
-            if (m_postingSizes.GetSize(headID) > (92 + reassignThreshold)) {
+            if (m_postingSizes.GetSize(headID) > (m_postingSizeLimit + reassignThreshold)) {
                 // SizeType VID = *(int*)(&appendPosting[0]);
                 // LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
                 // GetDBStats();

@@ -492,6 +492,7 @@ namespace SPTAG {
 
             std::shared_ptr<VectorSet>  LoadUpdateVectors(SPANN::Options& p_opts, std::vector<SizeType>& insertSet, SizeType updateSize)
             {
+                LOG(Helper::LogLevel::LL_Info, "Load Update Vectors\n");
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_opts.m_fullVectorPath.c_str(), std::ios::binary | std::ios::in)) {
                     LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", p_opts.m_fullVectorPath.c_str());
@@ -962,7 +963,8 @@ namespace SPTAG {
                     p_opts.m_calTruth = false;
                     do {
                         insert_status = insert_future.wait_for(std::chrono::seconds(2));
-                        delete_status = delete_future.wait_for(std::chrono::seconds(2));
+                        if (!p_opts.m_stressTest) delete_status = delete_future.wait_for(std::chrono::seconds(2));
+                        else delete_status = std::future_status::ready;
                         if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
                             if (p_index->GetNumDeleted() >= nextSamplePoint) {
                                 LOG(Helper::LogLevel::LL_Info, "Samppling Size: %d\n", nextSamplePoint);
@@ -985,13 +987,13 @@ namespace SPTAG {
 
                     ShowMemoryStatus(vectorSet, sw.getElapsedSec());
 
-                    std::string truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
+                    std::string truthFileName;
+
+                    if (!p_opts.m_stressTest) truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
+                    else truthFileName = p_opts.m_truthPath;
 
                     p_opts.m_calTruth = calTruthOrigin;
-                    // p_index->ForceCompaction();
                     if (p_opts.m_onlySearchFinalBatch && days - 1 != i) continue;
-                    // p_index->ForceGC();
-                    // p_index->ForceCompaction();
                     p_index->StopMerge();
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
