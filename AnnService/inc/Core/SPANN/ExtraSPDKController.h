@@ -80,6 +80,9 @@ namespace SPTAG::SPANN
             int m_numInitCalled = 0;
 
             int m_batchSize;
+            static int m_ioCompleteCount;
+            int m_preIOCompleteCount = 0;
+            std::chrono::time_point<std::chrono::high_resolution_clock> m_preTime = std::chrono::high_resolution_clock::now();
 
             static void* InitializeSpdk(void* args);
 
@@ -111,6 +114,8 @@ namespace SPTAG::SPANN
 
             // write p_value into p_size blocks start from p_data
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
+
+            bool IOStatistics();
 
             bool ShutDown();
         };

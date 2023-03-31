@@ -8,6 +8,7 @@ namespace SPTAG::SPANN
 
 thread_local struct SPDKIO::BlockController::IoContext SPDKIO::BlockController::m_currIoContext;
 int SPDKIO::BlockController::m_ssdInflight = 0;
+int SPDKIO::BlockController::m_ioCompleteCount = 0;
 std::unique_ptr<char[]> SPDKIO::BlockController::m_memBuffer;
 
 void SPDKIO::BlockController::SpdkBdevEventCallback(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx) {
@@ -17,6 +18,7 @@ void SPDKIO::BlockController::SpdkBdevEventCallback(enum spdk_bdev_event_type ty
 void SPDKIO::BlockController::SpdkBdevIoCallback(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg) {
     SubIoRequest* currSubIo = (SubIoRequest *)cb_arg;
     if (success) {
+        m_ioCompleteCount++;
         spdk_bdev_free_io(bdev_io);
         currSubIo->completed_sub_io_requests->push(currSubIo);
         m_ssdInflight--;
@@ -407,6 +409,23 @@ bool SPDKIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
         fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
         return false;
     }
+}
+
+bool SPDKIO::BlockController::IOStatistics() {
+    int currIOCount = m_ioCompleteCount;
+    int diffIOCount = currIOCount - m_preIOCompleteCount;
+    m_preIOCompleteCount = currIOCount;
+
+    auto currTime = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(currTime - m_preTime);
+    m_preTime = currTime;
+
+    double currIOPS = (double)diffIOCount / 1000 / duration.count();
+    double currBandWidth = (double)diffIOCount * PageSize / 1024 / 1024 / duration.count();
+
+    std::cout << "IOPS: " << currIOPS << "k Bandwidth: " << currBandWidth << "MB/s" << std::endl;
+
+    return true;
 }
 
 bool SPDKIO::BlockController::ShutDown() {
