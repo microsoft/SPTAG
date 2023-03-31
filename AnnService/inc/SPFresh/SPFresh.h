@@ -726,6 +726,7 @@ namespace SPTAG {
                 int insertThreads, 
                 std::shared_ptr<SPTAG::VectorSet> vectorSet, 
                 std::vector<SizeType>& insertSet,
+                std::vector<SizeType>& mapping,
                 int updateSize,
                 SPANN::Options& p_opts)
             {
@@ -748,22 +749,23 @@ namespace SPTAG {
                             {
                                 LOG(Helper::LogLevel::LL_Info, "Insert: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
-                            std::vector<char> meta;
-                            std::vector<std::uint64_t> metaoffset;
-                            std::string a = std::to_string(insertSet[index]);
-                            metaoffset.push_back((std::uint64_t)meta.size());
-                            for (size_t j = 0; j < a.length(); j++)
-                                meta.push_back(a[j]);
-                            metaoffset.push_back((std::uint64_t)meta.size());
-                            std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
-                                SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
-                                SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
-                                1));
+                            // std::vector<char> meta;
+                            // std::vector<std::uint64_t> metaoffset;
+                            // std::string a = std::to_string(insertSet[index]);
+                            // metaoffset.push_back((std::uint64_t)meta.size());
+                            // for (size_t j = 0; j < a.length(); j++)
+                            //     meta.push_back(a[j]);
+                            // metaoffset.push_back((std::uint64_t)meta.size());
+                            // std::shared_ptr<SPTAG::MetadataSet> metaset(new SPTAG::MemMetadataSet(
+                            //     SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false),
+                            //     SPTAG::ByteArray((std::uint8_t*)metaoffset.data(), metaoffset.size() * sizeof(std::uint64_t), false),
+                            //     1));
+                            if (p_opts.m_stressTest) p_index->DeleteIndex(mapping[insertSet[index]]);
                             auto insertBegin = std::chrono::high_resolution_clock::now();
                             if (p_opts.m_loadAllVectors)
-                                p_index->AddIndex(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, metaset);
+                                p_index->AddIndexSPFresh(vectorSet->GetVector(insertSet[index]), 1, p_opts.m_dim, &mapping[insertSet[index]]);
                             else
-                                p_index->AddIndex(vectorSet->GetVector(index), 1, p_opts.m_dim, metaset);
+                                p_index->AddIndexSPFresh(vectorSet->GetVector(index), 1, p_opts.m_dim, &mapping[insertSet[index]]);
                             auto insertEnd = std::chrono::high_resolution_clock::now();
                             latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(insertEnd - insertBegin).count();
                         }
@@ -810,6 +812,7 @@ namespace SPTAG {
                 int deleteThreads, 
                 std::shared_ptr<SPTAG::VectorSet> vectorSet,
                 std::vector<SizeType>& deleteSet,
+                std::vector<SizeType>& mapping,
                 int updateSize,
                 SPANN::Options& p_opts,
                 int batch)
@@ -835,17 +838,18 @@ namespace SPTAG {
                                 LOG(Helper::LogLevel::LL_Info, "Delete: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
                             auto deleteBegin = std::chrono::high_resolution_clock::now();
+                            p_index->DeleteIndex(mapping[deleteSet[index]]);
                             // p_index->DeleteIndex(vectorSet->GetVector(deleteSet[index]), deleteSet[index]);
-                            std::vector<char> meta;
-                            std::string a = std::to_string(deleteSet[index]);
-                            for (size_t j = 0; j < a.length(); j++)
-                                meta.push_back(a[j]);
-                            ByteArray metarr = SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false);
+                            // std::vector<char> meta;
+                            // std::string a = std::to_string(deleteSet[index]);
+                            // for (size_t j = 0; j < a.length(); j++)
+                            //     meta.push_back(a[j]);
+                            // ByteArray metarr = SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false);
 
-                            if (p_index->VectorIndex::DeleteIndex(metarr) == ErrorCode::VectorNotFound) {
-                                LOG(Helper::LogLevel::LL_Info,"VID meta no found: %d\n", deleteSet[index]);
-                                exit(1);
-                            }
+                            // if (p_index->VectorIndex::DeleteIndex(metarr) == ErrorCode::VectorNotFound) {
+                            //     LOG(Helper::LogLevel::LL_Info,"VID meta no found: %d\n", deleteSet[index]);
+                            //     exit(1);
+                            // }
 
                             auto deleteEnd = std::chrono::high_resolution_clock::now();
                             latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(deleteEnd - deleteBegin).count();
@@ -925,12 +929,17 @@ namespace SPTAG {
                 int updateSize;
                 std::vector<SizeType> insertSet;
                 std::vector<SizeType> deleteSet;
+                std::vector<SizeType> mapping;
+                if (p_opts.m_endVectorNum == -1) p_opts.m_endVectorNum = curCount;
+                mapping.resize(p_opts.m_endVectorNum);
+                for (int i = 0; i < p_opts.m_endVectorNum; i++) {
+                    mapping[i] = i;
+                }
                 
                 for (int i = 0; i < days; i++)
                 {   
 
                     std::string traceFileName = p_opts.m_updateFilePrefix + std::to_string(i);
-                    std::string mappingFileName = p_opts.m_updateMappingPrefix + std::to_string(i);
                     if (!p_opts.m_stressTest) LoadUpdateTrace(traceFileName, updateSize, insertSet, deleteSet);
                     else LoadUpdateTraceStressTest(traceFileName, updateSize, insertSet);
                     if (!p_opts.m_loadAllVectors) {
@@ -948,14 +957,14 @@ namespace SPTAG {
                     if (!p_opts.m_stressTest) {
                         delete_future =
                             std::async(std::launch::async, DeleteVectorsBySet<ValueType>, p_index,
-                                    1, vectorSet, std::ref(deleteSet), updateSize, std::ref(p_opts), i);
+                                    1, vectorSet, std::ref(deleteSet), std::ref(mapping), updateSize, std::ref(p_opts), i);
                     }
 
                     std::future_status delete_status;
 
                     std::future<void> insert_future =
                         std::async(std::launch::async, InsertVectorsBySet<ValueType>, p_index,
-                                insertThreads, vectorSet, std::ref(insertSet), updateSize, std::ref(p_opts));
+                                insertThreads, vectorSet, std::ref(insertSet), std::ref(mapping), updateSize, std::ref(p_opts));
 
                     std::future_status insert_status;
 

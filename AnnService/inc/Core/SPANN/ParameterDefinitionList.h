@@ -183,8 +183,6 @@ DefineSSDParameter(m_showUpdateProgress, bool, true, "ShowUpdateProgress")
 DefineSSDParameter(m_mergeThreshold, int, 10, "MergeThreshold")
 // Steady State: showUpdateProgress
 DefineSSDParameter(m_loadAllVectors, bool, false, "LoadAllVectors")
-// Steady State: showUpdateProgress
-DefineSSDParameter(m_loadAllVectors, bool, false, "LoadAllVectors")
 // Steady State: steady state
 DefineSSDParameter(m_steadyState, bool, false, "SteadyState")
 // Steady State: stress test

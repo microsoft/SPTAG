@@ -1115,7 +1115,7 @@ namespace SPTAG::SPANN {
         {
             auto exStart = std::chrono::high_resolution_clock::now();
 
-            const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+            // const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
             p_exWorkSpace->m_deduper.clear();
 

@@ -217,6 +217,49 @@ namespace SPTAG
             bool Initialize() { return m_extraSearcher->Initialize(); }
 
             bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
+
+            ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
+                if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
+                    LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
+                    return ErrorCode::Fail;
+                }
+
+                if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+                if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
+
+                SizeType begin, end;
+                {
+                    std::lock_guard<std::mutex> lock(m_dataAddLock);
+
+                    begin = m_versionMap.GetVectorNum();
+                    end = begin + p_vectorNum;
+
+                    if (begin == 0) { return ErrorCode::EmptyIndex; }
+
+                    if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
+                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                        exit(1);
+                    }
+                }
+                for (int i = 0; i < p_vectorNum; i++) VID[i] = begin + i;
+
+                std::shared_ptr<VectorSet> vectorSet;
+                if (m_options.m_distCalcMethod == DistCalcMethod::Cosine) {
+                    ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                    memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+                    vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                    int base = COMMON::Utils::GetBase<T>();
+                    for (SizeType i = 0; i < p_vectorNum; i++) {
+                        COMMON::Utils::Normalize((T*)(vectorSet->GetVector(i)), p_dimension, base);
+                    }
+                }
+                else {
+                    vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
+                        GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                }
+
+                return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
+            }
         };
     } // namespace SPANN
 } // namespace SPTAG

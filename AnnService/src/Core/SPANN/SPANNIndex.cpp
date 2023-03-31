@@ -1094,7 +1094,6 @@ namespace SPTAG
             if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
             if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
-            if (!m_options.m_stressTest)
             SizeType begin, end;
             {
                 std::lock_guard<std::mutex> lock(m_dataAddLock);
