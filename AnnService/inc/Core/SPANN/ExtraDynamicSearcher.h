@@ -162,7 +162,7 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 2, 1024, batchSize));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 6, 1024, batchSize));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
@@ -585,7 +585,7 @@ namespace SPTAG::SPANN {
                         newHeadVID = headID;
                         theSameHead = true;
                         auto splitPutBegin = std::chrono::high_resolution_clock::now();
-                        if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
+                        if (!preReassign && db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to override postings\n");
                             exit(0);
                         }
@@ -600,7 +600,7 @@ namespace SPTAG::SPANN {
                         newHeadVID = begin;
                         newHeadsID.push_back(begin);
                         auto splitPutBegin = std::chrono::high_resolution_clock::now();
-                        if (db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
+                        if (!preReassign && db->Put(newHeadVID, newPostingLists[k]) != ErrorCode::Success) {
                             LOG(Helper::LogLevel::LL_Info, "Fail to add new postings\n");
                             exit(0);
                         }
@@ -1008,6 +1008,7 @@ namespace SPTAG::SPANN {
                 auto appendIOBegin = std::chrono::high_resolution_clock::now();
                 if (db->Merge(headID, appendPosting) != ErrorCode::Success) {
                     LOG(Helper::LogLevel::LL_Error, "Merge failed! Posting Size:%d, limit: %d\n", m_postingSizes.GetSize(headID), m_postingSizeLimit);
+                    GetDBStats();
                     exit(1);
                 }
                 auto appendIOEnd = std::chrono::high_resolution_clock::now();
