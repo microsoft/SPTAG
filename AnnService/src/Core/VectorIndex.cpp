@@ -58,12 +58,13 @@ namespace SPTAG {
         const std::size_t bufferSize = 1 << 30;
         std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {
             if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
                 return false;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown(); output->ShutDown();
         return true;
