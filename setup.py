@@ -79,43 +79,6 @@ def _find_python_packages():
 
     if os.path.exists('Release'):
         shutil.copytree('Release', 'sptag')
-
-        if os.path.exists('lib'): shutil.rmtree('lib')
-        os.mkdir('lib')
-        for file in glob.glob(r'Release/*.cs'):
-            print (file)
-            shutil.copy(file, "lib/")
-        for file in glob.glob(r'Release/*.so*'):
-            print (file)
-            shutil.copy(file, "lib/")
-        print (os.listdir('lib'))
-        sfiles = ''
-        for framework in ['net5.0', 'netcoreapp2.0', 'netstandard2.0']:
-            for filename in os.listdir('lib'):
-                sfiles += '<file src="lib/%s" target="lib/%s/%s" />' % (filename, framework, filename)
-        f = open('sptag.nuspec', 'w')
-        spec = '''<?xml version="1.0" encoding="utf-8"?>
-<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
-  <metadata>
-    <id>MSSPTAG.Managed.Library.Linux</id>
-    <version>%s</version>
-    <title>MSSPTAG.Managed.Library.Linux</title>
-    <authors>cheqi,haidwa,mingqli</authors>
-    <owners>cheqi,haidwa,mingqli</owners>
-    <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
-    <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
-    <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
-    <copyright>Copyright @ Microsoft</copyright>
-  </metadata>
-  <files>
-%s
-  </files>
-</package>
-''' % (nuget_release, sfiles)
-
-        f.write(spec)
-        f.close()
     elif os.path.exists(os.path.join('x64', 'Release')):
         shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
 
@@ -127,7 +90,7 @@ def _find_python_packages():
         shutil.copy('x64\\Release\\libzstd.dll', "lib\\")
         shutil.copy('x64\\Release\\Ijwhost.dll', "lib\\")
         sfiles = ''
-        for framework in ['net5.0', 'netcoreapp2.0', 'netstandard2.0']:
+        for framework in ['net5.0']:
             sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % framework
             sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % framework
             sfiles += '<file src="lib\\libzstd.dll" target="lib\\%s\\libzstd.dll" />' % framework
