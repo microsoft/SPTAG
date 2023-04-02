@@ -11,6 +11,7 @@
 #include "inc/Helper/SimpleIniReader.h"
 #include <unordered_set>
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Core/Common/WorkSpace.h"
 
 namespace SPTAG
 {
@@ -37,6 +38,8 @@ public:
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 
@@ -142,6 +145,8 @@ public:
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
     virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) = 0;
+
+    virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;
 
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 

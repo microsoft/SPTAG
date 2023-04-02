@@ -46,7 +46,7 @@ int main(int argc, char* argv[])
     {
         exit(1);
     }
-    LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", options->m_quantizerFile.c_str());
 
     auto indexBuilder = VectorIndex::CreateInstance(options->m_indexAlgoType, options->m_inputValueType);
     if (!options->m_quantizerFile.empty())
@@ -61,7 +61,7 @@ int main(int argc, char* argv[])
     Helper::IniReader iniReader;
     if (!options->m_builderConfigFile.empty() && iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
     {
-        LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
         return -1;
     }
 
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
     }
 
     std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };
@@ -100,7 +100,7 @@ int main(int argc, char* argv[])
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile(options->m_inputFiles))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
             exit(1);
         }
         vecset = vectorReader->GetVectorSet();
@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
         exit(1);
     }
     return 0;
