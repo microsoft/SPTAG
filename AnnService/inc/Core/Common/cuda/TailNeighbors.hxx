@@ -638,7 +638,7 @@ auto t2 = std::chrono::high_resolution_clock::now();
 
               if(!use_q) {
                 if(dim > MAX_SHAPE) {
-                  LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
+                  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
                 }
 
                 if(metric == (int)DistMetric::Cosine) {
@@ -650,7 +650,7 @@ auto t2 = std::chrono::high_resolution_clock::now();
               }
               else {
                 if(dim > MAX_PQ_SHAPE) {
-                  LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
+                  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
                 }
                 findTailNeighbors_PQ_selector<<<NUM_BLOCKS, NUM_THREADS, sizeof(DistPair<float>)*RNG_SIZE*NUM_THREADS, streams[gpuNum]>>>((PointSet<uint8_t>*)d_headPS[gpuNum], (PointSet<uint8_t>*)d_tailPS[gpuNum], d_tptree[gpuNum], RNG_SIZE, (DistPair<float>*)d_results[gpuNum], curr_batch_size[gpuNum], headRows, d_queryGroups[gpuNum], dim, d_quantizer);
               }

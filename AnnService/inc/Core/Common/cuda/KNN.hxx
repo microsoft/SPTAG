@@ -319,10 +319,10 @@ void run_TPT_batch_multigpu(size_t dataSize, int** d_results, TPtree** tptrees, 
     auto after_tpt = std::chrono::high_resolution_clock::now();
 
     if(quantizer == NULL && dim > MAX_PQ_SHAPE) {
-      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
+      SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Input PQ dimension is %d, GPU index build with PQ dimension larger than %d not supported.\n", dim, MAX_SHAPE);
     }
     else if(dim > MAX_SHAPE) {
-      LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
+      SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Input vector dimension is %d, GPU index build of vector dimensions larger than %d not supported.\n", dim, MAX_SHAPE);
     }
 
     for(int gpuNum=0; gpuNum < NUM_GPUS; gpuNum++) {
