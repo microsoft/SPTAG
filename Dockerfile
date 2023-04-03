@@ -3,8 +3,7 @@ WORKDIR /app
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get -y install wget build-essential \
-    swig cmake git libnuma libnuma-dev \
+RUN apt-get update && apt-get -y install wget build-essential swig cmake git libnuma-dev python3.8-dev gcc-8 g++-8 \
     libboost-filesystem-dev libboost-test-dev libboost-serialization-dev libboost-regex-dev libboost-serialization-dev libboost-regex-dev libboost-thread-dev libboost-system-dev
 
 ENV PYTHONPATH=/app/Release
@@ -16,4 +15,4 @@ COPY Wrappers ./Wrappers/
 COPY GPUSupport ./GPUSupport/
 COPY ThirdParty ./ThirdParty/
 
-RUN mkdir build && cd build && cmake .. && make -j$(nproc) && cd ..
+RUN export CC=/usr/bin/gcc-8 && export CXX=/usr/bin/g++-8 && mkdir build && cd build && cmake .. && make -j && cd ..
