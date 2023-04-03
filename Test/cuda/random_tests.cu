@@ -1,29 +1,4 @@
-#include "inc/Core/Common/cuda/KNN.hxx"
-#include <cstdlib>
-#include <chrono>
-
-
-template<typename T>
-T* create_dataset(size_t rows, int dim) {
-
-  srand(0);
-  T* h_data = new T[rows*dim];
-  for(size_t i=0; i<rows*dim; ++i) {
-    if(std::is_same<T,float>::value) {
-      h_data[i] = (rand()/(float)RAND_MAX);
-    }
-    else if(std::is_same<T,int>::value) {
-      h_data[i] = static_cast<T>((rand()%INT_MAX));
-    }
-    else if(std::is_same<T,uint8_t>::value) {
-      h_data[i] = static_cast<T>((rand()%127));
-    }
-    else if(std::is_same<T,int8_t>::value) {
-      h_data[i] = static_cast<T>((rand()%127));
-    }
-  } 
-  return h_data;
-}
+#include "common.hxx"
 
 template<typename T, typename SUMTYPE, int Dim, int metric>
 __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
@@ -102,7 +77,6 @@ __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
 }
 
 
-
 template<typename T, typename SUMTYPE, int dim, int K>
 int GPUBuildKNNCosineTest(int rows) {
 
@@ -135,12 +109,14 @@ int GPUBuildKNNCosineTest(int rows) {
   for(int i=0; i<rows; ++i) {
     for(int j=0; j<K-1; ++j) {
       int neighborId = h_results[i*K+j];
-      SUMTYPE neighborDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[neighborId*dim], dim));
       int nextNeighborId = h_results[i*K+j+1];
-      SUMTYPE nextDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[nextNeighborId*dim], dim));
-      if(neighborDist > nextDist) {
-        printf("Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
-        return 1;
+      if(neighborId != -1 && nextNeighborId != -1) {
+        SUMTYPE neighborDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[neighborId*dim], dim));
+        SUMTYPE nextDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[nextNeighborId*dim], dim));
+        if(neighborDist > nextDist) {
+          LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
+          return 1;
+        }
       }
     }
   }
@@ -152,27 +128,118 @@ int GPUBuildKNNCosineTest() {
 
   int errors = 0;
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
   errors += GPUBuildKNNCosineTest<float, float, 10, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 384, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 1024, 10>(1000);
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
   errors += GPUBuildKNNCosineTest<int, int, 10, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 384, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 1024, 10>(1000);
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 384, 10>(1000);
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 1024, 10>(1000);
+ 
+  return errors;
+}
+
+template<typename T, typename SUMTYPE, int dim, int K>
+int GPUBuildKNNL2Test(int rows) {
+
+  T* data = create_dataset<T>(rows, dim);
+  T* d_data;
+  CUDA_CHECK(cudaMalloc(&d_data, dim*rows*sizeof(T)));
+  CUDA_CHECK(cudaMemcpy(d_data, data, dim*rows*sizeof(T), cudaMemcpyHostToDevice));
+
+  int* d_results;
+  CUDA_CHECK(cudaMalloc(&d_results, rows*K*sizeof(int)));
+
+  PointSet<T> h_ps;
+  h_ps.dim = dim;
+  h_ps.data = d_data;
+
+  PointSet<T>* d_ps;
+  
+  CUDA_CHECK(cudaMalloc(&d_ps, sizeof(PointSet<T>)));
+  CUDA_CHECK(cudaMemcpy(d_ps, &h_ps, sizeof(PointSet<T>), cudaMemcpyHostToDevice));
+
+  test_KNN<T,SUMTYPE,dim,(int)DistMetric::L2><<<1024, 64, K*64*sizeof(DistPair<SUMTYPE>)>>>(d_ps, d_results, rows, K);
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  int* h_results = new int[K*rows];
+  CUDA_CHECK(cudaMemcpy(h_results, d_results, rows*K*sizeof(int), cudaMemcpyDeviceToHost));
+
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+// Verify that the neighbor list of each vector is ordered correctly
+  for(int i=0; i<rows; ++i) {
+    for(int j=0; j<K-1; ++j) {
+      int neighborId = h_results[i*K+j];
+      int nextNeighborId = h_results[i*K+j+1];
+      if(neighborId != -1 && nextNeighborId != -1) {
+        SUMTYPE neighborDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeL2Distance<T>(&data[i*dim], &data[neighborId*dim], dim));
+        SUMTYPE nextDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeL2Distance<T>(&data[i*dim], &data[nextNeighborId*dim], dim));
+        if(neighborDist > nextDist) {
+          LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
+          return 1;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+int GPUBuildKNNL2Test() {
+
+  int errors = 0;
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
+  errors += GPUBuildKNNL2Test<float, float, 10, 10>(1000);
+  errors += GPUBuildKNNL2Test<float, float, 100, 10>(1000);
+  errors += GPUBuildKNNL2Test<float, float, 200, 10>(1000);
+  errors += GPUBuildKNNL2Test<float, float, 384, 10>(1000);
+  errors += GPUBuildKNNL2Test<float, float, 1024, 10>(1000);
+
+  CHECK_ERRS(errors)
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
+  errors += GPUBuildKNNL2Test<int, int, 10, 10>(1000);
+  errors += GPUBuildKNNL2Test<int, int, 100, 10>(1000);
+  errors += GPUBuildKNNL2Test<int, int, 200, 10>(1000);
+  errors += GPUBuildKNNL2Test<int, int, 384, 10>(1000);
+  errors += GPUBuildKNNL2Test<int, int, 1024, 10>(1000);
+
+  CHECK_ERRS(errors)
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
+  errors += GPUBuildKNNL2Test<int8_t, int32_t, 100, 10>(1000);
+  errors += GPUBuildKNNL2Test<int8_t, int32_t, 200, 10>(1000);
+  errors += GPUBuildKNNL2Test<int8_t, int32_t, 384, 10>(1000);
+  errors += GPUBuildKNNL2Test<int8_t, int32_t, 1024, 10>(1000);
+
+  CHECK_ERRS(errors)
 }
 
 int GPUBuildKNNTest() {
   int errors = 0;
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN Cosine metric tests\n");
   errors += GPUBuildKNNCosineTest();
+
+  CHECK_ERRS(errors)
+
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN L2 metric tests\n");
+  errors += GPUBuildKNNL2Test();
+
+  CHECK_ERRS(errors)
 
   return errors;
 }

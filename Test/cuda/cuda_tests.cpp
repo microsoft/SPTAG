@@ -21,6 +21,13 @@ BOOST_AUTO_TEST_CASE(RandomTests) {
 int GPUTestDistance_All(); 
 
 BOOST_AUTO_TEST_CASE(DistanceTests) {
-  int success = GPUTestDistance_All();
-  BOOST_CHECK(success == 1);
+  int errs = GPUTestDistance_All();
+  BOOST_CHECK(errs == 0);
+}
+
+  int GPUBuildTPTTest();
+
+BOOST_AUTO_TEST_CASE(TPTreeTests) {
+  int errs = GPUBuildTPTTest();
+  BOOST_CHECK(errs == 0);
 }

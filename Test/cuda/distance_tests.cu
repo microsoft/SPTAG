@@ -1,18 +1,15 @@
-#include "inc/Core/Common/cuda/KNN.hxx"
-#include <cstdlib>
-#include <chrono>
-
+#include "common.hxx"
 
 #define GPU_CHECK_CORRECT(a,b,msg) \
   if(a != (SUMTYPE)b) {              \
     printf(msg);                     \
-    success = 0;                     \
+    errs = 0;                     \
     return;                          \
   }                                  
 
 
 template<typename T, typename SUMTYPE, int Dim>
-__global__ void GPUTestDistancesKernelStatic(PointSet<T>* ps, int success) {
+__global__ void GPUTestDistancesKernelStatic(PointSet<T>* ps, int errs) {
   SUMTYPE ab, ac, bc;
 // Expected results
   SUMTYPE l2_res[3] = {Dim, 4*Dim, Dim};
@@ -57,15 +54,15 @@ int GPUTestDistancesSimple() {
   CUDA_CHECK(cudaMemcpy(d_ps, &h_ps, sizeof(PointSet<T>), cudaMemcpyHostToDevice));
 
  
-  int success=1;
-  GPUTestDistancesKernelStatic<T,SUMTYPE,dim><<<1, 1>>>(d_ps, success); // TODO - make sure result is correct returned
+  int errs=0;
+  GPUTestDistancesKernelStatic<T,SUMTYPE,dim><<<1, 1>>>(d_ps, errs); // TODO - make sure result is correct returned
   CUDA_CHECK(cudaDeviceSynchronize());
-  return success;
+  return errs;
 }
 
 
 template<typename T, typename SUMTYPE, int dim>
-__global__ void GPUTestDistancesRandomKernel(PointSet<T>* ps, int vecs, SUMTYPE* cosine_dists, SUMTYPE* l2_dists, int success) {
+__global__ void GPUTestDistancesRandomKernel(PointSet<T>* ps, int vecs, SUMTYPE* cosine_dists, SUMTYPE* l2_dists, int errs) {
   SUMTYPE cos, l2;
   SUMTYPE diff;
   float eps = 0.001; // exact distances are not expected, but should be within an epsilon
@@ -117,7 +114,7 @@ int GPUTestDistancesComplex(int vecs) {
       cpu_l2_dists[i*vecs+j] = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeL2Distance<T>(&h_data[i*dim], &h_data[j*dim], dim));
     }
   }
-  int success=1;
+  int errs=0;
 
   T* d_data;
   CUDA_CHECK(cudaMalloc(&d_data, dim*vecs*sizeof(T)));
@@ -139,51 +136,58 @@ int GPUTestDistancesComplex(int vecs) {
   CUDA_CHECK(cudaMemcpy(d_l2_dists, cpu_l2_dists, vecs*vecs*sizeof(SUMTYPE), cudaMemcpyHostToDevice));
 
  
-  GPUTestDistancesRandomKernel<T,SUMTYPE,dim><<<1024, 32>>>(d_ps, vecs, d_cosine_dists, d_l2_dists, success); // TODO - make sure result is correct returned
+  GPUTestDistancesRandomKernel<T,SUMTYPE,dim><<<1024, 32>>>(d_ps, vecs, d_cosine_dists, d_l2_dists, errs); // TODO - make sure result is correct returned
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  return success;
+  return errs;
 }
 
 int GPUTestDistance_All() {
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Static distance tests...\n");
   // Test Distances with float datatype
-  int success = GPUTestDistancesSimple<float, float, 10>();
-  success = success && GPUTestDistancesSimple<float, float, 100>();
-  success = success && GPUTestDistancesSimple<float, float, 200>();
-  success = success && GPUTestDistancesSimple<float, float, 384>();
-  success = success && GPUTestDistancesSimple<float, float, 1024>();
+  int errs = 0;
+  errs += GPUTestDistancesSimple<float, float, 10>();
+  errs += GPUTestDistancesSimple<float, float, 100>();
+  errs += GPUTestDistancesSimple<float, float, 200>();
+  errs += GPUTestDistancesSimple<float, float, 384>();
+  errs += GPUTestDistancesSimple<float, float, 1024>();
 
   // Test distances with int datatype
-  success = success && GPUTestDistancesSimple<int, int, 10>();
-  success = success && GPUTestDistancesSimple<int, int, 100>();
-  success = success && GPUTestDistancesSimple<int, int, 200>();
-  success = success && GPUTestDistancesSimple<int, int, 384>();
-  success = success && GPUTestDistancesSimple<int, int, 1024>();
+  errs += GPUTestDistancesSimple<int, int, 10>();
+  errs += GPUTestDistancesSimple<int, int, 100>();
+  errs += GPUTestDistancesSimple<int, int, 200>();
+  errs += GPUTestDistancesSimple<int, int, 384>();
+  errs += GPUTestDistancesSimple<int, int, 1024>();
 
   // Test distances with int8 datatype
-  success = success && GPUTestDistancesSimple<int8_t, int32_t, 100>();
-  success = success && GPUTestDistancesSimple<int8_t, int32_t, 200>();
-  success = success && GPUTestDistancesSimple<int8_t, int32_t, 384>();
-  success = success && GPUTestDistancesSimple<int8_t, int32_t, 1024>();
+  errs += GPUTestDistancesSimple<int8_t, int32_t, 100>();
+  errs += GPUTestDistancesSimple<int8_t, int32_t, 200>();
+  errs += GPUTestDistancesSimple<int8_t, int32_t, 384>();
+  errs += GPUTestDistancesSimple<int8_t, int32_t, 1024>();
 
+  CHECK_ERRS(errs)
 
+  LOG(SPTAG::Helper::LogLevel::LL_Info, "Randomized vector distance tests...\n");
   // Test distances between random vectors and compare with CPU calculation
-  success = success && GPUTestDistancesComplex<float, float, 10>(100);
-  success = success && GPUTestDistancesComplex<float, float, 100>(100);
-  success = success && GPUTestDistancesComplex<float, float, 200>(100);
-  success = success && GPUTestDistancesComplex<float, float, 384>(100);
-  success = success && GPUTestDistancesComplex<float, float, 1024>(100);
+  errs += GPUTestDistancesComplex<float, float, 10>(100);
+  errs += GPUTestDistancesComplex<float, float, 100>(100);
+  errs += GPUTestDistancesComplex<float, float, 200>(100);
+  errs += GPUTestDistancesComplex<float, float, 384>(100);
+  errs += GPUTestDistancesComplex<float, float, 1024>(100);
 
-  success = success && GPUTestDistancesComplex<int, int, 10>(100);
-  success = success && GPUTestDistancesComplex<int, int, 100>(100);
-  success = success && GPUTestDistancesComplex<int, int, 200>(100);
-  success = success && GPUTestDistancesComplex<int, int, 384>(100);
-  success = success && GPUTestDistancesComplex<int, int, 1024>(100);
+  errs += GPUTestDistancesComplex<int, int, 10>(100);
+  errs += GPUTestDistancesComplex<int, int, 100>(100);
+  errs += GPUTestDistancesComplex<int, int, 200>(100);
+  errs += GPUTestDistancesComplex<int, int, 384>(100);
+  errs += GPUTestDistancesComplex<int, int, 1024>(100);
 
-  success = success && GPUTestDistancesComplex<int8_t, int32_t, 100>(100);
-  success = success && GPUTestDistancesComplex<int8_t, int32_t, 200>(100);
-  success = success && GPUTestDistancesComplex<int8_t, int32_t, 384>(100);
-  success = success && GPUTestDistancesComplex<int8_t, int32_t, 1024>(100);
-  return success;
+  errs += GPUTestDistancesComplex<int8_t, int32_t, 100>(100);
+  errs += GPUTestDistancesComplex<int8_t, int32_t, 200>(100);
+  errs += GPUTestDistancesComplex<int8_t, int32_t, 384>(100);
+  errs += GPUTestDistancesComplex<int8_t, int32_t, 1024>(100);
+
+  CHECK_ERRS(errs)
+
+  return errs;
 }
