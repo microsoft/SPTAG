@@ -33,7 +33,7 @@ namespace SPTAG::SPANN
             static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
-            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 41) >> PageSizeEx; // 2T
+            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
             static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
