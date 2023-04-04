@@ -10,6 +10,7 @@
 %typemap(out) ByteArray {
     $result = JCALL1(NewByteArray, jenv, $1.Length());
     JCALL4(SetByteArrayRegion, jenv, $result, 0, $1.Length(), (jbyte *)$1.Data());
+    delete[] $1.Data();
 }
 %typemap(javain) ByteArray "$javainput"
 %typemap(javaout) ByteArray { return $jnicall; }

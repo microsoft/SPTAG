@@ -224,20 +224,6 @@ AnnIndex::Save(const char* p_savefile) const
 }
 
 
-AnnIndex
-AnnIndex::Load(const char* p_loaderFile)
-{
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    auto ret = SPTAG::VectorIndex::LoadIndex(p_loaderFile, vecIndex);
-    if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
-    {
-        return AnnIndex(0);
-    }
-
-    return AnnIndex(vecIndex);
-}
-
-
 bool 
 AnnIndex::Add(ByteArray p_data, SizeType p_num, bool p_normalized)
 {
@@ -296,6 +282,92 @@ AnnIndex::DeleteByMetaData(ByteArray p_meta)
     if (nullptr == m_index) return false;
     
     return (SPTAG::ErrorCode::Success == m_index->DeleteIndex(p_meta));
+}
+
+
+uint64_t
+AnnIndex::CalculateBufferSize()
+{
+    if (nullptr == m_index) return 0;
+
+    std::shared_ptr<std::vector<uint64_t>> buffersize = m_index->CalculateBufferSize();
+    uint64_t total = sizeof(int) + sizeof(uint64_t) * buffersize->size();
+    for (uint64_t bs : *buffersize) {
+        total += bs;
+    }
+    return total;
+}
+
+
+ByteArray
+AnnIndex::Dump(ByteArray p_blobs)
+{
+    if (nullptr == m_index) return ByteArray::c_empty;
+
+    std::shared_ptr<std::vector<uint64_t>> buffersize = m_index->CalculateBufferSize();
+    std::uint8_t *ptr = p_blobs.Data(), *pdata = ptr + sizeof(int) + sizeof(uint64_t) * buffersize->size();
+    *((int*)ptr) = (int)(buffersize->size());
+    ptr += sizeof(int);
+
+    std::vector<SPTAG::ByteArray> indexBlobs;
+    for (size_t i = 0; i < buffersize->size(); i++) {
+        *((uint64_t*)ptr) = buffersize->at(i);
+        ptr += sizeof(uint64_t);
+        indexBlobs.push_back(SPTAG::ByteArray(pdata, buffersize->at(i), false));
+        pdata += buffersize->at(i);
+    }
+
+    std::string config;
+    if (SPTAG::ErrorCode::Success != m_index->SaveIndex(config, indexBlobs))
+    {
+        return ByteArray::c_empty;
+    }
+    std::uint8_t* newdata = new std::uint8_t[config.size()];
+    memcpy(newdata, config.c_str(), config.size());
+    return ByteArray(newdata, config.size(), false);
+}
+
+
+AnnIndex
+AnnIndex::LoadFromDump(ByteArray p_config, ByteArray p_blobs)
+{
+    if (p_config.Length() == 0) return AnnIndex(0);
+
+    std::uint8_t* ptr = p_blobs.Data();
+    int streamNum = *((int*)ptr);
+    ptr += sizeof(int);
+    std::uint8_t* pdata = ptr + sizeof(uint64_t) * streamNum;
+
+    std::vector<SPTAG::ByteArray> p_indexBlobs;
+    for (int i = 0; i < streamNum; i++)
+    {
+        std::uint64_t streamSize = *((uint64_t*)ptr);
+        ptr += sizeof(uint64_t);
+        p_indexBlobs.push_back(SPTAG::ByteArray((std::uint8_t*)pdata, streamSize, false));
+        pdata += streamSize;
+    }
+
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    std::string config((char*)p_config.Data(), p_config.Length());
+    if (SPTAG::ErrorCode::Success != SPTAG::VectorIndex::LoadIndex(config, p_indexBlobs, vecIndex) || nullptr == vecIndex)
+    {
+        return AnnIndex(0);
+    }
+    return AnnIndex(vecIndex);
+}
+
+
+AnnIndex
+AnnIndex::Load(const char* p_loaderFile)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    auto ret = SPTAG::VectorIndex::LoadIndex(p_loaderFile, vecIndex);
+    if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
+    {
+        return AnnIndex(0);
+    }
+
+    return AnnIndex(vecIndex);
 }
 
 

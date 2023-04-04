@@ -84,10 +84,18 @@ def _find_python_packages():
 
         if os.path.exists('lib'): shutil.rmtree('lib')
         os.mkdir('lib')
-        os.mkdir(os.path.join('lib', 'net472'))
         for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
             print (file)
-            shutil.copy(file, "lib\\net472\\")
+            shutil.copy(file, "lib\\")
+        shutil.copy('x64\\Release\\libzstd.dll', "lib\\")
+        shutil.copy('x64\\Release\\Ijwhost.dll', "lib\\")
+        sfiles = ''
+        for framework in ['net5.0']:
+            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % framework
+            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % framework
+            sfiles += '<file src="lib\\libzstd.dll" target="lib\\%s\\libzstd.dll" />' % framework
+            sfiles += '<file src="lib\\Ijwhost.dll" target="lib\\%s\\Ijwhost.dll" />' % framework
+
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
@@ -104,11 +112,10 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" />
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" />
+%s
   </files>
 </package>
-''' % (nuget_release)
+''' % (nuget_release, sfiles)
         f.write(spec)
         f.close()
 
@@ -128,10 +135,10 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
     <dependencies>
       <group targetFramework="uap10.0">
-        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
       </group>
       <group targetFramework="native">
-        <dependency id="Zstandard.dyn.x64" version="1.4.0" />	
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
       </group>
     </dependencies>
   </metadata>
