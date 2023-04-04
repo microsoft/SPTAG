@@ -546,15 +546,15 @@ namespace SPTAG::SPANN {
                 // exit(0);
                 if (numClusters <= 1)
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Cut to limit\n");
-                    std::string newpostingList(m_postingSizeLimit * m_vectorInfoSize, '\0');
+                    LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Only Keep one\n");
+                    std::string newpostingList(1 * m_vectorInfoSize, '\0');
                     char* ptr = (char*)(newpostingList.c_str());
-                    for (int j = 0; j < m_postingSizeLimit; j++, ptr += m_vectorInfoSize)
+                    for (int j = 0; j < 1; j++, ptr += m_vectorInfoSize)
                     {
                         memcpy(ptr, postingList.c_str() + localIndices[j] * m_vectorInfoSize, m_vectorInfoSize);
                         //Serialize(ptr, localIndicesInsert[j], localIndicesInsertVersion[j], smallSample[j]);
                     }
-                    m_postingSizes.UpdateSize(headID, m_postingSizeLimit);
+                    m_postingSizes.UpdateSize(headID, 1);
                     if (db->Put(headID, newpostingList) != ErrorCode::Success) {
                         LOG(Helper::LogLevel::LL_Info, "Split fail to override postings cut to limit\n");
                         exit(0);

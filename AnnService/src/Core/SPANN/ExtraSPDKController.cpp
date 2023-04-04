@@ -282,6 +282,7 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
         // Temporarily disable timeout
 
         // Convert request format to SubIoRequests
+        auto t1 = std::chrono::high_resolution_clock::now();
         p_values->resize(p_data.size());
         std::vector<SubIoRequest> subIoRequests;
         std::vector<int> subIoRequestCount(p_data.size(), 0);
@@ -318,7 +319,6 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
             }
         }
 
-        auto t1 = std::chrono::high_resolution_clock::now();
         const int batch_size = m_batchSize;
         for (int currSubIoStartId = 0; currSubIoStartId < subIoRequests.size(); currSubIoStartId += batch_size) {
             int currSubIoEndId = (currSubIoStartId + batch_size) > subIoRequests.size() ? subIoRequests.size() : currSubIoStartId + batch_size;
