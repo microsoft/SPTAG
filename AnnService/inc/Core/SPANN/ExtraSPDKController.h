@@ -34,7 +34,7 @@ namespace SPTAG::SPANN
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
             // static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
-            static constexpr AddressType kSsdImplMaxNumBlocks = 1500*1024*1024; // 1.5T
+            static constexpr AddressType kSsdImplMaxNumBlocks = 1500*1024*256; // 1.5T
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
             static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
@@ -119,6 +119,10 @@ namespace SPTAG::SPANN
             bool IOStatistics();
 
             bool ShutDown();
+
+            int RemainBlocks() {
+                return m_blockAddresses.unsafe_size();
+            }
         };
 
         class CompactionJob : public Helper::ThreadPool::Job
@@ -302,7 +306,9 @@ namespace SPTAG::SPANN
         }
 
         void GetStat() {
-
+            int remainBlocks = m_pBlockController.RemainBlocks();
+            int remainGB = remainBlocks >> 20 << 2;
+            LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
         }
 
         ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
