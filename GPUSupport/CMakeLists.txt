@@ -84,12 +84,12 @@ if (CUDA_FOUND)
     target_link_libraries(gpussdserving GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(gpussdserving PRIVATE ${Definition} _exe)
 
-    CUDA_ADD_LIBRARY(GPUSPTAGTests SHARED ${AnnService}/../Test/cuda/knn_tests.cu ${AnnService}/../Test/cuda/distance_tests.cu ${AnnService}/../Test/cuda/tptree_tests.cu)
-    target_link_libraries(GPUSPTAGTests GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    CUDA_ADD_LIBRARY(GPUSPTAGTests SHARED ${AnnService}/../Test/cuda/knn_tests.cu ${AnnService}/../Test/cuda/distance_tests.cu ${AnnService}/../Test/cuda/tptree_tests.cu ${AnnService}/../Test/cuda/buildssd_test.cu)
+    target_link_libraries(GPUSPTAGTests ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(GPUSPTAGTests PRIVATE ${Definition})
 
     CUDA_ADD_EXECUTABLE(gpu_test ${AnnService}/../Test/cuda/cuda_tests.cpp)
-    target_link_libraries(gpu_test GPUSPTAGTests ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
+    target_link_libraries(gpu_test GPUSPTAGTests GPUSPTAGLibStatic ${Boost_LIBRARIES} ${CUDA_LIBRARIES})
     target_compile_definitions(gpu_test PRIVATE ${Definition} _exe)
     
 else()

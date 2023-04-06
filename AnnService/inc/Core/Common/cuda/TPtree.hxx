@@ -161,13 +161,13 @@ class TPtree {
       tree_mem+= levels*sizeof(int*) + levels*Dim*sizeof(KEYTYPE);
 
       tree_mem+= N*sizeof(int);
-      CUDA_CHECK(cudaMallocManaged(&node_sizes, num_nodes*sizeof(int)));
+      CUDA_CHECK(cudaMalloc(&node_sizes, num_nodes*sizeof(int)));
       CUDA_CHECK(cudaMemset(node_sizes, 0, num_nodes*sizeof(int)));
 
-      CUDA_CHECK(cudaMallocManaged(&split_keys, num_internals*sizeof(KEYTYPE)));
+      CUDA_CHECK(cudaMalloc(&split_keys, num_internals*sizeof(KEYTYPE)));
       tree_mem+= num_nodes*sizeof(int) + num_internals*sizeof(KEYTYPE);
 
-      CUDA_CHECK(cudaMallocManaged(&leafs, num_leaves*sizeof(LeafNode)));
+      CUDA_CHECK(cudaMalloc(&leafs, num_leaves*sizeof(LeafNode)));
       tree_mem+=num_leaves*sizeof(LeafNode);
 
       CUDA_CHECK(cudaMalloc(&leaf_points, N*sizeof(int)));
@@ -206,7 +206,6 @@ class TPtree {
     // For debugging purposes
     ************************************************************************************/
     __host__ void print_tree() {
-      printf("nodes:%d, leaves:%d, levels:%d\n", num_nodes, num_leaves, levels);
       int level_offset;
       
       print_level_device<<<1,1>>>(node_sizes, split_keys, 1, leafs, leaf_points);
@@ -466,7 +465,7 @@ __host__ void create_tptree_multigpu(TPtree** d_trees, PointSet<T>** ps, int N, 
   // Build TPT on each GPU  
 //  construct_trees_multigpu<T>(d_trees, ps, N, NUM_GPUS, streams, balanceFactor);
 
-  if(index->m_pQuantizer == NULL) { // Build directly if no quantizer
+  if(index == NULL || index->m_pQuantizer == NULL) { // Build directly if no quantizer
     construct_trees_multigpu<T>(d_trees, ps, N, NUM_GPUS, streams, balanceFactor);
   }
   else {

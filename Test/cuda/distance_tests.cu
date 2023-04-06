@@ -1,4 +1,5 @@
 #include "common.hxx"
+#include "inc/Core/Common/cuda/KNN.hxx"
 
 #define GPU_CHECK_CORRECT(a,b,msg) \
   if(a != (SUMTYPE)b) {              \
@@ -57,6 +58,9 @@ int GPUTestDistancesSimple() {
   int errs=0;
   GPUTestDistancesKernelStatic<T,SUMTYPE,dim><<<1, 1>>>(d_ps, errs); // TODO - make sure result is correct returned
   CUDA_CHECK(cudaDeviceSynchronize());
+
+  CUDA_CHECK(cudaFree(d_data));
+  CUDA_CHECK(cudaFree(d_ps));
   return errs;
 }
 
@@ -138,6 +142,11 @@ int GPUTestDistancesComplex(int vecs) {
  
   GPUTestDistancesRandomKernel<T,SUMTYPE,dim><<<1024, 32>>>(d_ps, vecs, d_cosine_dists, d_l2_dists, errs); // TODO - make sure result is correct returned
   CUDA_CHECK(cudaDeviceSynchronize());
+
+  CUDA_CHECK(cudaFree(d_data));
+  CUDA_CHECK(cudaFree(d_ps));
+  CUDA_CHECK(cudaFree(d_cosine_dists));
+  CUDA_CHECK(cudaFree(d_l2_dists));
 
   return errs;
 }

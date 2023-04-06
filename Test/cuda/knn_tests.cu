@@ -1,4 +1,5 @@
 #include "common.hxx"
+#include "inc/Core/Common/cuda/KNN.hxx"
 
 template<typename T, typename SUMTYPE, int Dim, int metric>
 __global__ void test_KNN(PointSet<T>* ps, int* results, int rows, int K) {
@@ -121,6 +122,10 @@ int GPUBuildKNNCosineTest(int rows) {
     }
   }
 
+  CUDA_CHECK(cudaFree(d_data));
+  CUDA_CHECK(cudaFree(d_results));
+  CUDA_CHECK(cudaFree(d_ps));
+
   return 0;
 }
 
@@ -194,6 +199,9 @@ int GPUBuildKNNL2Test(int rows) {
       }
     }
   }
+  CUDA_CHECK(cudaFree(d_data));
+  CUDA_CHECK(cudaFree(d_results));
+  CUDA_CHECK(cudaFree(d_ps));
 
   return 0;
 }
