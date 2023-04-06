@@ -56,6 +56,12 @@ public:
 
     bool DeleteByMetaData(ByteArray p_meta);
 
+    uint64_t CalculateBufferSize();
+
+    ByteArray Dump(ByteArray p_blobs);
+
+    static AnnIndex LoadFromDump(ByteArray p_config, ByteArray p_blobs);
+
     static AnnIndex Load(const char* p_loaderFile);
 
     static AnnIndex Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);

@@ -378,9 +378,9 @@ __host__ void construct_trees_PQ(TPtree** d_trees, PointSet<T>** ps, int N, int 
         size_t freeMem, totalMem;
         CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
         size_t neededMem = N*reconDim*sizeof(R);
-        LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory needed for reconstructed vectors to build TPT: %ld, memory availalbe: %ld\n", neededMem, totalMem);
+        SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Debug, "Memory needed for reconstructed vectors to build TPT: %ld, memory availalbe: %ld\n", neededMem, totalMem);
         if(freeMem*0.9 < neededMem) {
-          LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient memory for reconstructed vectors to build TPTree.\n");
+          SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Insufficient memory for reconstructed vectors to build TPTree.\n");
           exit(1);
         }
           
@@ -431,7 +431,7 @@ printf("Num leaves:%d, min leaf:%d, max leaf:%d\n", d_trees[0]->num_leaves, min_
 
         cudaDeviceProp prop;
         CUDA_CHECK(cudaGetDeviceProperties(&prop, gpuNum)); // Get avil. memory
-        LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s\n", gpuNum, prop.name);
+        SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU %d - %s\n", gpuNum, prop.name);
 
         size_t freeMem, totalMem;
         CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));

@@ -4,6 +4,14 @@
 #ifndef _SPTAG_CORE_COMMONDEFS_H_
 #define _SPTAG_CORE_COMMONDEFS_H_
 
+#ifdef DEBUG
+#define IF_DEBUG(statement) statement
+#define IF_NDEBUG(statement)
+#else
+#define IF_DEBUG(statement)
+#define IF_NDEBUG(statement) statement
+#endif
+
 #include <cstdint>
 #include <type_traits>
 #include <memory>
@@ -123,11 +131,13 @@ extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 
+extern Helper::LoggerHolder& GetLoggerHolder();
 extern std::shared_ptr<Helper::Logger> GetLogger();
+extern void SetLogger(std::shared_ptr<Helper::Logger>);
 
-#define LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
+#define SPTAGLIB_LOG(l, ...) GetLogger()->Logging("SPTAG", l, __FILE__, __LINE__, __FUNCTION__, __VA_ARGS__)
 
-class MyException : public std::exception 
+class MyException : public std::exception
 {
 private:
     std::string Exp;
@@ -248,6 +258,26 @@ enum class QuantizerType : std::uint8_t
     Undefined
 };
 static_assert(static_cast<std::uint8_t>(QuantizerType::Undefined) != 0, "Empty QuantizerType!");
+
+enum class NumaStrategy : std::uint8_t
+{
+#define DefineNumaStrategy(Name) Name,
+#include "DefinitionList.h"
+#undef DefineNumaStrategy
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(NumaStrategy::Undefined) != 0, "Empty NumaStrategy!");
+
+enum class OrderStrategy : std::uint8_t
+{
+#define DefineOrderStrategy(Name) Name,
+#include "DefinitionList.h"
+#undef DefineOrderStrategy
+
+    Undefined
+};
+static_assert(static_cast<std::uint8_t>(OrderStrategy::Undefined) != 0, "Empty OrderStrategy!");
 
 } // namespace SPTAG
 

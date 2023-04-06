@@ -156,7 +156,7 @@ namespace SPTAG
             }
 
             if (maxcluster != -1 && (args.clusterIdx[maxcluster] < 0 || args.clusterIdx[maxcluster] >= data.R()))
-                LOG(Helper::LogLevel::LL_Debug, "maxcluster:%d(%d) Error dist:%f\n", maxcluster, args.newCounts[maxcluster], args.clusterDist[maxcluster]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "maxcluster:%d(%d) Error dist:%f\n", maxcluster, args.newCounts[maxcluster], args.clusterDist[maxcluster]);
 
             float diff = 0;
             std::vector<R> reconstructVector(args._RD, 0);
@@ -374,12 +374,12 @@ namespace SPTAG
                     for (int k = 0; k < args._DK; k++) {
                         log += std::to_string(args.counts[k]) + " ";
                     }
-                    LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
                 }
                 */
 
                 currDiff = RefineCenters<T, R>(data, args);
-                //if (debug) LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
+                //if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iter, currDist, currDiff);
 
                 if (abort && abort->ShouldAbort()) return 0;
                 if (currDiff < 1e-3 || noImprovement >= 5) break;
@@ -406,7 +406,7 @@ namespace SPTAG
                 if (args.counts[i] > 0) availableClusters++;
             }
             CountStd = sqrt(CountStd / args._DK) / CountAvg;
-            if (debug) LOG(Helper::LogLevel::LL_Info, "Lambda:min(%g,%g) Max:%d Min:%d Avg:%f Std/Avg:%f Dist:%f NonZero/Total:%d/%d\n", originalLambda, adjustedLambda, maxCount, minCount, CountAvg, CountStd, currDist, availableClusters, args._DK);
+            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Lambda:min(%g,%g) Max:%d Min:%d Avg:%f Std/Avg:%f Dist:%f NonZero/Total:%d/%d\n", originalLambda, adjustedLambda, maxCount, minCount, CountAvg, CountStd, currDist, availableClusters, args._DK);
 
             return CountStd;
         }
@@ -418,7 +418,7 @@ namespace SPTAG
 
             float bestLambdaFactor = 100.0f, bestCountStd = (std::numeric_limits<float>::max)();
             for (float lambdaFactor = 0.001f; lambdaFactor <= 1000.0f + 1e-3; lambdaFactor *= 10) {
-                float CountStd;
+                float CountStd = 0.0;
                 if (args.m_pQuantizer)
                 {
                     switch (args.m_pQuantizer->GetReconstructType())
@@ -458,7 +458,7 @@ break;
                 }
             }
             */
-            LOG(Helper::LogLevel::LL_Info, "Best Lambda Factor:%f\n", bestLambdaFactor);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Best Lambda Factor:%f\n", bestLambdaFactor);
             return bestLambdaFactor;
         }
 
@@ -567,7 +567,7 @@ break;
 
                     m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
                     m_pTreeRoots.emplace_back((SizeType)localindices.size());
-                    LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
 
                     ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size(), true));
                     while (!ss.empty()) {
@@ -615,7 +615,7 @@ break;
                         m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
                     }
                     m_pTreeRoots.emplace_back(-1);
-                    LOG(Helper::LogLevel::LL_Info, "%d BKTree built, %zu %zu\n", i + 1, m_pTreeRoots.size() - m_pTreeStart[i], localindices.size());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d BKTree built, %zu %zu\n", i + 1, m_pTreeRoots.size() - m_pTreeStart[i], localindices.size());
                 }
             }
 
@@ -633,13 +633,13 @@ break;
                 SizeType treeNodeSize = (SizeType)m_pTreeRoots.size();
                 IOBINARY(p_out, WriteBinary, sizeof(treeNodeSize), (char*)&treeNodeSize);
                 IOBINARY(p_out, WriteBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
-                LOG(Helper::LogLevel::LL_Info, "Save BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode SaveTrees(std::string sTreeFileName) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save BKT to %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveTrees(ptr);
@@ -658,7 +658,7 @@ break;
                 m_pTreeRoots.resize(treeNodeSize);
                 memcpy(m_pTreeRoots.data(), pBKTMemFile, sizeof(BKTNode) * treeNodeSize);
                 if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
-                LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
@@ -674,13 +674,13 @@ break;
                 IOBINARY(p_input, ReadBinary, sizeof(BKTNode) * treeNodeSize, (char*)m_pTreeRoots.data());
 
                 if (m_pTreeRoots.size() > 0 && m_pTreeRoots.back().centerid != -1) m_pTreeRoots.emplace_back(-1);
-                LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load BKT (%d,%d) Finish!\n", m_iTreeNumber, treeNodeSize);
                 return ErrorCode::Success;
             }
 
             ErrorCode LoadTrees(std::string sTreeFileName)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load BKT From %s\n", sTreeFileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load BKT From %s\n", sTreeFileName.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sTreeFileName.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
                 return LoadTrees(ptr);

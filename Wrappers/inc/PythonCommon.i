@@ -1,5 +1,13 @@
 #ifdef SWIGPYTHON
 
+%typemap(out) ByteArray
+%{
+    {
+        $result = PyBytes_FromStringAndSize(reinterpret_cast<const char*>($1.Data()), $1.Length());
+        delete[] $1.Data();
+    }
+%}
+
 %typemap(out) std::shared_ptr<QueryResult>
 %{
     {

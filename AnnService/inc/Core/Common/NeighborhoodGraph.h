@@ -311,7 +311,7 @@ break;
                         (NeighborhoodDists)[i][j] = MaxDist;
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition begin\n");
 #pragma omp parallel for schedule(dynamic)
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
@@ -319,11 +319,11 @@ break;
                     for (SizeType j = 0; j < m_iGraphSize; j++) TptreeDataIndices[i][j] = j;
                     std::shuffle(TptreeDataIndices[i].begin(), TptreeDataIndices[i].end(), rg);
                     PartitionByTptree<T>(index, TptreeDataIndices[i], 0, m_iGraphSize - 1, TptreeLeafNodes[i]);
-                    LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish Getting Leaves for Tree %d\n", i);
                 }
-                LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parallel TpTree Partition done\n");
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
                 for (int i = 0; i < m_iTPTNumber; i++)
                 {
@@ -332,7 +332,7 @@ break;
                     {
                         SizeType start_index = TptreeLeafNodes[i][j].first;
                         SizeType end_index = TptreeLeafNodes[i][j].second;
-                        if ((j * 5) % TptreeLeafNodes[i].size() == 0) LOG(Helper::LogLevel::LL_Info, "Processing Tree %d %d%%\n", i, static_cast<int>(j * 1.0 / TptreeLeafNodes[i].size() * 100));
+                        if ((j * 5) % TptreeLeafNodes[i].size() == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Processing Tree %d %d%%\n", i, static_cast<int>(j * 1.0 / TptreeLeafNodes[i].size() * 100));
                         for (SizeType x = start_index; x < end_index; x++)
                         {
                             for (SizeType y = x + 1; y <= end_index; y++)
@@ -356,14 +356,14 @@ break;
                 TptreeLeafNodes.clear();
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Process TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Process TPTree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
             }
 #endif
 
             template <typename T>
             void BuildGraph(VectorIndex* index, const std::unordered_map<SizeType, SizeType>* idmap = nullptr)
             {
-                LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "build RNG graph!\n");
 
                 m_iGraphSize = index->GetNumSamples();
                 m_iNeighborhoodSize = (DimensionType)(ceil(m_iNeighborhoodSize * m_fNeighborhoodScale) * (m_rebuild + 1));
@@ -371,25 +371,25 @@ break;
 
                 if (m_iGraphSize < 1000) {
                     RefineGraph<T>(index, idmap);
-                    LOG(Helper::LogLevel::LL_Info, "Build RNG Graph end!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build RNG Graph end!\n");
                     return;
                 }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 BuildInitKNNGraph<T>(index, idmap);
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "BuildInitKNNGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BuildInitKNNGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
 
                 RefineGraph<T>(index, idmap);
 
                 auto t3 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count());
 
                 if (m_rebuild) {
                     m_iNeighborhoodSize = m_iNeighborhoodSize / 2;
                     RebuildGraph<T>(index, idmap);
                     auto t4 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReBuildGraph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count());
                 }
 
                 if (idmap != nullptr) {
@@ -423,7 +423,7 @@ break;
                     }
                 }
                 auto t1 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Calculate Indegree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t1 - t0).count());
                 int rebuild_threshold = m_iNeighborhoodSize / 2;
                 int rebuildstart = m_iNeighborhoodSize / 2;
 #pragma omp parallel for schedule(dynamic)
@@ -451,10 +451,10 @@ break;
                         outnodes[j] = outnodes[z];
                         z++;
                     }
-                    if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                    if ((i * 5) % m_iGraphSize == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Rebuild %d%%\n", static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                 }
                 auto t2 = std::chrono::high_resolution_clock::now();
-                LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Rebuild RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
             }
 
             template <typename T>
@@ -467,10 +467,10 @@ break;
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false, (int)(m_iCEF * m_fCEFScale));
-                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                        if ((i * 5) % m_iGraphSize == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", iter, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
                     auto t2 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
 
                 m_iNeighborhoodSize = (DimensionType)(m_iNeighborhoodSize / m_fNeighborhoodScale);
@@ -481,13 +481,13 @@ break;
                     for (SizeType i = 0; i < m_iGraphSize; i++)
                     {
                         RefineNode<T>(index, i, false, false, m_iCEF);
-                        if ((i * 5) % m_iGraphSize == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", m_iRefineIter - 1, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
+                        if ((i * 5) % m_iGraphSize == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d %d%%\n", m_iRefineIter - 1, static_cast<int>(i * 1.0 / m_iGraphSize * 100));
                     }
                     auto t2 = std::chrono::high_resolution_clock::now();
-                    LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine RNG time (s): %lld Graph Acc: %f\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count(), GraphAccuracyEstimation(index, 100, idmap));
                 }
                 else {
-                    LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Graph Acc: %f\n", GraphAccuracyEstimation(index, 100, idmap));
                 }
             }
 
@@ -509,7 +509,7 @@ break;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
-                    if ((i * 5) % R == 0) LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n", static_cast<int>(i * 1.0 / R * 100));
+                    if ((i * 5) % R == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine %d%%\n", static_cast<int>(i * 1.0 / R * 100));
 
                     SizeType* outnodes = newGraph->m_pNeighborhoodGraph[i];
 
@@ -553,6 +553,7 @@ break;
                     {
                         BasicResult* item = query.GetResult(j);
                         if (item->VID < 0) break;
+                        IF_DEBUG(if (item->VID >= index->GetNumSamples()) throw std::out_of_range();)
                         if (item->VID == node) continue;
 
                         InsertNeighbors(index, item->VID, node, item->Dist);
@@ -597,7 +598,7 @@ break;
 
             ErrorCode SaveGraph(std::string sGraphFilename) const
             {
-                LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s To %s\n", m_pNeighborhoodGraph.Name().c_str(), sGraphFilename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(sGraphFilename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 return SaveGraph(ptr);
@@ -610,7 +611,7 @@ break;
 
                 for (int i = 0; i < m_iGraphSize; i++)
                     IOBINARY(output, WriteBinary, sizeof(SizeType) * m_iNeighborhoodSize, (char*)m_pNeighborhoodGraph[i]);
-                LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save %s (%d,%d) Finish!\n", m_pNeighborhoodGraph.Name().c_str(), m_iGraphSize, m_iNeighborhoodSize);
                 return ErrorCode::Success;
             }
 

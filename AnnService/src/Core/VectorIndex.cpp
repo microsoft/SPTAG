@@ -15,22 +15,29 @@ typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::Si
 
 using namespace SPTAG;
 
-std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
+Helper::LoggerHolder& SPTAG::GetLoggerHolder() {
 #ifdef DEBUG
-  auto logLevel = Helper::LogLevel::LL_Debug;
+    auto logLevel = Helper::LogLevel::LL_Debug;
 #else
-  auto logLevel = Helper::LogLevel::LL_Info;
+    auto logLevel = Helper::LogLevel::LL_Info;
 #endif
 #ifdef  _WINDOWS_
-  if (auto exeHandle = GetModuleHandleW(nullptr)) {
-    if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
-      logLevel = SPTAG_GetLoggerLevel();
+    if (auto exeHandle = GetModuleHandleW(nullptr)) {
+        if (auto SPTAG_GetLoggerLevel = reinterpret_cast<SPTAG::Helper::LogLevel(*)()>(GetProcAddress(exeHandle, "SPTAG_GetLoggerLevel"))) {
+            logLevel = SPTAG_GetLoggerLevel();
+        }
     }
-  }
 #endif //  _WINDOWS_
+    static Helper::LoggerHolder s_pLoggerHolder(std::make_shared<Helper::SimpleLogger>(logLevel));
+    return s_pLoggerHolder;
+}
 
-  static std::shared_ptr<Helper::Logger> s_pLogger = std::make_shared<Helper::SimpleLogger>(logLevel);
-  return s_pLogger;
+std::shared_ptr<Helper::Logger> SPTAG::GetLogger() {
+    return GetLoggerHolder().GetLogger();
+}
+
+void SPTAG::SetLogger(std::shared_ptr<Helper::Logger> p_logger) {
+    GetLoggerHolder().SetLogger(p_logger);
 }
 
 std::mt19937 SPTAG::rg;
@@ -44,19 +51,20 @@ namespace SPTAG {
         if (input == nullptr || !input->Initialize(oldpath, std::ios::binary | std::ios::in) || 
             output == nullptr || !output->Initialize(newpath, std::ios::binary | std::ios::out))
         {
-            LOG(Helper::LogLevel::LL_Error, "Unable to open files: %s %s\n", oldpath, newpath);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open files: %s %s\n", oldpath, newpath);
             return false;
         }
 
         const std::size_t bufferSize = 1 << 30;
         std::unique_ptr<char[]> bufferHolder(new char[bufferSize]);
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {
             if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
-                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", newpath);
                 return false;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown(); output->ShutDown();
         return true;
@@ -319,7 +327,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
             size_t firstSep = oldFolder.length(), lastSep = file.find_last_of(FolderSep);
             std::string newFolder = folderPath + ((lastSep > firstSep)? file.substr(firstSep, lastSep - firstSep) : ""), filename = file.substr(lastSep + 1);
             if (!direxists(newFolder.c_str())) mkdir(newFolder.c_str());
-            LOG(Helper::LogLevel::LL_Info, "Copy file %s to %s...\n", file.c_str(), (newFolder + FolderSep + filename).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy file %s to %s...\n", file.c_str(), (newFolder + FolderSep + filename).c_str());
             if (!copyfile(file.c_str(), (newFolder + FolderSep + filename).c_str()))
                 return ErrorCode::DiskIOFail;
         }
@@ -424,7 +432,7 @@ ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, bool p_shareOwnership)
 {
-    LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
 
     bool valueMatches = p_vectorSet->GetValueType() == GetVectorValueType();
     bool quantizerMatches = ((bool)m_pQuantizer) && (p_vectorSet->GetValueType() == SPTAG::VectorValueType::UInt8);
@@ -435,7 +443,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     m_pMetadata = std::move(p_metadataSet);
     if (p_withMetaIndex && m_pMetadata != nullptr)
     {
-        LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
         BuildMetaMapping(false);
     }
     BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized, p_shareOwnership);
@@ -542,13 +550,13 @@ VectorIndex::LoadQuantizer(std::string p_quantizerFile)
     auto ptr = SPTAG::f_createIO();
     if (!ptr->Initialize(p_quantizerFile.c_str(), std::ios::binary | std::ios::in))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer file.\n");
         return ErrorCode::FailedOpenFile;
     }
     SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr));
     if (!m_pQuantizer)
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load quantizer.\n");
         return ErrorCode::FailedParseValue;
     }
     return ErrorCode::Success;
@@ -638,7 +646,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     for (std::string& f : *indexfiles) {
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(), std::ios::binary | std::ios::in)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", (folderPath + f).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", (folderPath + f).c_str());
             ptr = nullptr;
         }
         handles.push_back(std::move(ptr));
@@ -654,7 +662,7 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -712,7 +720,7 @@ VectorIndex::LoadIndexFromFile(const std::string& p_file, std::shared_ptr<Vector
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -768,7 +776,7 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
 
         if (!(p_vectorIndex->GetMetadata()->Available()))
         {
-            LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Failed to load metadata.\n");
             return ErrorCode::Fail;
         }
 
@@ -830,7 +838,7 @@ std::uint64_t VectorIndex::EstimatedMemoryUsage(std::uint64_t p_vectorCount, Dim
 #include "inc/Core/Common/cuda/TailNeighbors.hxx"
 
 void VectorIndex::SortSelections(std::vector<Edge>* selections) {
-  LOG(Helper::LogLevel::LL_Debug, "Starting sort of final input on GPU\n");
+  SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Starting sort of final input on GPU\n");
   GPU_SortSelections(selections);
 }
 
@@ -839,7 +847,7 @@ void VectorIndex::SortSelections(std::vector<Edge>* selections) {
 void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs)
 {
 
-    LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Starting GPU SSD Index build stage...\n");
 
     int metric = (GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine);
 
@@ -915,7 +923,7 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
                     default:
-                        LOG(Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s", Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to get quantizer reconstruct type %s", Helper::Convert::ConvertToString<VectorValueType>(m_pQuantizer->GetReconstructType()));
                         }
                     }
                     else
@@ -974,6 +982,6 @@ void VectorIndex::ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::u
     {
         threads[tid].join();
     }
-    LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. RNG failed count: %llu\n", static_cast<uint64_t>(rngFailedCountTotal.load()));
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. RNG failed count: %llu\n", static_cast<uint64_t>(rngFailedCountTotal.load()));
 }
 #endif
