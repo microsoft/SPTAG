@@ -34,7 +34,7 @@ namespace SPTAG::SPANN
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
             // static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
-            static constexpr AddressType kSsdImplMaxNumBlocks = 1500*1024*256; // 1.5T
+            static constexpr AddressType kSsdImplMaxNumBlocks = 1300*1024*256; // 1.5T
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
             static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
@@ -248,7 +248,10 @@ namespace SPTAG::SPANN
         }
 
         ErrorCode Merge(SizeType key, const std::string& value) {
-            if (key >= m_pBlockMapping.R()) return ErrorCode::Fail;
+            if (key >= m_pBlockMapping.R()) {
+                LOG(Helper::LogLevel::LL_Error, "Key range error: key: %d, mapping size: %d\n", key, m_pBlockMapping.R());
+                return ErrorCode::Fail;
+            }
 
             int64_t* postingSize = (int64_t*)At(key);
             auto newSize = *postingSize + value.size();
@@ -309,6 +312,7 @@ namespace SPTAG::SPANN
             int remainBlocks = m_pBlockController.RemainBlocks();
             int remainGB = remainBlocks >> 20 << 2;
             LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
+            m_pBlockController.IOStatistics();
         }
 
         ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
