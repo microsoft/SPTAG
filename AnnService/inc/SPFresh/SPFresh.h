@@ -981,11 +981,12 @@ namespace SPTAG {
                                 nextSamplePoint += sampleSize;
                                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
                                 p_index->GetIndexStat(-1, false, false);
-                                p_index->GetDBStat();
                             } else {
                                 showStatus = false;
                             }
+                            p_index->GetDBStat();
                             if(p_opts.m_searchDuringUpdate) StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, internalResultNum, tempFileName, p_opts, sw.getElapsedSec(), showStatus);
+                            p_index->GetDBStat();
                         }
                     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
 
