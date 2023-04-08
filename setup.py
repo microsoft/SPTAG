@@ -82,20 +82,21 @@ def _find_python_packages():
     elif os.path.exists(os.path.join('x64', 'Release')):
         shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
 
-        if os.path.exists('lib'): shutil.rmtree('lib')
-        os.mkdir('lib')
+        if not os.path.exists('lib'): os.mkdir('lib')
+        if not os.path.exists('lib\\net5.0'): os.mkdir('lib\\net5.0')
         for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
             print (file)
-            shutil.copy(file, "lib\\")
-        shutil.copy('x64\\Release\\libzstd.dll', "lib\\")
-        shutil.copy('x64\\Release\\Ijwhost.dll', "lib\\")
+            shutil.copy(file, "lib\\net5.0\\")
         sfiles = ''
-        for framework in ['net5.0']:
-            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % framework
-            sfiles += '<file src="lib\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % framework
-            sfiles += '<file src="lib\\libzstd.dll" target="lib\\%s\\libzstd.dll" />' % framework
-            sfiles += '<file src="lib\\Ijwhost.dll" target="lib\\%s\\Ijwhost.dll" />' % framework
-
+        for framework in ['net5.0', 'net472']:
+            if os.path.exists("lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" % framework):
+                sfiles += '<file src="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % (framework, framework)
+                sfiles += '<file src="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % (framework, framework)
+        if os.path.exists('x64\\Release\\libzstd.dll'):
+            sfiles += '<file src="x64\\Release\\libzstd.dll" target="runtimes\\win-x64\\native\\libzstd.dll" />'
+        if os.path.exists('x64\\Release\\Ijwhost.dll'):
+            sfiles += '<file src="x64\\Release\\Ijwhost.dll" target="runtimes\\win-x64\\native\\Ijwhost.dll" />'
+        sfiles += '<file src="SPTAG.targets" target="build\\MSSPTAG.Managed.Library.targets" />'
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">

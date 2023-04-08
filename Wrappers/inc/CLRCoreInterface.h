@@ -76,6 +76,14 @@ namespace Microsoft
 
                 void SetSearchParam(String^ p_name, String^ p_value, String^ p_section);
 
+                bool LoadQuantizer(String^ p_quantizerFile);
+
+                void SetQuantizerADC(bool p_adc);
+
+                bool BuildSPANN(bool p_normalized);
+
+                bool BuildSPANNWithMetaData(array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized);
+
                 bool Build(array<Byte>^ p_data, int p_num);
 
                 bool BuildWithMetaData(array<Byte>^ p_data, array<Byte>^ p_meta, int p_num, bool p_withMetaIndex);
@@ -87,6 +95,8 @@ namespace Microsoft
                 array<BasicResult^>^ Search(array<Byte>^ p_data, int p_resultNum);
 
                 array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
+
+                void UpdateIndex();
 
                 bool Save(String^ p_saveFile);
 
