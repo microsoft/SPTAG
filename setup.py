@@ -83,10 +83,10 @@ def _find_python_packages():
         shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
 
         if not os.path.exists('lib'): os.mkdir('lib')
-        if not os.path.exists('lib\\net5.0'): os.mkdir('lib\\net5.0')
+        if not os.path.exists('lib\\net472'): os.mkdir('lib\\net472')
         for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
             print (file)
-            shutil.copy(file, "lib\\net5.0\\")
+            shutil.copy(file, "lib\\net472\\")
         sfiles = ''
         for framework in ['net5.0', 'net472']:
             if os.path.exists("lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" % framework):
