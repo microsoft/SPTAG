@@ -900,7 +900,7 @@ namespace SPTAG {
 
                 p_index->ForceCompaction();
 
-                // p_index->GetDBStat();
+                p_index->GetDBStat();
 
                 if (!p_opts.m_onlySearchFinalBatch) {
                     if (p_opts.m_maxInternalResultNum != -1) 
