@@ -154,6 +154,7 @@ namespace SPTAG
             const SizeType *node = m_pGraph[tmpNode]; \
             _mm_prefetch((const char *)node, _MM_HINT_T0); \
             for (DimensionType i = 0; i <= checkPos; i++) { \
+                if (node[i] < 0 || node[i] >= m_pSamples.R()) break; \
                 _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
             } \
             if (gnode.distance <= p_query.worstDist()) { \
@@ -192,6 +193,7 @@ namespace SPTAG
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
+                if (nn_index >= m_pSamples.R()) continue; \
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
