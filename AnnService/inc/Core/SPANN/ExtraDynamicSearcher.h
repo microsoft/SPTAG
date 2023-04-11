@@ -1135,10 +1135,7 @@ namespace SPTAG::SPANN {
 
             std::vector<std::string> postingLists;
 
-            std::chrono::microseconds remainLimit;
-
-            if (p_stats->m_totalLatency >= m_opt->m_latencyLimit) return;
-            else remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
+            std::chrono::microseconds remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
 
             auto readStart = std::chrono::high_resolution_clock::now();
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
