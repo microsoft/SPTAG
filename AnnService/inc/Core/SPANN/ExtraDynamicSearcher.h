@@ -1023,9 +1023,9 @@ namespace SPTAG::SPANN {
                 //     GetDBStats();
                 //     exit(1);
                 // }
-                // if (!reassignThreshold) SplitAsync(p_index, headID);
-                // else Split(p_index, headID, !m_opt->m_disableReassign);
-                SplitAsync(p_index, headID);
+                if (!reassignThreshold) SplitAsync(p_index, headID);
+                else Split(p_index, headID, !m_opt->m_disableReassign);
+                // SplitAsync(p_index, headID);
             }
             auto appendEnd = std::chrono::high_resolution_clock::now();
             double elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendEnd - appendBegin).count();

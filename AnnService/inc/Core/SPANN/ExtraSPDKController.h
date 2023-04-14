@@ -212,7 +212,10 @@ namespace SPTAG::SPANN
             }
             int delta = key + 1 - m_pBlockMapping.R();
             if (delta > 0) {
-                m_pBlockMapping.AddBatch(delta);
+                {
+                    std::lock_guard<std::mutex> lock(m_updateMutex);
+                    m_pBlockMapping.AddBatch(delta);
+                }
             }
             if (At(key) == 0xffffffffffffffff) {
                 if (m_buffer.unsafe_size() > m_bufferLimit) {
@@ -378,6 +381,7 @@ namespace SPTAG::SPANN
         BlockController m_pBlockController;
 
         bool m_shutdownCalled;
+        std::mutex m_updateMutex;
     };
 }
 #endif // _SPTAG_SPANN_EXTRASPDKCONTROLLER_H_
