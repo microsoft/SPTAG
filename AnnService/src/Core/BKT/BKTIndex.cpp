@@ -333,10 +333,21 @@ namespace SPTAG
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc) const
         {
-            if (m_pQuantizer && !p_query.HasQuantizedTarget())
-            {
-                p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
-            }
+            std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
+            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
+            const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
+
+            while (!p_space.m_NGQueue.empty()) {
+                NodeDistPair gnode = p_space.m_NGQueue.pop();
+                SizeType tmpNode = gnode.node;
+                const SizeType* node = m_pGraph[tmpNode];
+                _mm_prefetch((const char*)node, _MM_HINT_T0);
+                for (DimensionType i = 0; i <= checkPos; i++) {
+                    auto futureNode = node[i];
+                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
+                    _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
+                }
 
             // bitflags for which dispatch to take
             uint8_t flags = 0;
