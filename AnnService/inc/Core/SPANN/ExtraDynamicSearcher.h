@@ -714,9 +714,9 @@ namespace SPTAG::SPANN {
                     if (currentLength + nextLength < m_postingSizeLimit && !m_mergeList.find(headIDAccessor, queryResult->VID))
                     {
                         {
+                            std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID], std::defer_lock);
                             // LOG(Helper::LogLevel::LL_Info,"Locked: %d, to be lock: %d\n", headID, queryResult->VID);
-                            if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID))
-                                std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID]);
+                            if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) anotherLock.lock();
                             if (!p_index->ContainSample(queryResult->VID)) continue;
                             if (db->Get(queryResult->VID, &nextPostingList) != ErrorCode::Success) {
                                 LOG(Helper::LogLevel::LL_Info, "Fail to get to be merged postings: %d\n", queryResult->VID);
@@ -757,6 +757,7 @@ namespace SPTAG::SPANN {
                                 m_postingSizes.UpdateSize(queryResult->VID, totalLength);
                                 m_postingSizes.UpdateSize(headID, 0);
                             }
+                            if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
                         }
 
                         // LOG(Helper::LogLevel::LL_Info,"Release: %d, Release: %d\n", headID, queryResult->VID);
