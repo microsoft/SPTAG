@@ -676,7 +676,7 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
         }
         catch (const std::system_error& e) {
         	std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
-        	return errorcode::fail;
+        	return ErrorCode::fail;
         }
     }
     else {
@@ -699,7 +699,7 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T>& args, int rank, int iteration, u
         }
         catch (const std::system_error& e) {
             std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
-            return errorcode::fail;
+            return ErrorCode::fail;
         }
     }
     else {
