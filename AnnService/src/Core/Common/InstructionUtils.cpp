@@ -20,17 +20,17 @@ namespace SPTAG {
         void InstructionSet::PrintInstructionSet(void) 
         {
             if (CPU_Rep.HW_AVX512)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX512 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX512 InstructionSet!\n");
             else if (CPU_Rep.HW_AVX2)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
             else if (CPU_Rep.HW_AVX)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
             else if (CPU_Rep.HW_SSE2)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
             else if (CPU_Rep.HW_SSE)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
             else
-                LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
         }
 
         // from https://stackoverflow.com/a/7495023/5053214
@@ -65,17 +65,17 @@ namespace SPTAG {
 #endif
             }
             if (HW_AVX512)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX512 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX512 InstructionSet!\n");
             else if (HW_AVX2)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX2 InstructionSet!\n");
             else if (HW_AVX)
-                LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using AVX InstructionSet!\n");
             else if (HW_SSE2)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using SSE2 InstructionSet!\n");
             else if (HW_SSE)
-                LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using SSE InstructionSet!\n");
             else
-                LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using NONE InstructionSet!\n");
         }
     }
 }

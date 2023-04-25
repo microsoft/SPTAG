@@ -39,7 +39,7 @@ SearchExecutor::ExecuteInternal()
     m_executionContext.reset(new SearchExecutionContext(c_serviceContext->GetServiceSettings()));
 
     if (m_executionContext->ParseQuery(m_queryString) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to parse query:%s!\n", m_queryString.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to parse query:%s!\n", m_queryString.c_str());
         return;
     }
 
@@ -49,7 +49,7 @@ SearchExecutor::ExecuteInternal()
 
     if (m_selectedIndex.empty())
     {
-        LOG(Helper::LogLevel::LL_Error, "Empty selected index!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty selected index!\n");
         return;
     }
 
@@ -57,13 +57,13 @@ SearchExecutor::ExecuteInternal()
 
     if (ErrorCode::Success != m_executionContext->ExtractVector(firstIndex->GetVectorValueType()))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to extract vector!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to extract vector!\n");
         return;
     }
 
     if (m_executionContext->GetVectorDimension() != firstIndex->GetFeatureDim())
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to match vector dimension!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to match vector dimension!\n");
         return;
     } 
 
@@ -85,7 +85,7 @@ SearchExecutor::ExecuteInternal()
             m_executionContext->AddResults(vectorIndex->GetIndexName(), query);
         }
         else {
-            LOG(Helper::LogLevel::LL_Error, "Failed to execute SearchIndex!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to execute SearchIndex!\n");
         }
     }
 }

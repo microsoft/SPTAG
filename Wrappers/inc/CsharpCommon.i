@@ -10,6 +10,10 @@
     void deleteArrayOfWrapperArray(void* ptr) {
         delete[] (WrapperArray*)ptr;
     }
+
+    void deleteWrapperArray(void* ptr) {
+        delete[] (std::uint8_t*)ptr;
+    }
 %}
 
 %pragma(csharp) imclasscode=%{ 
@@ -24,6 +28,7 @@
 
 %apply void *VOID_INT_PTR { void * }
 void deleteArrayOfWrapperArray(void* ptr);
+void deleteWrapperArray(void* ptr);
 
 %typemap(ctype) ByteArray "WrapperArray"
 %typemap(imtype) ByteArray "WrapperArray"
@@ -31,10 +36,7 @@ void deleteArrayOfWrapperArray(void* ptr);
 %typemap(in) ByteArray {
     $1.Set((std::uint8_t*)$input._data, $input._size, false);
 }
-%typemap(out) ByteArray {
-    $result._data = $1.Data();
-    $result._size = $1.Length();
-}
+
 %typemap(csin,
          pre="unsafe { fixed(byte* ptr$csinput = $csinput) { $modulePINVOKE.WrapperArray temp$csinput = new $modulePINVOKE.WrapperArray( (System.IntPtr)ptr$csinput, (ulong)$csinput.LongLength );",
          terminator="} }"
@@ -51,10 +53,16 @@ void deleteArrayOfWrapperArray(void* ptr);
     }
 %}
 
+%typemap(out) ByteArray {
+    $result._size = $1.Length();
+    $result._data = $1.Data();
+}
+
 %typemap(csout, excode=SWIGEXCODE) ByteArray %{
     $modulePINVOKE.WrapperArray data = $imcall;$excode
     byte[] ret = new byte[data._size];
     System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
+    $modulePINVOKE.deleteWrapperArray(data._data);
     return ret; 
 %}
 
@@ -63,6 +71,7 @@ void deleteArrayOfWrapperArray(void* ptr);
         $modulePINVOKE.WrapperArray data = $imcall;
         byte[] ret = new byte[data._size];
         System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
+        $modulePINVOKE.deleteWrapperArray(data._data);
         return ret; 
     }
 %}
