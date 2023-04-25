@@ -668,8 +668,16 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     }
     out->ShutDown();
 
-    if (!options.m_syncscript.empty()) {
-        system((options.m_syncscript + " upload " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(savecenters)).c_str());
+    if (!options.m_syncscript.empty()) {        
+        try {
+        	int return_value = system((options.m_syncscript + " upload " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(savecenters)).c_str());
+        	if (return_value != 0)
+        		throw std::system_error(errno, std::generic_category(), "error executing command");
+        }
+        catch (const std::system_error& e) {
+        	std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
+        	return errorcode::fail;
+        }
     }
     else {
         LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
@@ -684,7 +692,15 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T>& args, int rank, int iteration, u
 
     //TODO download
     if (!options.m_syncscript.empty()) {
-        system((options.m_syncscript + " download " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(loadcenters)).c_str());
+        try {
+            int return_value = system((options.m_syncscript + " download " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(loadcenters)).c_str());
+            if (return_value != 0)
+                throw std::system_error(errno, std::generic_category(), "error executing command");
+        }
+        catch (const std::system_error& e) {
+            std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
+            return errorcode::fail;
+        }
     }
     else {
         LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
