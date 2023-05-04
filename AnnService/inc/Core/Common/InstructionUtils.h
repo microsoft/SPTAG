@@ -6,6 +6,8 @@
 #include <bitset>
 #include <array>
 
+#ifndef GPU
+
 #ifndef _MSC_VER
 #include <cpuid.h>
 #include <xmmintrin.h>
@@ -16,6 +18,8 @@ void cpuid(int info[4], int InfoType);
 #else
 #include <intrin.h>
 #define cpuid(info, x)    __cpuidex(info, x, 0)
+#endif
+
 #endif
 
 namespace SPTAG {
