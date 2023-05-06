@@ -256,7 +256,7 @@ namespace SPTAG
                         {
                             if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                             {
-                                isDup(p_query, tmpNode, gnode.distance)
+                                isDup(p_query, tmpNode, gnode.distance);
                             }
                         }
                     }
