@@ -251,6 +251,14 @@ namespace SPTAG
                             }
                             tmpNode = m_pTrees[i].centerid;
                         }
+			    
+			if (notDeleted(m_deletedID, tmpNode))
+                        {
+                            if (checkFilter(m_pMetadata, tmpNode, filterFunc))
+                            {
+                                isDup(p_query, tmpNode, gnode.distance)
+                            }
+                        }
                     }
                     else {
 
