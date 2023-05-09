@@ -168,6 +168,30 @@ AnnIndex::SetQuantizerADC(bool p_adc)
 }
 
 
+ByteArray 
+AnnIndex::QuantizeVector(ByteArray p_data, int p_num)
+{
+    if (nullptr != m_index && m_index->GetQuantizer() != nullptr) {
+        ByteArray pout = ByteArray::Alloc(m_index->GetQuantizer()->GetNumSubvectors() * (size_t)p_num);
+        m_index->QuantizeVector(p_data.Data(), p_num, pout);
+        return pout;
+    }
+    return ByteArray::c_empty;
+}
+
+
+ByteArray 
+AnnIndex::ReconstructVector(ByteArray p_data, int p_num)
+{
+    if (nullptr != m_index && m_index->GetQuantizer() != nullptr) {
+        ByteArray pout = ByteArray::Alloc(m_index->GetQuantizer()->ReconstructSize() * (size_t)p_num);
+        m_index->ReconstructVector(p_data.Data(), p_num, pout);
+        return pout;
+    }
+    return ByteArray::c_empty;
+}
+
+
 std::shared_ptr<QueryResult>
 AnnIndex::Search(ByteArray p_data, int p_resultNum)
 {

@@ -80,6 +80,10 @@ namespace Microsoft
 
                 void SetQuantizerADC(bool p_adc);
 
+                array<Byte>^ QuantizeVector(array<Byte>^ p_data, int p_num);
+
+                array<Byte>^ ReconstructVector(array<Byte>^ p_data, int p_num);
+
                 bool BuildSPANN(bool p_normalized);
 
                 bool BuildSPANNWithMetaData(array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized);

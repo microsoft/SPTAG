@@ -54,6 +54,26 @@ namespace Microsoft
                     (*m_Instance)->SetQuantizerADC(p_adc);
             }
 
+            array<Byte>^ AnnIndex::QuantizeVector(array<Byte>^ p_data, int p_num) {
+                array<Byte>^ res;
+                if (m_Instance != nullptr && (*m_Instance)->GetQuantizer() != nullptr) {
+                    res = gcnew array<Byte>((*m_Instance)->GetQuantizer()->GetNumSubvectors() * (size_t)p_num);
+                    pin_ptr<Byte> ptr = &res[0], optr = &p_data[0];
+                    (*m_Instance)->QuantizeVector(optr, p_num, SPTAG::ByteArray(ptr, res->LongLength, false));
+                }
+                return res;
+            }
+
+            array<Byte>^ AnnIndex::ReconstructVector(array<Byte>^ p_data, int p_num) {
+                array<Byte>^ res;
+                if (m_Instance != nullptr && (*m_Instance)->GetQuantizer() != nullptr) {
+                    res = gcnew array<Byte>((*m_Instance)->GetQuantizer()->ReconstructSize() * (size_t)p_num);
+                    pin_ptr<Byte> ptr = &res[0], optr = &p_data[0];
+                    (*m_Instance)->ReconstructVector(optr, p_num, SPTAG::ByteArray(ptr, res->LongLength, false));
+                }
+                return res;
+            }
+
             bool AnnIndex::BuildSPANN(bool p_normalized)
             {
                 if (m_Instance == nullptr || (*m_Instance)->GetIndexAlgoType() != SPTAG::IndexAlgoType::SPANN) return false;
