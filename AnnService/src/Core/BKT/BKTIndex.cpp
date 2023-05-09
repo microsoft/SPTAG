@@ -238,8 +238,8 @@ namespace SPTAG
                     if (checkNode < -1) 
                     {
                         const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
-                        SizeType i = -tnode.childStart;
-                        do 
+                        
+                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++)
                         {
                             if (notDeleted(m_deletedID, tmpNode))
                             {
@@ -250,7 +250,15 @@ namespace SPTAG
                                 }
                             }
                             tmpNode = m_pTrees[i].centerid;
-                        } while (i++ < tnode.childEnd);
+                        }
+			    
+			if (notDeleted(m_deletedID, tmpNode))
+                        {
+                            if (checkFilter(m_pMetadata, tmpNode, filterFunc))
+                            {
+                                isDup(p_query, tmpNode, gnode.distance);
+                            }
+                        }
                     }
                     else {
 
