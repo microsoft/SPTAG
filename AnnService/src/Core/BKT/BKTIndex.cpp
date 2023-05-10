@@ -238,8 +238,8 @@ namespace SPTAG
                     if (checkNode < -1) 
                     {
                         const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
-                        SizeType i = -tnode.childStart;
-                        do 
+                        
+                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++)
                         {
                             if (notDeleted(m_deletedID, tmpNode))
                             {
@@ -250,7 +250,15 @@ namespace SPTAG
                                 }
                             }
                             tmpNode = m_pTrees[i].centerid;
-                        } while (i++ < tnode.childEnd);
+                        }
+			    
+			            if (notDeleted(m_deletedID, tmpNode))
+                        {
+                            if (checkFilter(m_pMetadata, tmpNode, filterFunc))
+                            {
+                                isDup(p_query, tmpNode, gnode.distance);
+                            }
+                        }
                     }
                     else {
 
@@ -279,7 +287,7 @@ namespace SPTAG
                     SizeType nn_index = node[i];
                     if (nn_index < 0) 
                         break;
-                    IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )
+                    IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range("VID: "s + std::string(nn_index) + ", Samples: "s + std::string(m_pSamples.R())); )
                     //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
                     if (p_space.CheckAndSet(nn_index)) continue;
                     float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
