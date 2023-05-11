@@ -172,9 +172,10 @@ ByteArray
 AnnIndex::QuantizeVector(ByteArray p_data, int p_num)
 {
     if (nullptr != m_index && m_index->GetQuantizer() != nullptr) {
-        ByteArray pout = ByteArray::Alloc(m_index->GetQuantizer()->GetNumSubvectors() * (size_t)p_num);
-        m_index->QuantizeVector(p_data.Data(), p_num, pout);
-        return pout;
+        size_t outsize = m_index->GetQuantizer()->GetNumSubvectors() * (size_t)p_num;
+        std::uint8_t* outdata = new std::uint8_t[outsize];
+        if (SPTAG::ErrorCode::Success != m_index->QuantizeVector(p_data.Data(), p_num, ByteArray(outdata, outsize, false))) return ByteArray::c_empty;
+        return ByteArray(outdata, outsize, false);
     }
     return ByteArray::c_empty;
 }
@@ -184,9 +185,10 @@ ByteArray
 AnnIndex::ReconstructVector(ByteArray p_data, int p_num)
 {
     if (nullptr != m_index && m_index->GetQuantizer() != nullptr) {
-        ByteArray pout = ByteArray::Alloc(m_index->GetQuantizer()->ReconstructSize() * (size_t)p_num);
-        m_index->ReconstructVector(p_data.Data(), p_num, pout);
-        return pout;
+        size_t outsize = m_index->GetQuantizer()->ReconstructSize() * (size_t)p_num;
+        std::uint8_t* outdata = new std::uint8_t[outsize];
+        if (SPTAG::ErrorCode::Success != m_index->ReconstructVector(p_data.Data(), p_num, ByteArray(outdata, outsize, false))) return ByteArray::c_empty;
+        return ByteArray(outdata, outsize, false);
     }
     return ByteArray::c_empty;
 }

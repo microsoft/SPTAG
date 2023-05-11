@@ -123,7 +123,7 @@ public:
     virtual ErrorCode QuantizeVector(const void* p_data, SizeType p_num, ByteArray p_out) {
         if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->GetNumSubvectors() * (size_t)p_num) {
             for (int i = 0; i < p_num; i++) 
-                m_pQuantizer->QuantizeVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->ReconstructSize()), p_out.Data() + i * (size_t)(m_pQuantizer->GetNumSubvectors()));
+                m_pQuantizer->QuantizeVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->ReconstructSize()), p_out.Data() + i * (size_t)(m_pQuantizer->GetNumSubvectors()), false);
             return ErrorCode::Success;
         }
         return ErrorCode::Fail;
