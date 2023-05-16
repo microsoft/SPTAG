@@ -185,6 +185,16 @@ namespace SPTAG
                 }
             }
 
+            std::shared_ptr<VectorIndex> GetInMemoryIndex()
+            {
+                return std::make_shared<VectorIndex>(this);
+            }
+
+            SizeType GetGlobalVID(SizeType vid)
+            {
+                return vid;
+            }
+
         private:
             template <typename Q>
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const;

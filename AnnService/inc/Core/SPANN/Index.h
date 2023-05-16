@@ -167,6 +167,19 @@ namespace SPTAG
                     return ErrorCode::Success;
                 }
             }
+
+            std::shared_ptr<VectorIndex> GetInMemoryIndex()
+            {
+                return this->m_index;
+            }
+
+            SizeType GetGlobalVID(SizeType vid)
+            {
+                return static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+            }
+
+            ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
+
         private:
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
