@@ -187,7 +187,7 @@ namespace SPTAG
 
             std::shared_ptr<VectorIndex> GetInMemoryIndex()
             {
-                return std::make_shared<VectorIndex>(this);
+                return std::make_shared<Index>(this);
             }
 
             SizeType GetGlobalVID(SizeType vid)
