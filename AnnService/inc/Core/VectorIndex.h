@@ -148,10 +148,6 @@ public:
 
     virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;
 
-    virtual std::shared_ptr<VectorIndex> GetInMemoryIndex() = 0;
-
-    virtual SizeType GetGlobalVID(SizeType vid) = 0;
-
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 
     inline SizeType GetMetaMapping(std::string& meta) const;

@@ -168,11 +168,6 @@ namespace SPTAG
                 }
             }
 
-            std::shared_ptr<VectorIndex> GetInMemoryIndex()
-            {
-                return this->m_index;
-            }
-
             SizeType GetGlobalVID(SizeType vid)
             {
                 return static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
