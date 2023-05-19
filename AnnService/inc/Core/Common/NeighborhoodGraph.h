@@ -553,7 +553,7 @@ break;
                     {
                         BasicResult* item = query.GetResult(j);
                         if (item->VID < 0) break;
-                        IF_DEBUG(if (item->VID >= index->GetNumSamples()) throw std::out_of_range();)
+                        IF_DEBUG(if (item->VID >= index->GetNumSamples()) throw std::out_of_range("VID: "s + std::string(item->VID) + ", Samples: "s + std::string(index->GetNumSamples()));)
                         if (item->VID == node) continue;
 
                         InsertNeighbors(index, item->VID, node, item->Dist);
