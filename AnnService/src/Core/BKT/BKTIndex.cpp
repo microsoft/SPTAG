@@ -238,27 +238,20 @@ namespace SPTAG
                     if (checkNode < -1) 
                     {
                         const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
-                        
-                        for (SizeType i = -tnode.childStart; i < tnode.childEnd; i++)
+                        SizeType i = -tnode.childStart;
+                        do
                         {
                             if (notDeleted(m_deletedID, tmpNode))
                             {
                                 if (checkFilter(m_pMetadata, tmpNode, filterFunc))
                                 {
-                                    if (isDup(p_query, tmpNode, gnode.distance)) 
+                                    if (isDup(p_query, tmpNode, gnode.distance))
                                         break;
                                 }
                             }
+                            if (i <= 0) break;
                             tmpNode = m_pTrees[i].centerid;
-                        }
-			    
-			            if (notDeleted(m_deletedID, tmpNode))
-                        {
-                            if (checkFilter(m_pMetadata, tmpNode, filterFunc))
-                            {
-                                isDup(p_query, tmpNode, gnode.distance);
-                            }
-                        }
+                        } while (i++ < tnode.childEnd);
                     }
                     else {
 
@@ -328,7 +321,7 @@ namespace SPTAG
             bool NeverDup(COMMON::QueryResultSet<T>& query, SizeType node, float score)
             {
                 query.AddPoint(node, score);
-                return false;
+                return true;
             }
 
             bool CheckFilter(const std::shared_ptr<MetadataSet>& metadata, SizeType node, std::function<bool(const ByteArray&)> filterFunc)
