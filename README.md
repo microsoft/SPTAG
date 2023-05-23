@@ -40,7 +40,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 ### **Requirements**
 
-* swig >= 3.0
+* swig >= 4.0.2
 * cmake >= 3.12.0
 * boost >= 1.67.0
 
