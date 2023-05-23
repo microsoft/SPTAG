@@ -130,7 +130,7 @@
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
-    <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -csharp -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)/ClientInterface_cwrap.cpp inc\CsharpClient.i" />
+    <Exec Command="$(SolutionDir)packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe -csharp -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)/ClientInterface_cwrap.cpp inc\CsharpClient.i" />
   </Target>
   <ItemGroup>
     <MySourceFiles Include="$(IntDir)\*.cs" />
@@ -142,7 +142,7 @@
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
+    <Error Condition="!Exists('..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe'))" />
     <Error Condition="!Exists('..\packages\boost.1.72.0.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.72.0.0\build\boost.targets'))" />
     <Error Condition="!Exists('..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc142.1.72.0.0\build\boost_system-vc142.targets'))" />
     <Error Condition="!Exists('..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_date_time-vc142.1.72.0.0\build\boost_date_time-vc142.targets'))" />
