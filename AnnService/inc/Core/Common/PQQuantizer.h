@@ -33,7 +33,7 @@ namespace SPTAG
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
             
             virtual SizeType QuantizeSize() const;
 
@@ -136,9 +136,9 @@ namespace SPTAG
         }
 
         template <typename T>
-        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
+        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC) const
         {
-            if (GetEnableADC())
+            if (ADC && GetEnableADC())
             {
                 auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
                 float* ADCtable = (float*) vecout;

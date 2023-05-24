@@ -116,6 +116,28 @@ public:
 
     virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
+    virtual std::shared_ptr<SPTAG::COMMON::IQuantizer> GetQuantizer() {
+        return m_pQuantizer;
+    }
+
+    virtual ErrorCode QuantizeVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->GetNumSubvectors() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++) 
+                m_pQuantizer->QuantizeVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->ReconstructSize()), p_out.Data() + i * (size_t)(m_pQuantizer->GetNumSubvectors()), false);
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
+    virtual ErrorCode ReconstructVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->ReconstructSize() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++)
+                m_pQuantizer->ReconstructVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->GetNumSubvectors()), p_out.Data() + i * (size_t)(m_pQuantizer->ReconstructSize()));
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
