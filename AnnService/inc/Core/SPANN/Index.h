@@ -170,7 +170,7 @@ namespace SPTAG
 
             SizeType GetGlobalVID(SizeType vid)
             {
-                return static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                return static_cast<SizeType>((m_vectorTranslateMap.get())[vid]);
             }
 
             ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);

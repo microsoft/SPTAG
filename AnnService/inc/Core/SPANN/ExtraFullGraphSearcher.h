@@ -751,11 +751,11 @@ namespace SPTAG
             {
                 VIDs.clear();
 
-                auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
+                SizeType curPostingID = vid;
                 ListInfo* listInfo = &(m_listInfos[curPostingID]);
                 VIDs.resize(listInfo->listEleCount);
                 ByteArray vector_array = ByteArray::Alloc(sizeof(ValueType) * listInfo->listEleCount * m_iDataDimension);
-                vecs.reset(vector_array, GetEnumValueType<ValueType>(), m_iDataDimension, listInfo->listEleCount);
+                vecs.reset(new BasicVectorSet(vector_array, GetEnumValueType<ValueType>(), m_iDataDimension, listInfo->listEleCount));
 
                 int fileid = m_oneContext ? 0 : curPostingID / m_listPerFile;
 
@@ -764,10 +764,10 @@ namespace SPTAG
 #endif
 
                 size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
-                char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
+                char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[0]).GetBuffer());
 
 #ifdef ASYNC_READ       
-                auto& request = p_exWorkSpace->m_diskRequests[pi];
+                auto& request = p_exWorkSpace->m_diskRequests[0];
                 request.m_offset = listInfo->listOffset;
                 request.m_readSize = totalBytes;
                 request.m_buffer = buffer;
@@ -776,7 +776,7 @@ namespace SPTAG
                 request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, this](bool success)
+                request.m_callback = [&p_exWorkSpace, &vecs, &VIDs, &p_index, &request, this](bool success)
                 {
                     char* buffer = request.m_buffer;
                     ListInfo* listInfo = (ListInfo*)(request.m_payload);
@@ -836,6 +836,7 @@ namespace SPTAG
                     memcpy(outVec, (void*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_iDataDimension);
                 }
 #endif
+                return ErrorCode::Success;
             }
 
         private:
