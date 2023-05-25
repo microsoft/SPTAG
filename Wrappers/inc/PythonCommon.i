@@ -4,7 +4,7 @@
 %{
     {
         $result = PyBytes_FromStringAndSize(reinterpret_cast<const char*>($1.Data()), $1.Length());
-        delete[] $1.Data();
+        if ($1.Length() > 0) delete[] $1.Data();
     }
 %}
 

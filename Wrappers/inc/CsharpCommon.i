@@ -62,7 +62,7 @@ void deleteWrapperArray(void* ptr);
     $modulePINVOKE.WrapperArray data = $imcall;$excode
     byte[] ret = new byte[data._size];
     System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
-    $modulePINVOKE.deleteWrapperArray(data._data);
+    if (data._size > 0) $modulePINVOKE.deleteWrapperArray(data._data);
     return ret; 
 %}
 
@@ -71,7 +71,7 @@ void deleteWrapperArray(void* ptr);
         $modulePINVOKE.WrapperArray data = $imcall;
         byte[] ret = new byte[data._size];
         System.Runtime.InteropServices.Marshal.Copy(data._data, ret, 0, (int)data._size);
-        $modulePINVOKE.deleteWrapperArray(data._data);
+        if (data._size > 0) $modulePINVOKE.deleteWrapperArray(data._data);
         return ret; 
     }
 %}

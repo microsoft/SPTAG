@@ -524,6 +524,13 @@ break;
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
+            inline void SwapTree(BKTree& newTrees)
+            {
+                m_pTreeRoots.swap(newTrees.m_pTreeRoots);
+                m_pTreeStart.swap(newTrees.m_pTreeStart);
+                m_pSampleCenterMap.swap(newTrees.m_pSampleCenterMap);
+            }
+
             template <typename T>
             void Rebuild(const Dataset<T>& data, DistCalcMethod distMethod, IAbortOperation* abort)
             {
@@ -711,7 +718,7 @@ break;
                             }
                         }
 
-                        for (int level = 1; level < 2; level++) {
+                        for (int level = 1; level <= m_bfs; level++) {
                             p_next->Top().distance = 1e9;
                             while (!p_curr->empty()) {
                                 NodeDistPair tmp = p_curr->pop();

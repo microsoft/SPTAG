@@ -42,7 +42,26 @@ namespace SPTAG
                 RebuildJob(COMMON::Dataset<T>* p_data, COMMON::BKTree* p_tree, COMMON::RelativeNeighborhoodGraph* p_graph, 
                     DistCalcMethod p_distMethod) : m_data(p_data), m_tree(p_tree), m_graph(p_graph), m_distMethod(p_distMethod) {}
                 void exec(IAbortOperation* p_abort) {
-                    m_tree->Rebuild<T>(*m_data, m_distMethod, p_abort);
+                    COMMON::BKTree newTrees(*m_tree);
+                    newTrees.BuildTrees<T>(*m_data, m_distMethod, 1, nullptr, nullptr, false, p_abort);
+
+                    std::unique_lock<std::shared_timed_mutex> lock(*(m_tree->m_lock));
+                    const std::unordered_map<SizeType, SizeType>* idmap = &(m_tree->GetSampleMap());
+                    for (auto iter = idmap->begin(); iter != idmap->end(); iter++) {
+                        if (iter->first < 0)
+                        {
+                            (*m_graph)[-1 - iter->first][m_graph->m_iNeighborhoodSize - 1] = -1;
+                        }
+                    }
+                    m_tree->SwapTree(newTrees);
+
+                    const std::unordered_map<SizeType, SizeType>* newidmap = &(m_tree->GetSampleMap());
+                    for (auto iter = newidmap->begin(); iter != newidmap->end(); iter++) {
+                        if (iter->first < 0)
+                        {
+                            (*m_graph)[-1 - iter->first][m_graph->m_iNeighborhoodSize - 1] = -2 - iter->second;
+                        }
+                    }
                 }
             private:
                 COMMON::Dataset<T>* m_data;
