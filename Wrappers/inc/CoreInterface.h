@@ -28,6 +28,10 @@ public:
 
     void SetQuantizerADC(bool p_adc);
 
+    ByteArray QuantizeVector(ByteArray p_data, int p_num);
+
+    ByteArray ReconstructVector(ByteArray p_data, int p_num);
+
     bool BuildSPANN(bool p_normalized);
 
     bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);

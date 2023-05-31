@@ -120,7 +120,7 @@
     <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
-    <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -python -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)CoreInterface_pwrap.cpp inc\PythonCore.i" />
+    <Exec Command="$(SolutionDir)packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe -python -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)CoreInterface_pwrap.cpp inc\PythonCore.i" />
   </Target>
   <Target Name="CopyFiles" AfterTargets="BeforeBuild">
     <Copy SourceFiles="$(IntDir)SPTAG.py" DestinationFolder="$(Outdir)" />
@@ -129,7 +129,7 @@
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
+    <Error Condition="!Exists('..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe'))" />
     <Error Condition="!Exists('..\packages\python.$(PYTHON_VERSION).3\build\native\python.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python.$(PYTHON_VERSION).3\build\native\python.props'))" />
     <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>

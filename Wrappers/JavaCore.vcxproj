@@ -119,7 +119,7 @@
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
-    <Exec Command="$(SolutionDir)packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe -java -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)CoreInterface_jwrap.cpp inc\JavaCore.i" />
+    <Exec Command="$(SolutionDir)packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe -java -c++ -I$(IntDir) -outdir $(IntDir) -o $(IntDir)CoreInterface_jwrap.cpp inc\JavaCore.i" />
   </Target>
   <ItemGroup>
     <MySourceFiles Include="$(IntDir)\*.java" />
@@ -131,6 +131,6 @@
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwin.3.0.9\tools\swigwin-3.0.9\swig.exe'))" />
+    <Error Condition="!Exists('..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe'))" />
   </Target>
 </Project>
