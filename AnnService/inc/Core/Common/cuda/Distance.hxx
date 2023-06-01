@@ -55,7 +55,7 @@ template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 
 
 template<typename T> __device__ T BASE() {}
 template<> __forceinline__ __device__ float BASE<float>() {return 1;}
-template<> __forceinline__ __device__ int32_t BASE<int32_t>() {return 16384;}
+template<> __forceinline__ __device__ int BASE<int>() {return 16384;}
 template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 65536;}
 
 

@@ -4,19 +4,19 @@
 
 #define CHECK_ERRS(errs) \
   if(errs > 0) {          \
-    LOG(SPTAG::Helper::LogLevel::LL_Info, "%d errors found\n", errs); \
+    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "%d errors found\n", errs); \
   }         
 
 #define CHECK_VAL(val,exp,errs) \
   if(val != exp) { \
     errs++;        \
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "%s != %s\n",#val,#exp);   \
+    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "%s != %s\n",#val,#exp);   \
   }
 
 #define CHECK_VAL_LT(val,exp,errs) \
   if(val > exp) { \
     errs++;        \
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "%s > %s\n",#val,#exp);   \
+    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "%s > %s\n",#val,#exp);   \
   }
 
 #define GPU_CHECK_VAL(val,exp,dtype,errs) \
@@ -25,7 +25,7 @@
   float eps = 0.01; \
   if((float)temp>0.0 && ((float)temp*(1.0+eps) < (float)(exp) || (float)temp*(1.0-eps) > (float)(exp))) { \
     errs++;        \
-    LOG(SPTAG::Helper::LogLevel::LL_Error, "%s != %s\n",#val,#exp);   \
+    SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "%s != %s\n",#val,#exp);   \
   }
 
 
@@ -50,3 +50,10 @@ T* create_dataset(size_t rows, int dim) {
   } 
   return h_data;
 }
+/*
+__global__ void count_leaf_sizes(LeafNode* leafs, int* node_ids, int N, int internal_nodes);
+__global__ void assign_leaf_points_in_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id);
+__global__ void assign_leaf_points_out_batch(LeafNode* leafs, int* leaf_points, int* node_ids, int N, int internal_nodes, int min_id, int max_id);
+__global__ void compute_mean(KEYTYPE* split_keys, int* node_sizes, int num_nodes);
+__global__ void initialize_rands(curandState* states, int iter);
+*/

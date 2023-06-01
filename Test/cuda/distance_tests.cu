@@ -153,7 +153,7 @@ int GPUTestDistancesComplex(int vecs) {
 
 int GPUTestDistance_All() {
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Static distance tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Static distance tests...\n");
   // Test Distances with float datatype
   int errs = 0;
   errs += GPUTestDistancesSimple<float, float, 10>();
@@ -177,7 +177,7 @@ int GPUTestDistance_All() {
 
   CHECK_ERRS(errs)
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Randomized vector distance tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Randomized vector distance tests...\n");
   // Test distances between random vectors and compare with CPU calculation
   errs += GPUTestDistancesComplex<float, float, 10>(100);
   errs += GPUTestDistancesComplex<float, float, 100>(100);

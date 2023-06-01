@@ -104,20 +104,20 @@ int GPUBuildTPTTest() {
 
   int errors = 0;
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting TPTree Kernel tests\n");
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting TPTree Kernel tests\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype...\n");
   errors += TPTKernelsTest<float, float, 100>(1000);
   errors += TPTKernelsTest<float, float, 200>(1000);
   errors += TPTKernelsTest<float, float, 384>(1000);
   errors += TPTKernelsTest<float, float, 1024>(1000);
 
-//  LOG(SPTAG::Helper::LogLevel::LL_Info, "int32 datatype...\n");
+//  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "int32 datatype...\n");
 //  errors += TPTKernelsTest<int, int, 100>(1000);
 //  errors += TPTKernelsTest<int, int, 200>(1000);
 //  errors += TPTKernelsTest<int, int, 384>(1000);
 //  errors += TPTKernelsTest<int, int, 1024>(1000);
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "int8 datatype...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "int8 datatype...\n");
   errors += TPTKernelsTest<int8_t, int32_t, 100>(1000);
   errors += TPTKernelsTest<int8_t, int32_t, 200>(1000);
   errors += TPTKernelsTest<int8_t, int32_t, 384>(1000);

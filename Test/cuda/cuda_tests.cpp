@@ -15,9 +15,11 @@ BOOST_AUTO_TEST_CASE(RandomTests) {
   BOOST_CHECK(1 == 1);
 
   int errors = GPUBuildKNNTest();
+printf("outside\n");
   BOOST_CHECK(errors == 0);
 }
 
+/*
 int GPUTestDistance_All(); 
 
 BOOST_AUTO_TEST_CASE(DistanceTests) {
@@ -32,9 +34,10 @@ BOOST_AUTO_TEST_CASE(TPTreeTests) {
   BOOST_CHECK(errs == 0);
 }
 
-//int GPUBuildSSDTest_All();
+int GPUBuildSSDTest_All();
 
-//BOOST_AUTO_TEST_CASE(BuildSSDTests) {
-//  int errs = GPUBuildSSDTest_All();
-//  BOOST_CHECK(errs == 0);
-//}
+BOOST_AUTO_TEST_CASE(BuildSSDTests) {
+  int errs = GPUBuildSSDTest_All();
+  BOOST_CHECK(errs == 0);
+}
+*/

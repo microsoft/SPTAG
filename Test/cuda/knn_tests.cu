@@ -115,7 +115,7 @@ int GPUBuildKNNCosineTest(int rows) {
         SUMTYPE neighborDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[neighborId*dim], dim));
         SUMTYPE nextDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeCosineDistance<T>(&data[i*dim], &data[nextNeighborId*dim], dim));
         if(neighborDist > nextDist) {
-          LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
+          SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
           return 1;
         }
       }
@@ -133,21 +133,21 @@ int GPUBuildKNNCosineTest() {
 
   int errors = 0;
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
   errors += GPUBuildKNNCosineTest<float, float, 10, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 384, 10>(1000);
   errors += GPUBuildKNNCosineTest<float, float, 1024, 10>(1000);
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
   errors += GPUBuildKNNCosineTest<int, int, 10, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 384, 10>(1000);
   errors += GPUBuildKNNCosineTest<int, int, 1024, 10>(1000);
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 100, 10>(1000);
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 200, 10>(1000);
   errors += GPUBuildKNNCosineTest<int8_t, int32_t, 384, 10>(1000);
@@ -193,7 +193,7 @@ int GPUBuildKNNL2Test(int rows) {
         SUMTYPE neighborDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeL2Distance<T>(&data[i*dim], &data[neighborId*dim], dim));
         SUMTYPE nextDist = (SUMTYPE)(SPTAG::COMMON::DistanceUtils::ComputeL2Distance<T>(&data[i*dim], &data[nextNeighborId*dim], dim));
         if(neighborDist > nextDist) {
-          LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
+          SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Neighbor list not in ascending distance order. i:%d, neighbor:%d (dist:%f), next:%d (dist:%f)\n", i, neighborId, neighborDist, nextNeighborId, nextDist);
           return 1;
         }
       }
@@ -210,7 +210,7 @@ int GPUBuildKNNL2Test() {
 
   int errors = 0;
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Float datatype tests...\n");
   errors += GPUBuildKNNL2Test<float, float, 10, 10>(1000);
   errors += GPUBuildKNNL2Test<float, float, 100, 10>(1000);
   errors += GPUBuildKNNL2Test<float, float, 200, 10>(1000);
@@ -219,7 +219,7 @@ int GPUBuildKNNL2Test() {
 
   CHECK_ERRS(errors)
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Int32 datatype tests...\n");
   errors += GPUBuildKNNL2Test<int, int, 10, 10>(1000);
   errors += GPUBuildKNNL2Test<int, int, 100, 10>(1000);
   errors += GPUBuildKNNL2Test<int, int, 200, 10>(1000);
@@ -228,7 +228,7 @@ int GPUBuildKNNL2Test() {
 
   CHECK_ERRS(errors)
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Int8 datatype tests...\n");
   errors += GPUBuildKNNL2Test<int8_t, int32_t, 100, 10>(1000);
   errors += GPUBuildKNNL2Test<int8_t, int32_t, 200, 10>(1000);
   errors += GPUBuildKNNL2Test<int8_t, int32_t, 384, 10>(1000);
@@ -239,12 +239,12 @@ int GPUBuildKNNL2Test() {
 
 int GPUBuildKNNTest() {
   int errors = 0;
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN Cosine metric tests\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN Cosine metric tests\n");
   errors += GPUBuildKNNCosineTest();
 
   CHECK_ERRS(errors)
 
-  LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN L2 metric tests\n");
+  SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Starting KNN L2 metric tests\n");
   errors += GPUBuildKNNL2Test();
 
   CHECK_ERRS(errors)
