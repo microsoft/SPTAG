@@ -94,12 +94,13 @@ The detailed parameters tunning can be found in [Parameters](docs/Parameters.md)
 > Clone the repository and submodules
 ```bash
 git clone git@github.com:MaggieQi/SPFresh.git
-git submodules update --init --recursive
+git submodule update --init --recursive
 ```
 
 > Compile SPDK
 ```bash
 cd ThirdParty/spdk
+./scripts/pkgdep.sh
 CC=gcc-9 ./configure
 CC=gcc-9 make -j
 ```
@@ -111,6 +112,14 @@ cd ThirdParty/isal-l_crypto
 ./autogen.sh
 ./configure
 make -j
+```
+
+> Build RocksDB
+```bash
+mkdir build && cd build
+cmake -DUSE_RTTI=1 -DWITH_JEMALLOC=1 -DWITH_SNAPPY=1 -DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fPIC" ..
+make -j
+sudo make install
 ```
 
 > Build SPFresh
