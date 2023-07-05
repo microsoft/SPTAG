@@ -215,6 +215,18 @@ namespace SPTAG
                                 memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
                                 memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
                             }
+
+                            if (m_options.m_excludehead) {
+                                auto VIDTrans = static_cast<SizeType>((m_vectorTranslateMap.get())[index]);
+                                uint8_t version = m_versionMap.GetVersion(VIDTrans);
+                                std::string appendPosting(m_vectorInfoSize, '\0');
+                                char* ptr = (char*)(appendPosting.c_str());
+                                memcpy(ptr, &VIDTrans, sizeof(VIDTrans));
+                                memcpy(ptr + sizeof(VIDTrans), &version, sizeof(version));
+                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), m_index->GetSample(index), m_vectorInfoSize - sizeof(int) + sizeof(uint8_t));
+                                newPosting = appendPosting + newPosting;
+                            }
+
                             m_extraSearcher->GetWritePosting(index, newPosting, true);
                         }
                         else
