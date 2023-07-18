@@ -67,8 +67,8 @@ namespace SPTAG
             if (m_pSamples.Load((char*)p_indexBlobs[0].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
-            else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
+            else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains) != ErrorCode::Success) return ErrorCode::FailedParseValue;
 
             if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
             {
@@ -90,8 +90,8 @@ namespace SPTAG
             if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
             if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
-            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
-            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
+            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains)) != ErrorCode::Success) return ret;
 
             if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
             {
@@ -482,7 +482,7 @@ namespace SPTAG
             omp_set_num_threads(m_iNumberOfThreads);
 
             m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, p_shareOwnership);
-            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
+            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
@@ -551,7 +551,7 @@ namespace SPTAG
             if ((ret = m_pSamples.Refine(indices, ptr->m_pSamples)) != ErrorCode::Success) return ret;
             if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata, m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize)) != ErrorCode::Success) return ret;
 
-            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
+            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
             COMMON::BKTree* newtree = &(ptr->m_pTrees);
             (*newtree).BuildTrees<T>(ptr->m_pSamples, ptr->m_iDistCalcMethod, omp_get_num_threads());
             m_pGraph.RefineGraph<T>(this, indices, reverseIndices, nullptr, &(ptr->m_pGraph), &(ptr->m_pTrees.GetSampleMap()));
@@ -601,7 +601,7 @@ namespace SPTAG
             if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr, &(newTrees.GetSampleMap()))) != ErrorCode::Success) return ret;
 
             COMMON::Labelset newDeletedID;
-            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
+            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
             if ((ret = newDeletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
             if (nullptr != m_pMetadata) {
                 if (p_indexStreams.size() < 6) return ErrorCode::LackOfInputs;
