@@ -13,19 +13,28 @@ namespace SPTAG
     {
         class Labelset
         {
+        public:
+            enum class InvalidIDBehavior
+            {
+                Passthrough,
+                AlwaysContains,
+                AlwaysNotContains
+            };
         private:
             std::atomic<SizeType> m_inserted;
             Dataset<std::int8_t> m_data;
+            InvalidIDBehavior m_invalidIDBehaviorSetting;
             
         public:
-            Labelset() 
+            Labelset()
             {
                 m_inserted = 0;
                 m_data.SetName("DeleteID");
             }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity)
+            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
             {
+                m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
                 m_data.Initialize(size, 1, blockSize, capacity);
             }
 
@@ -33,11 +42,33 @@ namespace SPTAG
 
             inline bool Contains(const SizeType& key) const
             {
+                if (key >= R())
+                {
+                    switch (m_invalidIDBehaviorSetting)
+                    {
+                        case InvalidIDBehavior::AlwaysContains:
+                            return true;
+                        case InvalidIDBehavior::AlwaysNotContains:
+                            return false;
+                    }
+                }
+
                 return *m_data[key] == 1;
             }
 
             inline bool Insert(const SizeType& key)
             {
+                if (key >= R())
+                {
+                    switch (m_invalidIDBehaviorSetting)
+                    {
+                        case InvalidIDBehavior::AlwaysContains:
+                            return true;
+                        case InvalidIDBehavior::AlwaysNotContains:
+                            return false;
+                    }
+                }
+
                 char oldvalue = InterlockedExchange8((char*)m_data[key], 1);
                 if (oldvalue == 1) return false;
                 m_inserted++;
@@ -59,24 +90,26 @@ namespace SPTAG
                 return Save(ptr);
             }
 
-            inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
             {
+                m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
                 SizeType deleted;
                 IOBINARY(input, ReadBinary, sizeof(SizeType), (char*)&deleted);
                 m_inserted = deleted;
                 return m_data.Load(input, blockSize, capacity);
             }
 
-            inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(std::string filename, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load %s From %s\n", m_data.Name().c_str(), filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
-                return Load(ptr, blockSize, capacity);
+                return Load(ptr, blockSize, capacity, invalidIDBehaviorSetting);
             }
 
-            inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
+            inline ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity, InvalidIDBehavior invalidIDBehaviorSetting = InvalidIDBehavior::Passthrough)
             {
+                m_invalidIDBehaviorSetting = invalidIDBehaviorSetting;
                 m_inserted = *((SizeType*)pmemoryFile);
                 return m_data.Load(pmemoryFile + sizeof(SizeType), blockSize, capacity);
             }
