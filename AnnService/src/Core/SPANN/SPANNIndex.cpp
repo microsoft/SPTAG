@@ -375,6 +375,29 @@ namespace SPTAG
 #pragma endregion
 
         template <typename T>
+        ErrorCode Index<T>::GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs)
+        {
+            VIDs.clear();
+            if (!m_extraSearcher) return ErrorCode::EmptyIndex;
+            if (!m_extraSearcher->CheckValidPosting(vid)) return ErrorCode::Fail;
+
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new ExtraWorkSpace());
+                workSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
+            else {
+                workSpace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
+            workSpace->m_deduper.clear();
+
+
+            auto out = m_extraSearcher->GetPostingDebug(workSpace.get(), m_index, vid, VIDs, vecs);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+            return out;
+        }
+
+        template <typename T>
         void Index<T>::SelectHeadAdjustOptions(int p_vectorCount) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Adjust Parameters...\n");
 

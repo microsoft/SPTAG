@@ -206,6 +206,7 @@ namespace SPTAG
                 }
             }
 
+
         private:
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc = nullptr) const;
             
