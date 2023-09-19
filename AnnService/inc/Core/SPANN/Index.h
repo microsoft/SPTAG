@@ -167,6 +167,14 @@ namespace SPTAG
                     return ErrorCode::Success;
                 }
             }
+
+            SizeType GetGlobalVID(SizeType vid)
+            {
+                return static_cast<SizeType>((m_vectorTranslateMap.get())[vid]);
+            }
+
+            ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
+
         private:
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
