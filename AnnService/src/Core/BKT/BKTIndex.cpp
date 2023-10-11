@@ -192,8 +192,6 @@ namespace SPTAG
             for (DimensionType i = 0; i <= checkPos; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
-                IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )\
-                IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )\
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 p_space.m_iNumberOfCheckedLeaves++; \
@@ -228,7 +226,7 @@ namespace SPTAG
                 _mm_prefetch((const char*)node, _MM_HINT_T0);
                 for (DimensionType i = 0; i <= checkPos; i++) {
                     auto futureNode = node[i];
-                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
+                    if (futureNode < 0) break;
                     _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
                 }
 
@@ -278,10 +276,8 @@ namespace SPTAG
                 for (DimensionType i = 0; i <= checkPos; i++) 
                 {
                     SizeType nn_index = node[i];
-                    if (nn_index < 0) 
-                        break;
-                    IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range("VID: "s + std::string(nn_index) + ", Samples: "s + std::string(m_pSamples.R())); )
-                    //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
+                    if (nn_index < 0) break;
+
                     if (p_space.CheckAndSet(nn_index)) continue;
                     float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
                     p_space.m_iNumberOfCheckedLeaves++;

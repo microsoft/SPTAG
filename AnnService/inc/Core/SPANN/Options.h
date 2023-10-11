@@ -97,6 +97,7 @@ namespace SPTAG {
             float m_rngFactor;
             int m_samples;
             bool m_excludehead;
+            int m_postingVectorLimit;
 
             // GPU building
             int m_gpuSSDNumTrees;
