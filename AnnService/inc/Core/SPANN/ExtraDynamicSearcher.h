@@ -160,7 +160,7 @@ namespace SPTAG::SPANN {
         tbb::concurrent_hash_map<SizeType, SizeType> m_mergeList;
 
     public:
-        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64) {
+        ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3) {
             if (useSPDK) {
                 db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 1, 1024, batchSize));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
@@ -502,7 +502,7 @@ namespace SPTAG::SPANN {
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
-                if (!preReassign && index < m_postingSizeLimit)
+                if (m_opt->m_inPlace || (!preReassign && index < m_postingSizeLimit))
                 {
                     char* ptr = (char*)(postingList.c_str());
                     for (int j = 0; j < index; j++, ptr += m_vectorInfoSize)
