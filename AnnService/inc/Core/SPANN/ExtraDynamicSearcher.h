@@ -1584,6 +1584,13 @@ namespace SPTAG::SPANN {
             m_postingSizes.Initialize((SizeType)(p_index->GetNumSamples()), p_index->m_iDataBlockSize, p_index->m_iDataCapacity);
         }
 
+        void Checkpoint(std::string prefix) override {
+            /**flush SPTAG, versionMap, block mapping, block pool**/
+            std::string p_persistenMap = prefix + "_versionMap";
+            m_versionMap->Save(p_persistenMap);
+            db->Checkpoint(prefix);
+        }
+
     private:
 
         int m_metaDataSize = 0;

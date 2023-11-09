@@ -218,6 +218,12 @@ namespace SPTAG
 
             bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
 
+            void Checkpoint() {
+                std::string filename = m_options.m_persistentBufferPath + "_headIndex";
+                m_index->SaveIndex(filename);
+                m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath);
+            }
+
             ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
                 if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
                     LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");

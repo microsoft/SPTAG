@@ -313,6 +313,8 @@ namespace SPTAG {
             virtual bool ExitBlockController() { return false; }
 
             virtual void InitPostingRecord(std::shared_ptr<VectorIndex> p_index) { return; }
+
+            virtual void Checkpoint(std::string prefix) { return; }
         };
     } // SPANN
 } // SPTAG

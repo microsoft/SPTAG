@@ -39,6 +39,8 @@ namespace SPTAG
             virtual bool Initialize(bool debug = false) { return false; }
 
             virtual bool ExitBlockController(bool debug = false) { return false; }
+
+            virtual ErrorCode Checkpoint(std::string prefix) {return ErrorCode::Undefined;}
         };
     }
 }

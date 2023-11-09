@@ -123,6 +123,19 @@ namespace SPTAG::SPANN
             int RemainBlocks() {
                 return m_blockAddresses.unsafe_size();
             }
+
+            ErrorCode Checkpoint(std::string prefix) {
+                std::string filename = prefix + "_blockpool";
+                LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                int blocks = RemainBlocks();
+                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
+                for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
+                }
+                LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+            }
         };
 
         class CompactionJob : public Helper::ThreadPool::Job
@@ -367,6 +380,12 @@ namespace SPTAG::SPANN
         bool ExitBlockController(bool debug = false) override { 
             if (debug) LOG(Helper::LogLevel::LL_Info, "Exit SPDK for thread\n");
             return m_pBlockController.ShutDown(); 
+        }
+
+        ErrorCode Checkpoint(std::string prefix) override {
+            std::string filename = prefix + "_blockmapping";
+            m_pBlockMapping.Save(filename);
+            m_pBlockController.Checkpoint(prefix);
         }
 
     private:
