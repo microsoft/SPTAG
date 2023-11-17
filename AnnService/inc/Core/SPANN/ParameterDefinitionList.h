@@ -190,7 +190,6 @@ DefineSSDParameter(m_steadyState, bool, false, "SteadyState")
 DefineSSDParameter(m_stressTest, bool, false, "StressTest")
 
 // SPANN
-DefineSSDParameter(m_postingVectorLimit, int, 1000, "PostingSearchVectorLimit")
 DefineSSDParameter(m_disableReassign, bool, false, "DisableReassign")
 DefineSSDParameter(m_searchDuringUpdate, bool, false, "SearchDuringUpdate")
 DefineSSDParameter(m_reassignK, int, 0, "ReassignK")

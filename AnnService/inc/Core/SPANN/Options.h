@@ -144,7 +144,6 @@ namespace SPTAG {
             bool m_onlySearchFinalBatch;
 
             // Updating
-            int m_postingVectorLimit;
             bool m_disableReassign;
             bool m_searchDuringUpdate;
             int m_reassignK;

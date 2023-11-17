@@ -21,8 +21,6 @@ namespace SPTAG
     {
         std::atomic_int ExtraWorkSpace::g_spaceCount(0);
         EdgeCompare Selection::g_edgeComparer;
-        template <typename T>
-        thread_local std::shared_ptr<ExtraWorkSpace> Index<T>::m_workspace;
 
         std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> { return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO()); };
 
@@ -158,18 +156,17 @@ namespace SPTAG
 
             m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
             IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
-=======
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
 
             if (m_options.m_useSPDK) {
                 int m_vectorLimit = m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t));
                 m_versionMap.Initialize(m_options.m_vectorSize, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
                 int m_vectorInfoSize = sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t);
-                LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
                 std::shared_ptr<IExtraSearcher> storeExtraSearcher;
                 storeExtraSearcher.reset(new ExtraStaticSearcher<T>());
                 if (!storeExtraSearcher->LoadIndex(m_options, m_versionMap)) {
-                    LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
                     exit(1);
                 }
                 int totalPostingNum = m_index->GetNumSamples();
@@ -190,7 +187,7 @@ namespace SPTAG
 
                             if ((index & ((1 << 14) - 1)) == 0)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
                             }
                             std::string tempPosting;
                             storeExtraSearcher->GetWritePosting(index, tempPosting);
@@ -241,12 +238,12 @@ namespace SPTAG
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
                 if (m_options.m_vectorPath.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
                 }
                 else {
                     if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
                         return ErrorCode::Fail;
                     }
                     // m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
@@ -451,15 +448,11 @@ namespace SPTAG
                 auto res = newResults.GetResult(i);
                 if (res->VID == -1) break;
 
-                    auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
-                    res->VID = global_VID;
-                }
-                newResults->Reverse();
+                auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
+                res->VID = global_VID;
             }
-            else {
-                newResults.reset(new COMMON::QueryResultSet<T>((T*)p_query.GetTarget(), p_query.GetResultNum()));
-            }
+            newResults.Reverse();
 
             auto workSpace = m_workSpaceFactory->GetWorkSpace();
             if (!workSpace) {
@@ -888,7 +881,7 @@ namespace SPTAG
 
                 if (m_pQuantizer)
                 {
-                    m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                    m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
                 }
                 else if (m_options.m_useKV)
                 {
@@ -901,7 +894,7 @@ namespace SPTAG
                 } else if (m_options.m_useSPDK)
                 {
                     if (m_options.m_inPlace) {
-                        LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
                         exit(1);
                     }
                     else {
@@ -1093,7 +1086,7 @@ namespace SPTAG
                                      bool p_normalized)
         {
             if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
-                LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
                 return ErrorCode::Fail;
             }
 
@@ -1110,7 +1103,7 @@ namespace SPTAG
                 if (begin == 0) { return ErrorCode::EmptyIndex; }
 
                 if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
                     exit(1);
                 }
 

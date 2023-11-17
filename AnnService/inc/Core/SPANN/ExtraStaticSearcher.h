@@ -1388,7 +1388,7 @@ namespace SPTAG
 
             void GetWritePosting(SizeType pid, std::string& posting, bool write = false) override {
                 if (write) {
-                    LOG(Helper::LogLevel::LL_Error, "Unsupport write\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupport write\n");
                     exit(1);
                 }
                 ListInfo* listInfo = &(m_listInfos[pid]);
@@ -1397,9 +1397,9 @@ namespace SPTAG
                 posting.resize(totalBytes);
                 int fileid = m_oneContext? 0: pid / m_listPerFile;
                 Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
-                auto numRead = indexFile->ReadBinary(totalBytes, posting.data(), listInfo->listOffset);
+                auto numRead = indexFile->ReadBinary(totalBytes, (char*)posting.data(), listInfo->listOffset);
                 if (numRead != totalBytes) {
-                    LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
                     throw std::runtime_error("File read mismatch");
                 }
                 char* ptr = (char*)(posting.c_str());

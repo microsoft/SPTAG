@@ -70,17 +70,17 @@ namespace SPTAG {
                 {
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(p_output.c_str(), std::ios::binary | std::ios::out)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
                         exit(1);
                     }
                     int32_t i32Val = static_cast<int32_t>(p_results.size());
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                         exit(1);
                     }
                     i32Val = p_resultNum;
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                         exit(1);
                     }
 
@@ -91,13 +91,13 @@ namespace SPTAG {
                         {
                             i32Val = p_results[i].GetResult(j)->VID;
                             if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                                 exit(1);
                             }
 
                             fVal = p_results[i].GetResult(j)->Dist;
                             if (ptr->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
-                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                                 exit(1);
                             }
                         }
@@ -126,7 +126,7 @@ namespace SPTAG {
                     vector_size = 0;
                 long vector_size_mb = vector_size / 1024;
 
-                LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %ld MB, Vector Set Size : %ld MB, True Size: %ld MB\n", second, rss / 1024, vector_size_mb, rss / 1024 - vector_size_mb);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Current time: %.0lf. RSS : %ld MB, Vector Set Size : %ld MB, True Size: %ld MB\n", second, rss / 1024, vector_size_mb, rss / 1024 - vector_size_mb);
             }
 
             template<typename T, typename V>
@@ -148,10 +148,10 @@ namespace SPTAG {
                     std::sort(collects.begin(), collects.end());
                 }
                 if (reverse) {
-                    LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMin\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMin\n");
                 }
                 else {
-                    LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMax\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMax\n");
                 }
 
                 std::string formatStr("%.3lf");
@@ -163,7 +163,7 @@ namespace SPTAG {
 
                 formatStr += '\n';
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     formatStr.c_str(),
                     sum / collects.size(),
                     collects[static_cast<size_t>(collects.size() * 0.50)],
@@ -180,7 +180,7 @@ namespace SPTAG {
                 float meanrecall = 0, minrecall = MaxDist, maxrecall = 0, stdrecall = 0;
                 std::vector<float> thisrecall(NumQuerys, 0);
                 std::unique_ptr<bool[]> visited(new bool[K]);
-                LOG(Helper::LogLevel::LL_Info, "Start Calculating Recall\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start Calculating Recall\n");
                 for (SizeType i = 0; i < NumQuerys; i++)
                 {
                     memset(visited.get(), 0, K * sizeof(bool));
@@ -223,11 +223,11 @@ namespace SPTAG {
                         std::sort(truthvec.begin(), truthvec.end());
                         for (int j = 0; j < truthvec.size(); j++)
                             ll += std::to_string(truthvec[j].node) + "@" + std::to_string(truthvec[j].distance) + ",";
-                        LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
                         ll = "ann:";
                         for (int j = 0; j < K; j++)
                             ll += std::to_string(results[i].GetResult(j)->VID) + "@" + std::to_string(results[i].GetResult(j)->Dist) + ",";
-                        LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", ll.c_str());
                     }
                 }
                 meanrecall /= NumQuerys;
@@ -237,9 +237,9 @@ namespace SPTAG {
                 }
                 stdrecall = std::sqrt(stdrecall / NumQuerys);
 
-                LOG(Helper::LogLevel::LL_Info, "stdrecall: %.6lf, maxrecall: %.2lf, minrecall: %.2lf\n", stdrecall, maxrecall, minrecall);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "stdrecall: %.6lf, maxrecall: %.2lf, minrecall: %.2lf\n", stdrecall, maxrecall, minrecall);
 
-                LOG(Helper::LogLevel::LL_Info, "\nRecall Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nRecall Distribution:\n");
                 PrintPercentiles<float, float>(thisrecall,
                     [](const float recall) -> float
                     {
@@ -247,7 +247,7 @@ namespace SPTAG {
                     },
                     "%.3lf", true);
 
-                LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", K, truthK, meanrecall);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f\n", K, truthK, meanrecall);
                 
                 if (log) (*log) << meanrecall << " " << stdrecall << " " << minrecall << " " << maxrecall << std::endl;
                 return meanrecall;
@@ -308,7 +308,7 @@ namespace SPTAG {
             template <typename ValueType>
             void PrintStats(std::vector<SPANN::SearchStats>& stats)
             {
-                LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -316,7 +316,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -324,7 +324,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
                 
-                LOG(Helper::LogLevel::LL_Info, "\nSetup Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nSetup Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -332,7 +332,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nComp Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nComp Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -340,7 +340,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nSPDK Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nSPDK Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -348,7 +348,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -356,7 +356,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -364,7 +364,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution(KB):\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution(KB):\n");
                 PrintPercentiles<int, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> int
                     {
@@ -372,7 +372,7 @@ namespace SPTAG {
                     },
                     "%4d");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
                 PrintPercentiles<int, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> int
                     {
@@ -380,7 +380,7 @@ namespace SPTAG {
                     },
                     "%4d");
 
-                LOG(Helper::LogLevel::LL_Info, "\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\n");
             }
 
             void ResetStats(std::vector<SPANN::SearchStats>& totalStats) 
@@ -473,7 +473,7 @@ namespace SPTAG {
             {
                 std::shared_ptr<VectorSet> vectorSet;
                 if (p_opts.m_loadAllVectors) {
-                    LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading VectorSet...\n");
                     if (!p_opts.m_fullVectorPath.empty() && fileexists(p_opts.m_fullVectorPath.c_str())) {
                         std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_vectorType, p_opts.m_vectorDelimiter));
                         auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
@@ -481,32 +481,32 @@ namespace SPTAG {
                         {
                             vectorSet = vectorReader->GetVectorSet();
                             if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
-                            LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
                         }
                     }
                 } else {
-                    LOG(Helper::LogLevel::LL_Info, "Reduce memory usage\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reduce memory usage\n");
                 }
                 return vectorSet;
             }
 
             std::shared_ptr<VectorSet>  LoadUpdateVectors(SPANN::Options& p_opts, std::vector<SizeType>& insertSet, SizeType updateSize)
             {
-                LOG(Helper::LogLevel::LL_Info, "Load Update Vectors\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load Update Vectors\n");
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(p_opts.m_fullVectorPath.c_str(), std::ios::binary | std::ios::in)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", p_opts.m_fullVectorPath.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", p_opts.m_fullVectorPath.c_str());
                     throw std::runtime_error("Failed read file");
                 }
 
                 SizeType row;
                 DimensionType col;
                 if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
                     throw std::runtime_error("Failed read file");
                 }
                 if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
                     throw std::runtime_error("Failed read file");
                 }
 
@@ -519,12 +519,12 @@ namespace SPTAG {
                     for (int i = 0; i < updateSize; i++) {
                         std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(p_opts.m_valueType)) * insertSet[i] * col + sizeof(SizeType) + sizeof(DimensionType);
                         if (ptr->ReadBinary(readSize, vecBuf + i*readSize, offset) != readSize) {
-                            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
                             throw std::runtime_error("Failed read file");
                         }
                     }
                 }
-                LOG(Helper::LogLevel::LL_Info, "Load Vector(%d,%d)\n",updateSize, col);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load Vector(%d,%d)\n",updateSize, col);
                 return std::make_shared<BasicVectorSet>(vectorSet,
                                                         p_opts.m_valueType,
                                                         col,
@@ -534,12 +534,12 @@ namespace SPTAG {
 
             std::shared_ptr<VectorSet> LoadQuerySet(SPANN::Options& p_opts)
             {
-                LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
                 std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
                 auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                 if (ErrorCode::Success != queryReader->LoadFile(p_opts.m_queryPath))
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
                     exit(1);
                 }
                 return queryReader->GetVectorSet();
@@ -549,25 +549,25 @@ namespace SPTAG {
             {
                 auto ptr = f_createIO();
                 if (p_opts.m_update) {
-                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", truthfilename.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", truthfilename.c_str());
                     
                     if (ptr == nullptr || !ptr->Initialize(truthfilename.c_str(), std::ios::in | std::ios::binary)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
                         exit(1);
                     }
                 } else {
-                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", p_opts.m_truthPath.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...: %s\n", p_opts.m_truthPath.c_str());
                     
                     if (ptr == nullptr || !ptr->Initialize(p_opts.m_truthPath.c_str(), std::ios::in | std::ios::binary)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthfilename.c_str());
                         exit(1);
                     }
                 }
-                LOG(Helper::LogLevel::LL_Error, "K: %d, TruthResultNum: %d\n", p_opts.m_resultNum, p_opts.m_truthResultNum);    
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "K: %d, TruthResultNum: %d\n", p_opts.m_resultNum, p_opts.m_truthResultNum);    
                 COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, p_opts.m_truthResultNum, p_opts.m_resultNum, p_opts.m_truthType);
                 char tmp[4];
                 if (ptr->ReadBinary(4, tmp) == 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                 }
             }
 
@@ -589,7 +589,7 @@ namespace SPTAG {
 
                 std::vector<QueryResult> results(numQueries, QueryResult(NULL, internalResultNum, false));
 
-                if (showStatus) LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d, searchTimes: %d.\n", numThreads, numQueries, avgStatsNum);
+                if (showStatus) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d, searchTimes: %d.\n", numThreads, numQueries, avgStatsNum);
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 std::vector<SPANN::SearchStats> TotalStats(numQueries);
                 ResetStats(TotalStats);
@@ -605,7 +605,7 @@ namespace SPTAG {
                     //PrintStats<ValueType>(stats);
                     AddStats(TotalStats, stats);
                 }
-                if (showStatus) LOG(Helper::LogLevel::LL_Info, "Current time: %.0lf, Searching Times: %d, AvgQPS: %.2lf.\n", second, avgStatsNum, totalQPS/avgStatsNum);
+                if (showStatus) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current time: %.0lf, Searching Times: %d, AvgQPS: %.2lf.\n", second, avgStatsNum, totalQPS/avgStatsNum);
 
                 AvgStats(TotalStats, avgStatsNum);
 
@@ -626,45 +626,45 @@ namespace SPTAG {
 
             void LoadUpdateMapping(std::string fileName, std::vector<SizeType>& reverseIndices)
             {
-                LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
 
                 int vectorNum;
 
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(fileName.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
                     exit(1);
                 }
                 
                 if (ptr->ReadBinary(4, (char *)&vectorNum) != 4) {
-                    LOG(Helper::LogLevel::LL_Error, "vector Size Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "vector Size Error!\n");
                 }
 
                 reverseIndices.clear();
                 reverseIndices.resize(vectorNum);
 
                 if (ptr->ReadBinary(vectorNum * 4, (char*)reverseIndices.data()) != vectorNum * 4) {
-                    LOG(Helper::LogLevel::LL_Error, "update mapping Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "update mapping Error!\n");
                     exit(1);
                 }
             }
 
             void LoadUpdateTrace(std::string fileName, SizeType& updateSize, std::vector<SizeType>& insertSet, std::vector<SizeType>& deleteSet)
             {
-                LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
 
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(fileName.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
                     exit(1);
                 }
 
                 int tempSize;
 
-                LOG(Helper::LogLevel::LL_Info, "Loading Size\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Size\n");
                 
                 if (ptr->ReadBinary(4, (char *)&tempSize) != 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Update Size Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Update Size Error!\n");
                 }
 
                 updateSize = tempSize;
@@ -672,40 +672,40 @@ namespace SPTAG {
                 deleteSet.clear();
                 deleteSet.resize(updateSize);
 
-                LOG(Helper::LogLevel::LL_Info, "Loading deleteSet\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading deleteSet\n");
 
                 if (ptr->ReadBinary(updateSize * 4, (char*)deleteSet.data()) != updateSize * 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Delete Set Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Delete Set Error!\n");
                     exit(1);
                 }
 
                 insertSet.clear();
                 insertSet.resize(updateSize);
 
-                LOG(Helper::LogLevel::LL_Info, "Loading insertSet\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading insertSet\n");
 
                 if (ptr->ReadBinary(updateSize * 4, (char*)insertSet.data()) != updateSize * 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Insert Set Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Insert Set Error!\n");
                     exit(1);
                 }
             }
 
             void LoadUpdateTraceStressTest(std::string fileName, SizeType& updateSize, std::vector<SizeType>& insertSet)
             {
-                LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading %s\n", fileName.c_str());
 
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(fileName.c_str(), std::ios::in | std::ios::binary)) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open trace file: %s\n", fileName.c_str());
                     exit(1);
                 }
 
                 int tempSize;
 
-                LOG(Helper::LogLevel::LL_Info, "Loading Size\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Size\n");
                 
                 if (ptr->ReadBinary(4, (char *)&tempSize) != 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Update Size Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Update Size Error!\n");
                 }
 
                 updateSize = tempSize;
@@ -713,10 +713,10 @@ namespace SPTAG {
                 insertSet.clear();
                 insertSet.resize(updateSize);
 
-                LOG(Helper::LogLevel::LL_Info, "Loading insertSet\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading insertSet\n");
 
                 if (ptr->ReadBinary(updateSize * 4, (char*)insertSet.data()) != updateSize * 4) {
-                    LOG(Helper::LogLevel::LL_Error, "Insert Set Error!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Insert Set Error!\n");
                     exit(1);
                 }
             }
@@ -747,7 +747,7 @@ namespace SPTAG {
                         {
                             if ((index & ((1 << 14) - 1)) == 0 && p_opts.m_showUpdateProgress)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Insert: Sent %.2lf%%...\n", index * 100.0 / updateSize);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Insert: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
                             // std::vector<char> meta;
                             // std::vector<std::uint64_t> metaoffset;
@@ -780,25 +780,25 @@ namespace SPTAG {
                 for (auto& thread : threads) { thread.join(); }
 
                 double sendingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Insert: Finish sending in %.3lf seconds, sending throughput is %.2lf , insertion count %u.\n",
                 sendingCost,
                 updateSize / sendingCost,
                 static_cast<uint32_t>(updateSize));
 
-                LOG(Helper::LogLevel::LL_Info,"Insert: During Update\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Insert: During Update\n");
 
                 while(!p_index->AllFinished())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
                 double syncingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Insert: Finish syncing in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
                 syncingCost,
                 updateSize / syncingCost,
                 static_cast<uint32_t>(updateSize));
-                LOG(Helper::LogLevel::LL_Info, "Insert Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Insert Latency Distribution:\n");
                 PrintPercentiles<double, double>(latency_vector,
                     [](const double& ss) -> double
                     {
@@ -835,7 +835,7 @@ namespace SPTAG {
                         {
                             if ((index & ((1 << 14) - 1)) == 0 && p_opts.m_showUpdateProgress)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Delete: Sent %.2lf%%...\n", index * 100.0 / updateSize);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Delete: Sent %.2lf%%...\n", index * 100.0 / updateSize);
                             }
                             auto deleteBegin = std::chrono::high_resolution_clock::now();
                             p_index->DeleteIndex(mapping[deleteSet[index]]);
@@ -847,7 +847,7 @@ namespace SPTAG {
                             // ByteArray metarr = SPTAG::ByteArray((std::uint8_t*)meta.data(), meta.size() * sizeof(char), false);
 
                             // if (p_index->VectorIndex::DeleteIndex(metarr) == ErrorCode::VectorNotFound) {
-                            //     LOG(Helper::LogLevel::LL_Info,"VID meta no found: %d\n", deleteSet[index]);
+                            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"VID meta no found: %d\n", deleteSet[index]);
                             //     exit(1);
                             // }
 
@@ -867,7 +867,7 @@ namespace SPTAG {
                 for (int j = 0; j < deleteThreads; j++) { threads.emplace_back(func); }
                 for (auto& thread : threads) { thread.join(); }
                 double sendingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Delete: Finish sending in %.3lf seconds, sending throughput is %.2lf , deletion count %u.\n",
                 sendingCost,
                 updateSize / sendingCost,
@@ -881,7 +881,7 @@ namespace SPTAG {
                 int days = p_opts.m_days;
                 if (days == 0)
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Need to input update days\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Need to input update days\n");
                     exit(1);
                 }
                 StopWSPFresh sw;
@@ -922,9 +922,9 @@ namespace SPTAG {
 
                 int insertThreads = p_opts.m_insertThreadNum;
 
-                LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, total days: %d.\n", insertThreads, days);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, total days: %d.\n", insertThreads, days);
 
-                LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
 
                 int updateSize;
                 std::vector<SizeType> insertSet;
@@ -945,7 +945,7 @@ namespace SPTAG {
                     if (!p_opts.m_loadAllVectors) {
                         vectorSet = LoadUpdateVectors(p_opts, insertSet, updateSize);
                     }
-                    LOG(Helper::LogLevel::LL_Info, "Updating day: %d: numThread: %d, updateSize: %d,total days: %d.\n", i, insertThreads, updateSize, days);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Updating day: %d: numThread: %d, updateSize: %d,total days: %d.\n", i, insertThreads, updateSize, days);
 
                     int sampleSize = updateSize / p_opts.m_sampling;
 
@@ -976,7 +976,7 @@ namespace SPTAG {
                         else delete_status = std::future_status::ready;
                         if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
                             if (p_index->GetNumDeleted() >= nextSamplePoint) {
-                                LOG(Helper::LogLevel::LL_Info, "Samppling Size: %d\n", nextSamplePoint);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Samppling Size: %d\n", nextSamplePoint);
                                 showStatus = true;
                                 nextSamplePoint += sampleSize;
                                 ShowMemoryStatus(vectorSet, sw.getElapsedSec());
@@ -1007,7 +1007,7 @@ namespace SPTAG {
                     p_index->StopMerge();
                     if (p_opts.m_maxInternalResultNum != -1) 
                     {
-                        LOG(Helper::LogLevel::LL_Info, "Latency & Recall Tradeoff\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Latency & Recall Tradeoff\n");
                         for (int iterInternalResultNum = p_opts.m_minInternalResultNum; iterInternalResultNum <= p_opts.m_maxInternalResultNum; iterInternalResultNum += p_opts.m_stepInternalResultNum) 
                         {
                             StableSearch(p_index, numThreads, querySet, vectorSet, searchTimes, p_opts.m_queryCountLimit, iterInternalResultNum, truthFileName, p_opts, sw.getElapsedSec());
@@ -1046,7 +1046,7 @@ namespace SPTAG {
                         {
                             if ((index & ((1 << 14) - 1)) == 0)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
                             }
                             auto insertBegin = std::chrono::high_resolution_clock::now();
                             p_index->AddIndex(vectorSet->GetVector((SizeType)(index + curCount)), 1, p_opts.m_dim, nullptr);
@@ -1064,20 +1064,20 @@ namespace SPTAG {
                 for (auto& thread : threads) { thread.join(); }
 
                 double sendingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Finish sending in %.3lf seconds, sending throughput is %.2lf , insertion count %u.\n",
                 sendingCost,
                 step/ sendingCost,
                 static_cast<uint32_t>(step));
 
-                LOG(Helper::LogLevel::LL_Info,"During Update\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"During Update\n");
 
                 while(!p_index->AllFinished())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
                 double syncingCost = sw.getElapsedSec();
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "Finish syncing in %.3lf seconds, actuall throughput is %.2lf, insertion count %u.\n",
                 syncingCost,
                 step / syncingCost,
@@ -1097,7 +1097,7 @@ namespace SPTAG {
                 int step = p_opts.m_step;
                 if (step == 0)
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Incremental Test Error, Need to set step.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Incremental Test Error, Need to set step.\n");
                     exit(1);
                 }
                 StopWSPFresh sw;
@@ -1151,12 +1151,12 @@ namespace SPTAG {
                 int finishedInsert = 0;
                 int insertThreads = p_opts.m_insertThreadNum;
 
-                LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, insertCount: %d, totalBatch: %d.\n", insertThreads, step, insertCount, batch);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Updating: numThread: %d, step: %d, insertCount: %d, totalBatch: %d.\n", insertThreads, step, insertCount, batch);
 
-                LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start updating...\n");
                 for (int i = 0; i < 1; i++)
                 {   
-                    LOG(Helper::LogLevel::LL_Info, "Updating Batch %d: numThread: %d, step: %d.\n", i, insertThreads, step);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Updating Batch %d: numThread: %d, step: %d.\n", i, insertThreads, step);
 
                     std::future<void> insert_future =
                         std::async(std::launch::async, InsertVectors<ValueType>, p_index,
@@ -1178,7 +1178,7 @@ namespace SPTAG {
 
                     curCount += step;
                     finishedInsert += step;
-                    LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total Vector num %d \n", curCount);
 
                     p_index->GetIndexStat(finishedInsert, true, true);
 
@@ -1211,7 +1211,7 @@ namespace SPTAG {
                 std::shared_ptr<VectorIndex> index;
 
                 if (index->LoadIndex(storePath, index) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to load index.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load index.\n");
                     return 1;
                 }
 

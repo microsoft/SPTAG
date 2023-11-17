@@ -333,21 +333,10 @@ namespace SPTAG
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, std::function<bool(const ByteArray&)> filterFunc) const
         {
-            std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
-            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
-            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
-            const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
-
-            while (!p_space.m_NGQueue.empty()) {
-                NodeDistPair gnode = p_space.m_NGQueue.pop();
-                SizeType tmpNode = gnode.node;
-                const SizeType* node = m_pGraph[tmpNode];
-                _mm_prefetch((const char*)node, _MM_HINT_T0);
-                for (DimensionType i = 0; i <= checkPos; i++) {
-                    auto futureNode = node[i];
-                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
-                    _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
-                }
+            if (m_pQuantizer && !p_query.HasQuantizedTarget())
+            {
+                p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
+            }
 
             // bitflags for which dispatch to take
             uint8_t flags = 0;
@@ -670,7 +659,7 @@ namespace SPTAG
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
-                if (m_pSamples.AddBatch(p_vectorNum, (const T*)p_data) != ErrorCode::Success || 
+                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success || 
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success || 
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
@@ -729,17 +718,17 @@ namespace SPTAG
                 end = begin + p_vectorNum;
 
                 if (begin == 0) {
-                    LOG(Helper::LogLevel::LL_Error, "Index Error: No vector in Index!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Index Error: No vector in Index!\n");
                     return ErrorCode::EmptyIndex;
                 }
 
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
 
 
-                if (m_pSamples.AddBatch(p_vectorNum, (const T*)p_data) != ErrorCode::Success ||
+                if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
                     m_deletedID.SetR(begin);

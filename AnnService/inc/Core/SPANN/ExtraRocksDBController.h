@@ -131,9 +131,9 @@ namespace SPTAG::SPANN
             }
 
             auto s = rocksdb::DB::Open(dbOptions, dbPath, &db);
-            LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
             if (s != rocksdb::Status::OK()) {
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
             }
         }
 
@@ -141,7 +141,7 @@ namespace SPTAG::SPANN
             /*
             std::string stats;
             db->GetProperty("rocksdb.stats", &stats);
-            LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
             */
 
             if (db) {
@@ -162,7 +162,7 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
             else {
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Get\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Get\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
                 return ErrorCode::Fail;
             }
         }
@@ -191,7 +191,7 @@ namespace SPTAG::SPANN
                     delete[] slice_keys;
                     delete[] slice_values;
                     delete[] statuses;
-                    LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), *((SizeType*)(keys[i].data())));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), *((SizeType*)(keys[i].data())));
                     return ErrorCode::Fail;
                 }
                 values->push_back(slice_values[i].ToString());
@@ -219,7 +219,7 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
             else {
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Put\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Put\e[0m: %s, key: %d\n", s.getState(), *((SizeType*)(key.data())));
                 return ErrorCode::Fail;
             }
         }
@@ -231,7 +231,7 @@ namespace SPTAG::SPANN
 
         ErrorCode Merge(SizeType key, const std::string& value) {
             if (value.empty()) {
-                LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
             std::string k((char*)&key, sizeof(SizeType));
             auto s = db->Merge(rocksdb::WriteOptions(), k, value);
@@ -239,7 +239,7 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
             else {
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Merge\e[0m: %s, key: %d\n", s.getState(), key);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in Merge\e[0m: %s, key: %d\n", s.getState(), key);
                 return ErrorCode::Fail;
             }
         }
@@ -259,26 +259,26 @@ namespace SPTAG::SPANN
             /*
             std::string stats;
             db->GetProperty("rocksdb.stats", &stats);
-            LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
             */
-            LOG(Helper::LogLevel::LL_Info, "Start Compaction\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start Compaction\n");
             auto s = db->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
-            LOG(Helper::LogLevel::LL_Info, "Finish Compaction\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish Compaction\n");
 
             if (s != rocksdb::Status::OK()) {
-                LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Compact Error\e[0m: %s\n", s.getState());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Compact Error\e[0m: %s\n", s.getState());
             }
             /*
             db->GetProperty("rocksdb.stats", &stats);
-            LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB Status:\n%s", stats.c_str());
             */
         }
 
         void GetStat() {
             if (dbOptions.statistics != nullptr)
-                LOG(Helper::LogLevel::LL_Info, "RocksDB statistics:\n %s\n", dbOptions.statistics->ToString().c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB statistics:\n %s\n", dbOptions.statistics->ToString().c_str());
             else
-                LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
         }
 
     private:

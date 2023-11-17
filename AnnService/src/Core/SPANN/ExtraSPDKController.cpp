@@ -215,7 +215,7 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         AddressType dataIdx = 1;
         while (currOffset < p_data[0]) {
             AddressType readSize = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
-            memcpy(p_value->data() + currOffset, m_memBuffer.get() + p_data[dataIdx] * PageSize, readSize);
+            memcpy((void *)p_value->data() + currOffset, m_memBuffer.get() + p_data[dataIdx] * PageSize, readSize);
             currOffset += PageSize;
             dataIdx++;
         }
@@ -246,7 +246,7 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
             if (currOffset < p_data[0] && m_currIoContext.free_sub_io_requests.size()) {
                 currSubIo = m_currIoContext.free_sub_io_requests.back();
                 m_currIoContext.free_sub_io_requests.pop_back();
-                currSubIo->app_buff = p_value->data() + currOffset;
+                currSubIo->app_buff = (void *)p_value->data() + currOffset;
                 currSubIo->real_size = (p_data[0] - currOffset) < PageSize ? (p_data[0] - currOffset) : PageSize;
                 currSubIo->is_read = true;
                 currSubIo->offset = p_data[dataIdx] * PageSize;
@@ -297,7 +297,7 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
 
             while (currOffset < p_data_i[0]) {
                 SubIoRequest currSubIo;
-                currSubIo.app_buff = p_value->data() + currOffset;
+                currSubIo.app_buff = (void *)p_value->data() + currOffset;
                 currSubIo.real_size = (p_data_i[0] - currOffset) < PageSize ? (p_data_i[0] - currOffset) : PageSize;
                 currSubIo.is_read = true;
                 currSubIo.offset = p_data_i[dataIdx] * PageSize;

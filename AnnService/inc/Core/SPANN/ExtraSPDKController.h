@@ -126,7 +126,7 @@ namespace SPTAG::SPANN
 
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
-                LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
                 int blocks = RemainBlocks();
@@ -134,7 +134,7 @@ namespace SPTAG::SPANN
                 for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
                     IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
                 }
-                LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
             }
         };
 
@@ -210,7 +210,7 @@ namespace SPTAG::SPANN
             for (SizeType key : keys) {
                 if (key < m_pBlockMapping.R()) blocks.push_back((AddressType*)At(key));
                 else {
-                    LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, m_pBlockMapping.R());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, m_pBlockMapping.R());
                 }
             }
             if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
@@ -220,7 +220,7 @@ namespace SPTAG::SPANN
         ErrorCode Put(SizeType key, const std::string& value) override {
             int blocks = ((value.size() + PageSize - 1) >> PageSizeEx);
             if (blocks >= m_blockLimit) {
-                LOG(Helper::LogLevel::LL_Error, "Failt to put key:%d value:%lld since value too long!\n", key, value.size());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failt to put key:%d value:%lld since value too long!\n", key, value.size());
                 return ErrorCode::Fail;
             }
             int delta = key + 1 - m_pBlockMapping.R();
@@ -265,7 +265,7 @@ namespace SPTAG::SPANN
 
         ErrorCode Merge(SizeType key, const std::string& value) {
             if (key >= m_pBlockMapping.R()) {
-                LOG(Helper::LogLevel::LL_Error, "Key range error: key: %d, mapping size: %d\n", key, m_pBlockMapping.R());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Key range error: key: %d, mapping size: %d\n", key, m_pBlockMapping.R());
                 return ErrorCode::Fail;
             }
 
@@ -273,8 +273,8 @@ namespace SPTAG::SPANN
             auto newSize = *postingSize + value.size();
             int newblocks = ((newSize + PageSize - 1) >> PageSizeEx);
             if (newblocks >= m_blockLimit) {
-                LOG(Helper::LogLevel::LL_Error, "Failt to merge key:%d value:%lld since value too long!\n", key, newSize);
-                LOG(Helper::LogLevel::LL_Error, "Origin Size: %lld, merge size: %lld\n", *postingSize, value.size());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failt to merge key:%d value:%lld since value too long!\n", key, newSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Origin Size: %lld, merge size: %lld\n", *postingSize, value.size());
                 return ErrorCode::Fail;
             }
 
@@ -327,12 +327,12 @@ namespace SPTAG::SPANN
         void GetStat() {
             int remainBlocks = m_pBlockController.RemainBlocks();
             int remainGB = remainBlocks >> 20 << 2;
-            LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
             m_pBlockController.IOStatistics();
         }
 
         ErrorCode Load(std::string path, SizeType blockSize, SizeType capacity) {
-            LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", path.c_str());
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
 
@@ -346,12 +346,12 @@ namespace SPTAG::SPANN
                 At(i) = (uintptr_t)(new AddressType[m_blockLimit]);
                 IOBINARY(ptr, ReadBinary, sizeof(AddressType) * mycols, (char*)At(i));
             }
-            LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%d,%d) Finish!\n", CR, mycols);
             return ErrorCode::Success;
         }
         
         ErrorCode Save(std::string path) {
-            LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping To %s\n", path.c_str());
             auto ptr = f_createIO();
             if (ptr == nullptr || !ptr->Initialize(path.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
 
@@ -368,17 +368,17 @@ namespace SPTAG::SPANN
                     IOBINARY(ptr, WriteBinary, sizeof(AddressType) * m_blockLimit, (char*)postingSize);
                 }
             }
-            LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%d,%d) Finish!\n", CR, m_blockLimit);
             return ErrorCode::Success;
         }
 
         bool Initialize(bool debug = false) override {
-            if (debug) LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
+            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
             return m_pBlockController.Initialize(64);
         }
 
         bool ExitBlockController(bool debug = false) override { 
-            if (debug) LOG(Helper::LogLevel::LL_Info, "Exit SPDK for thread\n");
+            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Exit SPDK for thread\n");
             return m_pBlockController.ShutDown(); 
         }
 

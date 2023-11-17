@@ -117,7 +117,7 @@ endif()
 
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
-option(ROCKSDB "ROCKSDB" ON)
+option(ROCKSDB "ROCKSDB" OFF)
 
 if (ROCKSDB)
     add_definitions(-DROCKSDB)

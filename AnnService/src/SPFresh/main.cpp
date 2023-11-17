@@ -21,7 +21,7 @@ using namespace SPTAG;
 int main(int argc, char* argv[]) {
 	if (argc < 2)
 	{
-		LOG(Helper::LogLevel::LL_Error,
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
 			"spfresh storePath\n");
 		exit(-1);
 	}

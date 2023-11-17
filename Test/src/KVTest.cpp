@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Test.h"
-#include "inc/Core/SPANN/ExtraRocksDBController.h"
+// #include "inc/Core/SPANN/ExtraRocksDBController.h"
 #include "inc/Core/SPANN/ExtraSPDKController.h"
 
 #include <memory>
@@ -43,11 +43,11 @@ void Test(std::string path, std::string type, bool debug = false)
     int totalNum = 1024;
     int mergeIters = 3;
     std::shared_ptr<Helper::KeyValueIO> db;
-    if (type == "RocksDB") {
-        db.reset(new RocksDBIO(path.c_str(), true));
-    } else if (type == "SPDK") {
+    // if (type == "RocksDB") {
+    //     db.reset(new RocksDBIO(path.c_str(), true));
+    // } else if (type == "SPDK") {
         db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
-    }
+    // }
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < totalNum; i++) {
@@ -74,12 +74,12 @@ void Test(std::string path, std::string type, bool debug = false)
     db->ForceCompaction();
     db->ShutDown();
 
-    if (type == "RocksDB") {
-        db.reset(new RocksDBIO(path.c_str(), true));
-        Search(db, internalResultNum, totalNum, 10, debug);
-        db->ForceCompaction();
-        db->ShutDown();
-    }
+    // if (type == "RocksDB") {
+    //     db.reset(new RocksDBIO(path.c_str(), true));
+    //     Search(db, internalResultNum, totalNum, 10, debug);
+    //     db->ForceCompaction();
+    //     db->ShutDown();
+    // }
 }
 
 BOOST_AUTO_TEST_SUITE(KVTest)

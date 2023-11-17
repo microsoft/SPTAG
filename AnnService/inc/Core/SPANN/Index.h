@@ -85,8 +85,6 @@ namespace SPTAG
             inline VectorValueType GetVectorValueType() const { return GetEnumValueType<T>(); }
 
             void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
-            
-            void SetQuantizer(std::shared_ptr<SPTAG::COMMON::IQuantizer> quantizer);
 
             inline float AccurateDistance(const void* pX, const void* pY) const { 
                 if (m_options.m_distCalcMethod == DistCalcMethod::L2) return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim);
@@ -201,7 +199,7 @@ namespace SPTAG
 
             void GetDBStat() { 
                 if (m_options.m_useKV || m_options.m_useSPDK) m_extraSearcher->GetDBStats(); 
-                LOG(Helper::LogLevel::LL_Info, "Current Vector Num: %d, Deleted: %d .\n", GetNumSamples(), GetNumDeleted());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current Vector Num: %d, Deleted: %d .\n", GetNumSamples(), GetNumDeleted());
             }
 
             void GetIndexStat(int finishedInsert, bool cost, bool reset) { if (m_options.m_useKV || m_options.m_useSPDK) m_extraSearcher->GetIndexStats(finishedInsert, cost, reset); }
@@ -226,7 +224,7 @@ namespace SPTAG
 
             ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
                 if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
-                    LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
                     return ErrorCode::Fail;
                 }
 
@@ -243,7 +241,7 @@ namespace SPTAG
                     if (begin == 0) { return ErrorCode::EmptyIndex; }
 
                     if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                        LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
                         exit(1);
                     }
                 }
