@@ -189,7 +189,12 @@ namespace SPTAG {
                         for (int j = 0; j < K; j++)
                         {
                             if (visited[j] || results[i].GetResult(j)->VID < 0) continue;
-                            if (vectorSet != nullptr) {
+                            if (results[i].GetResult(j)->VID == id)
+                            {
+                                thisrecall[i] += 1;
+                                visited[j] = true;
+                                break;
+                            } else if (vectorSet != nullptr) {
                                 float dist = results[i].GetResult(j)->Dist;
                                 float truthDist = COMMON::DistanceUtils::ComputeDistance((const T*)querySet->GetVector(i), (const T*)vectorSet->GetVector(id), vectorSet->Dimension(), index->GetDistCalcMethod());
                                 if (index->GetDistCalcMethod() == SPTAG::DistCalcMethod::Cosine && fabs(dist - truthDist) < Epsilon) {
@@ -615,9 +620,13 @@ namespace SPTAG {
                 {
                     if (p_opts.m_searchResult.empty()) {
                         std::vector<std::set<SizeType>> truth;
+                        int K = p_opts.m_resultNum;
                         int truthK = p_opts.m_resultNum;
+                        // float MRR, recall;
                         LoadTruth(p_opts, truth, numQueries, truthFileName, truthK);
-                        CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, p_opts.m_resultNum, truthK, querySet, vectorSet, numQueries);
+                        CalculateRecallSPFresh<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries);
+                        // recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
+                        // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
                     } else {
                         OutputResult<ValueType>(p_opts.m_searchResult + std::to_string(second), results, p_opts.m_resultNum);
                     }

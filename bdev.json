@@ -8,7 +8,7 @@
           "params": {
             "trtype": "pcie",
             "name": "Nvme0",
-            "traddr": "0000:65:00.0"
+            "traddr": "0000:9b:00.0"
           }
         }
       ]

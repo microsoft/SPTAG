@@ -33,8 +33,8 @@ namespace SPTAG::SPANN
             static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
             static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
-            // static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
-            static constexpr AddressType kSsdImplMaxNumBlocks = 1700*1024*256; // 1.7T
+            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
+            // static constexpr AddressType kSsdImplMaxNumBlocks = 1700*1024*256; // 1.7T
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
             static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
@@ -170,7 +170,10 @@ namespace SPTAG::SPANN
             }
             m_compactionThreadPool = std::make_shared<Helper::ThreadPool>();
             m_compactionThreadPool->init(compactionThreads);
-            m_pBlockController.Initialize(batchSize);
+            if (!m_pBlockController.Initialize(batchSize)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize SPDK!\n");
+                exit(0);
+            }
             m_shutdownCalled = false;
         }
 
