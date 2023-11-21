@@ -25,12 +25,12 @@
 #include <random>
 #include <tbb/concurrent_hash_map.h>
 
-// #ifdef ROCKSDB
-// #include "ExtraRocksDBController.h"
-// #endif
+#ifdef ROCKSDB
+#include "ExtraRocksDBController.h"
+#endif
 
 // enable rocksdb io_uring
-// extern "C" bool RocksDbIOUringEnable() { return true; }
+extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN {
     template <typename ValueType>
@@ -166,10 +166,10 @@ namespace SPTAG::SPANN {
                 db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 1, 1024, batchSize));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
-// #ifdef ROCKSDB
-//                 db.reset(new RocksDBIO(dbPath, useDirectIO));
-//                 m_postingSizeLimit = postingBlockLimit;
-// #endif
+#ifdef ROCKSDB
+                db.reset(new RocksDBIO(dbPath, useDirectIO));
+                m_postingSizeLimit = postingBlockLimit;
+#endif
             }
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
             m_vectorInfoSize = dim * sizeof(ValueType) + m_metaDataSize;

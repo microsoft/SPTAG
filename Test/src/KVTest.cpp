@@ -9,7 +9,7 @@
 #include <chrono>
 
 // enable rocksdb io_uring
-extern "C" bool RocksDbIOUringEnable() { return true; }
+// extern "C" bool RocksDbIOUringEnable() { return true; }
 
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
