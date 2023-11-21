@@ -482,7 +482,7 @@ namespace SPTAG::SPANN {
                 auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
                
-                COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity, (ValueType*)postingP, true);
+                COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity, (ValueType*)postingP, true, nullptr, m_metaDataSize, m_vectorInfoSize);
                 //COMMON::Dataset<ValueType> smallSample(0, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity);  // smallSample[i] -> VID
                 //std::vector<int> localIndicesInsert(postVectorNum);  // smallSample[i] = j <-> localindices[j] = i
                 //std::vector<uint8_t> localIndicesInsertVersion(postVectorNum);
