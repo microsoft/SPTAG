@@ -1589,7 +1589,11 @@ namespace SPTAG::SPANN {
         void Checkpoint(std::string prefix) override {
             /**flush SPTAG, versionMap, block mapping, block pool**/
             std::string p_persistenMap = prefix + "_versionMap";
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving version map\n");
             m_versionMap->Save(p_persistenMap);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving posting size\n");
+            std::string p_persistenRecord = prefix + "_postingSizeRecord";
+            m_postingSizes.Save(p_persistenRecord);
             db->Checkpoint(prefix);
         }
 

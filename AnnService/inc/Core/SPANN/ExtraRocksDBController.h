@@ -14,6 +14,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/merge_operator.h"
 #include "rocksdb/table.h"
+#include "rocksdb/utilities/checkpoint.h"
 
 #include <map>
 #include <cmath>
@@ -279,6 +280,15 @@ namespace SPTAG::SPANN
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB statistics:\n %s\n", dbOptions.statistics->ToString().c_str());
             else
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
+        }
+
+        ErrorCode Checkpoint(std::string prefix) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB: checkpoint\n");
+            rocksdb::Checkpoint* checkpoint_ptr;
+            rocksdb::Checkpoint::Create(db, &checkpoint_ptr);
+            std::string filename = prefix + "_rocksdb";
+            checkpoint_ptr->CreateCheckpoint(filename);
+            return ErrorCode::Success;
         }
 
     private:

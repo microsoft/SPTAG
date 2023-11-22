@@ -1011,6 +1011,8 @@ namespace SPTAG {
                     if (!p_opts.m_stressTest) truthFileName = p_opts.m_truthFilePrefix + std::to_string(i);
                     else truthFileName = p_opts.m_truthPath;
 
+                    p_index->Checkpoint();
+
                     p_opts.m_calTruth = calTruthOrigin;
                     if (p_opts.m_onlySearchFinalBatch && days - 1 != i) continue;
                     p_index->StopMerge();

@@ -196,7 +196,8 @@ bool SPDKIO::BlockController::GetBlocks(AddressType* p_data, int p_size) {
 bool SPDKIO::BlockController::ReleaseBlocks(AddressType* p_data, int p_size) {
     if (m_useMemImpl || m_useSsdImpl) {
         for (int i = 0; i < p_size; i++) {
-            m_blockAddresses.push(p_data[i]);
+            // m_blockAddresses.push(p_data[i]);
+            m_blockAddresses_reserve.push(p_data[i]);
         }
         return true;
     } else {

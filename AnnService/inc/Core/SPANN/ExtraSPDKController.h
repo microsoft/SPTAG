@@ -41,6 +41,8 @@ namespace SPTAG::SPANN
             static constexpr int kSsdSpdkDefaultIoDepth = 1024;
 
             tbb::concurrent_queue<AddressType> m_blockAddresses;
+            tbb::concurrent_queue<AddressType> m_blockAddresses_reserve;
+            int m_blockLastReserveSize = 0;
 
             bool m_useSsdImpl = false;
             const char* m_ssdSpdkBdevName = nullptr;
@@ -126,6 +128,7 @@ namespace SPTAG::SPANN
 
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK: saving block pool\n");
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
                 auto ptr = f_createIO();
                 if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
@@ -135,6 +138,15 @@ namespace SPTAG::SPANN
                     IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
+                AddressType currBlockAddress = 0;
+                for (int count = 0; count < m_blockLastReserveSize; count++) {
+                    m_blockAddresses_reserve.try_pop(currBlockAddress);
+                    m_blockAddresses.push(currBlockAddress);
+                }
+                m_blockLastReserveSize = m_blockAddresses_reserve.unsafe_size();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
+                return ErrorCode::Success;
             }
         };
 
@@ -387,6 +399,7 @@ namespace SPTAG::SPANN
 
         ErrorCode Checkpoint(std::string prefix) override {
             std::string filename = prefix + "_blockmapping";
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK: saving block mapping\n");
             m_pBlockMapping.Save(filename);
             m_pBlockController.Checkpoint(prefix);
         }

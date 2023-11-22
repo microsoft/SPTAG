@@ -55,6 +55,9 @@ namespace SPTAG
             int m_iBaseSquare;
 
             std::mutex m_dataAddLock;
+            
+            std::shared_timed_mutex m_checkPointLock;
+
             COMMON::VersionLabel m_versionMap;
 
         public:
@@ -217,8 +220,27 @@ namespace SPTAG
             bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
 
             void Checkpoint() {
+                /** Lock & wait until all jobs done **/
+
+                /** Lock **/
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Locking Index\n");
+                std::unique_lock<std::shared_timed_mutex> lock(m_checkPointLock);
+
+                /** Wait **/
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Waiting for index update complete\n");
+                while(!AllFinished())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
+
+                /** Flush the checkpoint file: SPTAG states, block pool states, block mapping states **/
                 std::string filename = m_options.m_persistentBufferPath + "_headIndex";
+                // Flush SPTAG
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving in-memory index\n");
                 m_index->SaveIndex(filename);
+                // Flush block pool states & block mapping states
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving storage states\n");
                 m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath);
             }
 
@@ -230,6 +252,8 @@ namespace SPTAG
 
                 if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
                 if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
+
+                std::shared_lock<std::shared_timed_mutex> lock(m_checkPointLock);
 
                 SizeType begin, end;
                 {
