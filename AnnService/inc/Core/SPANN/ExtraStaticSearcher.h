@@ -128,7 +128,7 @@ namespace SPTAG
             {
             }
 
-            virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap) {
+            virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, std::shared_ptr<std::uint64_t> m_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
                 p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));

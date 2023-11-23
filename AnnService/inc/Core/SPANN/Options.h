@@ -147,7 +147,7 @@ namespace SPTAG {
             bool m_disableReassign;
             bool m_searchDuringUpdate;
             int m_reassignK;
-            bool m_virtualHead;
+            bool m_recovery;
 
             // Updating(SPFresh Update Test)
             bool m_update;

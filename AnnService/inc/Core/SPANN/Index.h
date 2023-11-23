@@ -218,7 +218,6 @@ namespace SPTAG
             bool Initialize() { return m_extraSearcher->Initialize(); }
 
             bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
-
             void Checkpoint() {
                 /** Lock & wait until all jobs done **/
 

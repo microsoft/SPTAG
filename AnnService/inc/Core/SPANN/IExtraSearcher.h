@@ -277,7 +277,7 @@ namespace SPTAG {
             {
             }
 
-            virtual bool LoadIndex(Options& p_options, COMMON::VersionLabel& p_versionMap) = 0;
+            virtual bool LoadIndex(Options& p_options, COMMON::VersionLabel& p_versionMap, std::shared_ptr<std::uint64_t> m_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) = 0;
 
             virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
@@ -311,8 +311,6 @@ namespace SPTAG {
             virtual bool Initialize() { return false; }
 
             virtual bool ExitBlockController() { return false; }
-
-            virtual void InitPostingRecord(std::shared_ptr<VectorIndex> p_index) { return; }
 
             virtual void Checkpoint(std::string prefix) { return; }
         };

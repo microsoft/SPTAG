@@ -69,7 +69,7 @@ namespace SPTAG::SPANN
         };
 
     public:
-        RocksDBIO(const char* filePath, bool usdDirectIO, bool wal = false) {
+        RocksDBIO(const char* filePath, bool usdDirectIO, bool wal = false, bool recovery = false) {
             dbPath = std::string(filePath);
             //dbOptions.statistics = rocksdb::CreateDBStatistics();
             dbOptions.create_if_missing = true;

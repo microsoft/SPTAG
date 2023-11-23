@@ -620,23 +620,18 @@ VectorIndex::LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<Vect
     std::string folderPath(p_loaderFilePath);
     if (!folderPath.empty() && *(folderPath.rbegin()) != FolderSep) folderPath += FolderSep;
 
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Index Path: %s\n", folderPath.c_str());
-    // exit(1);
-
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reading ini\n");
     Helper::IniReader iniReader;
     {
         auto fp = SPTAG::f_createIO();
         if (fp == nullptr || !fp->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
         if (ErrorCode::Success != iniReader.LoadIni(fp)) return ErrorCode::FailedParseValue;
     }
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Analyze ini & build index\n");
+
     IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
     VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
     if ((p_vectorIndex = CreateInstance(algoType, valueType)) == nullptr) return ErrorCode::FailedParseValue;
 
     ErrorCode ret = ErrorCode::Success;
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load Config\n");
     if ((ret = p_vectorIndex->LoadIndexConfig(iniReader)) != ErrorCode::Success) return ret;
 
     std::shared_ptr<std::vector<std::string>> indexfiles = p_vectorIndex->GetIndexFiles();
