@@ -13,8 +13,6 @@ namespace SPTAG {
 
             inline int GetNewAssignmentID() { return _size++; }
 
-            inline void GetAssignment(int assignmentID, std::string* assignment) { db->Get(assignmentID, assignment); }
-
             inline int PutAssignment(std::string& assignment)
             {
                 int assignmentID = GetNewAssignmentID();
@@ -22,7 +20,27 @@ namespace SPTAG {
                 return assignmentID;
             }
 
-            inline int GetCurrentAssignmentID() { return _size; }
+            inline bool StartToScan(std::string& assignment)
+            {
+                SizeType newSize = 0;
+                if (db->StartToScan(newSize, &assignment) != ErrorCode::Success) return false;
+                _size = newSize+1;
+                return true;
+            }
+
+            inline bool NextToScan(std::string& assignment)
+            {
+                SizeType newSize = 0;
+                if (db->NextToScan(newSize, &assignment) != ErrorCode::Success) return false;
+                _size = newSize+1;
+                return true;
+            }
+
+            inline void ClearPreviousRecord() 
+            {
+                db->DeleteRange(0, _size.load());
+                _size = 0;
+            }
 
             inline int StopPB()
             {

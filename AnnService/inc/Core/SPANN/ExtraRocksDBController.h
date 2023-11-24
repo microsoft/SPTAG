@@ -245,9 +245,40 @@ namespace SPTAG::SPANN
             }
         }
 
+        ErrorCode StartToScan(SizeType& key, std::string* value) {
+            it = db->NewIterator(rocksdb::ReadOptions());
+            it->SeekToFirst();
+            if (!it->Valid()) return ErrorCode::Fail;
+            key = *((SizeType*)(it->key().ToString().c_str()));
+            *value = it->value().ToString();
+            return ErrorCode::Success;
+        }
+
+        ErrorCode NextToScan(SizeType& key, std::string* value) {
+            it->Next();
+            if (!it->Valid()) return ErrorCode::Fail;
+            key = *((SizeType*)(it->key().ToString().c_str()));
+            *value = it->value().ToString();
+            return ErrorCode::Success;
+        }
+
         ErrorCode Delete(SizeType key) override {
             std::string k((char*)&key, sizeof(SizeType));
             auto s = db->Delete(rocksdb::WriteOptions(), k);
+            if (s == rocksdb::Status::OK()) {
+                return ErrorCode::Success;
+            }
+            else {
+                return ErrorCode::Fail;
+            }
+        }
+
+        ErrorCode DeleteRange(SizeType start, SizeType end) override {
+            std::string string_start((char*)&start, sizeof(SizeType));
+            rocksdb::Slice slice_start = rocksdb::Slice(string_start);
+            std::string string_end((char*)&end, sizeof(SizeType));
+            rocksdb::Slice slice_end = rocksdb::Slice(string_end);
+            auto s = db->DeleteRange(rocksdb::WriteOptions(), db->DefaultColumnFamily(), slice_start, slice_end);
             if (s == rocksdb::Status::OK()) {
                 return ErrorCode::Success;
             }
@@ -295,6 +326,7 @@ namespace SPTAG::SPANN
         std::string dbPath;
         rocksdb::DB* db{};
         rocksdb::Options dbOptions;
+        rocksdb::Iterator* it;
     };
 }
 #endif // _SPTAG_SPANN_EXTRAROCKSDBCONTROLLER_H_

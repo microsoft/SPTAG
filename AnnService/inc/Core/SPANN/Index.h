@@ -254,12 +254,11 @@ namespace SPTAG
 
                 std::shared_lock<std::shared_timed_mutex> lock(m_checkPointLock);
 
-                SizeType begin, end;
+                SizeType begin;
                 {
                     std::lock_guard<std::mutex> lock(m_dataAddLock);
 
                     begin = m_versionMap.GetVectorNum();
-                    end = begin + p_vectorNum;
 
                     if (begin == 0) { return ErrorCode::EmptyIndex; }
 

@@ -1109,8 +1109,9 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::DeleteIndex(const SizeType &p_id)
         {
-            if (m_versionMap.Delete(p_id)) return ErrorCode::Success;
-            return ErrorCode::VectorNotFound;
+            // if (m_versionMap.Delete(p_id)) return ErrorCode::Success;
+            // return ErrorCode::VectorNotFound;
+            return m_extraSearcher->DeleteIndex(p_id);
         }
 
         template <typename T>

@@ -106,6 +106,7 @@ namespace SPTAG {
             bool m_useDirectIO;
             bool m_preReassign;
             float m_preReassignRatio;
+            bool m_enableWAL;
 
             // GPU building
             int m_gpuSSDNumTrees;

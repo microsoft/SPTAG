@@ -28,9 +28,11 @@ namespace SPTAG
 
             virtual ErrorCode Put(SizeType key, const std::string& value) = 0;
 
-            virtual  ErrorCode Merge(SizeType key, const std::string& value) = 0;
+            virtual ErrorCode Merge(SizeType key, const std::string& value) = 0;
 
             virtual ErrorCode Delete(SizeType key) = 0;
+
+            virtual ErrorCode DeleteRange(SizeType start, SizeType end) {return ErrorCode::Undefined;}
 
             virtual void ForceCompaction() {}
 
@@ -41,6 +43,10 @@ namespace SPTAG
             virtual bool ExitBlockController(bool debug = false) { return false; }
 
             virtual ErrorCode Checkpoint(std::string prefix) {return ErrorCode::Undefined;}
+
+            virtual ErrorCode StartToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
+
+            virtual ErrorCode NextToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
         };
     }
 }

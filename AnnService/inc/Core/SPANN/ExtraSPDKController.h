@@ -180,7 +180,7 @@ namespace SPTAG::SPANN
                         while (!m_ssdSpdkThreadReady && !m_ssdSpdkThreadStartFailed);
                         if (m_ssdSpdkThreadStartFailed) {
                             fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
-                            ErrorCode::Fail;
+                            return ErrorCode::Fail;
                         }
                     }
                     // Create sub I/O request pool
@@ -258,7 +258,7 @@ namespace SPTAG::SPANN
             if (m_shutdownCalled) {
                 return;
             }
-            Save(m_mappingPath);
+            if (!m_mappingPath.empty()) Save(m_mappingPath);
             for (int i = 0; i < m_pBlockMapping.R(); i++) {
                 if (At(i) != 0xffffffffffffffff) delete[]((AddressType*)At(i));
             }

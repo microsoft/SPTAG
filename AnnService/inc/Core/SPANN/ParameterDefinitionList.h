@@ -104,6 +104,7 @@ DefineSSDParameter(m_useDirectIO, bool, false, "UseDirectIO")
 DefineSSDParameter(m_preReassign, bool, false, "PreReassign")
 DefineSSDParameter(m_preReassignRatio, float, 0.7f, "PreReassignRatio")
 DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
+DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

@@ -153,6 +153,8 @@ namespace SPTAG::SPANN {
 
         IndexStats m_stat;
 
+        std::shared_ptr<PersistentBuffer> m_wal;
+
         // tbb::concurrent_hash_map<SizeType, SizeType> m_splitList;
 
         std::mutex m_runningLock;
@@ -163,11 +165,11 @@ namespace SPTAG::SPANN {
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false) {
             if (useSPDK) {
-                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + 1, 1024, batchSize, recovery));
+                db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
-                db.reset(new RocksDBIO(dbPath, useDirectIO, recovery));
+                db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
                 m_postingSizeLimit = postingBlockLimit;
 #endif
             }
@@ -1101,13 +1103,13 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading posting size\n");
                 std::string p_persistenRecord = m_opt->m_persistentBufferPath + "_postingSizeRecord";
                 m_postingSizes.Load(p_persistenRecord, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %d.\n", m_versionMap->GetVectorNum());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery:Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             }
             else if (!m_opt->m_useSPDK) {
                 m_versionMap->Load(m_opt->m_deleteIDFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 m_postingSizes.Load(m_opt->m_ssdInfoFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->GetVectorNum());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             } else if (m_opt->m_useSPDK) {
                 m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
@@ -1185,6 +1187,49 @@ namespace SPTAG::SPANN {
                 m_reassignThreadPool = std::make_shared<SPDKThreadPool>();
                 m_reassignThreadPool->initSPDK(m_opt->m_reassignThreadNum, this);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
+
+                if (m_opt->m_enableWAL) {
+                    std::string p_persistenWAL = m_opt->m_persistentBufferPath + "_WAL";
+                    std::shared_ptr<Helper::KeyValueIO> pdb;
+                    pdb.reset(new RocksDBIO(p_persistenWAL.c_str(), false, false));
+                    m_wal.reset(new PersistentBuffer(pdb));
+                } 
+            }
+
+            /** recover the previous WAL **/
+            if (m_opt->m_recovery && m_opt->m_enableWAL) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: WAL\n");
+                std::string assignment;
+                int countAssignment = 0;
+                if (!m_wal->StartToScan(assignment)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: No log\n");
+                    return true;
+                }
+                do {
+                    countAssignment++;
+                    if (countAssignment % 10000 == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Process %d logs\n", countAssignment);
+                    char* ptr = (char*)(assignment.c_str());
+                    SizeType VID = *(reinterpret_cast<SizeType*>(ptr));
+                    if (assignment.size() == m_vectorInfoSize) {
+                        if (VID >= m_versionMap->GetVectorNum()) {
+                            if (m_versionMap->AddBatch(VID - m_versionMap->GetVectorNum() + 1) != ErrorCode::Success) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", VID, m_versionMap->BufferSize());
+                                exit(1);
+                            }
+                        }
+                        std::shared_ptr<VectorSet> vectorSet;
+                        vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)ptr + sizeof(SizeType) + sizeof(uint8_t), sizeof(ValueType) * 1 * m_opt->m_dim, false),
+                            GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
+                        AddIndex(vectorSet, m_index, VID);
+                    } else {
+                        m_versionMap->Delete(VID);
+                    }
+                } while (m_wal->NextToScan(assignment));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: No more to repeat, wait for rebalance\n");
+                while(!AllFinished())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
             }
             return true;
         }
@@ -1583,6 +1628,9 @@ namespace SPTAG::SPANN {
                 uint8_t version = m_versionMap->GetVersion(VID);
                 std::string appendPosting(m_vectorInfoSize, '\0');
                 Serialize((char*)(appendPosting.c_str()), VID, version, p_vectorSet->GetVector(v));
+                if (m_opt->m_enableWAL) {
+                    m_wal->PutAssignment(appendPosting);
+                }
                 for (int i = 0; i < replicaCount; i++)
                 {
                     // AppendAsync(selections[i].node, 1, appendPosting_ptr);
@@ -1590,6 +1638,16 @@ namespace SPTAG::SPANN {
                 }
             }
             return ErrorCode::Success;
+        }
+
+        ErrorCode DeleteIndex(SizeType p_id) override {
+            if (m_opt->m_enableWAL) {
+                std::string assignment(sizeof(SizeType), '\0');
+                memcpy((char*)assignment.c_str(), &p_id, sizeof(SizeType));
+                m_wal->PutAssignment(assignment);
+            }
+            if (m_versionMap->Delete(p_id)) return ErrorCode::Success;
+            return ErrorCode::VectorNotFound;
         }
 
         SizeType SearchVector(std::shared_ptr<VectorSet>& p_vectorSet,
@@ -1668,6 +1726,11 @@ namespace SPTAG::SPANN {
             std::string p_persistenRecord = prefix + "_postingSizeRecord";
             m_postingSizes.Save(p_persistenRecord);
             db->Checkpoint(prefix);
+            if (m_opt->m_enableWAL) {
+                /** delete all the previous record **/
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Checkpoint done, delete previous record\n");
+                m_wal->ClearPreviousRecord();
+            }
         }
 
         ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) {
