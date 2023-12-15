@@ -70,9 +70,10 @@ namespace winrt::SPTAG::implementation
     bool p_withMetaIndex{ true };
     bool p_normalized{ true };
 
-    std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
-    if (!sptag::MetadataSet::GetMetadataOffsets(p_meta.Data(), p_meta.Length(), offsets, p_num + 1, '\n')) throw winrt::hresult_invalid_argument{};
-    std::shared_ptr<sptag::MetadataSet> meta(new sptag::MemMetadataSet(p_meta, sptag::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), (sptag::SizeType)p_num));
+    std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0, metadata.size() * sizeof(metadata[0]) };
+    sptag::ByteArray offsetsArray(reinterpret_cast<std::uint8_t*>(offsets), p_num + 1, true);
+    std::shared_ptr<sptag::MemMetadataSet> meta(new sptag::MemMetadataSet(p_meta, offsetsArray, p_num));
+
     if (sptag::ErrorCode::Success != m_index->AddIndex(vectors, meta, p_withMetaIndex, p_normalized)) {
       throw winrt::hresult_error(E_UNEXPECTED);
     }

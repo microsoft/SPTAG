@@ -131,6 +131,8 @@ namespace SPTAG
             virtual bool LoadIndex(Options& p_opt) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile;
+                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(), std::ios::binary | std::ios::in, 
@@ -537,6 +539,8 @@ namespace SPTAG
                 int postingSizeLimit = INT_MAX;
                 if (p_opt.m_postingPageLimit > 0)
                 {
+                    p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * vectorInfoSize + PageSize - 1) / PageSize));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build index with posting page limit:%d\n", p_opt.m_postingPageLimit);
                     postingSizeLimit = static_cast<int>(p_opt.m_postingPageLimit * PageSize / vectorInfoSize);
                 }
 
@@ -744,6 +748,99 @@ namespace SPTAG
             virtual bool CheckValidPosting(SizeType postingID)
             {
                 return m_listInfos[postingID].listEleCount != 0;
+            }
+
+
+            virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs)
+            {
+                VIDs.clear();
+
+                SizeType curPostingID = vid;
+                ListInfo* listInfo = &(m_listInfos[curPostingID]);
+                VIDs.resize(listInfo->listEleCount);
+                ByteArray vector_array = ByteArray::Alloc(sizeof(ValueType) * listInfo->listEleCount * m_iDataDimension);
+                vecs.reset(new BasicVectorSet(vector_array, GetEnumValueType<ValueType>(), m_iDataDimension, listInfo->listEleCount));
+
+                int fileid = m_oneContext ? 0 : curPostingID / m_listPerFile;
+
+#ifndef BATCH_READ
+                Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
+#endif
+
+                size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[0]).GetBuffer());
+
+#ifdef ASYNC_READ       
+                auto& request = p_exWorkSpace->m_diskRequests[0];
+                request.m_offset = listInfo->listOffset;
+                request.m_readSize = totalBytes;
+                request.m_buffer = buffer;
+                request.m_status = (fileid << 16) | p_exWorkSpace->m_spaceID;
+                request.m_payload = (void*)listInfo;
+                request.m_success = false;
+
+#ifdef BATCH_READ // async batch read
+                request.m_callback = [&p_exWorkSpace, &vecs, &VIDs, &p_index, &request, this](bool success)
+                {
+                    char* buffer = request.m_buffer;
+                    ListInfo* listInfo = (ListInfo*)(request.m_payload);
+
+                    // decompress posting list
+                    char* p_postingListFullData = buffer + listInfo->pageOffset;
+                    if (m_enableDataCompression)
+                    {
+                        DecompressPosting();
+                    }
+
+                    for (int i = 0; i < listInfo->listEleCount; i++) 
+                    {
+                            uint64_t offsetVectorID, offsetVector; 
+                            (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount); 
+                            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID)); 
+                            (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector)); 
+                            VIDs[i] = vectorID;
+                            auto outVec = vecs->GetVector(i);
+                            memcpy(outVec, (void*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_iDataDimension);
+                    } 
+                };
+#else // async read
+                request.m_callback = [&p_exWorkSpace, &request](bool success)
+                {
+                    p_exWorkSpace->m_processIocp.push(&request);
+                };
+
+                ++unprocessed;
+                if (!(indexFile->ReadFileAsync(request)))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
+                    unprocessed--;
+                }
+#endif
+#else // sync read
+                auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
+                if (numRead != totalBytes) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
+                    throw std::runtime_error("File read mismatch");
+                }
+                // decompress posting list
+                char* p_postingListFullData = buffer + listInfo->pageOffset;
+                if (m_enableDataCompression)
+                {
+                    DecompressPosting();
+                }
+
+                for (int i = 0; i < listInfo->listEleCount; i++) 
+                {
+                    uint64_t offsetVectorID, offsetVector;
+                    (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount);
+                    int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));
+                    (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));
+                    VIDs[i] = vectorID;
+                    auto outVec = vecs->GetVector(i);
+                    memcpy(outVec, (void*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_iDataDimension);
+                }
+#endif
+                return ErrorCode::Success;
             }
 
         private:
