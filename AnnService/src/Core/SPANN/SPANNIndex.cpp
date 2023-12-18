@@ -3,8 +3,11 @@
 
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
-#include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
+#include "inc/Core/SPANN/ExtraStaticSearcher.h"
+#include "inc/Core/SPANN/ExtraDynamicSearcher.h"
+#include <shared_mutex>
 #include <chrono>
+#include <random>
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -80,6 +83,7 @@ namespace SPTAG
         template <typename T>
         ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs)
         {
+            /** Need to modify **/
             m_index->SetQuantizer(m_pQuantizer);
             if (m_index->LoadIndexDataFromMemory(p_indexBlobs) != ErrorCode::Success) return ErrorCode::Fail;
 
@@ -91,17 +95,27 @@ namespace SPTAG
 
             if (m_pQuantizer)
             {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
             }
             else
             {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                if (m_options.m_useKV) {
+                    if (m_options.m_inPlace) {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
+                    }
+                }
+                else {
+                    m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                }
             }
-            
-            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
+
+            if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index)) return ErrorCode::Fail;
 
             m_vectorTranslateMap.reset((std::uint64_t*)(p_indexBlobs.back().Data()), [=](std::uint64_t* ptr) {});
-           
+
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
             return ErrorCode::Success;
         }
@@ -110,29 +124,88 @@ namespace SPTAG
         ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams)
         {
             m_index->SetQuantizer(m_pQuantizer);
-            if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
+
+            auto headfiles = m_index->GetIndexFiles();
+            if (m_options.m_recovery) {
+                std::shared_ptr<std::vector<std::string>> files(new std::vector<std::string>);
+                auto headfiles = m_index->GetIndexFiles();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading another in-memory index\n");
+                std::string filename = m_options.m_persistentBufferPath + "_headIndex";
+                for (auto file : *headfiles) {
+                    files->push_back(filename + FolderSep + file);
+                }
+                std::vector<std::shared_ptr<Helper::DiskIO>> handles;
+                for (std::string& f : *files) {
+                    auto ptr = SPTAG::f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(f.c_str(), std::ios::binary | std::ios::in)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open file %s!\n", f.c_str());
+                        ptr = nullptr;
+                    }
+                    handles.push_back(std::move(ptr));
+                }
+                m_index->LoadIndexData(handles);
+            } else if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
             m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-            //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
+            m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
             m_index->UpdateIndex();
             m_index->SetReady(true);
 
+            if (m_options.m_recovery) {
+                m_options.m_KVPath = m_options.m_persistentBufferPath + "_rocksdb";
+                m_options.m_spdkMappingPath = m_options.m_persistentBufferPath;
+            }
+
             if (m_pQuantizer)
             {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
             }
             else
             {
-                m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                if (m_options.m_useKV) {
+                    if (m_options.m_inPlace) {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T) * m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
+                    }
+                }
+                else if (m_options.m_useSPDK) {
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
+                } else {
+                    m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                }
             }
 
-            if (!m_extraSearcher->LoadIndex(m_options)) return ErrorCode::Fail;
-
-            m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
-            IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
-
+            if (!m_options.m_recovery) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headID map\n");
+                m_vectorTranslateMap.reset(new std::uint64_t[m_index->GetNumSamples()], std::default_delete<std::uint64_t[]>());
+                IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), reinterpret_cast<char*>(m_vectorTranslateMap.get()));
+            }
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
+
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading storage\n");
+            if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index)) return ErrorCode::Fail;
+
+            if ((m_options.m_useSPDK || m_options.m_useKV) && m_options.m_preReassign) {
+                std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(m_options.m_valueType, m_options.m_dim, m_options.m_vectorType, m_options.m_vectorDelimiter, m_options.m_iSSDNumberOfThreads));
+                auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
+                if (m_options.m_vectorPath.empty())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Vector file is empty. Skipping loading.\n");
+                }
+                else {
+                    if (ErrorCode::Success != vectorReader->LoadFile(m_options.m_vectorPath))
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+                        return ErrorCode::Fail;
+                    }
+                    // m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
+                }
+                m_extraSearcher->RefineIndex(vectorReader, m_index);
+            }
+
             return ErrorCode::Success;
         }
 
@@ -182,7 +255,8 @@ namespace SPTAG
             ErrorCode ret;
             if ((ret = m_index->SaveIndexData(p_indexStreams)) != ErrorCode::Success) return ret;
 
-            IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], WriteBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+            if (m_options.m_excludehead) IOBINARY(p_indexStreams[m_index->GetIndexFiles()->size()], WriteBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+            m_versionMap.Save(m_options.m_deleteIDFile);
             return ErrorCode::Success;
         }
 
@@ -218,10 +292,9 @@ namespace SPTAG
                 {
                     auto res = p_queryResults->GetResult(i);
                     if (res->VID == -1) break;
-
                     auto postingID = res->VID;
-                    res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
-                    if (res->VID == MaxSize) {
+                    if (m_vectorTranslateMap.get() != nullptr) res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    else {
                         res->VID = -1;
                         res->Dist = MaxDist;
                     }
@@ -291,7 +364,11 @@ namespace SPTAG
                 {
                     workSpace->m_postingIDs.emplace_back(res->VID);
                 }
-                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (m_vectorTranslateMap.get() != nullptr) res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                else {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
                 if (res->VID == MaxSize) 
                 {
                     res->VID = -1;
@@ -303,7 +380,11 @@ namespace SPTAG
             {
                 auto res = p_queryResults->GetResult(i);
                 if (res->VID == -1) break;
-                res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                if (m_vectorTranslateMap.get() != nullptr) res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                else {
+                    res->VID = -1;
+                    res->Dist = MaxDist;
+                }
                 if (res->VID == MaxSize) 
                 {
                     res->VID = -1;
@@ -333,10 +414,6 @@ namespace SPTAG
                 auto global_VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
                 if (truth && truth->count(global_VID)) (*found)[res->VID].insert(global_VID);
                 res->VID = global_VID;
-                if (res->VID == MaxSize) {
-                    res->VID = -1;
-                    res->Dist = MaxDist;
-                }
             }
             newResults.Reverse();
 
@@ -767,10 +844,33 @@ namespace SPTAG
 
                 if (m_pQuantizer)
                 {
-                    m_extraSearcher.reset(new ExtraFullGraphSearcher<std::uint8_t>());
+                    m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
+                }
+                else if (m_options.m_useKV)
+                {
+                    if (m_options.m_inPlace) {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit * PageSize / (sizeof(T)*m_options.m_dim + sizeof(int) + sizeof(uint8_t)), m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
+                    }
+                } else if (m_options.m_useSPDK)
+                {
+                    if (m_options.m_inPlace) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
+                        exit(1);
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize));
+                    }  
                 }
                 else {
-                    m_extraSearcher.reset(new ExtraFullGraphSearcher<T>());
+                    if (m_pQuantizer) {
+                        m_extraSearcher.reset(new ExtraStaticSearcher<std::uint8_t>());
+                    }
+                    else {
+                        m_extraSearcher.reset(new ExtraStaticSearcher<T>());
+                    }
                 }
 
                 if (m_options.m_buildSsdIndex) {
@@ -787,12 +887,17 @@ namespace SPTAG
                         }
                     }
 
-                    if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options)) {
+                    if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options, m_versionMap)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
-                        return ErrorCode::Fail;
+                        if (m_options.m_buildSsdIndex) {
+                            return ErrorCode::Fail;
+                        }
+                        else {
+                            m_extraSearcher.reset();
+                        }
                     }
                 }
-                if (!m_extraSearcher->LoadIndex(m_options)) {
+                if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot Load SSDIndex!\n");
                     if (m_options.m_buildSsdIndex) {
                         return ErrorCode::Fail;
@@ -810,8 +915,12 @@ namespace SPTAG
                         return ErrorCode::Fail;
                     }
                     IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * m_index->GetNumSamples(), (char*)(m_vectorTranslateMap.get()));
+                    if ((m_options.m_useKV || m_options.m_useSPDK) && m_options.m_preReassign) {
+                        m_extraSearcher->RefineIndex(p_reader, m_index);
+                    }
                 }
             }
+            
             auto t4 = std::chrono::high_resolution_clock::now();
             double buildSSDTime = std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count();
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n", selectHeadTime, buildHeadTime, buildSSDTime);
@@ -845,7 +954,6 @@ namespace SPTAG
                 }
                 m_options.m_vectorSize = vectorReader->GetVectorSet()->Count();
             }
-  
             return BuildIndexInternal(vectorReader);
         }
 
@@ -933,6 +1041,101 @@ namespace SPTAG
             else {
                 return m_options.GetParameter(p_section, p_param);
             }
+        }
+
+        // Add insert entry to persistent buffer
+        template <typename T>
+        ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension,
+                                     std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex,
+                                     bool p_normalized)
+        {
+            if ((!m_options.m_useKV &&!m_options.m_useSPDK) || m_extraSearcher == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
+                return ErrorCode::Fail;
+            }
+
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+            if (p_dimension != GetFeatureDim()) return ErrorCode::DimensionSizeMismatch;
+
+            SizeType begin, end;
+            {
+                std::lock_guard<std::mutex> lock(m_dataAddLock);
+
+                begin = m_versionMap.GetVectorNum();
+                end = begin + p_vectorNum;
+
+                if (begin == 0) { return ErrorCode::EmptyIndex; }
+
+                if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                    exit(1);
+                }
+
+                if (m_pMetadata != nullptr) {
+                    if (p_metadataSet != nullptr) {
+                        m_pMetadata->AddBatch(*p_metadataSet);
+                        if (HasMetaMapping()) {
+                            for (SizeType i = begin; i < end; i++) {
+                                ByteArray meta = m_pMetadata->GetMetadata(i);
+                                std::string metastr((char*)meta.Data(), meta.Length());
+                                UpdateMetaMapping(metastr, i);
+                            }
+                        }
+                    }
+                    else {
+                        for (SizeType i = begin; i < end; i++) m_pMetadata->Add(ByteArray::c_empty);
+                    }
+                }
+            }
+
+            std::shared_ptr<VectorSet> vectorSet;
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                int base = COMMON::Utils::GetBase<T>();
+                for (SizeType i = 0; i < p_vectorNum; i++) {
+                    COMMON::Utils::Normalize((T*)(vectorSet->GetVector(i)), p_dimension, base);
+                }
+            }
+            else {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_data, sizeof(T) * p_vectorNum * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, p_vectorNum));
+            }
+
+            return m_extraSearcher->AddIndex(vectorSet, m_index, begin);
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::DeleteIndex(const SizeType &p_id)
+        {
+            // if (m_versionMap.Delete(p_id)) return ErrorCode::Success;
+            // return ErrorCode::VectorNotFound;
+            return m_extraSearcher->DeleteIndex(p_id);
+        }
+
+        template <typename T>
+        ErrorCode Index<T>::DeleteIndex(const void* p_vectors, SizeType p_vectorNum)
+        {
+            // TODO: Support batch delete
+            DimensionType p_dimension = GetFeatureDim();
+            std::shared_ptr<VectorSet> vectorSet;
+            if (m_options.m_distCalcMethod == DistCalcMethod::Cosine) {
+                ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+                memcpy(arr.Data(), p_vectors, sizeof(T) * p_vectorNum * p_dimension);
+                vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+                int base = COMMON::Utils::GetBase<T>();
+                for (SizeType i = 0; i < p_vectorNum; i++) {
+                    COMMON::Utils::Normalize((T*)(vectorSet->GetVector(i)), p_dimension, base);
+                }
+            }
+            else {
+                vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)p_vectors, sizeof(T) * 1 * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, 1));
+            }
+            SizeType p_id = m_extraSearcher->SearchVector(vectorSet, m_index);
+            if (p_id == -1) return ErrorCode::VectorNotFound;
+            return DeleteIndex(p_id);
         }
     }
 }

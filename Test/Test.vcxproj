@@ -154,6 +154,7 @@
     <ClCompile Include="src\DistanceTest.cpp" />
     <ClCompile Include="src\FilterTest.cpp" />
     <ClCompile Include="src\IniReaderTest.cpp" />
+    <ClCompile Include="src\KVTest.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\PerfTest.cpp" />
     <ClCompile Include="src\ReconstructIndexSimilarityTest.cpp" />

@@ -23,7 +23,7 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     if (CXX_COMPILER_VERSION VERSION_LESS 5.0)
         message(FATAL_ERROR "GCC version must be at least 5.0!")
     endif()
-    set (CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-delete-non-virtual-dtor -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++14 -fopenmp")
+    set (CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-delete-non-virtual-dtor -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++17 -fopenmp")
     set (CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -march=native")
     set (CMAKE_CXX_FLAGS_DEBUG   "-g -DDEBUG")
 
@@ -117,6 +117,11 @@ endif()
 
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
+option(ROCKSDB "ROCKSDB" ON)
+
+if (ROCKSDB)
+    add_definitions(-DROCKSDB)
+endif()
 
 add_subdirectory (ThirdParty/zstd/build/cmake)
 
