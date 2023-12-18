@@ -3,6 +3,7 @@
 
 #include "inc/Core/BKT/Index.h"
 #include <chrono>
+#include "inc/Core/ResultIterator.h"
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -238,6 +239,56 @@ namespace SPTAG
         } \
         p_query.SortResult(); \
 
+#define SearchIterative(CheckDeleted, p_isFirst, batch) \
+        if (p_isFirst) { \
+            m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        } \
+        const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
+        int count = 0; \
+        while (!p_space.m_NGQueue.empty()) { \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
+            SizeType tmpNode = gnode.node; \
+            const SizeType *node = m_pGraph[tmpNode]; \
+            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
+            CheckDeleted \
+                { \
+                    p_query.AddPoint(tmpNode, gnode.distance); \
+                    count++; \
+                } \
+            SizeType checkNode = node[checkPos]; \
+            if (checkNode < -1) { \
+                const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                SizeType i = -tnode.childStart; \
+                while (i < tnode.childEnd) { \
+                    tmpNode = m_pTrees[i].centerid; \
+                    CheckDeleted \
+                    { \
+                        float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[tmpNode], GetFeatureDim()); \
+                        p_space.m_NGQueue.insert(NodeDistPair(tmpNode, distance2leaf)); \
+                    } \
+                    i++; \
+                }\
+            } \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                SizeType nn_index = node[i]; \
+                if (nn_index < 0) break; \
+                if (p_space.CheckAndSet(nn_index)) continue; \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                p_space.m_iNumberOfCheckedLeaves++; \
+                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
+            } \
+            if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+            } \
+            if (count >= batch) {\
+                break; \
+            } \
+        } \
+        p_query.SortResult(); \
 
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
@@ -271,6 +322,71 @@ namespace SPTAG
             }
         }
 
+        template <typename T>
+        void Index<T>::SearchIndexIterative(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool p_isFirst, 
+            int batch, bool p_searchDeleted, bool p_searchDuplicated) const
+        {
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+            {
+                SearchIterative(;, p_isFirst, batch)
+            }
+            else
+            {
+                SearchIterative(if (!m_deletedID.Contains(tmpNode)), p_isFirst, batch)
+            }
+        }
+
+        template <typename T>
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted) const
+        {
+            if (p_isFirst) 
+            {
+		        p_space->ResetResult(m_iMaxCheck, p_query.GetResultNum());
+                SearchIndex(*((COMMON::QueryResultSet<T>*) & p_query), *p_space, p_searchDeleted, true);
+                // make sure other node can be traversed after topk found 
+		p_space->nodeCheckStatus.clear();
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    if (result < 0)
+                        continue;
+                    p_space->nodeCheckStatus.CheckAndSet(result);
+                    const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
+                    const SizeType* node = m_pGraph[result];
+                    _mm_prefetch((const char*)node, _MM_HINT_T0);
+                    for (DimensionType i = 0; i <= checkPos; i++) {
+                        _mm_prefetch((const char*)(m_pSamples)[node[i]], _MM_HINT_T0);
+                    }
+                    for (DimensionType i = 0; i <= checkPos; i++) {
+                        SizeType nn_index = node[i];
+                        if (nn_index < 0) break;
+                        if (p_space->CheckAndSet(nn_index)) continue;
+                        float distance2leaf = m_fComputeDistance((const T*)p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
+                        p_space->m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf));
+                    }
+                }
+		
+            }
+            else 
+            {
+                p_space->ResetResult(m_iMaxCheck, p_query.GetResultNum());
+                SearchIndexIterative(*((COMMON::QueryResultSet<T>*) & p_query), *p_space, p_isFirst, p_query.GetResultNum(), p_searchDeleted, true);
+            }
+            if (p_query.GetResult(0) == nullptr || p_query.GetResult(0)->VID < 0)
+            {
+                return false;
+            }
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return true;
+        }
+
         template<typename T>
         ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
@@ -282,7 +398,7 @@ namespace SPTAG
             SearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true);
 
             m_workSpacePool->Return(workSpace);
-
+            
             if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
@@ -292,6 +408,54 @@ namespace SPTAG
                 }
             }
             return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return nullptr;
+            auto workSpace = m_workSpacePool->Rent();
+            // TODO(qiazh): optimize batch instead of 1
+            workSpace->Reset(m_iMaxCheck, 1);
+            std::shared_ptr<ResultIterator> resultIterator =
+                std::make_shared<ResultIterator>(this, p_target, workSpace, p_searchDeleted);
+            return resultIterator;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            // TODO(qiazh): optimize batch instead of 1
+            workSpace->ResetResult(m_iMaxCheck, 1);
+            SearchIndexIterative(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_isFirst, 1, p_searchDeleted, true);
+            
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& space) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            if (nullptr != space)
+                m_workSpacePool->Return(space);
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_iMaxCheck, batch);
+            return workSpace;
         }
 
         template<typename T>

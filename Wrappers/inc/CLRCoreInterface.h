@@ -4,6 +4,8 @@
 #pragma once
 #include "ManagedObject.h"
 #include "inc/Core/VectorIndex.h"
+#include "inc/Core/ResultIterator.h"
+#include "inc/Core/MultiIndexScan.h"
 
 using namespace System;
 
@@ -64,6 +66,15 @@ namespace Microsoft
                 }
             };
 
+            public ref class ResultIterator :
+                public ManagedObject<std::shared_ptr<SPTAG::ResultIterator>>
+            {
+            public:
+                ResultIterator(std::shared_ptr<SPTAG::ResultIterator> result_iterator);
+                BasicResult^ Next();
+                void Close();
+            };
+
             public ref class AnnIndex :
                 public ManagedObject<std::shared_ptr<SPTAG::VectorIndex>>
             {
@@ -87,6 +98,8 @@ namespace Microsoft
                 array<BasicResult^>^ Search(array<Byte>^ p_data, int p_resultNum);
 
                 array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
+
+                ResultIterator^ GetIterator(array<Byte>^ p_data, int p_resultNum);
 
                 bool Save(String^ p_saveFile);
 
@@ -116,6 +129,18 @@ namespace Microsoft
 
                 size_t m_inputVectorSize;
             };
+
+            public ref class MultiIndexScan :
+                public ManagedObject<std::shared_ptr<SPTAG::MultiIndexScan>>
+            {
+            public:
+                MultiIndexScan(std::shared_ptr<SPTAG::MultiIndexScan> multi_index_scan);
+                MultiIndexScan(array<AnnIndex^>^ indice, array<array<Byte>^>^ p_data, array<float>^ weight, int p_resultNum,
+                    bool useTimer, int termCondVal, int searchLimit);
+                BasicResult^ Next();
+                void Close();
+            };
+
         }
     }
 }

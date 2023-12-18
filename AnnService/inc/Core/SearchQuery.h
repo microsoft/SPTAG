@@ -113,7 +113,7 @@ public:
     }
 
 
-    inline void* GetQuantizedTarget()
+    inline const void* GetQuantizedTarget()
     {
         return m_quantizedTarget;
     }

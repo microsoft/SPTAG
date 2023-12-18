@@ -164,8 +164,11 @@
     <ClInclude Include="inc\Core\CommonDataStructure.h" />
     <ClInclude Include="inc\Core\DefinitionList.h" />
     <ClInclude Include="inc\Core\MetadataSet.h" />
+    <ClInclude Include="inc\Core\MultiIndexScan.h" />
+    <ClInclude Include="inc\Core\ResultIterator.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
+    <ClInclude Include="inc\Core\SPANNResultIterator.h" />
     <ClInclude Include="inc\Core\SPANN\Compressor.h" />
     <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
@@ -207,6 +210,8 @@
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
+    <ClCompile Include="src\Core\MultiIndexScan.cpp" />
+    <ClCompile Include="src\Core\ResultIterator.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />

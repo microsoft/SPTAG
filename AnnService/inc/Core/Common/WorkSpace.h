@@ -243,6 +243,14 @@ namespace SPTAG
                 m_iMaxCheck = maxCheck;
             }
 
+            void ResetResult(int maxCheck, int resultNum)
+            {
+                m_Results.clear(max(maxCheck / 16, resultNum));
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                m_iNumberOfTreeCheckedLeaves = 0;
+                m_iNumberOfCheckedLeaves = 0;
+            }
+
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);

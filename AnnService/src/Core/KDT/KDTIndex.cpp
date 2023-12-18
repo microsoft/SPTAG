@@ -3,6 +3,7 @@
 
 #include "inc/Core/KDT/Index.h"
 #include <chrono>
+#include "inc/Core/ResultIterator.h"
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -177,6 +178,20 @@ namespace SPTAG
             }
         }
 
+        template <typename T>
+        void Index<T>::SearchIndexIterativeWithoutDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        {
+            //Search(if (!m_deletedID.Contains(gnode.node)))
+            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+        }
+
+        template <typename T>
+        void Index<T>::SearchIndexIterativeWithDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        {
+            //Search(;)
+            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+        }
+
         template<typename T>
         ErrorCode
             Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
@@ -222,6 +237,64 @@ case VectorValueType::Name: \
                 }
             }
             return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return nullptr;
+            auto workSpace = m_workSpacePool->Rent();
+            // TODO(qiazh): optimize batch instead of 1
+            workSpace->Reset(m_iMaxCheck, 1);
+
+            std::shared_ptr<ResultIterator> resultIterator =
+                std::make_shared<ResultIterator>(this, p_target, workSpace, p_searchDeleted);
+
+            return resultIterator;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            // TODO(qiazh): optimize batch instead of 1
+            workSpace->ResetResult(m_iMaxCheck, 1);
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+                SearchIndexIterativeWithDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace);
+            else
+                SearchIndexIterativeWithoutDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace);
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& space) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            m_workSpacePool->Return(space);
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted) const
+        {
+            LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR KDT");
+            return false;
+        }
+
+        template<typename T>
+        std::shared_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        {
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->ResetResult(m_iMaxCheck, batch);
+            return workSpace;
         }
 
         template <typename T>

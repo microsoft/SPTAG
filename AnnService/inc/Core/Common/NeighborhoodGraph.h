@@ -399,6 +399,15 @@ break;
                             m_pNeighborhoodGraph[-1 - iter->first][m_iNeighborhoodSize - 1] = -2 - iter->second;
                         }
                 }
+                for (auto iter = idmap->begin(); iter != idmap->end(); iter++)
+                {
+                    if (iter->first >= 0)
+                    {
+                        for (DimensionType j = 0; j < m_iNeighborhoodSize; j++) {
+                            m_pNeighborhoodGraph[iter->first][j] = -1;
+                        }
+                    }
+                }
             }
 
             template <typename T>

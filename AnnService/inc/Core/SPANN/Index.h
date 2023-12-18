@@ -36,8 +36,12 @@ namespace SPTAG
         class IniReader;
     }
 
+
     namespace SPANN
     {
+        template<typename T>
+	class SPANNResultIterator;
+
         template<typename T>
         class Index : public VectorIndex
         {
@@ -87,6 +91,10 @@ namespace SPTAG
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim); }
+            inline float GetDistance(const void* target, const SizeType idx) const {
+                LOG(Helper::LogLevel::LL_Error, "GetDistance NOT SUPPORT FOR SPANN");
+                return -1;
+            }
             inline bool ContainSample(const SizeType idx) const { return idx < m_options.m_vectorSize; }
 
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
@@ -119,7 +127,16 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
+	    std::shared_ptr<SPANNResultIterator<T>> GetSPANNIterator(const void* p_target, bool p_searchDeleted, int batch) const;
+	    ErrorCode SearchIndexIterativeNext(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace) const;
+            ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace, std::shared_ptr<SPANN::ExtraWorkSpace>& extraWorkspace) const;
+            bool SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted = false) const;
+            std::shared_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
+            ErrorCode SearchIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_indexWorkspace, std::shared_ptr<ExtraWorkSpace>& p_extraWorkspace, bool first) const;
             ErrorCode SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats = nullptr) const;
+	    bool SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, std::shared_ptr<ExtraWorkSpace>& extraWorkspace) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) const;
             ErrorCode UpdateIndex();

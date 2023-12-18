@@ -5,6 +5,7 @@
 #define _SPTAG_VECTORINDEX_H_
 
 #include "Common.h"
+#include "Common/WorkSpace.h"
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
@@ -20,6 +21,7 @@ class IAbortOperation
 public:
     virtual bool ShouldAbort() = 0;
 };
+class ResultIterator;
 
 class VectorIndex
 {
@@ -36,6 +38,16 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeNext(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace) const = 0;
+
+    virtual bool SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted = false) const = 0;
+
+    virtual std::shared_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const = 0;
+
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
@@ -44,6 +56,7 @@ public:
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
     virtual bool NeedRefine() const = 0;

@@ -122,6 +122,9 @@ namespace SPTAG
                 return 1.0f - xy / (sqrt(xx) * sqrt(yy));
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
+            inline float GetDistance(const void* target, const SizeType idx) const {
+                return ComputeDistance(target, m_pSamples.At(idx));
+            }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx); }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
@@ -154,6 +157,12 @@ namespace SPTAG
 
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeNext(QueryResult & p_results, std::shared_ptr<COMMON::WorkSpace>&workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>&workSpace) const;
+            bool SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted = false) const;
+            std::shared_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
+
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
@@ -169,6 +178,7 @@ namespace SPTAG
 
         private:
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const;
+            void SearchIndexIterative(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool p_isFirst, int batch, bool p_searchDeleted, bool p_searchDuplicated) const;
         };
     } // namespace BKT
 } // namespace SPTAG
