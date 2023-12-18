@@ -19,7 +19,7 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
-
+    vecIndex->SetParameter("MaxCheck", "5");
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
     BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
 }
@@ -28,15 +28,37 @@ template <typename T>
 void SearchIterative(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::BasicResult result;
     std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    bool relaxedMono = false;
     for (int i = 0; i < 100; i++) {
-        bool hasResult = resultIterator->Next(result);
+        bool hasResult = resultIterator->Next(result, relaxedMono);
         if (!hasResult) break;
         std::cout << "hasResult: " << hasResult << std::endl;
-        std::cout << "result: " << result.VID << std::endl;  
+        std::cout << "result: " << result.VID << std::endl;
+        std::cout << "relaxedMono: " << relaxedMono << std::endl;
+    }
+    resultIterator->Close();
+}
+
+template <typename T>
+void SearchRelaxedMono(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+    SPTAG::BasicResult result;
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    bool relaxedMono = false;
+    for (int i = 0; i < 100; i++) {
+        bool hasResult = resultIterator->Next(result, relaxedMono);
+        if (!hasResult) break;
+        std::cout << "hasResult: " << hasResult << std::endl;
+        std::cout << "result: " << result.VID << std::endl;
+        std::cout << "relaxedMono: " << relaxedMono << std::endl;
     }
     resultIterator->Close();
 }
@@ -83,6 +105,7 @@ void TestIterativeScan(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     BuildIndex<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     SearchIterative<T>("testindices", query.data(), q, k, truthmeta1);
+    SearchRelaxedMono<T>("testindices", query.data(), q, k, truthmeta1);
 }
 
 BOOST_AUTO_TEST_SUITE(IterativeScanTest)

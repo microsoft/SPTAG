@@ -220,6 +220,7 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg)
@@ -241,6 +242,7 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
             }
 
             void ResetResult(int maxCheck, int resultNum)
@@ -271,6 +273,7 @@ namespace SPTAG
             int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
+            bool m_relaxedMono;
 
             // Prioriy queue used for neighborhood graph
             Heap<NodeDistPair> m_NGQueue;

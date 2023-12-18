@@ -22,6 +22,11 @@ namespace Microsoft
                 return gcnew BasicResult(result);
             }
 
+            bool ResultIterator::GetRelaxedMono()
+            {
+                return (*m_Instance)->GetRelaxedMono();
+            }
+
             void ResultIterator::Close()
             {
                 (*m_Instance)->Close();

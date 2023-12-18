@@ -18,7 +18,8 @@ public:
 	ResultIterator(const VectorIndex* index, const void* p_target,
 		std::shared_ptr<COMMON::WorkSpace> workspace, bool searchDeleted);
 	~ResultIterator();
-	bool Next(BasicResult& result);
+	bool Next(BasicResult& result, bool& relaxedMono);
+	bool GetRelaxedMono();
 	void Close();
 	QueryResult* GetQuery() const;
 private:

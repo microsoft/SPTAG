@@ -72,6 +72,7 @@ namespace Microsoft
             public:
                 ResultIterator(std::shared_ptr<SPTAG::ResultIterator> result_iterator);
                 BasicResult^ Next();
+                bool GetRelaxedMono();
                 void Close();
             };
 

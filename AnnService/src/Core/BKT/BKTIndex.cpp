@@ -258,6 +258,9 @@ namespace SPTAG
                 { \
                     p_query.AddPoint(tmpNode, gnode.distance); \
                     count++; \
+                    if (gnode.distance > p_space.m_Results.worst() || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
+                        p_space.m_relaxedMono = true; \
+                    } \
                 } \
             SizeType checkNode = node[checkPos]; \
             if (checkNode < -1) { \
@@ -268,19 +271,22 @@ namespace SPTAG
                     CheckDeleted \
                     { \
                         float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[tmpNode], GetFeatureDim()); \
-                        p_space.m_NGQueue.insert(NodeDistPair(tmpNode, distance2leaf)); \
+                        if (!p_space.CheckAndSet(tmpNode)) { \
+                            p_space.m_NGQueue.insert(NodeDistPair(tmpNode, distance2leaf)); \
+                        } \
                     } \
                     i++; \
                 }\
             } \
-            for (DimensionType i = 0; i <= checkPos; i++) { \
-                SizeType nn_index = node[i]; \
-                if (nn_index < 0) break; \
-                if (p_space.CheckAndSet(nn_index)) continue; \
-                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
-                p_space.m_iNumberOfCheckedLeaves++; \
-                p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
-            } \
+                for (DimensionType i = 0; i <= checkPos; i++) { \
+                        SizeType nn_index = node[i]; \
+                        if (nn_index < 0) break; \
+                        if (p_space.CheckAndSet(nn_index)) continue; \
+						float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+						p_space.m_iNumberOfCheckedLeaves++; \
+						p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
+						p_space.m_Results.insert(distance2leaf); \
+                } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
                 m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
             } \

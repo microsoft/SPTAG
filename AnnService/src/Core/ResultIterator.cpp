@@ -22,7 +22,7 @@ namespace SPTAG
 		m_queryResult = nullptr;
 	}
 
-	bool ResultIterator::Next(BasicResult& result)
+	bool ResultIterator::Next(BasicResult& result, bool& relaxedMono)
 	{
 		m_queryResult->Reset();
 		m_index->SearchIndexIterativeNext(*m_queryResult, m_workspace, m_isFirstResult, m_searchDeleted);
@@ -34,7 +34,13 @@ namespace SPTAG
 		result.VID = m_queryResult->GetResult(0)->VID;
 		result.Dist = m_queryResult->GetResult(0)->Dist;
 		result.Meta = m_queryResult->GetResult(0)->Meta;
+		relaxedMono = m_workspace->m_relaxedMono;
 		return true;
+	}
+
+	bool ResultIterator::GetRelaxedMono()
+	{
+		return m_workspace->m_relaxedMono;
 	}
 
 	// Add end into destructor.
