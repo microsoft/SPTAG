@@ -2,3 +2,12 @@
 	path = ThirdParty/zstd
 	url = https://github.com/facebook/zstd
 	branch = release
+[submodule "ThirdParty/spdk"]
+	path = ThirdParty/spdk
+	url = https://github.com/spdk/spdk
+[submodule "ThirdParty/isal-l_crypto"]
+	path = ThirdParty/isal-l_crypto
+	url = https://github.com/intel/isa-l_crypto
+[submodule "ThirdParty/RocksDB"]
+	path = ThirdParty/RocksDB
+	url = git@github.com:facebook/rocksdb.git
