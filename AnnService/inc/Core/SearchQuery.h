@@ -27,6 +27,10 @@ public:
     {
     }
 
+    QueryResult(int p_resultNum)
+    {
+        Init(nullptr, p_resultNum, true);
+    }
 
     QueryResult(const void* p_target, int p_resultNum, bool p_withMeta)
     {

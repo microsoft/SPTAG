@@ -128,8 +128,9 @@ namespace SPTAG
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
-	    std::shared_ptr<SPANNResultIterator<T>> GetSPANNIterator(const void* p_target, bool p_searchDeleted, int batch) const;
-	    ErrorCode SearchIndexIterativeNext(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
+	        std::shared_ptr<SPANNResultIterator<T>> GetSPANNIterator(const void* p_target, bool p_searchDeleted, int batch) const;
+	        ErrorCode SearchIndexIterativeNext(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeNextBatch(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, int batch, int& resultCount, bool p_isFirst, bool p_searchDeleted = false) const;
             ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace) const;
             ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace, std::shared_ptr<SPANN::ExtraWorkSpace>& extraWorkspace) const;
             bool SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted = false) const;

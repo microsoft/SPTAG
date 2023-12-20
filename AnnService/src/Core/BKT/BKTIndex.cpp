@@ -245,7 +245,6 @@ namespace SPTAG
             m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
         } \
         const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
-        int count = 0; \
         while (!p_space.m_NGQueue.empty()) { \
             NodeDistPair gnode = p_space.m_NGQueue.pop(); \
             SizeType tmpNode = gnode.node; \
@@ -279,13 +278,13 @@ namespace SPTAG
                 }\
             } \
                 for (DimensionType i = 0; i <= checkPos; i++) { \
-                        SizeType nn_index = node[i]; \
-                        if (nn_index < 0) break; \
-                        if (p_space.CheckAndSet(nn_index)) continue; \
-						float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
-						p_space.m_iNumberOfCheckedLeaves++; \
-						p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
-						p_space.m_Results.insert(distance2leaf); \
+                    SizeType nn_index = node[i]; \
+                    if (nn_index < 0) break; \
+                    if (p_space.CheckAndSet(nn_index)) continue; \
+					float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+					p_space.m_iNumberOfCheckedLeaves++; \
+					p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
+					p_space.m_Results.insert(distance2leaf); \
                 } \
             if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
                 m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
@@ -329,9 +328,10 @@ namespace SPTAG
         }
 
         template <typename T>
-        void Index<T>::SearchIndexIterative(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool p_isFirst, 
+        int Index<T>::SearchIndexIterative(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space, bool p_isFirst, 
             int batch, bool p_searchDeleted, bool p_searchDuplicated) const
         {
+            int count = 0;
             if (m_deletedID.Count() == 0 || p_searchDeleted)
             {
                 SearchIterative(;, p_isFirst, batch)
@@ -340,6 +340,7 @@ namespace SPTAG
             {
                 SearchIterative(if (!m_deletedID.Contains(tmpNode)), p_isFirst, batch)
             }
+            return count;
         }
 
         template <typename T>
@@ -439,6 +440,24 @@ namespace SPTAG
             if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, int p_batch, int& resultCount,  bool p_isFirst, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+            workSpace->ResetResult(m_iMaxCheck, p_batch);
+            resultCount = SearchIndexIterative(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_isFirst, p_batch, p_searchDeleted, true);
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < resultCount; ++i)
                 {
                     SizeType result = p_query.GetResult(i)->VID;
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));

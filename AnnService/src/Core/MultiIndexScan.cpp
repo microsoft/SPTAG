@@ -93,8 +93,7 @@ namespace SPTAG
                 auto result_iter = indexIters[i];
                // printf("probing index %d, %s\n", i, fwdLUTs[i]->GetIndexName().c_str());
                 BasicResult curr_result;
-                bool relaxed_mono;
-                if ( !(result_iter->Next(curr_result, relaxed_mono) ){
+                if (!result_iter->Next(curr_result)) {
                     printf("index %d no more result!! Terminating\n", i);                    
                     terminate = true;
                     break;

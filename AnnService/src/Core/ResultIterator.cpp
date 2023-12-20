@@ -22,7 +22,7 @@ namespace SPTAG
 		m_queryResult = nullptr;
 	}
 
-	bool ResultIterator::Next(BasicResult& result, bool& relaxedMono)
+	bool ResultIterator::Next(BasicResult& result)
 	{
 		m_queryResult->Reset();
 		m_index->SearchIndexIterativeNext(*m_queryResult, m_workspace, m_isFirstResult, m_searchDeleted);
@@ -34,8 +34,24 @@ namespace SPTAG
 		result.VID = m_queryResult->GetResult(0)->VID;
 		result.Dist = m_queryResult->GetResult(0)->Dist;
 		result.Meta = m_queryResult->GetResult(0)->Meta;
-		relaxedMono = m_workspace->m_relaxedMono;
+		result.RelaxedMono = m_workspace->m_relaxedMono;
 		return true;
+	}
+
+	int ResultIterator::Next(QueryResult& results, int batch)
+	{
+		results.Reset();
+		results.SetTarget(m_queryResult->GetTarget());
+		results.SetTarget(m_queryResult->GetQuantizedTarget());
+		int resultCount = 0;
+		m_index->SearchIndexIterativeNextBatch(results, m_workspace, batch, resultCount, m_isFirstResult, m_searchDeleted);
+		m_isFirstResult = false;
+		for (int i = 0; i < resultCount; i++)
+		{
+			SizeType result = results.GetResult(i)->VID;
+			results.GetResult(i)->RelaxedMono = m_workspace->m_relaxedMono;
+		}
+		return resultCount;
 	}
 
 	bool ResultIterator::GetRelaxedMono()

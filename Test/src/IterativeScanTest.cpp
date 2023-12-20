@@ -33,13 +33,34 @@ void SearchIterative(const std::string folder, T* vec, SPTAG::SizeType n, int k,
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::BasicResult result;
     std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
-    bool relaxedMono = false;
     for (int i = 0; i < 100; i++) {
-        bool hasResult = resultIterator->Next(result, relaxedMono);
+        bool hasResult = resultIterator->Next(result);
         if (!hasResult) break;
         std::cout << "hasResult: " << hasResult << std::endl;
         std::cout << "result: " << result.VID << std::endl;
-        std::cout << "relaxedMono: " << relaxedMono << std::endl;
+        std::cout << "relaxedMono: " << result.RelaxedMono << std::endl;
+    }
+    resultIterator->Close();
+}
+
+template <typename T>
+void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
+{
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
+
+    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    BOOST_CHECK(nullptr != vecIndex);
+    SPTAG::QueryResult results(5);
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    int batch = 5;
+    for (int i = 0; i < 100; i++) {
+        int resultCount = resultIterator->Next(results, batch);
+        std::cout << "resultCount: " << resultCount << std::endl;
+        if (resultCount <= 0) break;
+        for (int j = 0; j < resultCount; j++) {
+            std::cout << "result: " << results.GetResult(j)->VID << std::endl;
+            std::cout << "relaxedMono: " << results.GetResult(j)->RelaxedMono << std::endl;
+        }
     }
     resultIterator->Close();
 }
@@ -52,13 +73,12 @@ void SearchRelaxedMono(const std::string folder, T* vec, SPTAG::SizeType n, int 
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::BasicResult result;
     std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
-    bool relaxedMono = false;
     for (int i = 0; i < 100; i++) {
-        bool hasResult = resultIterator->Next(result, relaxedMono);
+        bool hasResult = resultIterator->Next(result);
         if (!hasResult) break;
         std::cout << "hasResult: " << hasResult << std::endl;
         std::cout << "result: " << result.VID << std::endl;
-        std::cout << "relaxedMono: " << relaxedMono << std::endl;
+        std::cout << "relaxedMono: " << result.RelaxedMono << std::endl;
     }
     resultIterator->Close();
 }
@@ -106,6 +126,7 @@ void TestIterativeScan(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
     SearchIterative<T>("testindices", query.data(), q, k, truthmeta1);
     SearchRelaxedMono<T>("testindices", query.data(), q, k, truthmeta1);
+    SearchIterativeBatch<T>("testindices", query.data(), q, k, truthmeta1);
 }
 
 BOOST_AUTO_TEST_SUITE(IterativeScanTest)

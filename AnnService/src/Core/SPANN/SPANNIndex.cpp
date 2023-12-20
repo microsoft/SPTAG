@@ -311,6 +311,13 @@ namespace SPTAG
         }
 
         template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        {
+            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR SPANN");
+            return ErrorCode::Undefined;
+        }
+
+        template<typename T>
         ErrorCode Index<T>::SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& space) const
         {
             LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR SPANN");

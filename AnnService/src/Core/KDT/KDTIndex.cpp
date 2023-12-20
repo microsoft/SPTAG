@@ -179,17 +179,19 @@ namespace SPTAG
         }
 
         template <typename T>
-        void Index<T>::SearchIndexIterativeWithoutDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        int Index<T>::SearchIndexIterativeWithoutDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             //Search(if (!m_deletedID.Contains(gnode.node)))
             LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return 0;
         }
 
         template <typename T>
-        void Index<T>::SearchIndexIterativeWithDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        int Index<T>::SearchIndexIterativeWithDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             //Search(;)
             LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return 0;
         }
 
         template<typename T>
@@ -271,6 +273,13 @@ case VectorValueType::Name: \
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        {
+            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
             return ErrorCode::Success;
         }
 
