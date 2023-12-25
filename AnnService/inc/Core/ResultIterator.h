@@ -16,7 +16,7 @@ class ResultIterator
 {
 public:
 	ResultIterator(const VectorIndex* index, const void* p_target,
-		std::shared_ptr<COMMON::WorkSpace> workspace, bool searchDeleted);
+		std::unique_ptr<COMMON::WorkSpace> workspace, bool searchDeleted);
 	~ResultIterator();
 	bool Next(BasicResult& result);
 	int Next(QueryResult& results, int batch);
@@ -28,7 +28,7 @@ private:
 	const void* m_target;
 	ByteArray m_byte_target;
 	std::unique_ptr<QueryResult> m_queryResult;
-	std::shared_ptr<COMMON::WorkSpace> m_workspace;
+	std::unique_ptr<COMMON::WorkSpace> m_workspace;
 	bool m_searchDeleted;
 	bool m_isFirstResult;
 	int m_batch = 1;

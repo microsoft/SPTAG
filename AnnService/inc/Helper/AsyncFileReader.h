@@ -16,23 +16,25 @@
 #include <stdint.h>
 
 #define ASYNC_READ 1
+#define BATCH_READ 1
 
 #ifdef _MSC_VER
 #include <tchar.h>
 #include <Windows.h>
-#define BATCH_READ 1
 #else
-#define BATCH_READ 1
 #include <fcntl.h>
 #include <sys/syscall.h>
 #include <linux/aio_abi.h>
+#ifdef NUMA
+#include <numa.h>
+#endif
 #endif
 
 namespace SPTAG
 {
     namespace Helper
     {
-
+        void SetThreadAffinity(int threadID, std::thread& thread, NumaStrategy socketStrategy = NumaStrategy::LOCAL, OrderStrategy idStrategy = OrderStrategy::ASC);
 #ifdef _MSC_VER
         namespace DiskUtils
         {
@@ -160,7 +162,7 @@ namespace SPTAG
                 if (!m_fileHandle.IsValid()) return false;
 
                 m_diskSectorSize = static_cast<uint32_t>(GetSectorSize(filePath));
-                LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
+                SPTAGLIB_LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
 
                 PreAllocQueryContext();
 
@@ -168,7 +170,7 @@ namespace SPTAG
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
                 {
-                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this)));
+                    m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
                 return m_fileIocp.IsValid();
             }
@@ -369,14 +371,16 @@ namespace SPTAG
 
                 // Display the error message and exit the process
 
-                LOG(Helper::LogLevel::LL_Error, "Failed with: %s\n", (char*)lpMsgBuf);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed with: %s\n", (char*)lpMsgBuf);
 
                 LocalFree(lpMsgBuf);
                 ExitProcess(dw);
             }
 
-            void ListionIOCP()
+            void ListionIOCP(int i)
             {
+                SetThreadAffinity(i, m_fileIocpThreads[i], NumaStrategy::SCATTER, OrderStrategy::DESC); // avoid IO threads overlap with search threads
+
                 DWORD cBytes;
                 ULONG_PTR key;
                 OVERLAPPED* ol;
@@ -518,7 +522,7 @@ namespace SPTAG
             {
                 m_fileHandle = open(filePath, O_RDONLY | O_DIRECT);
                 if (m_fileHandle <= 0) {
-                    LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
+                    SPTAGLIB_LOG(LogLevel::LL_Error, "Failed to create file handle: %s\n", filePath);
                     return false;
                 }
 
@@ -527,7 +531,7 @@ namespace SPTAG
                 for (int i = 0; i < threadPoolSize; i++) {
                     auto ret = syscall(__NR_io_setup, (int)maxIOSize, &(m_iocps[i]));
                     if (ret < 0) {
-                        LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
+                        SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
                         return false;
                     }
                 }

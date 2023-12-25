@@ -3,10 +3,10 @@
 namespace SPTAG
 {
 	ResultIterator::ResultIterator(const VectorIndex* index, const void* p_target,
-		std::shared_ptr<COMMON::WorkSpace> workspace, bool searchDeleted)
+		std::unique_ptr<COMMON::WorkSpace> workspace, bool searchDeleted)
 		:m_index(index),
 		m_target(p_target),
-		m_workspace(workspace),
+		m_workspace(std::move(workspace)),
 		m_searchDeleted(searchDeleted)
 	{
 		// TODO(qiazh): optimize batch instead of 1
@@ -17,7 +17,7 @@ namespace SPTAG
 	ResultIterator::~ResultIterator()
 	{
 		if (m_index != nullptr && m_workspace != nullptr) {
-			m_index->SearchIndexIterativeEnd(m_workspace);
+			m_index->SearchIndexIterativeEnd(std::move(m_workspace));
 		}
 		m_queryResult = nullptr;
 	}
@@ -25,7 +25,7 @@ namespace SPTAG
 	bool ResultIterator::Next(BasicResult& result)
 	{
 		m_queryResult->Reset();
-		m_index->SearchIndexIterativeNext(*m_queryResult, m_workspace, m_isFirstResult, m_searchDeleted);
+		m_index->SearchIndexIterativeNext(*m_queryResult, m_workspace.get(), m_isFirstResult, m_searchDeleted);
 		m_isFirstResult = false;
 		if (m_queryResult->GetResult(0) == nullptr || m_queryResult->GetResult(0)->VID < 0)
 		{
@@ -44,7 +44,7 @@ namespace SPTAG
 		results.SetTarget(m_queryResult->GetTarget());
 		results.SetTarget(m_queryResult->GetQuantizedTarget());
 		int resultCount = 0;
-		m_index->SearchIndexIterativeNextBatch(results, m_workspace, batch, resultCount, m_isFirstResult, m_searchDeleted);
+		m_index->SearchIndexIterativeNextBatch(results, m_workspace.get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
 		m_isFirstResult = false;
 		for (int i = 0; i < resultCount; i++)
 		{
@@ -63,7 +63,7 @@ namespace SPTAG
 	void ResultIterator::Close()
 	{
 		if (m_workspace != nullptr) {
-			m_index->SearchIndexIterativeEnd(m_workspace);
+			m_index->SearchIndexIterativeEnd(std::move(m_workspace));
 			m_workspace = nullptr;
 		}
 	}

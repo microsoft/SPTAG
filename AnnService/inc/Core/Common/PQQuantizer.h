@@ -33,7 +33,7 @@ namespace SPTAG
 
             virtual float CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const;
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
             
             virtual SizeType QuantizeSize() const;
 
@@ -131,14 +131,14 @@ namespace SPTAG
         float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
-            LOG(Helper::LogLevel::LL_Error, "Quantizer does not support CosineDistance!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Quantizer does not support CosineDistance!\n");
             return 0;
         }
 
         template <typename T>
-        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
+        void PQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC) const
         {
-            if (GetEnableADC())
+            if (ADC && GetEnableADC())
             {
                 auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
                 float* ADCtable = (float*) vecout;
@@ -234,52 +234,52 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
-            LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
         {
-            LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
-            LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
-            LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
-            LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
-            LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
-            LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
-            LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
         {
-            LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             m_NumSubvectors = *(DimensionType*)raw_bytes;
             raw_bytes += sizeof(DimensionType);
-            LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
             m_KsPerSubvector = *(SizeType*)raw_bytes;
             raw_bytes += sizeof(SizeType);
-            LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             m_DimPerSubvector = *(DimensionType*)raw_bytes;
             raw_bytes += sizeof(DimensionType);
-            LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
-            LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
-            LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
-            LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
 

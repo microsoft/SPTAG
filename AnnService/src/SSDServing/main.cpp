@@ -83,7 +83,7 @@ namespace SPTAG {
 			}
 
 
-			LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", QuantizerFilePath.c_str());
+			SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set QuantizerFile = %s\n", QuantizerFilePath.c_str());
 
 			std::shared_ptr<VectorIndex> index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, valueType);
 			if (!QuantizerFilePath.empty() && index->LoadQuantizer(QuantizerFilePath) != ErrorCode::Success)
@@ -91,7 +91,7 @@ namespace SPTAG {
 				exit(1);
 			}
 			if (index == nullptr) {
-				LOG(Helper::LogLevel::LL_Error, "Cannot create Index with ValueType %s!\n", (*config_map)[SEC_BASE]["ValueType"].c_str());
+				SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot create Index with ValueType %s!\n", (*config_map)[SEC_BASE]["ValueType"].c_str());
 				return -1;
 			}
 
@@ -102,7 +102,7 @@ namespace SPTAG {
 			}
 
 			if (index->BuildIndex() != ErrorCode::Success) {
-				LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
+				SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
 				exit(1);
 			}
 
@@ -118,13 +118,13 @@ namespace SPTAG {
 #undef DefineVectorValueType
 
 			if (opts == nullptr) {
-				LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
+				SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
 				exit(1);
 			}
 
 			if (opts->m_generateTruth)
 			{
-				LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
+				SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start generating truth. It's maybe a long time.\n");
 				SizeType dim = opts->m_dim;
 				if (index->m_pQuantizer)
 				{
@@ -135,14 +135,14 @@ namespace SPTAG {
 				auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
 				if (ErrorCode::Success != vectorReader->LoadFile(opts->m_vectorPath))
 				{
-					LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+					SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
 					exit(1);
 				}
 				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(opts->m_valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
 				auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
 				if (ErrorCode::Success != queryReader->LoadFile(opts->m_queryPath))
 				{
-					LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+					SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
 					exit(1);
 				}
 				auto vectorSet = vectorReader->GetVectorSet();
@@ -160,7 +160,7 @@ namespace SPTAG {
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 
-				LOG(Helper::LogLevel::LL_Info, "End generating truth.\n");
+				SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "End generating truth.\n");
 			}
 
 			if (searchSSD) {
@@ -183,7 +183,7 @@ namespace SPTAG {
 int main(int argc, char* argv[]) {
 	if (argc < 2)
 	{
-		LOG(Helper::LogLevel::LL_Error,
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
 			"ssdserving configFilePath\n");
 		exit(-1);
 	}

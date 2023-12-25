@@ -14,7 +14,7 @@
 using namespace SPTAG;
 
 #define CHECKIO(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) { \
-    LOG(Helper::LogLevel::LL_Error, "DiskError: Cannot read or write %d bytes.\n", (int)(bytes)); \
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "DiskError: Cannot read or write %d bytes.\n", (int)(bytes)); \
     exit(1); \
 }
 
@@ -27,7 +27,7 @@ public:
     {
         AddRequiredOption(m_inputFiles, "-i", "--input", "Input raw data.");
         AddRequiredOption(m_clusterNum, "-c", "--numclusters", "Number of clusters.");
-        AddOptionalOption(m_stopDifference, "-d", "--diff", "Clustering stop center difference.");
+        AddOptionalOption(m_stopDifference, "-df", "--diff", "Clustering stop center difference.");
         AddOptionalOption(m_maxIter, "-r", "--iters", "Max clustering iterations.");
         AddOptionalOption(m_localSamples, "-s", "--samples", "Number of samples for fast clustering.");
         AddOptionalOption(m_lambda, "-l", "--lambda", "lambda for balanced size level.");
@@ -91,7 +91,7 @@ bool LoadCenters(T* centers, SizeType row, DimensionType col, const std::string&
     if (fileexists(centerpath.c_str())) {
         auto ptr = f_createIO();
         if (ptr == nullptr || !ptr->Initialize(centerpath.c_str(), std::ios::binary | std::ios::in)) {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read center file %s.\n", centerpath.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read center file %s.\n", centerpath.c_str());
             return false;
         }
 
@@ -103,7 +103,7 @@ bool LoadCenters(T* centers, SizeType row, DimensionType col, const std::string&
         if (ptr->ReadBinary(sizeof(DimensionType), (char*)&c) != sizeof(DimensionType)) return false;
 
         if (r != row || c != col) {
-            LOG(Helper::LogLevel::LL_Error, "Row(%d,%d) or Col(%d,%d) cannot match.\n", r, row, c, col);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Row(%d,%d) or Col(%d,%d) cannot match.\n", r, row, c, col);
             return false;
         }
 
@@ -121,7 +121,7 @@ bool LoadCenters(T* centers, SizeType row, DimensionType col, const std::string&
         if (noimprovement) {
             if (ptr->ReadBinary(sizeof(int), (char*)&i) == sizeof(int)) *noimprovement = i;
         }
-        LOG(Helper::LogLevel::LL_Info, "Load centers(%d,%d) from file %s.\n", row, col, centerpath.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load centers(%d,%d) from file %s.\n", row, col, centerpath.c_str());
         return true;
     }
     return false;
@@ -131,7 +131,7 @@ template <typename T>
 void SaveCenters(T* centers, SizeType row, DimensionType col, const std::string& centerpath, float lambda = 0.0, float diff = 0.0, float mindist = 0.0, int noimprovement = 0) {
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(centerpath.c_str(), std::ios::binary | std::ios::out)) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to open center file %s to write.\n", centerpath.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open center file %s to write.\n", centerpath.c_str());
         exit(1);
     }
 
@@ -142,7 +142,7 @@ void SaveCenters(T* centers, SizeType row, DimensionType col, const std::string&
     CHECKIO(ptr, WriteBinary, sizeof(float), (char*)&diff);
     CHECKIO(ptr, WriteBinary, sizeof(float), (char*)&mindist);
     CHECKIO(ptr, WriteBinary, sizeof(int), (char*)&noimprovement);
-    LOG(Helper::LogLevel::LL_Info, "Save centers(%d,%d) to file %s.\n", row, col, centerpath.c_str());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save centers(%d,%d) to file %s.\n", row, col, centerpath.c_str());
 }
 
 template <typename T>
@@ -225,9 +225,9 @@ inline float MultipleClustersAssign(const COMMON::Dataset<T>& data,
         }
     }
 
-    LOG(Helper::LogLevel::LL_Info, "start printing dist_total\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "start printing dist_total\n");
     for (int k = 0; k < args._K; k++) {
-        LOG(Helper::LogLevel::LL_Info, "cluster %d: dist_total:%f \n", k, dist_total[k]);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d: dist_total:%f \n", k, dist_total[k]);
     }
 
     if (updateCenters) {
@@ -314,7 +314,7 @@ inline float HardMultipleClustersAssign(const COMMON::Dataset<T>& data,
     for (int i = 0; i < args._K; ++i)
     {
         std::size_t endIdx = std::lower_bound(items, items + last - first, i + 1, g_edgeComparer) - items;
-        LOG(Helper::LogLevel::LL_Info, "cluster %d: avgdist:%f limit:%d, drop:%zu - %zu\n", items[startIdx].node, args.clusterDist[i] / (endIdx - startIdx), mylimit[i], startIdx + mylimit[i], endIdx);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d: avgdist:%f limit:%d, drop:%zu - %zu\n", items[startIdx].node, args.clusterDist[i] / (endIdx - startIdx), mylimit[i], startIdx + mylimit[i], endIdx);
         for (size_t dropID = startIdx + mylimit[i]; dropID < endIdx; ++dropID)
         {
             if (items[dropID].tonode >= 0) items[dropID].tonode = -items[dropID].tonode - 1;
@@ -379,7 +379,7 @@ void Process(MPI_Datatype type) {
     options.m_inputFiles = Helper::StrUtils::ReplaceAll(options.m_inputFiles, "*", std::to_string(rank));
     if (ErrorCode::Success != vectorReader->LoadFile(options.m_inputFiles))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
         exit(1);
     }
     std::shared_ptr<VectorSet> vectors = vectorReader->GetVectorSet();
@@ -391,14 +391,14 @@ void Process(MPI_Datatype type) {
         options.m_weightfile = Helper::StrUtils::ReplaceAll(options.m_weightfile, "*", std::to_string(rank));
         std::ifstream win(options.m_weightfile, std::ifstream::binary);
         if (!win.is_open()) {
-            LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read weight file %s.\n", rank, options.m_weightfile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read weight file %s.\n", rank, options.m_weightfile.c_str());
             exit(1);
         }
         SizeType rows;
         win.read((char*)&rows, sizeof(SizeType));
         if (rows != vectors->Count()) {
             win.close();
-            LOG(Helper::LogLevel::LL_Error, "Number of weights (%d) is not equal to number of vectors (%d).\n", rows, vectors->Count());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Number of weights (%d) is not equal to number of vectors (%d).\n", rows, vectors->Count());
             exit(1);
         }
         win.read((char*)weights.data(), sizeof(float)*rows);
@@ -419,11 +419,11 @@ void Process(MPI_Datatype type) {
         options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
     }
     MPI_Bcast(&(options.m_lambda), 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-    LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n",
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n",
         rank, data.R(), data.C(), size, options.m_clusterNum, ((int)options.m_inputValueType), options.m_threadNum, options.m_lambda, options.m_localSamples, totalCount);
 
     if (rank == 0) {
-        LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
             if (options.m_seed >= 0) std::srand(options.m_seed);
             COMMON::InitCenters<T, T>(data, localindices, 0, data.R(), args, options.m_localSamples, options.m_initIter);
@@ -459,7 +459,7 @@ void Process(MPI_Datatype type) {
         if (rank == 0) {
             MPI_Reduce(MPI_IN_PLACE, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
             currDiff = COMMON::RefineCenters<T, T>(data, args);
-            LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
         } else
             MPI_Reduce(args.newCenters, args.newCenters, args._K * args._D, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
 
@@ -475,7 +475,7 @@ void Process(MPI_Datatype type) {
     else {
         if (rank == 0) {
             for (int i = 0; i < args._K; i++)
-                LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
     }
     d = 0;
@@ -490,9 +490,9 @@ void Process(MPI_Datatype type) {
         MPI_Allreduce(MPI_IN_PLACE, args.counts, args._K, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         MPI_Allreduce(MPI_IN_PLACE, args.weightedCounts, args._K, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
         if (rank == 0) {
-            LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
             for (int i = 0; i < args._K; i++)
-                LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
         for (int k = 0; k < args._K; k++)
             if (totalCount > args.counts[k])
@@ -505,21 +505,21 @@ void Process(MPI_Datatype type) {
     MPI_Allreduce(&d, &currDist, 1, MPI_FLOAT, MPI_SUM, MPI_COMM_WORLD);
 
     if (label.Save(options.m_labels + "." + std::to_string(rank)) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to save labels.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save labels.\n");
         exit(1);
     }
     if (rank == 0) {
         SaveCenters(args.centers, args._K, args._D, options.m_centers, options.m_lambda);
-        LOG(Helper::LogLevel::LL_Info, "final dist:%f\n", currDist);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "final dist:%f\n", currDist);
         for (int i = 0; i < args._K; i++)
-            LOG(Helper::LogLevel::LL_Status, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Status, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (options.m_outdir.compare("-") != 0) {
         for (int i = 0; i < args._K; i++) {
             if (i % size == rank) {
-                LOG(Helper::LogLevel::LL_Info, "Cluster %d start ......\n", i);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Cluster %d start ......\n", i);
             }
             noImprovement = 0;
             std::string vecfile = options.m_outdir + "/" + options.m_outfile + "." + std::to_string(i + 1);
@@ -533,15 +533,15 @@ void Process(MPI_Datatype type) {
                 std::string metaindexfile = options.m_outdir + "/" + options.m_outmetaindexfile + "." + std::to_string(i);
                 std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
                 if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
                     exit(1);
                 }
                 if (metaout == nullptr || !metaout->Initialize(metafile.c_str(), std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metafile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metafile.c_str());
                     exit(1);
                 }
                 if (metaindexout == nullptr || !metaindexout->Initialize(metaindexfile.c_str(), std::ios::binary | std::ios::out)) {
-                    LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
                     exit(1);
                 }
 
@@ -566,7 +566,7 @@ void Process(MPI_Datatype type) {
                                 int len;
                                 MPI_Recv(&len, 1, MPI_INT, j, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                                 if (len > recvmetabuflen) {
-                                    LOG(Helper::LogLevel::LL_Info, "enlarge recv meta buf to %d\n", len);
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "enlarge recv meta buf to %d\n", len);
                                     delete[] recvmetabuf;
                                     recvmetabuflen = len;
                                     recvmetabuf = new char[recvmetabuflen];
@@ -577,7 +577,7 @@ void Process(MPI_Datatype type) {
                                 offset += len;
                             }
                         }
-                        LOG(Helper::LogLevel::LL_Info, "rank %d <- rank %d: %d vectors, %llu bytes meta\n", rank, j, recv, (offset - offset_before));
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d <- rank %d: %d vectors, %llu bytes meta\n", rank, j, recv, (offset - offset_before));
                     }
                     else {
                         size_t total_rec = 0;
@@ -595,7 +595,7 @@ void Process(MPI_Datatype type) {
                                 }
                             }
                         }
-                        LOG(Helper::LogLevel::LL_Info, "rank %d <- rank %d: %d(%d) vectors, %llu bytes meta\n", rank, j, args.newCounts[i], total_rec, (offset - offset_before));
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d <- rank %d: %d(%d) vectors, %llu bytes meta\n", rank, j, args.newCounts[i], total_rec, (offset - offset_before));
                     }
                 }
                 delete[] recvmetabuf;
@@ -624,7 +624,7 @@ void Process(MPI_Datatype type) {
                         }
                     }
                 }
-                LOG(Helper::LogLevel::LL_Info, "rank %d -> rank %d: %d(%d) vectors, %llu bytes meta\n", rank, dest, args.newCounts[i], total_rec, total_len);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d -> rank %d: %d(%d) vectors, %llu bytes meta\n", rank, dest, args.newCounts[i], total_rec, total_len);
             }
             MPI_Barrier(MPI_COMM_WORLD);
         }
@@ -640,7 +640,7 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     if (!direxists(folder.c_str())) mkdir(folder.c_str());
 
     if (!direxists(folder.c_str())) {
-        LOG(Helper::LogLevel::LL_Error, "Cannot create the folder %s.\n", folder.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot create the folder %s.\n", folder.c_str());
         exit(1);
     }
 
@@ -651,7 +651,7 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     std::string savePath = folder + FolderSep + "status." + std::to_string(iteration) + "." + std::to_string(rank);
     auto out = f_createIO();
     if (out == nullptr || !out->Initialize(savePath.c_str(), std::ios::binary | std::ios::out)) {
-        LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write status.\n", savePath.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write status.\n", savePath.c_str());
         exit(1);
     }
 
@@ -668,11 +668,19 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     }
     out->ShutDown();
 
-    if (!options.m_syncscript.empty()) {
-        system((options.m_syncscript + " upload " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(savecenters)).c_str());
+    if (!options.m_syncscript.empty()) {        
+        try {
+        	int return_value = system((options.m_syncscript + " upload " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(savecenters)).c_str());
+        	if (return_value != 0)
+        		throw std::system_error(errno, std::generic_category(), "error executing command");
+        }
+        catch (const std::system_error& e) {
+        	std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
+        	return ErrorCode::Fail;
+        }
     }
     else {
-        LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
     }
     return ErrorCode::Success;
 }
@@ -684,15 +692,23 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T>& args, int rank, int iteration, u
 
     //TODO download
     if (!options.m_syncscript.empty()) {
-        system((options.m_syncscript + " download " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(loadcenters)).c_str());
+        try {
+            int return_value = system((options.m_syncscript + " download " + folder + " " + std::to_string(options.m_totalparts) + " " + std::to_string(loadcenters)).c_str());
+            if (return_value != 0)
+                throw std::system_error(errno, std::generic_category(), "error executing command");
+        }
+        catch (const std::system_error& e) {
+            std::cerr << "error executing command: " << options.m_syncscript << e.what() << '\n';
+            return ErrorCode::Fail;
+        }
     }
     else {
-        LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Sync script is empty.\n");
     }
 
     if (loadcenters) {
         if (!LoadCenters(args.newTCenters, args._K, args._D, folder + FolderSep + "centers.bin", &lambda, &diff, &mindist, &noimprovement)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot load centers.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load centers.\n");
             exit(1);
         }
     }
@@ -710,7 +726,7 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T>& args, int rank, int iteration, u
         std::string loadPath = folder + FolderSep + "status." + std::to_string(iteration) + "." + std::to_string(part);
         auto input = f_createIO();
         if (input == nullptr || !input->Initialize(loadPath.c_str(), std::ios::binary | std::ios::in)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to read status.", loadPath.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to read status.", loadPath.c_str());
             exit(1);
         }
 
@@ -728,7 +744,7 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T>& args, int rank, int iteration, u
             int partsize = *((int*)(buf.get()) + i);
             if (partsize >= 0 && args.counts[i] <= MaxSize - partsize) args.counts[i] += partsize;
             else {
-                LOG(Helper::LogLevel::LL_Error, "Cluster %d counts overflow:%d + %d(%d)! Set it to MaxSize.\n", i, args.counts[i], partsize, part);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cluster %d counts overflow:%d + %d(%d)! Set it to MaxSize.\n", i, args.counts[i], partsize, part);
                 args.counts[i] = MaxSize;
             }
         }
@@ -743,17 +759,21 @@ template <typename T>
 void ProcessWithoutMPI() {
     std::string rankstr = options.m_labels.substr(options.m_labels.rfind(".") + 1);
     int rank = std::stoi(rankstr);
-    LOG(Helper::LogLevel::LL_Info, "DEBUG:rank--%d labels--%s\n", rank, options.m_labels.c_str());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG:rank--%d labels--%s\n", rank, options.m_labels.c_str());
 
     auto vectorReader = Helper::VectorSetReader::CreateInstance(std::make_shared<Helper::ReaderOptions>(options));
     options.m_inputFiles = Helper::StrUtils::ReplaceAll(options.m_inputFiles, "*", std::to_string(rank));
     if (ErrorCode::Success != vectorReader->LoadFile(options.m_inputFiles))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
         exit(1);
     }
     std::shared_ptr<VectorSet> vectors = vectorReader->GetVectorSet();
     std::shared_ptr<MetadataSet> metas = vectorReader->GetMetadataSet();
+    if (vectors->Dimension() != options.m_dimension) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "vector dimension %d is not equal to the dimension %d of the option.\n", vectors->Dimension(), options.m_dimension);
+        exit(1);
+    }
     if (options.m_distMethod == DistCalcMethod::Cosine) vectors->Normalize(options.m_threadNum);
 
     std::vector<float> weights(vectors->Count(), 0.0f);
@@ -761,14 +781,14 @@ void ProcessWithoutMPI() {
         options.m_weightfile = Helper::StrUtils::ReplaceAll(options.m_weightfile, "*", std::to_string(rank));
         std::ifstream win(options.m_weightfile, std::ifstream::binary);
         if (!win.is_open()) {
-            LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read weight file %s.\n", rank, options.m_weightfile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read weight file %s.\n", rank, options.m_weightfile.c_str());
             exit(1);
         }
         SizeType rows;
         win.read((char*)&rows, sizeof(SizeType));
         if (rows != vectors->Count()) {
             win.close();
-            LOG(Helper::LogLevel::LL_Error, "Number of weights (%d) is not equal to number of vectors (%d).\n", rows, vectors->Count());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Number of weights (%d) is not equal to number of vectors (%d).\n", rows, vectors->Count());
             exit(1);
         }
         win.read((char*)weights.data(), sizeof(float) * rows);
@@ -789,7 +809,7 @@ void ProcessWithoutMPI() {
     int noImprovement = 0;
 
     if (rank == 0 && iteration < 0) {
-        LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
         if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda))) {
             if (options.m_seed >= 0) std::srand(options.m_seed);
             if (options.m_maxIter > 0 && options.m_lambda < -1e-6f) {
@@ -804,11 +824,11 @@ void ProcessWithoutMPI() {
         SyncSaveCenter(args, rank, iteration, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 2);
     }
     else {
-        LOG(Helper::LogLevel::LL_Info, "recover from iteration:%d\n", iteration);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "recover from iteration:%d\n", iteration);
     }
     SyncLoadCenter(args, rank, iteration, totalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, true);
 
-    LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n",
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d maxcountperpartition:%d\n",
         rank, data.R(), data.C(), options.m_totalparts, options.m_clusterNum, ((int)options.m_inputValueType), options.m_threadNum, options.m_lambda, options.m_localSamples, static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor));
 
     while (noImprovement < 10 && currDiff > options.m_stopDifference && iteration < options.m_maxIter) {
@@ -837,7 +857,7 @@ void ProcessWithoutMPI() {
         }
         iteration++;
 
-        LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f\n", iteration, currDist, currDiff);
     }
 
     if (options.m_maxIter == 0) {
@@ -846,7 +866,7 @@ void ProcessWithoutMPI() {
     else {
         if (rank == 0) {
             for (int i = 0; i < args._K; i++)
-                LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
     }
     d = 0;
@@ -863,9 +883,9 @@ void ProcessWithoutMPI() {
         SyncSaveCenter(args, rank, 10000 + iteration + 1 + i, data.R(), d, options.m_lambda, currDiff, minClusterDist, noImprovement, 0, true);
         SyncLoadCenter(args, rank, 10000 + iteration + 1 + i, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
         if (rank == 0) {
-            LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "assign %d....................d:%f\n", i, d);
             for (int i = 0; i < args._K; i++)
-                LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
         }
         for (int k = 0; k < args._K; k++)
             if (totalCount > args.counts[k])
@@ -877,14 +897,14 @@ void ProcessWithoutMPI() {
     SyncLoadCenter(args, rank, 10000 + iteration + options.m_clusterassign, tmpTotalCount, currDist, options.m_lambda, currDiff, minClusterDist, noImprovement, false);
 
     if (label.Save(options.m_labels) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to save labels.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save labels.\n");
         exit(1);
     }
     if (rank == 0) {
         SaveCenters(args.centers, args._K, args._D, options.m_centers, options.m_lambda);
-        LOG(Helper::LogLevel::LL_Info, "final dist:%f\n", currDist);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "final dist:%f\n", currDist);
         for (int i = 0; i < args._K; i++)
-            LOG(Helper::LogLevel::LL_Status, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Status, "cluster %d contains vectors:%d weights:%f\n", i, args.counts[i], args.weightedCounts[i]);
     }
 }
 
@@ -895,7 +915,7 @@ void Partition() {
     auto vectorReader = Helper::VectorSetReader::CreateInstance(std::make_shared<Helper::ReaderOptions>(options));
     if (ErrorCode::Success != vectorReader->LoadFile(options.m_inputFiles))
     {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
         exit(1);
     }
     std::shared_ptr<VectorSet> vectors = vectorReader->GetVectorSet();
@@ -906,7 +926,7 @@ void Partition() {
 
     COMMON::Dataset<LabelType> label;
     if (label.Load(options.m_labels, vectors->Count(), vectors->Count()) != ErrorCode::Success) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read labels.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read labels.\n");
         exit(1);
     }
 
@@ -917,15 +937,15 @@ void Partition() {
         std::string metaindexfile = options.m_outdir + "/" + options.m_outmetaindexfile + "." + taskId + "." + std::to_string(i);
         std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
         if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
             exit(1);
         }
         if (metaout == nullptr || !metaout->Initialize(metafile.c_str(), std::ios::binary | std::ios::out)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metafile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metafile.c_str());
             exit(1);
         }
         if (metaindexout == nullptr || !metaindexout->Initialize(metaindexfile.c_str(), std::ios::binary | std::ios::out)) {
-            LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
             exit(1);
         }
 
@@ -950,7 +970,7 @@ void Partition() {
                 }
             }
         }
-        LOG(Helper::LogLevel::LL_Info, "part %s cluster %d: %d vectors, %llu bytes meta.\n", taskId.c_str(), i, records, offset);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "part %s cluster %d: %d vectors, %llu bytes meta.\n", taskId.c_str(), i, records, offset);
 
         if (metas != nullptr) CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char*)(&offset));
         CHECKIO(out, WriteBinary, sizeof(int), (char*)(&records), 0);
@@ -983,7 +1003,7 @@ int main(int argc, char* argv[]) {
             Process<std::uint8_t>(MPI_CHAR);
             break;
         default:
-            LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
         }
     }
     else if (options.m_stage.compare("ClusteringWithoutMPI") == 0) {
@@ -1001,7 +1021,7 @@ int main(int argc, char* argv[]) {
             ProcessWithoutMPI<std::uint8_t>();
             break;
         default:
-            LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
         }
     }
     else if (options.m_stage.compare("LocalPartition") == 0) {
@@ -1019,7 +1039,7 @@ int main(int argc, char* argv[]) {
             Partition<std::uint8_t>();
             break;
         default:
-            LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error data type!\n");
         }
     }
     return 0;

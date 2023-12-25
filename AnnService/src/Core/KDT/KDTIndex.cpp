@@ -11,8 +11,11 @@
 
 namespace SPTAG
 {
+    template <typename T>
+    thread_local std::unique_ptr<T> COMMON::ThreadLocalWorkSpaceFactory<T>::m_workspace;
     namespace KDT
     {
+
         template <typename T>
         ErrorCode Index<T>::LoadConfig(Helper::IniReader& p_reader)
         {
@@ -51,7 +54,7 @@ namespace SPTAG
             m_pTrees.m_pQuantizer = quantizer;
             if (quantizer)
             {
-                LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Set non-null quantizer for index with data type other than BYTE");
             }
         }
 
@@ -63,12 +66,16 @@ namespace SPTAG
             if (m_pSamples.Load((char*)p_indexBlobs[0].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pTrees.LoadTrees((char*)p_indexBlobs[1].Data()) != ErrorCode::Success) return ErrorCode::FailedParseValue;
             if (m_pGraph.LoadGraph((char*)p_indexBlobs[2].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
-            if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
-            else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+            if (p_indexBlobs.size() <= 3) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
+            else if (m_deletedID.Load((char*)p_indexBlobs[3].Data(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains) != ErrorCode::Success) return ErrorCode::FailedParseValue;
+
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ErrorCode::Success;
         }
@@ -82,12 +89,16 @@ namespace SPTAG
             if (p_indexStreams[0] == nullptr || (ret = m_pSamples.Load(p_indexStreams[0], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
             if (p_indexStreams[1] == nullptr || (ret = m_pTrees.LoadTrees(p_indexStreams[1])) != ErrorCode::Success) return ret;
             if (p_indexStreams[2] == nullptr || (ret = m_pGraph.LoadGraph(p_indexStreams[2], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
-            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity);
-            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity)) != ErrorCode::Success) return ret;
+            if (p_indexStreams[3] == nullptr) m_deletedID.Initialize(m_pSamples.R(), m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
+            else if ((ret = m_deletedID.Load(p_indexStreams[3], m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains)) != ErrorCode::Success) return ret;
+
+            if (m_pSamples.R() != m_pGraph.R() || m_pSamples.R() != m_deletedID.R())
+            {
+                SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Error, "Index data is corrupted, please rebuild the index. Samples: %i, Graph: %i, DeletedID: %i.", m_pSamples.R(), m_pGraph.R(), m_deletedID.R());
+                return ErrorCode::FailedParseValue;
+            }
 
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
             return ret;
         }
@@ -95,9 +106,12 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
         {
-            auto workSpace = m_workSpacePool->Rent();
-            m_iHashTableExp = workSpace->HashTableExponent();
-            m_workSpacePool->Return(workSpace);
+            auto workspace = m_workSpaceFactory->GetWorkSpace();
+            if (workspace)
+            {
+                m_iHashTableExp = workspace->HashTableExponent();
+            }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workspace));
 
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     IOSTRING(p_configOut, WriteString, (RepresentStr + std::string("=") + GetParameter(RepresentStr) + std::string("\n")).c_str());
@@ -126,7 +140,7 @@ namespace SPTAG
         }
 
 #pragma region K-NN search
-
+        /*
 #define Search(CheckDeleted) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees<T,Q>(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -164,17 +178,90 @@ namespace SPTAG
             } \
         } \
         p_query.SortResult(); \
+*/
+        template<typename T>
+        template<typename Q, bool(*notDeleted)(const COMMON::Labelset&, SizeType)>
+        void Index<T>::Search(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
+        {
+            std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
+            m_pTrees.InitSearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space);
+            m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots);
+            while (!p_space.m_NGQueue.empty()) 
+            {
+                NodeDistPair gnode = p_space.m_NGQueue.pop();
+                const SizeType* node = m_pGraph[gnode.node];
+                _mm_prefetch((const char*)node, _MM_HINT_T0);
+                for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++)
+                {
+                    auto futureNode = node[i];
+                    if (futureNode < 0) break;
+                    _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
+                }
+                    
+                if (notDeleted(m_deletedID, gnode.node))
+                {
+                    if (!p_query.AddPoint(gnode.node, gnode.distance) && p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) 
+                    {
+                        p_query.SortResult();
+                        return;
+                    }
+                }
 
+                float upperBound = max(p_query.worstDist(), gnode.distance);
+                bool bLocalOpt = true;
+                for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) 
+                {
+                    SizeType nn_index = node[i];
+                    if (nn_index < 0) break;
+
+                    if (p_space.CheckAndSet(nn_index)) continue;
+                    float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
+                    if (distance2leaf <= upperBound) 
+                        bLocalOpt = false;
+                    p_space.m_iNumberOfCheckedLeaves++;
+                    p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf));
+                }
+                if (bLocalOpt) 
+                    p_space.m_iNumOfContinuousNoBetterPropagation++;
+                else 
+                    p_space.m_iNumOfContinuousNoBetterPropagation = 0;
+                if (p_space.m_iNumOfContinuousNoBetterPropagation > m_iThresholdOfNumberOfContinuousNoBetterPropagation) 
+                {
+                    if (p_space.m_iNumberOfTreeCheckedLeaves <= p_space.m_iNumberOfCheckedLeaves / 10) 
+                    {
+                        m_pTrees.SearchTrees<T, Q>(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
+                    }
+                    else if (gnode.distance > p_query.worstDist()) 
+                    {
+                        break;
+                    }
+                }
+            }
+            p_query.SortResult();
+        }
+
+        namespace StaticDispatch
+        {
+            bool AlwaysTrue(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return true;
+            }
+
+            bool CheckIfNotDeleted(const COMMON::Labelset& deletedIDs, SizeType node)
+            {
+                return !deletedIDs.Contains(node);
+            }
+        };
 
         template <typename T>
         template <typename Q>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const
         {
             if (m_deletedID.Count() == 0 || p_searchDeleted) {
-                Search(;)
+                Search<Q, StaticDispatch::AlwaysTrue>(p_query, p_space);
             }
             else {
-                Search(if (!m_deletedID.Contains(gnode.node)))
+                Search<Q, StaticDispatch::CheckIfNotDeleted>(p_query, p_space);
             }
         }
 
@@ -182,7 +269,7 @@ namespace SPTAG
         int Index<T>::SearchIndexIterativeWithoutDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             //Search(if (!m_deletedID.Contains(gnode.node)))
-            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
             return 0;
         }
 
@@ -190,7 +277,7 @@ namespace SPTAG
         int Index<T>::SearchIndexIterativeWithDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const
         {
             //Search(;)
-            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
             return 0;
         }
 
@@ -200,7 +287,11 @@ namespace SPTAG
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
 
-            auto workSpace = m_workSpacePool->Rent();
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
             workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
@@ -228,9 +319,9 @@ case VectorValueType::Name: \
                 SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
 
-            m_workSpacePool->Return(workSpace);
-
-            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+            
+                if (p_query.WithMeta() && nullptr != m_pMetadata)
             {
                 for (int i = 0; i < p_query.GetResultNum(); ++i)
                 {
@@ -238,6 +329,7 @@ case VectorValueType::Name: \
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
+
             return ErrorCode::Success;
         }
 
@@ -245,21 +337,20 @@ case VectorValueType::Name: \
         std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
         {
             if (!m_bReady) return nullptr;
-            auto workSpace = m_workSpacePool->Rent();
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
             // TODO(qiazh): optimize batch instead of 1
             workSpace->Reset(m_iMaxCheck, 1);
 
             std::shared_ptr<ResultIterator> resultIterator =
-                std::make_shared<ResultIterator>(this, p_target, workSpace, p_searchDeleted);
+                std::make_shared<ResultIterator>(this, p_target, std::move(workSpace), p_searchDeleted);
 
             return resultIterator;
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, bool p_isFirst, bool p_searchDeleted) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
-            // TODO(qiazh): optimize batch instead of 1
             workSpace->ResetResult(m_iMaxCheck, 1);
             if (m_deletedID.Count() == 0 || p_searchDeleted)
                 SearchIndexIterativeWithDeleted(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace);
@@ -277,39 +368,50 @@ case VectorValueType::Name: \
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
         {
-            LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
             return ErrorCode::Success;
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& space) const
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> space) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
-            m_workSpacePool->Return(space);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(space));
             return ErrorCode::Success;
         }
 
         template <typename T>
-        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted) const
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted) const
         {
-            LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR KDT");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR KDT");
             return false;
         }
 
         template<typename T>
-        std::shared_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
         {
-            auto workSpace = m_workSpacePool->Rent();
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
             workSpace->ResetResult(m_iMaxCheck, batch);
-            return workSpace;
+            return std::move(workSpace);
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not Support Filter on KDT Index!\n");
+            return ErrorCode::Fail;
         }
 
         template <typename T>
         ErrorCode Index<T>::RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted) const
         {
-            auto workSpace = m_workSpacePool->Rent();
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*) & p_query;
@@ -336,15 +438,19 @@ case VectorValueType::Name: \
             {
                 SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
             }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
 
-            m_workSpacePool->Return(workSpace);
             return ErrorCode::Success;
         }
 
         template <typename T>
         ErrorCode Index<T>::SearchTree(QueryResult& p_query) const
         {
-            auto workSpace = m_workSpacePool->Rent();
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
             workSpace->Reset(m_pGraph.m_iMaxCheckForRefineGraph, p_query.GetResultNum());
 
             COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
@@ -381,7 +487,8 @@ case VectorValueType::Name: \
                 res[i].VID = cell.node;
                 res[i].Dist = cell.distance;
             }
-            m_workSpacePool->Return(workSpace);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
             return ErrorCode::Success;
         }
 #pragma endregion
@@ -394,7 +501,7 @@ case VectorValueType::Name: \
             omp_set_num_threads(m_iNumberOfThreads);
 
             m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, p_shareOwnership);
-            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
+            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
 
             if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
             {
@@ -405,8 +512,6 @@ case VectorValueType::Name: \
                 }
             }
 
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             m_threadPool.init();
 
             auto t1 = std::chrono::high_resolution_clock::now();
@@ -414,10 +519,10 @@ case VectorValueType::Name: \
             m_pTrees.BuildTrees<T>(m_pSamples, m_iNumberOfThreads);
 
             auto t2 = std::chrono::high_resolution_clock::now();
-            LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
             m_pGraph.BuildGraph<T>(this);
             auto t3 = std::chrono::high_resolution_clock::now();
-            LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
 
             m_bReady = true;
             return ErrorCode::Success;
@@ -456,18 +561,16 @@ case VectorValueType::Name: \
                 }
             }
 
-            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
-            ptr->m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            ptr->m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             ptr->m_threadPool.init();
 
             ErrorCode ret = ErrorCode::Success;
             if ((ret = m_pSamples.Refine(indices, ptr->m_pSamples)) != ErrorCode::Success) return ret;
             if (nullptr != m_pMetadata && (ret = m_pMetadata->RefineMetadata(indices, ptr->m_pMetadata, m_iDataBlockSize, m_iDataCapacity, m_iMetaRecordSize)) != ErrorCode::Success) return ret;
 
-            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
+            ptr->m_deletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
             COMMON::KDTree* newtree = &(ptr->m_pTrees);
 
             (*newtree).BuildTrees<T>(ptr->m_pSamples, omp_get_num_threads());
@@ -501,7 +604,7 @@ case VectorValueType::Name: \
                 }
             }
 
-            LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Refine... from %d -> %d\n", GetNumSamples(), newR);
             if (newR == 0) return ErrorCode::EmptyIndex;
 
             ErrorCode ret = ErrorCode::Success;
@@ -525,7 +628,7 @@ case VectorValueType::Name: \
             if ((ret = m_pGraph.RefineGraph<T>(this, indices, reverseIndices, p_indexStreams[2], nullptr)) != ErrorCode::Success) return ret;
 
             COMMON::Labelset newDeletedID;
-            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity);
+            newDeletedID.Initialize(newR, m_iDataBlockSize, m_iDataCapacity, COMMON::Labelset::InvalidIDBehavior::AlwaysContains);
             if ((ret = newDeletedID.Save(p_indexStreams[3])) != ErrorCode::Success) return ret;
 
             if (nullptr != m_pMetadata) {
@@ -543,9 +646,9 @@ case VectorValueType::Name: \
                 COMMON::QueryResultSet<T> query(ptr_v + i * GetFeatureDim(), m_pGraph.m_iCEF);
                 SearchIndex(query);
 
-                for (int i = 0; i < m_pGraph.m_iCEF; i++) {
-                    if (query.GetResult(i)->Dist < 1e-6) {
-                        DeleteIndex(query.GetResult(i)->VID);
+                for (int j = 0; j < m_pGraph.m_iCEF; j++) {
+                    if (query.GetResult(j)->Dist < 1e-6) {
+                        DeleteIndex(query.GetResult(j)->VID);
                     }
                 }
             }
@@ -589,7 +692,7 @@ case VectorValueType::Name: \
                 if (m_pSamples.AddBatch((const T*)p_data, p_vectorNum) != ErrorCode::Success ||
                     m_pGraph.AddBatch(p_vectorNum) != ErrorCode::Success ||
                     m_deletedID.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                    LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Memory Error: Cannot alloc space for vectors!\n");
                     m_pSamples.SetR(begin);
                     m_pGraph.SetR(begin);
                     m_deletedID.SetR(begin);
@@ -637,8 +740,6 @@ case VectorValueType::Name: \
             Index<T>::UpdateIndex()
         {
             omp_set_num_threads(m_iNumberOfThreads);
-            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
-            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
             return ErrorCode::Success;
         }
 
@@ -651,7 +752,7 @@ case VectorValueType::Name: \
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
     else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (SPTAG::Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \

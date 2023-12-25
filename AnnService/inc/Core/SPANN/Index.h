@@ -51,16 +51,17 @@ namespace SPTAG
             std::unordered_map<std::string, std::string> m_headParameters;
 
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
-            std::unique_ptr<COMMON::WorkSpacePool<ExtraWorkSpace>> m_workSpacePool;
 
             Options m_options;
 
             std::function<float(const T*, const T*, DimensionType)> m_fComputeDistance;
             int m_iBaseSquare;
+            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
 
         public:
             Index()
             {
+                m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
             }
@@ -92,7 +93,7 @@ namespace SPTAG
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_options.m_dim); }
             inline float GetDistance(const void* target, const SizeType idx) const {
-                LOG(Helper::LogLevel::LL_Error, "GetDistance NOT SUPPORT FOR SPANN");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "GetDistance NOT SUPPORT FOR SPANN");
                 return -1;
             }
             inline bool ContainSample(const SizeType idx) const { return idx < m_options.m_vectorSize; }
@@ -127,17 +128,21 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+
             std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
 	        std::shared_ptr<SPANNResultIterator<T>> GetSPANNIterator(const void* p_target, bool p_searchDeleted, int batch) const;
-	        ErrorCode SearchIndexIterativeNext(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexIterativeNextBatch(QueryResult& p_results, std::shared_ptr<COMMON::WorkSpace>& workSpace, int batch, int& resultCount, bool p_isFirst, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace) const;
-            ErrorCode SearchIndexIterativeEnd(std::shared_ptr<COMMON::WorkSpace>& workSpace, std::shared_ptr<SPANN::ExtraWorkSpace>& extraWorkspace) const;
-            bool SearchIndexIterativeFromNeareast(QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_space, bool p_isFirst, bool p_searchDeleted = false) const;
-            std::shared_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
-            ErrorCode SearchIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, std::shared_ptr<COMMON::WorkSpace>& p_indexWorkspace, std::shared_ptr<ExtraWorkSpace>& p_extraWorkspace, bool first) const;
+	        ErrorCode SearchIndexIterativeNext(QueryResult& p_results, COMMON::WorkSpace* workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeNextBatch(QueryResult& p_results, COMMON::WorkSpace* workSpace, int batch, int& resultCount, bool p_isFirst, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
+            ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace, std::unique_ptr<SPANN::ExtraWorkSpace> extraWorkspace) const;
+            bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
+            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
+            ErrorCode SearchIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, COMMON::WorkSpace* p_indexWorkspace, ExtraWorkSpace* p_extraWorkspace, bool first) const;
+
+            ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
+
             ErrorCode SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats = nullptr) const;
-	    bool SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, std::shared_ptr<ExtraWorkSpace>& extraWorkspace) const;
+	        bool SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, ExtraWorkSpace* extraWorkspace) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) const;
             ErrorCode UpdateIndex();
@@ -156,6 +161,41 @@ namespace SPTAG
             ErrorCode DeleteIndex(const SizeType& p_id) { return ErrorCode::Undefined; }
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) { return ErrorCode::Undefined; }
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) { return ErrorCode::Undefined; }
+            ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
+            {
+                SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>* raw_generic_ptr = up_workSpaceFactory.release();
+                if (!raw_generic_ptr) return ErrorCode::Fail;
+
+
+                SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>* raw_specialized_ptr = dynamic_cast<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>*>(raw_generic_ptr);
+                if (!raw_specialized_ptr)
+                {
+                    // If it is of type SPTAG::COMMON::WorkSpace, we should pass on to child index
+                    if (!m_index) 
+                    {
+                        delete raw_generic_ptr;
+                        return ErrorCode::Fail;
+                    }
+                    else
+                    {
+                        return m_index->SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>>(raw_generic_ptr));
+                    }
+                    
+                }
+                else
+                {
+                    m_workSpaceFactory = std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>>(raw_specialized_ptr);
+                    return ErrorCode::Success;
+                }
+            }
+
+            SizeType GetGlobalVID(SizeType vid)
+            {
+                return static_cast<SizeType>((m_vectorTranslateMap.get())[vid]);
+            }
+
+            ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
+
         private:
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);

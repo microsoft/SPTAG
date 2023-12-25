@@ -20,13 +20,13 @@ namespace SPTAG
 		{
 		public:
 			SPANNResultIterator(const Index<T>* p_index, const void* p_target,
-				std::shared_ptr<COMMON::WorkSpace> headWorkspace,
-				std::shared_ptr<SPANN::ExtraWorkSpace> extraWorkspace,
+				std::unique_ptr<COMMON::WorkSpace> headWorkspace,
+				std::unique_ptr<SPANN::ExtraWorkSpace> extraWorkspace,
 				int batch)
 				:m_index(p_index),
 			        m_target(p_target),
-			        m_headWorkspace(headWorkspace),
-			        m_extraWorkspace(extraWorkspace),
+			        m_headWorkspace(std::move(headWorkspace)),
+			        m_extraWorkspace(std::move(extraWorkspace)),
 			        m_batch(batch)
 		        {
 			        m_headQueryResult = std::make_unique<QueryResult>(p_target, batch, false);
@@ -35,20 +35,22 @@ namespace SPTAG
 		        }
 			~SPANNResultIterator()
 			{
-                                if (m_index != nullptr && m_headWorkspace != nullptr && m_extraWorkspace != nullptr) {
-				    m_index->SearchIndexIterativeEnd(m_headWorkspace, m_extraWorkspace);
-			        }
-			        m_headQueryResult = nullptr;
-			        m_queryResult = nullptr;
+                if (m_index != nullptr && m_headWorkspace != nullptr && m_extraWorkspace != nullptr) {
+				    m_index->SearchIndexIterativeEnd(std::move(m_headWorkspace), 
+						std::move(m_extraWorkspace));
+			    }
+			    m_headQueryResult = nullptr;
+			    m_queryResult = nullptr;
 			}
 			bool Next(BasicResult& result)
 			{
 			     m_queryResult->Reset();
-			     m_index->SearchIndexIterative(*m_headQueryResult, *m_queryResult, m_headWorkspace, m_extraWorkspace, m_isFirstResult);
+			     m_index->SearchIndexIterative(*m_headQueryResult, *m_queryResult, 
+					 m_headWorkspace.get(), m_extraWorkspace.get(), m_isFirstResult);
 			     m_isFirstResult = false;
 			     if (m_queryResult->GetResult(0) == nullptr || m_queryResult->GetResult(0)->VID < 0)
 			     {
-				return false;
+				      return false;
 			     }
 			     result.VID = m_queryResult->GetResult(0)->VID;
 			     result.Dist = m_queryResult->GetResult(0)->Dist;
@@ -58,9 +60,10 @@ namespace SPTAG
 			void Close()
 			{
 			   if (m_headWorkspace != nullptr && m_extraWorkspace != nullptr) {
-				m_index->SearchIndexIterativeEnd(m_headWorkspace, m_extraWorkspace);
-				m_headWorkspace = nullptr;
-				m_extraWorkspace = nullptr;
+				   m_index->SearchIndexIterativeEnd(std::move(m_headWorkspace), 
+					   std::move(m_extraWorkspace));
+				   m_headWorkspace = nullptr;
+				   m_extraWorkspace = nullptr;
 			   }
 			}
 			QueryResult* GetQuery() const
@@ -73,8 +76,8 @@ namespace SPTAG
 			ByteArray m_byteTarget;
 			std::unique_ptr<QueryResult> m_headQueryResult;
 			std::unique_ptr<QueryResult> m_queryResult;
-			std::shared_ptr<COMMON::WorkSpace> m_headWorkspace;
-			std::shared_ptr<SPANN::ExtraWorkSpace> m_extraWorkspace;
+			std::unique_ptr<COMMON::WorkSpace> m_headWorkspace;
+			std::unique_ptr<SPANN::ExtraWorkSpace> m_extraWorkspace;
 			bool m_isFirstResult;
 			int m_batch;
 		};

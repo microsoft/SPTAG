@@ -58,6 +58,67 @@ namespace Microsoft
                     (*m_Instance)->SetParameter(string_to_char_array(p_name), string_to_char_array(p_value), string_to_char_array(p_section));
             }
 
+            bool AnnIndex::LoadQuantizer(String^ p_quantizerFile)
+            {
+                if (m_Instance == nullptr) return false;
+                
+                auto ret = ((*m_Instance)->LoadQuantizer(string_to_char_array(p_quantizerFile)) == SPTAG::ErrorCode::Success);
+                if (ret)
+                {
+                    m_inputVectorSize = (*m_Instance)->m_pQuantizer->QuantizeSize();
+                }
+                return ret;
+            }
+
+            void AnnIndex::SetQuantizerADC(bool p_adc)
+            {
+                if (m_Instance != nullptr)
+                    (*m_Instance)->SetQuantizerADC(p_adc);
+            }
+
+            array<Byte>^ AnnIndex::QuantizeVector(array<Byte>^ p_data, int p_num) {
+                array<Byte>^ res;
+                if (m_Instance != nullptr && (*m_Instance)->GetQuantizer() != nullptr) {
+                    res = gcnew array<Byte>((*m_Instance)->GetQuantizer()->GetNumSubvectors() * (size_t)p_num);
+                    pin_ptr<Byte> ptr = &res[0], optr = &p_data[0];
+                    (*m_Instance)->QuantizeVector(optr, p_num, SPTAG::ByteArray(ptr, res->LongLength, false));
+                }
+                return res;
+            }
+
+            array<Byte>^ AnnIndex::ReconstructVector(array<Byte>^ p_data, int p_num) {
+                array<Byte>^ res;
+                if (m_Instance != nullptr && (*m_Instance)->GetQuantizer() != nullptr) {
+                    res = gcnew array<Byte>((*m_Instance)->GetQuantizer()->ReconstructSize() * (size_t)p_num);
+                    pin_ptr<Byte> ptr = &res[0], optr = &p_data[0];
+                    (*m_Instance)->ReconstructVector(optr, p_num, SPTAG::ByteArray(ptr, res->LongLength, false));
+                }
+                return res;
+            }
+
+            bool AnnIndex::BuildSPANN(bool p_normalized)
+            {
+                if (m_Instance == nullptr || (*m_Instance)->GetIndexAlgoType() != SPTAG::IndexAlgoType::SPANN) return false;
+
+                return (*m_Instance)->BuildIndex(p_normalized) == SPTAG::ErrorCode::Success;
+            }
+
+            bool AnnIndex::BuildSPANNWithMetaData(array<Byte>^ p_meta, int p_num, bool p_withMetaIndex, bool p_normalized)
+            {
+                if (m_Instance == nullptr || (*m_Instance)->GetIndexAlgoType() != SPTAG::IndexAlgoType::SPANN) return false;
+
+                pin_ptr<Byte> metaptr = &p_meta[0];
+                std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
+                if (!SPTAG::MetadataSet::GetMetadataOffsets(metaptr, p_meta->LongLength, offsets, p_num + 1, '\n')) return false;
+                (*m_Instance)->SetMetadata(new SPTAG::MemMetadataSet(SPTAG::ByteArray(metaptr, p_meta->LongLength, false),
+                    SPTAG::ByteArray((std::uint8_t*)offsets, (p_num + 1) * sizeof(std::uint64_t), true), p_num,
+                    (*m_Instance)->m_iDataBlockSize, (*m_Instance)->m_iDataCapacity, (*m_Instance)->m_iMetaRecordSize));
+
+                if (p_withMetaIndex) (*m_Instance)->BuildMetaMapping(false);
+
+                return (SPTAG::ErrorCode::Success == (*m_Instance)->BuildIndex(p_normalized));
+            }
+
             bool AnnIndex::Build(array<Byte>^ p_data, int p_num)
             {
                 return Build(p_data, p_num, false);
@@ -83,7 +144,9 @@ namespace Microsoft
                     return false;
 
                 pin_ptr<Byte> dataptr = &p_data[0];
-                std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(SPTAG::ByteArray(dataptr, p_data->LongLength, false), (*m_Instance)->GetVectorValueType(), m_dimension, p_num));
+                auto vectorType = (*m_Instance)->m_pQuantizer ? SPTAG::VectorValueType::UInt8 : (*m_Instance)->GetVectorValueType();
+                auto vectorSize = (*m_Instance)->m_pQuantizer ? (*m_Instance)->m_pQuantizer->GetNumSubvectors() : m_dimension;
+                std::shared_ptr<SPTAG::VectorSet> vectors(new SPTAG::BasicVectorSet(SPTAG::ByteArray(dataptr, p_data->LongLength, false), vectorType, vectorSize, p_num));
 
                 pin_ptr<Byte> metaptr = &p_meta[0];
                 std::uint64_t* offsets = new std::uint64_t[p_num + 1]{ 0 };
@@ -97,7 +160,7 @@ namespace Microsoft
             array<BasicResult^>^ AnnIndex::Search(array<Byte>^ p_data, int p_resultNum)
             {
                 array<BasicResult^>^ res;
-                if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
+                if (m_Instance == nullptr)
                     return res;
 
                 pin_ptr<Byte> ptr = &p_data[0];
@@ -114,7 +177,7 @@ namespace Microsoft
             array<BasicResult^>^ AnnIndex::SearchWithMetaData(array<Byte>^ p_data, int p_resultNum)
             {
                 array<BasicResult^>^ res;
-                if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
+                if (m_Instance == nullptr)
                     return res;
 
                 pin_ptr<Byte> ptr = &p_data[0];
@@ -128,6 +191,7 @@ namespace Microsoft
                 return res;
             }
 
+<<<<<<< HEAD
             ResultIterator^ AnnIndex::GetIterator(array<Byte>^ p_data, int p_resultNum)
             {
                 ResultIterator^ res;
@@ -139,6 +203,11 @@ namespace Microsoft
 
                 res = gcnew ResultIterator(result_iterator);
                 return res;
+=======
+            void AnnIndex::UpdateIndex()
+            {
+                if (m_Instance != nullptr) (*m_Instance)->UpdateIndex();
+>>>>>>> main
             }
 
             bool AnnIndex::Save(String^ p_saveFile)

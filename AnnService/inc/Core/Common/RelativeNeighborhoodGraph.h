@@ -46,7 +46,9 @@ namespace SPTAG
                 _mm_prefetch((const char*)(nodeVec), _MM_HINT_T0);
                 _mm_prefetch((const char*)(insertVec), _MM_HINT_T0);
                 for (DimensionType i = 0; i < m_iNeighborhoodSize; i++) {
-                    _mm_prefetch((const char*)(index->GetSample(nodes[i])), _MM_HINT_T0);
+                    auto futureNode = nodes[i];
+                    if (futureNode < 0) break;
+                    _mm_prefetch((const char*)(index->GetSample(futureNode)), _MM_HINT_T0);
                 }
 
                 SizeType tmpNode;

@@ -82,12 +82,21 @@ def _find_python_packages():
     elif os.path.exists(os.path.join('x64', 'Release')):
         shutil.copytree(os.path.join('x64', 'Release'), 'sptag')
 
-        if os.path.exists('lib'): shutil.rmtree('lib')
-        os.mkdir('lib')
-        os.mkdir(os.path.join('lib', 'net472'))
+        if not os.path.exists('lib'): os.mkdir('lib')
+        if not os.path.exists('lib\\net472'): os.mkdir('lib\\net472')
         for file in glob.glob(r'x64\\Release\\Microsoft.ANN.SPTAGManaged.*'):
             print (file)
             shutil.copy(file, "lib\\net472\\")
+        sfiles = ''
+        for framework in ['net5.0', 'net472']:
+            if os.path.exists("lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" % framework):
+                sfiles += '<file src="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.dll" />' % (framework, framework)
+                sfiles += '<file src="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\%s\\Microsoft.ANN.SPTAGManaged.pdb" />' % (framework, framework)
+        if os.path.exists('x64\\Release\\libzstd.dll'):
+            sfiles += '<file src="x64\\Release\\libzstd.dll" target="runtimes\\win-x64\\native\\libzstd.dll" />'
+        if os.path.exists('x64\\Release\\Ijwhost.dll'):
+            sfiles += '<file src="x64\\Release\\Ijwhost.dll" target="runtimes\\win-x64\\native\\Ijwhost.dll" />'
+        sfiles += '<file src="SPTAG.targets" target="build\\MSSPTAG.Managed.Library.targets" />'
         f = open('sptag.nuspec', 'w')
         spec = '''<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
@@ -104,13 +113,48 @@ def _find_python_packages():
     <copyright>Copyright @ Microsoft</copyright>
   </metadata>
   <files>
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.dll" />
-    <file src="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" target="lib\\net472\\Microsoft.ANN.SPTAGManaged.pdb" />
+%s
+  </files>
+</package>
+''' % (nuget_release, sfiles)
+        f.write(spec)
+        f.close()
+
+        fwinrt = open('sptag.winrt.nuspec', 'w')
+        spec = '''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>MSSPTAG.WinRT</id>
+    <version>%s</version>
+    <title>MSSPTAG.WinRT</title>
+    <authors>cheqi,haidwa,mingqli</authors>
+    <owners>cheqi,haidwa,mingqli</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <licenseUrl>https://github.com/microsoft/SPTAG</licenseUrl>
+    <projectUrl>https://github.com/microsoft/SPTAG</projectUrl>
+    <description>SPTAG (Space Partition Tree And Graph) is a library for large scale vector approximate nearest neighbor search scenario released by Microsoft Research (MSR) and Microsoft Bing.</description>
+    <copyright>Copyright @ Microsoft</copyright>
+    <dependencies>
+      <group targetFramework="uap10.0">
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
+      </group>
+      <group targetFramework="native">
+        <dependency id="Zstandard.dyn.x64" version="1.4.0" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="Wrappers\\WinRT\\SPTAG.WinRT.targets" target="build\\native" />
+    <file src="x64\Release\\SPTAG.WinRT\\SPTAG.winmd" target="lib\\uap10.0" />
+    <file src="x64\Release\\SPTAG.WinRT\\SPTAG.dll" target="runtimes\\win10-x64\\native" />
+    <file src="readme.md" />
+    <file src="LICENSE" />
   </files>
 </package>
 ''' % (nuget_release)
-        f.write(spec)
-        f.close()
+        fwinrt.write(spec)
+        fwinrt.close()
+
     f = open(os.path.join('sptag', '__init__.py'), 'w')
     f.close()
     return ['sptag']

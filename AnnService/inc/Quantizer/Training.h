@@ -63,16 +63,16 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
 {
     SizeType numCentroids = 256;
     if (raw_vectors->Dimension() % options->m_quantizedDim != 0) {
-        LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
         exit(1);
     }
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
     auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
-    LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
 #pragma omp parallel for
     for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
-        LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
         auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2, nullptr);
         auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 

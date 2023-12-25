@@ -89,7 +89,7 @@ class GPU_Quantizer {
 
       // Make sure L2 is used, since other 
       if(metric != DistMetric::L2) {
-        LOG(Helper::LogLevel::LL_Error, "Only L2 distance currently supported for PQ or OPQ\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only L2 distance currently supported for PQ or OPQ\n");
         exit(1);
       }
 
@@ -103,7 +103,7 @@ class GPU_Quantizer {
         m_BlockSize = pq_quantizer->GetBlockSize();
         m_DimPerSubvector = pq_quantizer->GetDimPerSubvector();
 
-        LOG(Helper::LogLevel::LL_Debug, "Using PQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Using PQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
 
         rType = pq_quantizer->GetReconstructType();
         CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
@@ -117,14 +117,14 @@ class GPU_Quantizer {
         m_BlockSize = opq_quantizer->GetBlockSize();
         m_DimPerSubvector = opq_quantizer->GetDimPerSubvector();
 
-        LOG(Helper::LogLevel::LL_Debug, "Using OPQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Using OPQ - numSubVectors:%d, KsPerSub:%ld, BlockSize:%ld, DimPerSub:%d, total size of tables:%ld\n", m_NumSubvectors, m_KsPerSubvector, m_BlockSize, m_DimPerSubvector, m_BlockSize*m_NumSubvectors*sizeof(float));
 
         rType = opq_quantizer->GetReconstructType();
         CUDA_CHECK(cudaMalloc(&m_DistanceTables, m_BlockSize * m_NumSubvectors * sizeof(float)));
         CUDA_CHECK(cudaMemcpy(m_DistanceTables, opq_quantizer->GetL2DistanceTables(), m_BlockSize*m_NumSubvectors*sizeof(float), cudaMemcpyHostToDevice));
       }
       else {
-        LOG(Helper::LogLevel::LL_Error, "Only PQ and OPQ quantizers are supported for GPU build\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only PQ and OPQ quantizers are supported for GPU build\n");
         exit(1);
       }
 
