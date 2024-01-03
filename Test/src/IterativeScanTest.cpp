@@ -32,7 +32,7 @@ void SearchIterative(const std::string folder, T* vec, SPTAG::SizeType n, int k,
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::BasicResult result;
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     for (int i = 0; i < 100; i++) {
         bool hasResult = resultIterator->Next(result);
         if (!hasResult) break;
@@ -51,7 +51,7 @@ void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, i
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::QueryResult results(5);
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     int batch = 5;
     for (int i = 0; i < 100; i++) {
         int resultCount = resultIterator->Next(results, batch);
@@ -72,7 +72,7 @@ void SearchRelaxedMono(const std::string folder, T* vec, SPTAG::SizeType n, int 
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
     SPTAG::BasicResult result;
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     for (int i = 0; i < 100; i++) {
         bool hasResult = resultIterator->Next(result);
         if (!hasResult) break;
