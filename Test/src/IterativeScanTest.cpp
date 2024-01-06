@@ -32,7 +32,7 @@ void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, i
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
 
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec);
+    std::shared_ptr<ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     int batch = 5;
     for (int i = 0; i < 10; i++) {
         auto results = resultIterator->Next(batch);

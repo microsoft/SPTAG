@@ -38,10 +38,8 @@
 			batch = m_queryResult->GetResultNum();
 		}
         
-		if (m_workspace == nullptr) {
-			m_queryResult->Reset();
-			return m_queryResult;
-		}
+		m_queryResult->Reset();
+		if (m_workspace == nullptr) return m_queryResult;
 		
 		int resultCount = 0;
 		m_index->SearchIndexIterativeNextBatch(*m_queryResult, (((UniqueHandler*)m_workspace)->m_handler).get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
