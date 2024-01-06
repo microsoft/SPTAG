@@ -25,60 +25,25 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
 }
 
 template <typename T>
-void SearchIterative(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
-{
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-    SPTAG::BasicResult result;
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
-    for (int i = 0; i < 100; i++) {
-        bool hasResult = resultIterator->Next(result);
-        if (!hasResult) break;
-        std::cout << "hasResult: " << hasResult << std::endl;
-        std::cout << "result: " << result.VID << std::endl;
-        std::cout << "relaxedMono: " << result.RelaxedMono << std::endl;
-    }
-    resultIterator->Close();
-}
-
-template <typename T>
 void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
 
     BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
     BOOST_CHECK(nullptr != vecIndex);
-    SPTAG::QueryResult results(5);
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
+
+    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     int batch = 5;
-    for (int i = 0; i < 100; i++) {
-        int resultCount = resultIterator->Next(results, batch);
+    for (int i = 0; i < 10; i++) {
+        auto results = resultIterator->Next(batch);
+        int resultCount = results->GetResultNum();
         std::cout << "resultCount: " << resultCount << std::endl;
         if (resultCount <= 0) break;
         for (int j = 0; j < resultCount; j++) {
-            std::cout << "result: " << results.GetResult(j)->VID << std::endl;
-            std::cout << "relaxedMono: " << results.GetResult(j)->RelaxedMono << std::endl;
+            std::cout << "result: " << results->GetResult(j)->VID << std::endl;
+            std::cout << "dist: " << results->GetResult(j)->Dist << std::endl;
+            std::cout << "relaxedMono: " << results->GetResult(j)->RelaxedMono << std::endl;
         }
-    }
-    resultIterator->Close();
-}
-
-template <typename T>
-void SearchRelaxedMono(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
-{
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-    SPTAG::BasicResult result;
-    std::shared_ptr<SPTAG::ResultIterator> resultIterator = vecIndex->GetIterator(vec, true);
-    for (int i = 0; i < 100; i++) {
-        bool hasResult = resultIterator->Next(result);
-        if (!hasResult) break;
-        std::cout << "hasResult: " << hasResult << std::endl;
-        std::cout << "result: " << result.VID << std::endl;
-        std::cout << "relaxedMono: " << result.RelaxedMono << std::endl;
     }
     resultIterator->Close();
 }
@@ -124,8 +89,6 @@ void TestIterativeScan(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 
     BuildIndex<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
-    SearchIterative<T>("testindices", query.data(), q, k, truthmeta1);
-    SearchRelaxedMono<T>("testindices", query.data(), q, k, truthmeta1);
     SearchIterativeBatch<T>("testindices", query.data(), q, k, truthmeta1);
 }
 

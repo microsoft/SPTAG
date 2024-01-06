@@ -111,6 +111,12 @@ public:
     }
 
 
+    inline void SetResultNum(int p_resultNum)
+    {
+        m_resultNum = p_resultNum;
+    }
+
+
     inline const void* GetTarget()
     {
         return m_target;

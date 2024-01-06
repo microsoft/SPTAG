@@ -32,10 +32,10 @@ namespace SPTAG
         for ( int i = 0; i < fwdLUTs.size(); i++ ){
             indexIters.push_back(vectorIndices[i]->GetIterator(p_targets[i], true));
         }
-        printf("(%lu, %lu, %lu)\n", fwdLUTs.size(), p_targets.size(), indexIters.size() );
+        printf("(%zu, %zu, %zu)\n", fwdLUTs.size(), p_targets.size(), indexIters.size() );
     }
     float rankFunc(std::vector<float> in) {
-        return std::accumulate(in.begin(), in.end(), 0);
+        return (float)std::accumulate(in.begin(), in.end(), 0);
     }
 
     float MultiIndexScan::WeightedRankFunc(std::vector<float> in) {
@@ -77,7 +77,7 @@ namespace SPTAG
             p_data_array.push_back(p_targets[i]);
             indexIters.push_back(vectorIndices[i]->GetIterator(p_data_array[i].Data(), true));
         }
-        printf("(%lu, %lu, %lu)\n", fwdLUTs.size(), p_targets.size(), indexIters.size());
+        printf("(%zu, %zu, %zu)\n", fwdLUTs.size(), p_targets.size(), indexIters.size());
     }
 
     MultiIndexScan::~MultiIndexScan(){
@@ -86,21 +86,21 @@ namespace SPTAG
 
 	bool MultiIndexScan::Next(BasicResult& result)
 	{
-        int numCols = indexIters.size();
+        int numCols = (int)indexIters.size();
         while ( !terminate ) {
             
             for ( int i = 0 ; i < numCols; i++ ) {
                 auto result_iter = indexIters[i];
                // printf("probing index %d, %s\n", i, fwdLUTs[i]->GetIndexName().c_str());
-                BasicResult curr_result;
-                if (!result_iter->Next(curr_result)) {
+                auto results = result_iter->Next(1);
+                if (results->GetResultNum() == 0) {
                     printf("index %d no more result!! Terminating\n", i);                    
                     terminate = true;
                     break;
                 }
 
-                auto vid  = curr_result.VID;
-                auto dist = curr_result.Dist;
+                auto vid  = results->GetResult(0)->VID;
+                auto dist = results->GetResult(0)->Dist;
                 //we ignore meta for now:: auto meta = curr_result.Meta;
 
                // printf("vid = %lu, dist = %f from index %d\n", vid, dist, i);
@@ -114,7 +114,7 @@ namespace SPTAG
                     // lookup scores using foward index
                     for ( int j = 0; j < numCols; j++ ){
                         if ( i != j ){
-                            dists[j] = fwdLUTs[j]->GetDistance(indexIters[j]->GetQuery()->GetTarget(), vid);
+                            dists[j] = fwdLUTs[j]->GetDistance(indexIters[j]->GetTarget(), vid);
                         }
                     }
 

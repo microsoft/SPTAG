@@ -8,30 +8,35 @@
 
 #include "VectorIndex.h"
 #include "SearchQuery.h"
-#include "Common/WorkSpace.h"
 
-namespace SPTAG
-{
+typedef SPTAG::VectorIndex VectorIndex;
+typedef SPTAG::ByteArray ByteArray;
+typedef SPTAG::QueryResult QueryResult;
+
 class ResultIterator
 {
 public:
-	ResultIterator(const VectorIndex* index, const void* p_target,
-		std::unique_ptr<COMMON::WorkSpace> workspace, bool searchDeleted);
+	ResultIterator(const void* index, const void* p_target, bool searchDeleted);
+
 	~ResultIterator();
-	bool Next(BasicResult& result);
-	int Next(QueryResult& results, int batch);
+	
+	std::shared_ptr<QueryResult> Next(int batch);
+	
 	bool GetRelaxedMono();
+	
 	void Close();
-	QueryResult* GetQuery() const;
+
+	const void* GetTarget();
+
 private:
 	const VectorIndex* m_index;
 	const void* m_target;
 	ByteArray m_byte_target;
-	std::unique_ptr<QueryResult> m_queryResult;
-	std::unique_ptr<COMMON::WorkSpace> m_workspace;
+	std::shared_ptr<QueryResult> m_queryResult;
+	void* m_workspace;
 	bool m_searchDeleted;
 	bool m_isFirstResult;
 	int m_batch = 1;
 };
-} // namespace SPTAG
+
 #endif

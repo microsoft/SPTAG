@@ -337,12 +337,9 @@ case VectorValueType::Name: \
         std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
         {
             if (!m_bReady) return nullptr;
-            auto workSpace = m_workSpaceFactory->GetWorkSpace();
-            // TODO(qiazh): optimize batch instead of 1
-            workSpace->Reset(m_iMaxCheck, 1);
 
             std::shared_ptr<ResultIterator> resultIterator =
-                std::make_shared<ResultIterator>(this, p_target, std::move(workSpace), p_searchDeleted);
+                std::make_shared<ResultIterator>((const void*)this, p_target, p_searchDeleted);
 
             return resultIterator;
         }
@@ -393,6 +390,10 @@ case VectorValueType::Name: \
         std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
         {
             auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
             workSpace->ResetResult(m_iMaxCheck, batch);
             return std::move(workSpace);
         }

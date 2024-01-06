@@ -236,6 +236,10 @@ namespace SPTAG
                 Initialize(other.m_iMaxCheck, other.nodeCheckStatus.HashTableExponent());
             }
 
+            ~WorkSpace() {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Delete workspace happens!\n");
+            }
+
             void Initialize(int maxCheck, int hashExp)
             {
                 nodeCheckStatus.Init(maxCheck, hashExp);

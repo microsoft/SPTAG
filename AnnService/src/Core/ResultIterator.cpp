@@ -1,77 +1,75 @@
 #include "inc/Core/ResultIterator.h"
 
-namespace SPTAG
-{
-	ResultIterator::ResultIterator(const VectorIndex* index, const void* p_target,
-		std::unique_ptr<COMMON::WorkSpace> workspace, bool searchDeleted)
-		:m_index(index),
+
+
+	struct UniqueHandler {
+		std::unique_ptr<SPTAG::COMMON::WorkSpace> m_handler;
+	};
+
+	ResultIterator::ResultIterator(const void* index, const void* p_target, bool searchDeleted)
+		:m_index((const VectorIndex*)index),
 		m_target(p_target),
-		m_workspace(std::move(workspace)),
 		m_searchDeleted(searchDeleted)
 	{
-		// TODO(qiazh): optimize batch instead of 1
-		m_queryResult = std::make_unique<QueryResult>(p_target, 1, true);
+		m_workspace = new UniqueHandler;
+		((UniqueHandler*)m_workspace)->m_handler = std::move(m_index->RentWorkSpace(1));
 		m_isFirstResult = true;
 	}
 
 	ResultIterator::~ResultIterator()
 	{
 		if (m_index != nullptr && m_workspace != nullptr) {
-			m_index->SearchIndexIterativeEnd(std::move(m_workspace));
+			m_index->SearchIndexIterativeEnd(std::move(((UniqueHandler*)m_workspace)->m_handler));
+			delete m_workspace;
+			m_workspace = nullptr;
 		}
 		m_queryResult = nullptr;
 	}
 
-	bool ResultIterator::Next(BasicResult& result)
+	std::shared_ptr<QueryResult> ResultIterator::Next(int batch)
 	{
-		m_queryResult->Reset();
-		m_index->SearchIndexIterativeNext(*m_queryResult, m_workspace.get(), m_isFirstResult, m_searchDeleted);
-		m_isFirstResult = false;
-		if (m_queryResult->GetResult(0) == nullptr || m_queryResult->GetResult(0)->VID < 0)
-		{
-			return false;
-		}
-		result.VID = m_queryResult->GetResult(0)->VID;
-		result.Dist = m_queryResult->GetResult(0)->Dist;
-		result.Meta = m_queryResult->GetResult(0)->Meta;
-		result.RelaxedMono = m_workspace->m_relaxedMono;
-		return true;
-	}
+		if (m_workspace == nullptr) return nullptr;
 
-	int ResultIterator::Next(QueryResult& results, int batch)
-	{
-		results.Reset();
-		results.SetTarget(m_queryResult->GetTarget());
-		results.SetTarget(m_queryResult->GetQuantizedTarget());
+		if (m_queryResult == nullptr) {
+			m_queryResult = std::make_unique<QueryResult>(m_target, batch, true);
+		}
+		else if (batch <= m_queryResult->GetResultNum()) {
+			m_queryResult->SetResultNum(batch);
+		}
+		else {
+			batch = m_queryResult->GetResultNum();
+		}
+
 		int resultCount = 0;
-		m_index->SearchIndexIterativeNextBatch(results, m_workspace.get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
+		m_index->SearchIndexIterativeNextBatch(*m_queryResult, (((UniqueHandler*)m_workspace)->m_handler).get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
 		m_isFirstResult = false;
 		for (int i = 0; i < resultCount; i++)
 		{
-			SizeType result = results.GetResult(i)->VID;
-			results.GetResult(i)->RelaxedMono = m_workspace->m_relaxedMono;
+			m_queryResult->GetResult(i)->RelaxedMono = (((UniqueHandler*)m_workspace)->m_handler)->m_relaxedMono;
 		}
-		return resultCount;
+		m_queryResult->SetResultNum(resultCount);
+		return m_queryResult;
 	}
 
 	bool ResultIterator::GetRelaxedMono()
 	{
-		return m_workspace->m_relaxedMono;
+		if (m_workspace == nullptr) return false;
+
+		return (((UniqueHandler*)m_workspace)->m_handler)->m_relaxedMono;
 	}
 
 	// Add end into destructor.
 	void ResultIterator::Close()
 	{
 		if (m_workspace != nullptr) {
-			m_index->SearchIndexIterativeEnd(std::move(m_workspace));
+			m_index->SearchIndexIterativeEnd(std::move(((UniqueHandler*)m_workspace)->m_handler));
+			delete m_workspace;
 			m_workspace = nullptr;
 		}
 	}
 
-	QueryResult* ResultIterator::GetQuery() const
+	const void* ResultIterator::GetTarget()
 	{
-		return m_queryResult.get();
+		return m_target;
 	}
-
-
-} // namespace SPTAG
+ // namespace SPTAG

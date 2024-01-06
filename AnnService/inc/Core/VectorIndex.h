@@ -14,6 +14,8 @@
 #include "inc/Core/Common/IQuantizer.h"
 #include "inc/Core/Common/WorkSpace.h"
 
+class ResultIterator;
+
 namespace SPTAG
 {
 
@@ -22,7 +24,6 @@ class IAbortOperation
 public:
     virtual bool ShouldAbort() = 0;
 };
-class ResultIterator;
 
 class VectorIndex
 {
