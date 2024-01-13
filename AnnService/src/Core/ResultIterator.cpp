@@ -6,24 +6,25 @@
 		std::unique_ptr<SPTAG::COMMON::WorkSpace> m_handler;
 	};
 
-	ResultIterator::ResultIterator(const void* index, const void* p_target, bool searchDeleted)
-		:m_index((const VectorIndex*)index),
+	ResultIterator::ResultIterator(const void* p_index, const void* p_target, bool p_searchDeleted, int p_workspaceBatch)
+		:m_index((const VectorIndex*)p_index),
 		m_target(p_target),
-		m_searchDeleted(searchDeleted)
+		m_searchDeleted(p_searchDeleted)
 	{
 		m_workspace = new UniqueHandler;
-		((UniqueHandler*)m_workspace)->m_handler = std::move(m_index->RentWorkSpace(1));
+		((UniqueHandler*)m_workspace)->m_handler = std::move(m_index->RentWorkSpace(p_workspaceBatch));
 		m_isFirstResult = true;
 	}
 
 	ResultIterator::~ResultIterator()
 	{
-		if (m_index != nullptr && m_workspace != nullptr) {
-			m_index->SearchIndexIterativeEnd(std::move(((UniqueHandler*)m_workspace)->m_handler));
-			delete m_workspace;
-			m_workspace = nullptr;
-		}
-		m_queryResult = nullptr;
+		Close();
+	}
+
+    void* ResultIterator::GetWorkSpace()
+	{
+        if (m_workspace == nullptr) return nullptr;
+		return (((UniqueHandler*)m_workspace)->m_handler).get();
 	}
 
 	std::shared_ptr<QueryResult> ResultIterator::Next(int batch)
@@ -42,7 +43,7 @@
 		if (m_workspace == nullptr) return m_queryResult;
 		
 		int resultCount = 0;
-		m_index->SearchIndexIterativeNextBatch(*m_queryResult, (((UniqueHandler*)m_workspace)->m_handler).get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
+		m_index->SearchIndexIterativeNext(*m_queryResult, (((UniqueHandler*)m_workspace)->m_handler).get(), batch, resultCount, m_isFirstResult, m_searchDeleted);
 		m_isFirstResult = false;
 		for (int i = 0; i < resultCount; i++)
 		{

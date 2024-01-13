@@ -53,7 +53,7 @@ namespace SPTAG
 
         
         bool useTimer;
-        int termCondVal;
+        unsigned int termCondVal;
         int searchLimit;
         std::chrono::time_point<std::chrono::high_resolution_clock> t_start;
         

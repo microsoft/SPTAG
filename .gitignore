@@ -462,4 +462,4 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
-/AnnService.users.props
+

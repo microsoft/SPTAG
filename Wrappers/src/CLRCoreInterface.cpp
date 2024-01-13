@@ -191,7 +191,6 @@ namespace Microsoft
                 return res;
             }
 
-<<<<<<< HEAD
             ResultIterator^ AnnIndex::GetIterator(array<Byte>^ p_data, int p_resultNum)
             {
                 ResultIterator^ res;
@@ -199,15 +198,15 @@ namespace Microsoft
                     return res;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                std::shared_ptr<SPTAG::ResultIterator> result_iterator = (*m_Instance)->GetIterator(ptr, p_resultNum);
+                std::shared_ptr<ResultIterator> result_iterator = (*m_Instance)->GetIterator(ptr, p_resultNum);
 
                 res = gcnew ResultIterator(result_iterator);
                 return res;
-=======
+            }
+
             void AnnIndex::UpdateIndex()
             {
                 if (m_Instance != nullptr) (*m_Instance)->UpdateIndex();
->>>>>>> main
             }
 
             bool AnnIndex::Save(String^ p_saveFile)

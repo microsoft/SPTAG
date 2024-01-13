@@ -67,10 +67,10 @@ namespace Microsoft
             };
 
             public ref class ResultIterator :
-                public ManagedObject<std::shared_ptr<SPTAG::ResultIterator>>
+                public ManagedObject<std::shared_ptr<ResultIterator>>
             {
             public:
-                ResultIterator(std::shared_ptr<SPTAG::ResultIterator> result_iterator);
+                ResultIterator(std::shared_ptr<ResultIterator> result_iterator);
                 BasicResult^ Next();
                 bool GetRelaxedMono();
                 void Close();
@@ -112,11 +112,9 @@ namespace Microsoft
 
                 array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
 
-<<<<<<< HEAD
                 ResultIterator^ GetIterator(array<Byte>^ p_data, int p_resultNum);
-=======
+
                 void UpdateIndex();
->>>>>>> main
 
                 bool Save(String^ p_saveFile);
 

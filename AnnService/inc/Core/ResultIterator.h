@@ -16,19 +16,21 @@ typedef SPTAG::QueryResult QueryResult;
 class ResultIterator
 {
 public:
-	ResultIterator(const void* index, const void* p_target, bool searchDeleted);
+	ResultIterator(const void* p_index, const void* p_target, bool p_searchDeleted, int p_workspaceBatch);
 
 	~ResultIterator();
 	
-	std::shared_ptr<QueryResult> Next(int batch);
+	void* GetWorkSpace();
+
+	virtual std::shared_ptr<QueryResult> Next(int batch);
 	
-	bool GetRelaxedMono();
+	virtual bool GetRelaxedMono();
 	
-	void Close();
+	virtual void Close();
 
 	const void* GetTarget();
 
-private:
+protected:
 	const VectorIndex* m_index;
 	const void* m_target;
 	ByteArray m_byte_target;

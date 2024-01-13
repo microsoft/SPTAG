@@ -226,8 +226,8 @@
     <ClInclude Include="inc\Core\Common\SIMDUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
-    <ClInclude Include="inc\Core\SPANNResultIterator.h">
-      <Filter>Header Files\Core</Filter>
+    <ClInclude Include="inc\Core\SPANN\SPANNResultIterator.h">
+      <Filter>Header Files\Core\SPANN</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

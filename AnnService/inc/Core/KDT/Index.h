@@ -158,8 +158,7 @@ namespace SPTAG
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
 
             std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexIterativeNext(QueryResult& p_results, COMMON::WorkSpace* workSpace, bool p_isFirst, bool p_searchDeleted = false) const;
-            ErrorCode SearchIndexIterativeNextBatch(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const;
+            ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const;
             ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
             bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
             std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
@@ -197,10 +196,6 @@ namespace SPTAG
             }
 
         private:
-            void SearchIndexWithDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
-            void SearchIndexWithoutDeleted(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const;
-            int SearchIndexIterativeWithDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const;
-            int SearchIndexIterativeWithoutDeleted(COMMON::QueryResultSet<T>& p_query, COMMON::WorkSpace& p_space) const;
             template <typename Q>
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted) const;
             template <typename Q, bool(*notDeleted)(const COMMON::Labelset&, SizeType)>

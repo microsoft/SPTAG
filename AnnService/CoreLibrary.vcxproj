@@ -168,13 +168,13 @@
     <ClInclude Include="inc\Core\ResultIterator.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
-    <ClInclude Include="inc\Core\SPANNResultIterator.h" />
     <ClInclude Include="inc\Core\SPANN\Compressor.h" />
     <ClInclude Include="inc\Core\SPANN\ExtraFullGraphSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\IExtraSearcher.h" />
     <ClInclude Include="inc\Core\SPANN\Index.h" />
     <ClInclude Include="inc\Core\SPANN\Options.h" />
     <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\Core\SPANN\SPANNResultIterator.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />

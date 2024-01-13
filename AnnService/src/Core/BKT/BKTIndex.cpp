@@ -648,31 +648,12 @@ namespace SPTAG
             if (!m_bReady) return nullptr;
 
             std::shared_ptr<ResultIterator> resultIterator =
-                std::make_shared<ResultIterator>((const void*)this, p_target, p_searchDeleted);
+                std::make_shared<ResultIterator>((const void*)this, p_target, p_searchDeleted, 1);
             return resultIterator;
         }
 
         template<typename T>
-        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, bool p_isFirst, bool p_searchDeleted) const
-        {
-            if (!m_bReady) return ErrorCode::EmptyIndex;
-            // TODO(qiazh): optimize batch instead of 1
-            workSpace->ResetResult(m_iMaxCheck, 1);
-            SearchIndexIterative(*((COMMON::QueryResultSet<T>*) & p_query), *workSpace, p_isFirst, 1, p_searchDeleted, true);
-            
-            if (p_query.WithMeta() && nullptr != m_pMetadata)
-            {
-                for (int i = 0; i < p_query.GetResultNum(); ++i)
-                {
-                    SizeType result = p_query.GetResult(i)->VID;
-                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
-                }
-            }
-            return ErrorCode::Success;
-        }
-
-        template<typename T>
-        ErrorCode Index<T>::SearchIndexIterativeNextBatch(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount,  bool p_isFirst, bool p_searchDeleted) const
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount,  bool p_isFirst, bool p_searchDeleted) const
         {
             if (!m_bReady) return ErrorCode::EmptyIndex;
             workSpace->ResetResult(m_iMaxCheck, p_batch);

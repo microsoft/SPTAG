@@ -128,6 +128,7 @@ namespace SPTAG {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
                 m_spaceID = g_spaceCount++;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg) {
@@ -183,6 +184,10 @@ namespace SPTAG {
             int m_offset;
 
             bool m_loadPosting;
+
+            bool m_relaxedMono;
+
+            int m_loadedPostingNum;
 
             static std::atomic_int g_spaceCount;
         };

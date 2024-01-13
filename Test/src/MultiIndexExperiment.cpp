@@ -75,10 +75,10 @@ void GenerateVectorDataSet(SPTAG::IndexAlgoType algo, std::string distCalcMethod
         std::string a = line.substr(0, line.find("\t"));
         for (size_t j = 0; j < a.length(); j++)
             number = number * 10 + a[j] - '0'; 
-        VID2rid.push_back(number);
+        VID2rid.push_back((int)number);
         meta.push_back(number);
 
-        int l = vec.size();
+        int l = (int)vec.size();
 		line.erase(0, line.find("[") + 1);
         for (SPTAG::DimensionType j = 0; j < m - 1; j++) {
             vec.push_back((T)std::stof(line.substr(0, line.find(","))));
@@ -86,13 +86,13 @@ void GenerateVectorDataSet(SPTAG::IndexAlgoType algo, std::string distCalcMethod
         }
         vec.push_back((T)std::stof(line.substr(0, line.find("]"))));
         //normalization;
-        int r = vec.size();
+        int r = (int)vec.size();
         double sum = 0.0;
         for (int i = l; i < r; i++)
             sum += vec[i] * vec[i];
         sum = sqrt(sum);
         for (int i = l; i < r; i++)
-            vec[i] = vec[i] / sum;
+            vec[i] = (T)(vec[i] / sum);
 
     }
     fileName = pathEmbeddings + File_name + "_embeds_query.tsv";
@@ -106,7 +106,7 @@ void GenerateVectorDataSet(SPTAG::IndexAlgoType algo, std::string distCalcMethod
 	{
         query_id.push_back((T)std::stof(line.substr(0, line.find("\t"))));
 
-        int l = query.size();
+        int l = (int)query.size();
 		line.erase(0, line.find("[") + 1);
         for (SPTAG::DimensionType j = 0; j < m - 1; j++) {
             query.push_back((T)std::stof(line.substr(0, line.find(","))));
@@ -114,13 +114,13 @@ void GenerateVectorDataSet(SPTAG::IndexAlgoType algo, std::string distCalcMethod
         }
         query.push_back((T)std::stof(line.substr(0, line.find("]"))));
         //normalization;
-        int r = query.size();
+        int r = (int)query.size();
         double sum = 0.0;
         for (int i = l; i < r; i++)
             sum += query[i] * query[i];
         sum = sqrt(sum);
         for (int i = l; i < r; i++)
-            query[i] = query[i] / sum;
+            query[i] = (T)(query[i] / sum);
     }
 
     std::shared_ptr<SPTAG::VectorSet> vecset(new SPTAG::BasicVectorSet(
@@ -174,15 +174,15 @@ void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::string distCalcMethod, 
 
         for ( int i = 0; i < query_id[0].size(); i++ ){
             std::vector<std::vector<T>> query_current(n, std::vector<T>());
-            for ( int j = 0; j < n ; j++ ){
+            for ( unsigned int j = 0; j < n ; j++ ){
                 for ( int k = i * m; k <  i * m + m; k++ ){
                     query_current[j].push_back(queries[j][k]);
                 }
             }
-            int idquery = query_id[0][i];
+            int idquery = (int)query_id[0][i];
             std::vector<std::shared_ptr<SPTAG::VectorIndex>> vecIndices;
             std::vector<void*> p_targets;
-            for ( int i = 0; i < n; i++ ) {
+            for ( unsigned int i = 0; i < n; i++ ) {
                 std::shared_ptr<SPTAG::VectorIndex> vecIndex;
                 BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
                 BOOST_CHECK(nullptr != vecIndex);
@@ -212,7 +212,7 @@ void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::string distCalcMethod, 
             for (auto i = FinalResult.begin(); i != FinalResult.end(); i++)
                 out1 << idquery << " " << i->rid << " " << ++Rank << " " << i->vid << " " << i->Dist << std::endl;
 
-            for (int i = FinalResult.size(); i < topk; i++)
+            for (int i = (int)FinalResult.size(); i < topk; i++)
                 out1 << idquery << " " << -1 << " " << ++Rank << " " << -1 << " " << -1 << std::endl;
 
             scan.Close();

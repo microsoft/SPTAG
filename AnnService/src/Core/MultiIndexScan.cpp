@@ -35,7 +35,7 @@ namespace SPTAG
         printf("(%zu, %zu, %zu)\n", fwdLUTs.size(), p_targets.size(), indexIters.size() );
     }
     float rankFunc(std::vector<float> in) {
-        return (float)std::accumulate(in.begin(), in.end(), 0);
+        return (float)std::accumulate(in.begin(), in.end(), 0.0f);
     }
 
     float MultiIndexScan::WeightedRankFunc(std::vector<float> in) {

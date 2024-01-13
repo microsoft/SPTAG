@@ -29,7 +29,7 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
 }
 
 float rankFunc(std::vector<float> in){
-    return std::accumulate(in.begin(), in.end(), 0);
+    return std::accumulate(in.begin(), in.end(), 0.0f);
 }
 
 template <typename T>
@@ -38,7 +38,7 @@ void MultiIndexSearch(unsigned int n, std::vector<std::vector<T>> &queries, int 
 
     std::vector<std::shared_ptr<SPTAG::VectorIndex>> vecIndices;
     std::vector<void*> p_targets;
-    for ( int i = 0; i < n; i++ ) {
+    for ( unsigned int i = 0; i < n; i++ ) {
         std::shared_ptr<SPTAG::VectorIndex> vecIndex;
         BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
         BOOST_CHECK(nullptr != vecIndex);
@@ -106,7 +106,7 @@ void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::string distCalcMethod, 
     int k = 3;
     std::vector<std::vector<T>> queries(n, std::vector<T>());
 
-    for ( int i = 0; i < n; i++ ){
+    for (unsigned int i = 0; i < n; i++ ){
         GenerateVectorDataSet<T>(algo, distCalcMethod, i, queries[i]);
     }
 
