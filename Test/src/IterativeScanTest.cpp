@@ -25,7 +25,7 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
 }
 
 template <typename T>
-void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, int k, std::string* truthmeta)
+void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, std::string* truthmeta)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
 
@@ -33,17 +33,21 @@ void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, i
     BOOST_CHECK(nullptr != vecIndex);
 
     std::shared_ptr<ResultIterator> resultIterator = vecIndex->GetIterator(vec);
-    std::cout << "relaxedMono:" << resultIterator->GetRelaxedMono() << std::endl;
+    //std::cout << "relaxedMono:" << resultIterator->GetRelaxedMono() << std::endl;
     int batch = 5;
-    for (int i = 0; i < 10; i++) {
+    int ri = 0;
+    for (int i = 0; i < 2; i++) {
         auto results = resultIterator->Next(batch);
         int resultCount = results->GetResultNum();
-        std::cout << "resultCount: " << resultCount << std::endl;
         if (resultCount <= 0) break;
+        BOOST_CHECK(resultCount == batch);
         for (int j = 0; j < resultCount; j++) {
-            std::cout << "result: " << results->GetResult(j)->VID << std::endl;
-            std::cout << "dist: " << results->GetResult(j)->Dist << std::endl;
-            std::cout << "relaxedMono: " << results->GetResult(j)->RelaxedMono << std::endl;
+            
+            BOOST_CHECK(std::string((char*)((results->GetMetadata(j)).Data()), (results->GetMetadata(j)).Length()) == truthmeta[ri]);
+            BOOST_CHECK(results->GetResult(j)->RelaxedMono == true);
+            std::cout << "Result[" << ri << "] VID:" << results->GetResult(j)->VID << " Dist:" << results->GetResult(j)->Dist << " RelaxedMono:"
+                << results->GetResult(j)->RelaxedMono << std::endl;
+            ri++;
         }
     }
     resultIterator->Close();
@@ -52,9 +56,8 @@ void SearchIterativeBatch(const std::string folder, T* vec, SPTAG::SizeType n, i
 template <typename T>
 void TestIterativeScan(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 {
-    SPTAG::SizeType n = 2000, q = 3;
+    SPTAG::SizeType n = 2000, q = 1;
     SPTAG::DimensionType m = 10;
-    int k = 3;
     std::vector<T> vec;
     for (SPTAG::SizeType i = 0; i < n; i++) {
         for (SPTAG::DimensionType j = 0; j < m; j++) {
@@ -89,8 +92,8 @@ void TestIterativeScan(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
         n));
 
     BuildIndex<T>(algo, distCalcMethod, vecset, metaset, "testindices");
-    std::string truthmeta1[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
-    SearchIterativeBatch<T>("testindices", query.data(), q, k, truthmeta1);
+    std::string truthmeta1[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    SearchIterativeBatch<T>("testindices", query.data(), q, truthmeta1);
 }
 
 BOOST_AUTO_TEST_SUITE(IterativeScanTest)
