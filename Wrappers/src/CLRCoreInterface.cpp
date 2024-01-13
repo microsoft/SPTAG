@@ -10,24 +10,32 @@ namespace Microsoft
     {
         namespace SPTAGManaged
         {
-            ResultIterator::ResultIterator(std::shared_ptr<SPTAG::ResultIterator> result_iterator) :
+            RIterator::RIterator(std::shared_ptr<ResultIterator> result_iterator) :
                 ManagedObject(result_iterator)
             {
             }
 
-            BasicResult^ ResultIterator::Next()
+            array<BasicResult^>^ RIterator::Next(int p_batch)
             {
-                SPTAG::BasicResult* result = new SPTAG::BasicResult();
-                (*m_Instance)->Next(*result);
-                return gcnew BasicResult(result);
+                array<BasicResult^>^ res;
+                if (m_Instance == nullptr)
+                    return res;
+
+                std::shared_ptr<QueryResult> results = (*m_Instance)->Next(p_batch);
+
+                res = gcnew array<BasicResult^>(results->GetResultNum());
+                for (int i = 0; i < results->GetResultNum(); i++)
+                    res[i] = gcnew BasicResult(new SPTAG::BasicResult(*(results->GetResult(i))));
+
+                return res;
             }
 
-            bool ResultIterator::GetRelaxedMono()
+            bool RIterator::GetRelaxedMono()
             {
                 return (*m_Instance)->GetRelaxedMono();
             }
 
-            void ResultIterator::Close()
+            void RIterator::Close()
             {
                 (*m_Instance)->Close();
             }
@@ -191,16 +199,16 @@ namespace Microsoft
                 return res;
             }
 
-            ResultIterator^ AnnIndex::GetIterator(array<Byte>^ p_data, int p_resultNum)
+            RIterator^ AnnIndex::GetIterator(array<Byte>^ p_data)
             {
-                ResultIterator^ res;
+                RIterator^ res;
                 if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
                     return res;
 
                 pin_ptr<Byte> ptr = &p_data[0];
-                std::shared_ptr<ResultIterator> result_iterator = (*m_Instance)->GetIterator(ptr, p_resultNum);
+                std::shared_ptr<ResultIterator> result_iterator = (*m_Instance)->GetIterator(ptr);
 
-                res = gcnew ResultIterator(result_iterator);
+                res = gcnew RIterator(result_iterator);
                 return res;
             }
 

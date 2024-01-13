@@ -64,14 +64,27 @@ namespace Microsoft
                     {
                     }
                 }
+
+                property bool RelaxedMono
+                {
+                public:
+                    bool get()
+                    {
+                        return m_Instance->RelaxedMono;
+                    }
+                private:
+                    void set(bool p_relaxedMono)
+                    {
+                    }
+                }
             };
 
-            public ref class ResultIterator :
+            public ref class RIterator :
                 public ManagedObject<std::shared_ptr<ResultIterator>>
             {
             public:
-                ResultIterator(std::shared_ptr<ResultIterator> result_iterator);
-                BasicResult^ Next();
+                RIterator(std::shared_ptr<ResultIterator> result_iterator);
+                array<BasicResult^>^ Next(int p_batch);
                 bool GetRelaxedMono();
                 void Close();
             };
@@ -112,7 +125,7 @@ namespace Microsoft
 
                 array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
 
-                ResultIterator^ GetIterator(array<Byte>^ p_data, int p_resultNum);
+                RIterator^ GetIterator(array<Byte>^ p_data);
 
                 void UpdateIndex();
 
