@@ -306,12 +306,16 @@ namespace SPTAG
         {
             if (!m_bReady) return nullptr;
             auto extraWorkspace = m_workSpaceFactory->GetWorkSpace();
+            if (!extraWorkspace) {
+                extraWorkspace.reset(new ExtraWorkSpace());
+                extraWorkspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
             extraWorkspace->m_relaxedMono = false;
             extraWorkspace->m_loadedPostingNum = 0;
             extraWorkspace->m_deduper.clear();
             extraWorkspace->m_postingIDs.clear();
             std::shared_ptr<ResultIterator> resultIterator =
-                std::make_shared<SPANNResultIterator<T>>(this, p_target, std::move(extraWorkspace), m_options.m_headBatch);
+                std::make_shared<SPANNResultIterator<T>>(this, m_index.get(), p_target, std::move(extraWorkspace), m_options.m_headBatch);
             return resultIterator;
         }
 

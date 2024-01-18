@@ -7,6 +7,7 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <mutex>
 #include <shared_mutex>
 #include "inc/Core/VectorIndex.h"
 
