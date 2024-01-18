@@ -174,7 +174,7 @@ namespace SPTAG {
 
                 std::vector<std::thread> threads;
 
-                LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
 
                 Utils::StopW sw;
 
@@ -190,7 +190,7 @@ namespace SPTAG {
                         if (index < numQueries)
                         {
                             std::shared_ptr<ResultIterator> baseIterator = p_index->GetIterator(p_results[index].GetTarget(), false);
-                            SPANNResultIterator<ValueType>* iterator = (SPANNResultIterator<ValueType>*)baseIterator;
+                            SPTAG::SPANN::SPANNResultIterator<ValueType>* iterator = (SPTAG::SPANN::SPANNResultIterator<ValueType>*)(baseIterator.get());
                             bool hasNext = true;
                             int i = 0;
                             while (hasNext) {
@@ -215,7 +215,7 @@ namespace SPTAG {
 
                     }
                     double endTime = threadws.getElapsedMs();
-                    LOG(Helper::LogLevel::LL_Info, "Time: %f\n", endTime - startTime);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time: %f\n", endTime - startTime);
                 };
 
                 for (int i = 0; i < p_numThreads; i++) { threads.emplace_back(func); }
