@@ -3,7 +3,7 @@
 
 #pragma once
 #include <limits>
-
+#include "inc/Core/SPANN/SPANNResultIterator.h"
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -162,6 +162,68 @@ namespace SPTAG {
             }
 
             template <typename ValueType>
+            void SearchSequentialIterative(SPANN::Index<ValueType>* p_index,
+                int p_numThreads,
+                std::vector<QueryResult>& p_results,
+                std::vector<SPANN::SearchStats>& p_stats,
+                int p_maxQueryCount, int p_internalResultNum)
+            {
+                int numQueries = min(static_cast<int>(p_results.size()), p_maxQueryCount);
+                p_numThreads = 1;
+                std::atomic_size_t queriesSent(0);
+
+                std::vector<std::thread> threads;
+
+                LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
+
+                Utils::StopW sw;
+
+                auto func = [&]()
+                {
+                    Utils::StopW threadws;
+                    size_t index = 0;
+                    numQueries = 1000;
+                    double startTime = threadws.getElapsedMs();
+                    while (true)
+                    {
+                        index = queriesSent.fetch_add(1);
+                        if (index < numQueries)
+                        {
+                            std::shared_ptr<ResultIterator> baseIterator = p_index->GetIterator(p_results[index].GetTarget(), false);
+                            SPANNResultIterator<ValueType>* iterator = (SPANNResultIterator<ValueType>*)baseIterator;
+                            bool hasNext = true;
+                            int i = 0;
+                            while (hasNext) {
+                                auto result = iterator->Next(10);
+                                for (int j = 0; j < result->GetResultNum(); j++) {
+                                    i++;
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d\n", i);
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Result: %d\n", result->GetResult(j)->VID);
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Dist: %d\n", result->GetResult(j)->Dist);
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Mono: %d\n", result->GetResult(j)->RelaxedMono);
+                                }
+                                if (i >= 958) break;
+                            }
+
+                            iterator->Close();
+                        }
+                        else
+                        {
+                            //return;
+                            break;
+                        }
+
+                    }
+                    double endTime = threadws.getElapsedMs();
+                    LOG(Helper::LogLevel::LL_Info, "Time: %f\n", endTime - startTime);
+                };
+
+                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back(func); }
+                for (auto& thread : threads) { thread.join(); }
+                for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
+            }
+
+            template <typename ValueType>
             void Search(SPANN::Index<ValueType>* p_index)
             {
                 SPANN::Options& p_opts = *(p_index->GetOptions());
@@ -205,7 +267,7 @@ namespace SPTAG {
                     }
 
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start warmup...\n");
-                    SearchSequential(p_index, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
+                    SearchSequentialIterative(p_index, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
                 }
 
@@ -231,7 +293,7 @@ namespace SPTAG {
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
 
-                SearchSequential(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
+                SearchSequentialIterative(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
