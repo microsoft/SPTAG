@@ -91,6 +91,15 @@ BasicVectorSet::Save(const std::string& p_vectorFile) const
     return ErrorCode::Success;
 }
 
+ErrorCode
+BasicVectorSet::Save(std::shared_ptr<Helper::DiskIO> p_vectorIO) const
+{
+    IOBINARY(p_vectorIO, WriteBinary, sizeof(SizeType), (char*)&m_vectorCount);
+    IOBINARY(p_vectorIO, WriteBinary, sizeof(DimensionType), (char*)&m_dimension);
+    IOBINARY(p_vectorIO, WriteBinary, m_data.Length(), (char*)m_data.Data());
+    return ErrorCode::Success;
+}
+
 ErrorCode BasicVectorSet::AppendSave(const std::string& p_vectorFile) const
 {
     auto append = fileexists(p_vectorFile.c_str());

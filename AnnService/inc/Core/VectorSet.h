@@ -30,6 +30,8 @@ public:
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const = 0;
 
+    virtual ErrorCode Save(std::shared_ptr<Helper::DiskIO> p_vectorIO) const = 0;
+
     virtual ErrorCode AppendSave(const std::string& p_vectorFile) const = 0;
 
     virtual SizeType PerVectorDataSize() const = 0;
@@ -61,6 +63,8 @@ public:
     virtual bool Available() const;
 
     virtual ErrorCode Save(const std::string& p_vectorFile) const;
+
+    virtual ErrorCode Save(std::shared_ptr<Helper::DiskIO> p_vectorIO) const;
 
     virtual ErrorCode AppendSave(const std::string& p_vectorFile) const;
 
