@@ -456,6 +456,8 @@ namespace SPTAG
             {
                 return filterFunc(metadata->GetMetadata(node));
             }
+
+
         };
 
         template <typename T>
