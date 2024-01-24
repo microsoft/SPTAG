@@ -56,6 +56,10 @@ namespace SPTAG
                         exit(1);
                     }
                     truth[i].insert(vec.begin(), vec.begin() + K);
+                    if (truth[i].size() < K) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: LoadTruthXVEC truth[%d] size:%d not match required %d!\n", i, (int)(truth[i].size()), K);
+                        exit(1);
+                    }
                 }
             }
 

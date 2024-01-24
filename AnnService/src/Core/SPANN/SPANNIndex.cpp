@@ -329,9 +329,8 @@ namespace SPTAG
         template<typename T>
         ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> space) const
         {
-            if (!m_bReady || m_index == nullptr) return ErrorCode::EmptyIndex;
-
-            return m_index->SearchIndexIterativeEnd(std::move(space));
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeEnd NOT SUPPORT FOR SPANN");
+            return ErrorCode::Fail;
         }
 
         template<typename T>
