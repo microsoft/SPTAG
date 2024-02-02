@@ -40,6 +40,8 @@ public:
 
     bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
+    std::shared_ptr<ResultIterator> GetIterator(ByteArray p_target);
+
     std::shared_ptr<QueryResult> Search(ByteArray p_data, int p_resultNum);
 
     std::shared_ptr<QueryResult> SearchWithMetaData(ByteArray p_data, int p_resultNum);

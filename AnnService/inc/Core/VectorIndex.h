@@ -5,6 +5,7 @@
 #define _SPTAG_VECTORINDEX_H_
 
 #include "Common.h"
+#include "Common/WorkSpace.h"
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
@@ -12,6 +13,8 @@
 #include <unordered_set>
 #include "inc/Core/Common/IQuantizer.h"
 #include "inc/Core/Common/WorkSpace.h"
+
+class ResultIterator;
 
 namespace SPTAG
 {
@@ -37,6 +40,16 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const = 0;
+
+    virtual bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const = 0;
+
+    virtual std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const = 0;
+
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
@@ -47,6 +60,7 @@ public:
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
     virtual bool NeedRefine() const = 0;

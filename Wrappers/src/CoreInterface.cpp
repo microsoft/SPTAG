@@ -139,6 +139,14 @@ AnnIndex::SetSearchParam(const char* p_name, const char* p_value, const char* p_
 }
 
 
+std::shared_ptr<ResultIterator> 
+AnnIndex::GetIterator(ByteArray p_target)
+{
+    if (nullptr != m_index) return m_index->GetIterator(p_target.Data());
+    return nullptr;
+}
+
+
 bool
 AnnIndex::LoadQuantizer(const char* p_quantizerFile)
 {

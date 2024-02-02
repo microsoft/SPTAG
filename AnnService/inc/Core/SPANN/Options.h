@@ -123,6 +123,9 @@ namespace SPTAG {
             bool m_enableADC;
             int m_iotimeout;
 
+            // Iterative
+            int m_headBatch;
+
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \

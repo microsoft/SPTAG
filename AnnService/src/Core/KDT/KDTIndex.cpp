@@ -3,6 +3,7 @@
 
 #include "inc/Core/KDT/Index.h"
 #include <chrono>
+#include "inc/Core/ResultIterator.h"
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -314,6 +315,46 @@ case VectorValueType::Name: \
             }
 
             return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return nullptr;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return ErrorCode::Fail;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> space) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return ErrorCode::Fail;
+        }
+
+        template <typename T>
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR KDT");
+            return false;
+        }
+
+        template<typename T>
+        std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        {
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
+            workSpace->ResetResult(m_iMaxCheck, batch);
+            return std::move(workSpace);
         }
 
         template<typename T>
