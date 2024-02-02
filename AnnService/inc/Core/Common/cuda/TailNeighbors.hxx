@@ -336,7 +336,7 @@ __host__ void get_query_groups(QueryGroup* groups, TPtree* tptree, PointSet<T>* 
   }                                                        
 
 
-#define MAX_SHAPE 384
+#define MAX_SHAPE 1024
 
 template<typename T, typename SUMTYPE, int metric>
 __global__ void findTailNeighbors_selector(PointSet<T>* headPS, PointSet<T>* tailPS, TPtree* tptree, int KVAL, DistPair<SUMTYPE>* results, size_t curr_batch_size, size_t numHeads, QueryGroup* groups, int dim) {
@@ -346,6 +346,7 @@ __global__ void findTailNeighbors_selector(PointSet<T>* headPS, PointSet<T>* tai
 
   RUN_TAIL_KERNEL(64)
   RUN_TAIL_KERNEL(100)
+  RUN_TAIL_KERNEL(384)
   RUN_TAIL_KERNEL(MAX_SHAPE)
 
 }
