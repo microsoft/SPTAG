@@ -3,7 +3,6 @@
 
 #pragma once
 #include <limits>
-
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"

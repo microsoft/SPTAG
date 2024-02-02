@@ -11,16 +11,19 @@
 %typemap(out) std::shared_ptr<QueryResult>
 %{
     {
-        $result = PyTuple_New(3);
+        $result = PyTuple_New(4);
         int resNum = $1->GetResultNum();
         auto dstVecIDs = PyList_New(resNum);
         auto dstVecDists = PyList_New(resNum);
         auto dstMetadata = PyList_New(resNum);
+        auto dstRelaxMono = PyList_New(resNum);
         int i = 0;
         for (const auto& res : *($1))
         {
             PyList_SetItem(dstVecIDs, i, PyInt_FromLong(res.VID));
             PyList_SetItem(dstVecDists, i, PyFloat_FromDouble(res.Dist));
+            if (res.RelaxedMono) PyList_SetItem(dstRelaxMono, i, Py_True);
+            else PyList_SetItem(dstRelaxMono, i, Py_False);
             i++;
         }
     
@@ -37,22 +40,26 @@
         PyTuple_SetItem($result, 0, dstVecIDs);
         PyTuple_SetItem($result, 1, dstVecDists);
         PyTuple_SetItem($result, 2, dstMetadata);
+        PyTuple_SetItem($result, 3, dstRelaxMono);
     }
 %}
 
 %typemap(out) std::shared_ptr<RemoteSearchResult>
 %{
     {
-        $result = PyTuple_New(3);
+        $result = PyTuple_New(4);
         auto dstVecIDs = PyList_New(0);
         auto dstVecDists = PyList_New(0);
         auto dstMetadata = PyList_New(0);
+        auto dstRelaxMono = PyList_New(0);
         for (const auto& indexRes : $1->m_allIndexResults)
         {
             for (const auto& res : indexRes.m_results)
             {
                 PyList_Append(dstVecIDs, PyInt_FromLong(res.VID));
                 PyList_Append(dstVecDists, PyFloat_FromDouble(res.Dist));
+                if (res.RelaxedMono) PyList_Append(dstRelaxMono, Py_True);
+                else PyList_Append(dstRelaxMono, Py_False);
             }
 
             if (indexRes.m_results.WithMeta()) 
@@ -68,6 +75,7 @@
         PyTuple_SetItem($result, 0, dstVecIDs);
         PyTuple_SetItem($result, 1, dstVecDists);
         PyTuple_SetItem($result, 2, dstMetadata);
+        PyTuple_SetItem($result, 3, dstRelaxMono);
     }
 %}
 

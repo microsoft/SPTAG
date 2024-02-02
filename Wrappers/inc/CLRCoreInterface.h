@@ -4,6 +4,8 @@
 #pragma once
 #include "ManagedObject.h"
 #include "inc/Core/VectorIndex.h"
+#include "inc/Core/ResultIterator.h"
+#include "inc/Core/MultiIndexScan.h"
 
 using namespace System;
 
@@ -62,6 +64,29 @@ namespace Microsoft
                     {
                     }
                 }
+
+                property bool RelaxedMono
+                {
+                public:
+                    bool get()
+                    {
+                        return m_Instance->RelaxedMono;
+                    }
+                private:
+                    void set(bool p_relaxedMono)
+                    {
+                    }
+                }
+            };
+
+            public ref class RIterator :
+                public ManagedObject<std::shared_ptr<ResultIterator>>
+            {
+            public:
+                RIterator(std::shared_ptr<ResultIterator> result_iterator);
+                array<BasicResult^>^ Next(int p_batch);
+                bool GetRelaxedMono();
+                void Close();
             };
 
             public ref class AnnIndex :
@@ -100,6 +125,8 @@ namespace Microsoft
 
                 array<BasicResult^>^ SearchWithMetaData(array<Byte>^ p_data, int p_resultNum);
 
+                RIterator^ GetIterator(array<Byte>^ p_data);
+
                 void UpdateIndex();
 
                 bool Save(String^ p_saveFile);
@@ -130,6 +157,18 @@ namespace Microsoft
 
                 size_t m_inputVectorSize;
             };
+
+            public ref class MultiIndexScan :
+                public ManagedObject<std::shared_ptr<SPTAG::MultiIndexScan>>
+            {
+            public:
+                MultiIndexScan(std::shared_ptr<SPTAG::MultiIndexScan> multi_index_scan);
+                MultiIndexScan(array<AnnIndex^>^ indice, array<array<Byte>^>^ p_data, array<float>^ weight, int p_resultNum,
+                    bool useTimer, int termCondVal, int searchLimit);
+                BasicResult^ Next();
+                void Close();
+            };
+
         }
     }
 }

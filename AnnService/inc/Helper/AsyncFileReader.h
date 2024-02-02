@@ -180,7 +180,7 @@ namespace SPTAG
                 ResourceType* resource = GetResource();
 
                 DiskUtils::CallbackOverLapped& col = resource->m_col;
-                memset(&col, 0, sizeof(col));
+                memset(&col, 0, sizeof(OVERLAPPED));
                 col.Offset = (offset & 0xffffffff);
                 col.OffsetHigh = (offset >> 32);
                 col.m_data = nullptr;
@@ -222,7 +222,7 @@ namespace SPTAG
                 ResourceType* resource = GetResource();
 
                 DiskUtils::CallbackOverLapped& col = resource->m_col;
-                memset(&col, 0, sizeof(col));
+                memset(&col, 0, sizeof(OVERLAPPED));
                 col.Offset = (readRequest.m_offset & 0xffffffff);
                 col.OffsetHigh = (readRequest.m_offset >> 32);
                 col.m_data = (void*)&readRequest;
@@ -280,7 +280,7 @@ namespace SPTAG
                         th.join();
                     }
                 }
-
+                
                 ResourceType* res = nullptr;
                 while (m_resources.try_pop(res))
                 {
@@ -289,6 +289,8 @@ namespace SPTAG
                         delete res;
                     }
                 }
+
+                m_fileIocpThreads.clear();
             }
 
         private:
@@ -374,7 +376,8 @@ namespace SPTAG
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed with: %s\n", (char*)lpMsgBuf);
 
                 LocalFree(lpMsgBuf);
-                ExitProcess(dw);
+                ExitProcess(dw); 
+                ShutDown();
             }
 
             void ListionIOCP(int i)

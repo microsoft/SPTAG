@@ -101,6 +101,22 @@ namespace SPTAG
         }\
 }\
 
+#define DecompressPostingIterative(){\
+        p_postingListFullData = (char*)p_exWorkSpace->m_decompressBuffer.GetBuffer(); \
+        if (listInfo->listEleCount != 0) { \
+            std::size_t sizePostingListFullData;\
+            try {\
+                sizePostingListFullData = m_pCompressor->Decompress(buffer + listInfo->pageOffset, listInfo->listTotalBytes, p_postingListFullData, listInfo->listEleCount * m_vectorInfoSize, m_enableDictTraining);\
+                if (sizePostingListFullData != listInfo->listEleCount * m_vectorInfoSize) {\
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PostingList %d decompressed size not match! %zu, %d, \n", listInfo - m_listInfos.data(), sizePostingListFullData, listInfo->listEleCount * m_vectorInfoSize);\
+                }\
+             }\
+            catch (std::runtime_error& err) {\
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Decompress postingList %d  failed! %s, \n", listInfo - m_listInfos.data(), err.what());\
+            }\
+        }\
+}\
+
 #define ProcessPosting() \
         for (int i = 0; i < listInfo->listEleCount; i++) { \
             uint64_t offsetVectorID, offsetVector;\
@@ -110,6 +126,24 @@ namespace SPTAG
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
+        } \
+
+#define ProcessPostingOffset() \
+        while (p_exWorkSpace->m_offset < listInfo->listEleCount) { \
+            uint64_t offsetVectorID, offsetVector;\
+            (this->*m_parsePosting)(offsetVectorID, offsetVector, p_exWorkSpace->m_offset, listInfo->listEleCount);\
+            p_exWorkSpace->m_offset++;\
+            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
+            if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
+            (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
+            auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
+            queryResults.AddPoint(vectorID, distance2leaf); \
+            foundResult = true;\
+            break;\
+        } \
+        if (p_exWorkSpace->m_offset == listInfo->listEleCount) { \
+            p_exWorkSpace->m_pi++; \
+            p_exWorkSpace->m_offset = 0; \
         } \
 
         template <typename ValueType>
@@ -339,6 +373,155 @@ namespace SPTAG
                     p_stats->m_diskIOCount = diskIO;
                     p_stats->m_diskAccessCount = diskRead;
                 }
+            }
+
+            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace)
+            {
+                const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+
+                int diskRead = 0;
+                int diskIO = 0;
+                int listElements = 0;
+
+#if defined(ASYNC_READ) && !defined(BATCH_READ)
+                int unprocessed = 0;
+#endif
+
+                for (uint32_t pi = 0; pi < postingListCount; ++pi)
+                {
+                    auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
+                    ListInfo* listInfo = &(m_listInfos[curPostingID]);
+                    int fileid = m_oneContext ? 0 : curPostingID / m_listPerFile;
+
+#ifndef BATCH_READ
+                    Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
+#endif
+
+                    diskRead += listInfo->listPageCount;
+                    diskIO += 1;
+                    listElements += listInfo->listEleCount;
+
+                    size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                    char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[pi]).GetBuffer());
+
+#ifdef ASYNC_READ       
+                    auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_offset = listInfo->listOffset;
+                    request.m_readSize = totalBytes;
+                    request.m_buffer = buffer;
+                    request.m_status = (fileid << 16) | p_exWorkSpace->m_spaceID;
+                    request.m_payload = (void*)listInfo;
+                    request.m_success = false;
+
+#ifdef BATCH_READ // async batch read
+                    request.m_callback = [this](bool success)
+                    {
+                        //char* buffer = request.m_buffer;
+                        //ListInfo* listInfo = (ListInfo*)(request.m_payload);
+
+                        // decompress posting list
+                        /*
+                        char* p_postingListFullData = buffer + listInfo->pageOffset;
+                        if (m_enableDataCompression)
+                        {
+                            DecompressPosting();
+                        }
+
+                        ProcessPosting();
+                        */
+                    };
+#else // async read
+                    request.m_callback = [&p_exWorkSpace, &request](bool success)
+                    {
+                        p_exWorkSpace->m_processIocp.push(&request);
+                    };
+
+                    ++unprocessed;
+                    if (!(indexFile->ReadFileAsync(request)))
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file!\n");
+                        unprocessed--;
+                    }
+#endif
+#else // sync read
+                    auto numRead = indexFile->ReadBinary(totalBytes, buffer, listInfo->listOffset);
+                    if (numRead != totalBytes) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s read bytes, expected: %zu, acutal: %llu.\n", m_extraFullGraphFile.c_str(), totalBytes, numRead);
+                        throw std::runtime_error("File read mismatch");
+                    }
+                    // decompress posting list
+                    /*
+                    char* p_postingListFullData = buffer + listInfo->pageOffset;
+                    if (m_enableDataCompression)
+                    {
+                        DecompressPosting();
+                    }
+
+                    ProcessPosting();
+                    */
+#endif
+                }
+
+#ifdef ASYNC_READ
+#ifdef BATCH_READ
+                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+#else
+                while (unprocessed > 0)
+                {
+                    Helper::AsyncReadRequest* request;
+                    if (!(p_exWorkSpace->m_processIocp.pop(request))) break;
+
+                    --unprocessed;
+                    char* buffer = request->m_buffer;
+                    ListInfo* listInfo = static_cast<ListInfo*>(request->m_payload);
+                    // decompress posting list
+                    /*
+                    char* p_postingListFullData = buffer + listInfo->pageOffset;
+                    if (m_enableDataCompression)
+                    {
+                        DecompressPosting();
+                    }
+
+                    ProcessPosting();
+                    */
+                }
+#endif
+#endif
+            }
+
+            virtual bool SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace,
+                QueryResult& p_queryResults,
+		std::shared_ptr<VectorIndex>& p_index)
+            {
+                COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
+                bool foundResult = false;
+                while (!foundResult && p_exWorkSpace->m_pi < p_exWorkSpace->m_postingIDs.size()) {
+
+                    char* buffer = (char*)((p_exWorkSpace->m_pageBuffers[p_exWorkSpace->m_pi]).GetBuffer());
+                    ListInfo* listInfo = static_cast<ListInfo*>(p_exWorkSpace->m_diskRequests[p_exWorkSpace->m_pi].m_payload);
+                    // decompress posting list
+                    char* p_postingListFullData = buffer + listInfo->pageOffset;
+                    if (m_enableDataCompression && p_exWorkSpace->m_offset == 0)
+                    {
+                        DecompressPostingIterative();
+                    }
+                    ProcessPostingOffset();
+                }
+                return !(p_exWorkSpace->m_pi == p_exWorkSpace->m_postingIDs.size());
+            }
+
+            virtual bool SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace,
+                 QueryResult& p_query,
+		 std::shared_ptr<VectorIndex> p_index)
+            {
+                if (p_exWorkSpace->m_loadPosting) {
+                    SearchIndexWithoutParsing(p_exWorkSpace);
+                    p_exWorkSpace->m_pi = 0;
+                    p_exWorkSpace->m_offset = 0;
+                    p_exWorkSpace->m_loadPosting = false;
+                }
+
+                return SearchNextInPosting(p_exWorkSpace, p_query, p_index);
             }
 
             std::string GetPostingListFullData(

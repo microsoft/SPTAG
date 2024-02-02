@@ -121,4 +121,7 @@ DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
 DefineSSDParameter(m_debugBuildInternalResultNum, int, 64, "DebugBuildInternalResultNum")
 DefineSSDParameter(m_iotimeout, int, 30, "IOTimeout")
 
+// Iterative
+DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch")
+
 #endif

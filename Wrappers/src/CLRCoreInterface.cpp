@@ -10,6 +10,36 @@ namespace Microsoft
     {
         namespace SPTAGManaged
         {
+            RIterator::RIterator(std::shared_ptr<ResultIterator> result_iterator) :
+                ManagedObject(result_iterator)
+            {
+            }
+
+            array<BasicResult^>^ RIterator::Next(int p_batch)
+            {
+                array<BasicResult^>^ res;
+                if (m_Instance == nullptr)
+                    return res;
+
+                std::shared_ptr<QueryResult> results = (*m_Instance)->Next(p_batch);
+
+                res = gcnew array<BasicResult^>(results->GetResultNum());
+                for (int i = 0; i < results->GetResultNum(); i++)
+                    res[i] = gcnew BasicResult(new SPTAG::BasicResult(*(results->GetResult(i))));
+
+                return res;
+            }
+
+            bool RIterator::GetRelaxedMono()
+            {
+                return (*m_Instance)->GetRelaxedMono();
+            }
+
+            void RIterator::Close()
+            {
+                (*m_Instance)->Close();
+            }
+
             AnnIndex::AnnIndex(std::shared_ptr<SPTAG::VectorIndex> p_index) :
                 ManagedObject(p_index)
             {
@@ -169,6 +199,19 @@ namespace Microsoft
                 return res;
             }
 
+            RIterator^ AnnIndex::GetIterator(array<Byte>^ p_data)
+            {
+                RIterator^ res;
+                if (m_Instance == nullptr || m_dimension == 0 || p_data->LongLength != m_inputVectorSize)
+                    return res;
+
+                pin_ptr<Byte> ptr = &p_data[0];
+                std::shared_ptr<ResultIterator> result_iterator = (*m_Instance)->GetIterator(ptr);
+
+                res = gcnew RIterator(result_iterator);
+                return res;
+            }
+
             void AnnIndex::UpdateIndex()
             {
                 if (m_Instance != nullptr) (*m_Instance)->UpdateIndex();
@@ -298,6 +341,53 @@ namespace Microsoft
                 }
                 return res;
             }
+
+            MultiIndexScan::MultiIndexScan(std::shared_ptr<SPTAG::MultiIndexScan> multi_index_scan) :
+                ManagedObject(multi_index_scan)
+            {
+            }
+
+            MultiIndexScan::MultiIndexScan(array<AnnIndex^>^ indice, array<array<Byte>^>^ p_data, array<float>^ weight, int p_resultNum,
+                bool useTimer, int termCondVal, int searchLimit) : ManagedObject(std::make_shared<SPTAG::MultiIndexScan>())
+            {
+                std::vector<std::shared_ptr<SPTAG::VectorIndex>> vecIndices;
+                for (int i = 0; i < indice->Length; i++)
+                {
+                    std::shared_ptr<SPTAG::VectorIndex> index = *(indice[i]->GetInstance());
+                    vecIndices.push_back(index);
+                }
+
+                std::vector<SPTAG::ByteArray> data_array;
+                for (int i = 0; i < p_data->Length; i++)
+                {
+                    pin_ptr<Byte> ptr = &p_data[i][0];
+                    SPTAG::ByteArray byte_target = SPTAG::ByteArray::Alloc(p_data[i]->LongLength);
+                    byte_target.Set((std::uint8_t*)ptr, p_data[i]->LongLength, false);
+                    data_array.push_back(byte_target);
+                }
+
+                std::vector<float> weight_array;
+                for (int i = 0; i < weight->Length; i++)
+                {
+                    float w = weight[i];
+                    weight_array.push_back(w);
+                }
+
+                (*m_Instance)->Init(vecIndices, data_array, weight_array, p_resultNum, useTimer, termCondVal, searchLimit);
+            }
+
+            BasicResult^ MultiIndexScan::Next()
+            {
+                SPTAG::BasicResult* result = new SPTAG::BasicResult();
+                (*m_Instance)->Next(*result);
+                return gcnew BasicResult(result);
+            }
+
+            void MultiIndexScan::Close()
+            {
+                (*m_Instance)->Close();
+            }
+
         }
     }
 }

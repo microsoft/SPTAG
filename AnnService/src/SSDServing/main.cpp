@@ -138,6 +138,8 @@ namespace SPTAG {
 					SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
 					exit(1);
 				}
+				auto vectorSet = vectorReader->GetVectorSet();
+
 				std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(opts->m_valueType, opts->m_dim, opts->m_queryType, opts->m_queryDelimiter));
 				auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
 				if (ErrorCode::Success != queryReader->LoadFile(opts->m_queryPath))
@@ -145,7 +147,6 @@ namespace SPTAG {
 					SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
 					exit(1);
 				}
-				auto vectorSet = vectorReader->GetVectorSet();
 				auto querySet = queryReader->GetVectorSet();
 				if (distCalcMethod == DistCalcMethod::Cosine && !index->m_pQuantizer) vectorSet->Normalize(opts->m_iSSDNumberOfThreads);
 
