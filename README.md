@@ -10,7 +10,10 @@
  <img src="docs/img/sptag.png" alt="architecture" width="500"/>
  </p>
 
-
+## What's NEW
+* Result Iterator with Relaxed Monotonicity Signal Support
+* New Research Paper [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search](https://dl.acm.org/doi/10.1145/3600006.3613166) - _published in SOSP 2023_
+* New Research Paper [VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity](https://www.usenix.org/system/files/osdi23-zhang-qianxi_1.pdf) - _published in OSDI 2023_
 
 ## **Introduction**
  
@@ -40,7 +43,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 ### **Requirements**
 
-* swig >= 3.0
+* swig >= 4.0.2
 * cmake >= 3.12.0
 * boost >= 1.67.0
 
@@ -48,7 +51,7 @@ The searches in the trees and the graph are iteratively conducted.
 
 ```
 set GIT_LFS_SKIP_SMUDGE=1
-git clone https://github.com/microsoft/SPTAG
+git clone --recurse-submodules https://github.com/microsoft/SPTAG
 
 OR
 
@@ -93,6 +96,21 @@ The detailed parameters tunning can be found in [Parameters](docs/Parameters.md)
 ## **References**
 Please cite SPTAG in your publications if it helps your research:
 ```
+@inproceedings{xu2023spfresh,
+  title={SPFresh: Incremental In-Place Update for Billion-Scale Vector Search},
+  author={Xu, Yuming and Liang, Hengyu and Li, Jin and Xu, Shuotao and Chen, Qi and Zhang, Qianxi and Li, Cheng and Yang, Ziyue and Yang, Fan and Yang, Yuqing and others},
+  booktitle={Proceedings of the 29th Symposium on Operating Systems Principles},
+  pages={545--561},
+  year={2023}
+}
+
+@inproceedings{zhang2023vbase,
+  title={$\{$VBASE$\}$: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity},
+  author={Zhang, Qianxi and Xu, Shuotao and Chen, Qi and Sui, Guoxin and Xie, Jiadong and Cai, Zhizhen and Chen, Yaoqi and He, Yinxuan and Yang, Yuqing and Yang, Fan and others},
+  booktitle={17th USENIX Symposium on Operating Systems Design and Implementation (OSDI 23)},
+  year={2023}
+}
+
 @inproceedings{ChenW21,
   author = {Qi Chen and 
             Bing Zhao and 

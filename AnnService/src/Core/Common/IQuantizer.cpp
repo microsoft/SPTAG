@@ -13,7 +13,7 @@ namespace SPTAG
             std::shared_ptr<IQuantizer> ret = nullptr;
             if (p_in->ReadBinary(sizeof(QuantizerType), (char*)&quantizerType) != sizeof(QuantizerType)) return ret;
             if (p_in->ReadBinary(sizeof(VectorValueType), (char*)&reconstructType) != sizeof(VectorValueType)) return ret;
-            LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
             switch (quantizerType) {
             case QuantizerType::None:
                 break;
@@ -60,7 +60,7 @@ namespace SPTAG
 
             VectorValueType reconstructType = *(VectorValueType*)raw_bytes;
             raw_bytes += sizeof(VectorValueType);
-            LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
             std::shared_ptr<IQuantizer> ret = nullptr;
 
             switch (quantizerType) {

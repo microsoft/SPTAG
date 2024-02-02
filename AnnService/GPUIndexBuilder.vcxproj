@@ -103,6 +103,7 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CudaCompile Include="src\Core\Common\Kernel.cu" />
     <CudaCompile Include="src\IndexBuilder\main.cpp" />
   </ItemGroup>
   <ItemGroup>

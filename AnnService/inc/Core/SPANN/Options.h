@@ -97,6 +97,7 @@ namespace SPTAG {
             float m_rngFactor;
             int m_samples;
             bool m_excludehead;
+            int m_postingVectorLimit;
 
             // GPU building
             int m_gpuSSDNumTrees;
@@ -121,6 +122,9 @@ namespace SPTAG {
             int m_debugBuildInternalResultNum;
             bool m_enableADC;
             int m_iotimeout;
+
+            // Iterative
+            int m_headBatch;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -158,7 +162,7 @@ namespace SPTAG {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
@@ -175,7 +179,7 @@ namespace SPTAG {
 #define DefineSelectHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
@@ -192,7 +196,7 @@ namespace SPTAG {
 #define DefineBuildHeadParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \
@@ -209,7 +213,7 @@ namespace SPTAG {
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr) \
     if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
     { \
-        LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting %s with value %s\n", RepresentStr, p_value); \
         VarType tmp; \
         if (Helper::Convert::ConvertStringTo<VarType>(p_value, tmp)) \
         { \

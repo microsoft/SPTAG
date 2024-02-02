@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <fstream>
+#include <atomic>
 
 #pragma warning(disable:4996)
 
@@ -31,6 +32,41 @@ namespace SPTAG
         {
         public:
             virtual void Logging(const char* title, LogLevel level, const char* file, int line, const char* func, const char* format, ...) = 0;
+        };
+
+        class LoggerHolder
+        {
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 	202002L) || __cplusplus >= 	202002L)
+        private:
+            std::atomic<std::shared_ptr<Logger>> m_logger;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                m_logger = p_logger;
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                return m_logger;
+            }
+#else
+        private:
+            std::shared_ptr<Logger> m_logger;
+        public:
+            LoggerHolder(std::shared_ptr<Logger> logger) : m_logger(logger) {}
+
+            void SetLogger(std::shared_ptr<Logger> p_logger)
+            {
+                std::atomic_store(&m_logger, p_logger);
+            }
+
+            std::shared_ptr<Logger> GetLogger()
+            {
+                return std::atomic_load(&m_logger);
+            }
+#endif
         };
 
 

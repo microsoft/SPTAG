@@ -221,7 +221,7 @@ void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 
         AddOneByOne<T>(algo, distCalcMethod, vecset, metaset, "testindices");
         std::string truthmeta6[] = { "0", "1", "2", "2", "1", "3", "4", "3", "5" };
-        Search<float>("testindices", query.data(), q, k, truthmeta6);
+        Search<T>("testindices", query.data(), q, k, truthmeta6);
     }
 }
 

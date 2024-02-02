@@ -38,9 +38,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLib DistanceUtils libzstd_shared)
+target_link_libraries (SPTAGLib DistanceUtils libzstd_shared ${NUMA_LIBRARY})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLibStatic DistanceUtils libzstd_static)
+target_link_libraries (SPTAGLibStatic DistanceUtils libzstd_static ${NUMA_LIBRARY_STATIC})
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)
 endif()
@@ -87,15 +87,6 @@ endif()
 
 file(GLOB_RECURSE SSD_SERVING_HDR_FILES ${AnnService}/inc/SSDServing/*.h)
 file(GLOB_RECURSE SSD_SERVING_FILES ${AnnService}/src/SSDServing/*.cpp)
-#if(NOT WIN32)
-#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
-#            ${VECTORSEARCH_INC_DIR}/AsyncFileReader.h
-#            )
-#elseif(WIN32)
-#    list(REMOVE_ITEM SSD_SERVING_HDR_FILES 
-#            ${VECTORSEARCH_INC_DIR}/AsyncFileReaderLinux.h
-#            )
-#endif()
 
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES})

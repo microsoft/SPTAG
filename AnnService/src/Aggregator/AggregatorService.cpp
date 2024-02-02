@@ -107,7 +107,7 @@ AggregatorService::StartListen()
                                             handlerMap,
                                             context->GetSettings()->m_socketThreadNum));
 
-    LOG(Helper::LogLevel::LL_Info,
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "Start to listen %s:%s ...\n",
             context->GetSettings()->m_listenAddr.c_str(),
             context->GetSettings()->m_listenPort.c_str());
@@ -125,12 +125,12 @@ AggregatorService::WaitForShutdown()
 
     m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
     {
-        LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
         m_pendingConnectServersTimer.cancel();
     });
 
     m_ioContext.run();
-    LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
 
     m_socketServer.reset();
     m_threadPool->stop();
@@ -167,7 +167,7 @@ AggregatorService::ConnectToPendingServers()
                           {
                               if (ErrorCode::Socket_FailedResolveEndPoint == errCode)
                               {
-                                  LOG(Helper::LogLevel::LL_Error,
+                                  SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                                           "[Error] Failed to resolve %s %s.\n",
                                           server->m_address.c_str(),
                                           server->m_port.c_str());

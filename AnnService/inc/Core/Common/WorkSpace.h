@@ -14,6 +14,32 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename WorkSpaceType>
+        class IWorkSpaceFactory
+        {
+        public:
+            virtual std::unique_ptr<WorkSpaceType> GetWorkSpace() = 0;
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) = 0;
+        };
+
+        template <typename WorkSpaceType>
+        class ThreadLocalWorkSpaceFactory : public IWorkSpaceFactory<WorkSpaceType>
+        {
+        public:
+            static thread_local std::unique_ptr<WorkSpaceType> m_workspace;
+
+            virtual std::unique_ptr< WorkSpaceType> GetWorkSpace() override
+            {
+                return std::move(m_workspace);
+            }
+
+            virtual void ReturnWorkSpace(std::unique_ptr<WorkSpaceType> ws) override
+            {
+                m_workspace = std::move(ws);
+            }
+
+        };
+
         class OptHashPosVector
         {
         protected:
@@ -133,7 +159,7 @@ namespace SPTAG
                 }
 
                 DoubleSize();
-                LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
             }
         };
@@ -198,14 +224,20 @@ namespace SPTAG
             }
         };
 
+        class IWorkSpace {};
+
         // Variables for each single NN search
-        struct WorkSpace
+        struct WorkSpace : public IWorkSpace
         {
             WorkSpace() {}
 
             WorkSpace(WorkSpace& other) 
             {
                 Initialize(other.m_iMaxCheck, other.nodeCheckStatus.HashTableExponent());
+            }
+
+            ~WorkSpace() {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Delete workspace happens!\n");
             }
 
             void Initialize(int maxCheck, int hashExp)
@@ -220,6 +252,7 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg)
@@ -232,8 +265,8 @@ namespace SPTAG
             void Reset(int maxCheck, int resultNum)
             {
                 nodeCheckStatus.clear();
-                m_SPTQueue.clear();
-                m_NGQueue.clear();
+                m_SPTQueue.clear(maxCheck * 10);
+                m_NGQueue.clear(maxCheck * 30);
                 m_Results.clear(max(maxCheck / 16, resultNum));
 
                 m_iNumOfContinuousNoBetterPropagation = 0;
@@ -241,6 +274,15 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
+            }
+
+            void ResetResult(int maxCheck, int resultNum)
+            {
+                m_Results.clear(max(maxCheck / 16, resultNum));
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                m_iNumberOfTreeCheckedLeaves = 0;
+                m_iNumberOfCheckedLeaves = 0;
             }
 
             inline bool CheckAndSet(SizeType idx)
@@ -263,6 +305,7 @@ namespace SPTAG
             int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
+            bool m_relaxedMono;
 
             // Prioriy queue used for neighborhood graph
             Heap<NodeDistPair> m_NGQueue;

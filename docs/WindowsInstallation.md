@@ -22,6 +22,10 @@ Boost's precompiled binaries are available at https://sourceforge.net/projects/b
 2. Launch the installation
 3. Add the folder path to PATH environment variable, for instance `C:\Sptag\boost_1_67_0\`
 
+On the off chance of needing to build boost, because you encountered this message during the Build step `Could NOT find Boost (missing: system thread serialization wserialization regex filesystem)`, try the following
+1. Locate and run `bootstrap.bat`, this creates a file called `b2.exe`
+2. Run the generated exe (in this case `b2.exe`), be patient this may take +1 hr
+3. Once complete, the built libraries will be located in `\stage\lib` (or something along the lines)
 
 ## Build
 

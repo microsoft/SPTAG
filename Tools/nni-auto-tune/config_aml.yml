@@ -1,0 +1,26 @@
+experimentName: sift128
+trialConcurrency: 4
+maxExperimentDuration: 168h
+searchSpaceFile: search_space.json
+
+trialCommand:
+  python --version;
+  pip --version;
+  pip install -i https://test.pypi.org/simple/ sptag;
+  git clone https://github.com/microsoft/SPTAG.git;
+  cd SPTAG/tools/nni-auto-tune;
+  wget http://ann-benchmarks.com/sift-128-euclidean.hdf5;
+  python main.py --train_file sift-128-euclidean.hdf5
+
+tuner:
+  name: TPE
+  classArgs:
+    optimize_mode: maximize
+
+trainingService:
+  platform: aml
+  dockerImage: msranni/nni
+  subscriptionId:
+  resourceGroup:
+  workspaceName:
+  computeTarget:

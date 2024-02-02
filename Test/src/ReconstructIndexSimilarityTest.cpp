@@ -56,7 +56,7 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
         }
     }
 
-    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", truthDimension, k*2, recall / queryset->Count() / truthDimension);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", truthDimension, k*2, recall / queryset->Count() / truthDimension);
 }
 
 
@@ -99,14 +99,14 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("quantest_vector.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
         real_vecset = vectorReader->GetVectorSet();
 
         if (ErrorCode::Success != vectorReader->LoadFile("quantest_query.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
             exit(1);
         }
         queryset = vectorReader->GetVectorSet();
@@ -132,7 +132,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("quantest_truth." + SPTAG::Helper::Convert::ConvertToString(distCalcMethod)))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
             exit(1);
         }
         truth = vectorReader->GetVectorSet();
@@ -172,7 +172,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("quantest_rec_vector.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
         rec_vecset = vectorReader->GetVectorSet();
@@ -181,7 +181,7 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         vectorReader = Helper::VectorSetReader::CreateInstance(quanOptions);
         if (ErrorCode::Success != vectorReader->LoadFile("quantest_quan_vector.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
         quan_vecset = vectorReader->GetVectorSet();
@@ -277,10 +277,10 @@ void ReconstructTest(IndexAlgoType algo, DistCalcMethod distMethod)
     Search<R>(rec_idx, queryset, 10, truth);
     auto quan_idx = PerfBuild<std::uint8_t>(algo, Helper::Convert::ConvertToString<DistCalcMethod>(distMethod), quan_vecset, metaset, queryset, 10, truth, "quan_idx", quantizer);
 
-    LOG(Helper::LogLevel::LL_Info, "Test search with SDC");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Test search with SDC");
     Search<R>(quan_idx, queryset, 10, truth);
     
-    LOG(Helper::LogLevel::LL_Info, "Test search with ADC");
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Test search with ADC");
     quan_idx->SetQuantizerADC(true);
     Search<R>(quan_idx, queryset, 10, truth);
 }

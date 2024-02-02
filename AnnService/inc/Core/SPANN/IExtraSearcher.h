@@ -101,15 +101,14 @@ namespace SPTAG {
             std::size_t m_pageBufferSize;
         };
 
-        struct ExtraWorkSpace
+        struct ExtraWorkSpace : public SPTAG::COMMON::IWorkSpace
         {
             ExtraWorkSpace() {}
 
-            ~ExtraWorkSpace() {}
+            ~ExtraWorkSpace() { g_spaceCount--; }
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
                 Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_enableDataCompression);
-                m_spaceID = g_spaceCount++;
             }
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
@@ -121,10 +120,15 @@ namespace SPTAG {
                     m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
                 }
                 m_diskRequests.resize(p_internalResultNum);
+                for (int pi = 0; pi < p_internalResultNum; pi++) {
+                    m_diskRequests[pi].m_extension = m_processIocp.handle();
+                }
                 m_enableDataCompression = enableDataCompression;
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
+                m_spaceID = g_spaceCount++;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg) {
@@ -134,6 +138,28 @@ namespace SPTAG {
                 int maxPages = va_arg(arg, int);
                 bool enableDataCompression = bool(va_arg(arg, int));
                 Initialize(maxCheck, hashExp, internalResultNum, maxPages, enableDataCompression);
+            }
+
+            void Clear(int p_internalResultNum, int p_maxPages, bool enableDataCompression) {
+                if (p_internalResultNum > m_pageBuffers.size()) {
+                    m_postingIDs.reserve(p_internalResultNum);
+                    m_processIocp.reset(p_internalResultNum);
+                    m_pageBuffers.resize(p_internalResultNum);
+                    for (int pi = 0; pi < p_internalResultNum; pi++) {
+                        m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
+                    }
+                    m_diskRequests.resize(p_internalResultNum);
+                    for (int pi = 0; pi < p_internalResultNum; pi++) {
+                        m_diskRequests[pi].m_extension = m_processIocp.handle();
+                    }
+                } else if (p_maxPages > m_pageBuffers[0].GetPageSize()) {
+                    for (int pi = 0; pi < m_pageBuffers.size(); pi++) m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
+                }
+
+                m_enableDataCompression = enableDataCompression;
+                if (enableDataCompression) {
+                    m_decompressBuffer.ReservePageBuffer(p_maxPages);
+                }
             }
 
             static void Reset() { g_spaceCount = 0; }
@@ -152,6 +178,16 @@ namespace SPTAG {
             std::vector<Helper::AsyncReadRequest> m_diskRequests;
 
             int m_spaceID;
+
+            uint32_t m_pi;
+
+            int m_offset;
+
+            bool m_loadPosting;
+
+            bool m_relaxedMono;
+
+            int m_loadedPostingNum;
 
             static std::atomic_int g_spaceCount;
         };
@@ -176,11 +212,23 @@ namespace SPTAG {
                 std::set<int>* truth = nullptr,
                 std::map<int, std::set<int>>* found = nullptr) = 0;
 
+            virtual bool SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace,
+                QueryResult& p_queryResults,
+                std::shared_ptr<VectorIndex> p_index) = 0;
+
+            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) = 0;
+
+            virtual bool SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace,
+                QueryResult& p_queryResults,
+		std::shared_ptr<VectorIndex>& p_index) = 0;
+
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
                 Options& p_opt) = 0;
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
+
+            virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) = 0;
         };
     } // SPANN
 } // SPTAG

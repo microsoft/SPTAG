@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/Common/DistanceUtils.h"
-#include <immintrin.h>
 
 using namespace SPTAG;
 using namespace SPTAG::COMMON;

@@ -5,12 +5,16 @@
 #define _SPTAG_VECTORINDEX_H_
 
 #include "Common.h"
+#include "Common/WorkSpace.h"
 #include "SearchQuery.h"
 #include "VectorSet.h"
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include <unordered_set>
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Core/Common/WorkSpace.h"
+
+class ResultIterator;
 
 namespace SPTAG
 {
@@ -36,7 +40,19 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
+    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const = 0;
+
+    virtual ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const = 0;
+
+    virtual bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const = 0;
+
+    virtual std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const = 0;
+
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
+
+    virtual ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const = 0;
 
     virtual ErrorCode SearchTree(QueryResult &p_query) const = 0;
 
@@ -44,6 +60,7 @@ public:
 
     virtual float AccurateDistance(const void* pX, const void* pY) const = 0;
     virtual float ComputeDistance(const void* pX, const void* pY) const = 0;
+    virtual float GetDistance(const void* target, const SizeType idx) const = 0;
     virtual const void* GetSample(const SizeType idx) const = 0;
     virtual bool ContainSample(const SizeType idx) const = 0;
     virtual bool NeedRefine() const = 0;
@@ -113,6 +130,28 @@ public:
 
     virtual ErrorCode LoadQuantizer(std::string p_quantizerFile);
 
+    virtual std::shared_ptr<SPTAG::COMMON::IQuantizer> GetQuantizer() {
+        return m_pQuantizer;
+    }
+
+    virtual ErrorCode QuantizeVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->GetNumSubvectors() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++) 
+                m_pQuantizer->QuantizeVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->ReconstructSize()), p_out.Data() + i * (size_t)(m_pQuantizer->GetNumSubvectors()), false);
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
+    virtual ErrorCode ReconstructVector(const void* p_data, SizeType p_num, ByteArray p_out) {
+        if (m_pQuantizer != nullptr && p_out.Length() >= m_pQuantizer->ReconstructSize() * (size_t)p_num) {
+            for (int i = 0; i < p_num; i++)
+                m_pQuantizer->ReconstructVector(((std::uint8_t*)p_data) + i * (size_t)(m_pQuantizer->GetNumSubvectors()), p_out.Data() + i * (size_t)(m_pQuantizer->ReconstructSize()));
+            return ErrorCode::Success;
+        }
+        return ErrorCode::Fail;
+    }
+
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
@@ -142,6 +181,8 @@ public:
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
     virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) = 0;
+
+    virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;
 
     inline bool HasMetaMapping() const { return nullptr != m_pMetaToVec; }
 

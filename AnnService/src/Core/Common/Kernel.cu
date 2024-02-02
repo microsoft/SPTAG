@@ -28,9 +28,12 @@
 #include <typeinfo>
 #include <cuda_fp16.h>
 #include <curand_kernel.h>
+#include <type_traits>
 
+//#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/cuda/params.h"
 #include "inc/Core/Common/cuda/TPtree.hxx"
+//#include "inc/Core/Common/cuda/KNN.hxx"
 
 /*****************************************************************************************
 * Convert sums to means for each split key

@@ -64,7 +64,7 @@ AggregatorContext::AggregatorContext(const std::string& p_filePath)
     if (m_settings->m_topK > 0) {
         std::ifstream inputStream(m_settings->m_centers, std::ifstream::binary);
         if (!inputStream.is_open()) {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_settings->m_centers.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_settings->m_centers.c_str());
             exit(1);
         }
 

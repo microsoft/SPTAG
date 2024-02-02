@@ -380,6 +380,13 @@ BOOST_AUTO_TEST_SUITE(SSDServingTest)
 #define QUERY_NUM 10
 #define VECTOR_DIM 100
 
+#define FLOAT
+#define INT8
+//#define UINT8
+#define INT16
+#define TDEFAULT
+#define TXVEC
+
 #define SSDTEST_DIRECTORY_NAME "sddtest"
 #define SSDTEST_DIRECTORY SSDTEST_DIRECTORY_NAME "/"
 // #define RAW_VECTORS(VT, FT)  "vectors_"#VT"_"#FT".bin"
@@ -437,23 +444,53 @@ BOOST_AUTO_TEST_CASE(TestHead##VT##DM##FT) { \
 	TestHead(configName, OutputIDFile, OutputVectorFile, base_config);  \
 } \
 
+#ifdef FLOAT
+#ifdef TDEFAULT
 WTEV(Float, L2, DEFAULT)
 WTEV(Float, Cosine, DEFAULT)
-WTEV(Int16, L2, DEFAULT)
-WTEV(Int16, Cosine, DEFAULT)
-WTEV(UInt8, L2, DEFAULT)
-WTEV(UInt8, Cosine, DEFAULT)
-WTEV(Int8, L2, DEFAULT)
-WTEV(Int8, Cosine, DEFAULT)
+#endif
 
+#ifdef TXVEC
 WTEV(Float, L2, XVEC)
 WTEV(Float, Cosine, XVEC)
+#endif
+#endif
+
+#ifdef INT16
+#ifdef TDEFAULT
+WTEV(Int16, L2, DEFAULT)
+WTEV(Int16, Cosine, DEFAULT)
+#endif
+
+#ifdef TXVEC
 WTEV(Int16, L2, XVEC)
 WTEV(Int16, Cosine, XVEC)
+#endif
+#endif
+
+#ifdef UINT8
+#ifdef TDEFAULT
+WTEV(UInt8, L2, DEFAULT)
+WTEV(UInt8, Cosine, DEFAULT)
+#endif
+
+#ifdef TXVEC
 WTEV(UInt8, L2, XVEC)
 WTEV(UInt8, Cosine, XVEC)
+#endif
+#endif
+
+#ifdef INT8
+#ifdef TDEFAULT
+WTEV(Int8, L2, DEFAULT)
+WTEV(Int8, Cosine, DEFAULT)
+#endif
+
+#ifdef TXVEC
 WTEV(Int8, L2, XVEC)
 WTEV(Int8, Cosine, XVEC)
+#endif
+#endif
 
 #undef WTEV
 
@@ -482,46 +519,69 @@ TestBuildHead( \
 ); \
 } \
 
+#ifdef FLOAT
+#ifdef TDEFAULT
 BDHD(Float, L2, BKT, DEFAULT)
 BDHD(Float, L2, KDT, DEFAULT)
 BDHD(Float, Cosine, BKT, DEFAULT)
 BDHD(Float, Cosine, KDT, DEFAULT)
+#endif
 
-BDHD(Int8, L2, BKT, DEFAULT)
-BDHD(Int8, L2, KDT, DEFAULT)
-BDHD(Int8, Cosine, BKT, DEFAULT)
-BDHD(Int8, Cosine, KDT, DEFAULT)
-
-BDHD(UInt8, L2, BKT, DEFAULT)
-BDHD(UInt8, L2, KDT, DEFAULT)
-BDHD(UInt8, Cosine, BKT, DEFAULT)
-BDHD(UInt8, Cosine, KDT, DEFAULT)
-
-BDHD(Int16, L2, BKT, DEFAULT)
-BDHD(Int16, L2, KDT, DEFAULT)
-BDHD(Int16, Cosine, BKT, DEFAULT)
-BDHD(Int16, Cosine, KDT, DEFAULT)
-
-//XVEC
+#ifdef TXVEC
 BDHD(Float, L2, BKT, XVEC)
 BDHD(Float, L2, KDT, XVEC)
 BDHD(Float, Cosine, BKT, XVEC)
 BDHD(Float, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef INT8
+#ifdef TDEFAULT
+BDHD(Int8, L2, BKT, DEFAULT)
+BDHD(Int8, L2, KDT, DEFAULT)
+BDHD(Int8, Cosine, BKT, DEFAULT)
+BDHD(Int8, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDHD(Int8, L2, BKT, XVEC)
 BDHD(Int8, L2, KDT, XVEC)
 BDHD(Int8, Cosine, BKT, XVEC)
 BDHD(Int8, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef UINT8
+#ifdef TDEFAULT
+BDHD(UInt8, L2, BKT, DEFAULT)
+BDHD(UInt8, L2, KDT, DEFAULT)
+BDHD(UInt8, Cosine, BKT, DEFAULT)
+BDHD(UInt8, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDHD(UInt8, L2, BKT, XVEC)
 BDHD(UInt8, L2, KDT, XVEC)
 BDHD(UInt8, Cosine, BKT, XVEC)
 BDHD(UInt8, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef INT16
+#ifdef TDEFAULT
+BDHD(Int16, L2, BKT, DEFAULT)
+BDHD(Int16, L2, KDT, DEFAULT)
+BDHD(Int16, Cosine, BKT, DEFAULT)
+BDHD(Int16, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDHD(Int16, L2, BKT, XVEC)
 BDHD(Int16, L2, KDT, XVEC)
 BDHD(Int16, Cosine, BKT, XVEC)
 BDHD(Int16, Cosine, KDT, XVEC)
+#endif
+#endif
 
 #undef BDHD
 
@@ -549,47 +609,70 @@ TestBuildSSDIndex(\
 	base_config \
 );} \
 
-// DEFAULT
+#ifdef FLOAT
+#ifdef TDEFAULT
 BDSSD(Float, L2, BKT, DEFAULT)
 BDSSD(Float, L2, KDT, DEFAULT)
 BDSSD(Float, Cosine, BKT, DEFAULT)
 BDSSD(Float, Cosine, KDT, DEFAULT)
+#endif
 
-BDSSD(Int8, L2, BKT, DEFAULT)
-BDSSD(Int8, L2, KDT, DEFAULT)
-BDSSD(Int8, Cosine, BKT, DEFAULT)
-BDSSD(Int8, Cosine, KDT, DEFAULT)
-
-BDSSD(UInt8, L2, BKT, DEFAULT)
-BDSSD(UInt8, L2, KDT, DEFAULT)
-BDSSD(UInt8, Cosine, BKT, DEFAULT)
-BDSSD(UInt8, Cosine, KDT, DEFAULT)
-
-BDSSD(Int16, L2, BKT, DEFAULT)
-BDSSD(Int16, L2, KDT, DEFAULT)
-BDSSD(Int16, Cosine, BKT, DEFAULT)
-BDSSD(Int16, Cosine, KDT, DEFAULT)
-
-// XVEC
+#ifdef TXVEC
 BDSSD(Float, L2, BKT, XVEC)
 BDSSD(Float, L2, KDT, XVEC)
 BDSSD(Float, Cosine, BKT, XVEC)
 BDSSD(Float, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef INT8
+#ifdef TDEFAULT
+BDSSD(Int8, L2, BKT, DEFAULT)
+BDSSD(Int8, L2, KDT, DEFAULT)
+BDSSD(Int8, Cosine, BKT, DEFAULT)
+BDSSD(Int8, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDSSD(Int8, L2, BKT, XVEC)
 BDSSD(Int8, L2, KDT, XVEC)
 BDSSD(Int8, Cosine, BKT, XVEC)
 BDSSD(Int8, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef UINT8
+#ifdef TDEFAULT
+BDSSD(UInt8, L2, BKT, DEFAULT)
+BDSSD(UInt8, L2, KDT, DEFAULT)
+BDSSD(UInt8, Cosine, BKT, DEFAULT)
+BDSSD(UInt8, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDSSD(UInt8, L2, BKT, XVEC)
 BDSSD(UInt8, L2, KDT, XVEC)
 BDSSD(UInt8, Cosine, BKT, XVEC)
 BDSSD(UInt8, Cosine, KDT, XVEC)
+#endif
+#endif
 
+#ifdef INT16
+#ifdef TDEFAULT
+BDSSD(Int16, L2, BKT, DEFAULT)
+BDSSD(Int16, L2, KDT, DEFAULT)
+BDSSD(Int16, Cosine, BKT, DEFAULT)
+BDSSD(Int16, Cosine, KDT, DEFAULT)
+#endif
+
+#ifdef TXVEC
 BDSSD(Int16, L2, BKT, XVEC)
 BDSSD(Int16, L2, KDT, XVEC)
 BDSSD(Int16, Cosine, BKT, XVEC)
 BDSSD(Int16, Cosine, KDT, XVEC)
+#endif
+#endif
+
 #undef BDSSD
 
 
@@ -618,48 +701,78 @@ TestSearchSSDIndex( \
 	base_config \
 );} \
 
+#ifdef FLOAT
+#ifdef TDEFAULT
 SCSSD(Float, L2, BKT, DEFAULT, TXT)
 SCSSD(Float, L2, KDT, DEFAULT, TXT)
 SCSSD(Float, Cosine, BKT, DEFAULT, TXT)
 SCSSD(Float, Cosine, KDT, DEFAULT, TXT)
+#endif
 
-SCSSD(Int8, L2, BKT, DEFAULT, TXT)
-SCSSD(Int8, L2, KDT, DEFAULT, TXT)
-SCSSD(Int8, Cosine, BKT, DEFAULT, TXT)
-SCSSD(Int8, Cosine, KDT, DEFAULT, TXT)
-
-SCSSD(UInt8, L2, BKT, DEFAULT, TXT)
-SCSSD(UInt8, L2, KDT, DEFAULT, TXT)
-SCSSD(UInt8, Cosine, BKT, DEFAULT, TXT)
-SCSSD(UInt8, Cosine, KDT, DEFAULT, TXT)
-
-SCSSD(Int16, L2, BKT, DEFAULT, TXT)
-SCSSD(Int16, L2, KDT, DEFAULT, TXT)
-SCSSD(Int16, Cosine, BKT, DEFAULT, TXT)
-SCSSD(Int16, Cosine, KDT, DEFAULT, TXT)
-
-
-//Another
+#ifdef TXVEC
 SCSSD(Float, L2, BKT, XVEC, XVEC)
 SCSSD(Float, L2, KDT, XVEC, XVEC)
 SCSSD(Float, Cosine, BKT, XVEC, XVEC)
 SCSSD(Float, Cosine, KDT, XVEC, XVEC)
+#endif
+#endif
 
+#ifdef INT8
+#ifdef TDEFAULT
+SCSSD(Int8, L2, BKT, DEFAULT, TXT)
+SCSSD(Int8, L2, KDT, DEFAULT, TXT)
+SCSSD(Int8, Cosine, BKT, DEFAULT, TXT)
+SCSSD(Int8, Cosine, KDT, DEFAULT, TXT)
+#endif
+
+#ifdef TXVEC
 SCSSD(Int8, L2, BKT, XVEC, XVEC)
 SCSSD(Int8, L2, KDT, XVEC, XVEC)
 SCSSD(Int8, Cosine, BKT, XVEC, XVEC)
 SCSSD(Int8, Cosine, KDT, XVEC, XVEC)
+#endif
+#endif
 
+#ifdef UINT8
+#ifdef TDEFAULT
+SCSSD(UInt8, L2, BKT, DEFAULT, TXT)
+SCSSD(UInt8, L2, KDT, DEFAULT, TXT)
+SCSSD(UInt8, Cosine, BKT, DEFAULT, TXT)
+SCSSD(UInt8, Cosine, KDT, DEFAULT, TXT)
+#endif
+
+#ifdef TXVEC
 SCSSD(UInt8, L2, BKT, XVEC, XVEC)
 SCSSD(UInt8, L2, KDT, XVEC, XVEC)
 SCSSD(UInt8, Cosine, BKT, XVEC, XVEC)
 SCSSD(UInt8, Cosine, KDT, XVEC, XVEC)
+#endif
+#endif
 
+#ifdef INT16
+#ifdef TDEFAULT
+SCSSD(Int16, L2, BKT, DEFAULT, TXT)
+SCSSD(Int16, L2, KDT, DEFAULT, TXT)
+SCSSD(Int16, Cosine, BKT, DEFAULT, TXT)
+SCSSD(Int16, Cosine, KDT, DEFAULT, TXT)
+#endif
+
+#ifdef TXVEC
 SCSSD(Int16, L2, BKT, XVEC, XVEC)
 SCSSD(Int16, L2, KDT, XVEC, XVEC)
 SCSSD(Int16, Cosine, BKT, XVEC, XVEC)
 SCSSD(Int16, Cosine, KDT, XVEC, XVEC)
+#endif
+#endif
+
 #undef SCSSD
+
+#undef FLOAT
+#undef INT8
+//#undef UINT8
+#undef INT16
+#undef TDEFAULT
+#undef TXVEC
 
 BOOST_AUTO_TEST_CASE(RUN_FROM_MAP) {
 	RunFromMap();

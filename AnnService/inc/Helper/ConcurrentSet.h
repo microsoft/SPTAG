@@ -5,6 +5,7 @@
 #define _SPTAG_HELPER_CONCURRENTSET_H_
 
 #ifndef _MSC_VER
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_set>
 #include <unordered_map>

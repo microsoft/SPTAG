@@ -46,7 +46,7 @@ void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& 
             }
         }
     }
-    LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
 }
 
 template <typename T>
@@ -114,7 +114,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("perftest_vector.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
             exit(1);
         }
         vecset = vectorReader->GetVectorSet();
@@ -123,7 +123,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
 
         if (ErrorCode::Success != vectorReader->LoadFile("perftest_query.bin"))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
             exit(1);
         }
         queryset = vectorReader->GetVectorSet();
@@ -166,7 +166,7 @@ void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSe
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
         if (ErrorCode::Success != vectorReader->LoadFile("perftest_truth." + distCalcMethod))
         {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
             exit(1);
         }
         truth = vectorReader->GetVectorSet();
