@@ -239,6 +239,12 @@ namespace SPTAG
                 return true;
             }
 
+            virtual void Wait(AsyncReadRequest& readRequest)
+            {
+                // currently not used anywhere, effective only when ASYNC_READ is defined and BATCH_READ is not defined
+                throw std::runtime_error("Not implemented");
+            }
+
             virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount)
             {
                 std::uint32_t remaining = requestCount;
