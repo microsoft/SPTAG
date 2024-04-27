@@ -65,6 +65,9 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
+
+            // interface method for waiting for async read to complete when underlying callback support is not available.
+            virtual void Wait(AsyncReadRequest& readRequest) { return; }
             
             virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
