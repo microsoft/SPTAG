@@ -188,7 +188,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
             std::atomic_size_t queriesSent(0);
             std::vector<std::thread> threads;
-
+            threads.reserve(options->m_threadNum);
             auto batchstart = std::chrono::high_resolution_clock::now();
 
             for (std::uint32_t i = 0; i < options->m_threadNum; i++) { 

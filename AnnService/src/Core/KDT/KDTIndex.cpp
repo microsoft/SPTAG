@@ -3,6 +3,7 @@
 
 #include "inc/Core/KDT/Index.h"
 #include <chrono>
+#include "inc/Core/ResultIterator.h"
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -160,8 +161,6 @@ namespace SPTAG
             for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) { \
                 SizeType nn_index = node[i]; \
                 if (nn_index < 0) break; \
-                IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range(); )\
-                IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )\
                 if (p_space.CheckAndSet(nn_index)) continue; \
                 float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
                 if (distance2leaf <= upperBound) bLocalOpt = false; \
@@ -195,7 +194,7 @@ namespace SPTAG
                 for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++)
                 {
                     auto futureNode = node[i];
-                    if (futureNode < 0 || futureNode >= m_pSamples.R()) break;
+                    if (futureNode < 0) break;
                     _mm_prefetch((const char*)(m_pSamples)[futureNode], _MM_HINT_T0);
                 }
                     
@@ -213,12 +212,9 @@ namespace SPTAG
                 for (DimensionType i = 0; i < m_pGraph.m_iNeighborhoodSize; i++) 
                 {
                     SizeType nn_index = node[i];
-                    if (nn_index < 0) 
-                        break;
-                    IF_DEBUG(if (nn_index >= m_pSamples.R()) throw std::out_of_range("VID: "s + std::string(nn_index) + ", Samples: "s + std::string(m_pSamples.R())); )
-                    //IF_NDEBUG(if (nn_index >= m_pSamples.R()) continue; )
-                    if (p_space.CheckAndSet(nn_index)) 
-                        continue;
+                    if (nn_index < 0) break;
+
+                    if (p_space.CheckAndSet(nn_index)) continue;
                     float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim());
                     if (distance2leaf <= upperBound) 
                         bLocalOpt = false;
@@ -319,6 +315,46 @@ case VectorValueType::Name: \
             }
 
             return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return nullptr;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return ErrorCode::Fail;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> space) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");
+            return ErrorCode::Fail;
+        }
+
+        template <typename T>
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR KDT");
+            return false;
+        }
+
+        template<typename T>
+        std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        {
+            auto workSpace = m_workSpaceFactory->GetWorkSpace();
+            if (!workSpace) {
+                workSpace.reset(new COMMON::WorkSpace());
+                workSpace->Initialize(max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            }
+            workSpace->ResetResult(m_iMaxCheck, batch);
+            return std::move(workSpace);
         }
 
         template<typename T>

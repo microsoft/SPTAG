@@ -236,6 +236,10 @@ namespace SPTAG
                 Initialize(other.m_iMaxCheck, other.nodeCheckStatus.HashTableExponent());
             }
 
+            ~WorkSpace() {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Delete workspace happens!\n");
+            }
+
             void Initialize(int maxCheck, int hashExp)
             {
                 nodeCheckStatus.Init(maxCheck, hashExp);
@@ -248,6 +252,7 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
             }
 
             void Initialize(va_list& arg)
@@ -269,6 +274,15 @@ namespace SPTAG
                 m_iNumberOfTreeCheckedLeaves = 0;
                 m_iNumberOfCheckedLeaves = 0;
                 m_iMaxCheck = maxCheck;
+                m_relaxedMono = false;
+            }
+
+            void ResetResult(int maxCheck, int resultNum)
+            {
+                m_Results.clear(max(maxCheck / 16, resultNum));
+                m_iNumOfContinuousNoBetterPropagation = 0;
+                m_iNumberOfTreeCheckedLeaves = 0;
+                m_iNumberOfCheckedLeaves = 0;
             }
 
             inline bool CheckAndSet(SizeType idx)
@@ -291,6 +305,7 @@ namespace SPTAG
             int m_iNumberOfTreeCheckedLeaves;
             int m_iNumberOfCheckedLeaves;
             int m_iMaxCheck;
+            bool m_relaxedMono;
 
             // Prioriy queue used for neighborhood graph
             Heap<NodeDistPair> m_NGQueue;

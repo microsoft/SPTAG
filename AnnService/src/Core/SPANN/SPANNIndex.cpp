@@ -5,7 +5,8 @@
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
 #include <chrono>
-
+#include "inc/Core/ResultIterator.h"
+#include "inc/Core/SPANN/SPANNResultIterator.h"
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4127)  // conditional expression is constant
@@ -257,6 +258,100 @@ namespace SPTAG
         }
 
         template<typename T>
+        ErrorCode Index<T>::SearchIndexIterative(QueryResult& p_headQuery, QueryResult& p_query,
+            COMMON::WorkSpace* p_indexWorkspace,
+            ExtraWorkSpace* p_extraWorkspace, int p_batch, int& resultCount,
+            bool first) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            COMMON::QueryResultSet<T>* p_headQueryResults = (COMMON::QueryResultSet<T>*) & p_headQuery;
+            COMMON::QueryResultSet<T>* p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
+           
+            if (first) {
+                p_headQueryResults->Reset();
+                m_index->SearchIndexIterativeFromNeareast(*p_headQueryResults, p_indexWorkspace, true);
+		        p_extraWorkspace->m_loadPosting = true;
+            }
+
+            bool continueSearch = true;
+            resultCount = 0;
+            while (continueSearch && resultCount < p_batch) {
+                bool found = SearchDiskIndexIterative(p_headQuery, p_query, p_extraWorkspace);
+                p_extraWorkspace->m_loadPosting = false;
+                if (!found)
+                {
+                    p_headQueryResults->Reset();
+                    continueSearch = m_index->SearchIndexIterativeFromNeareast(*p_headQueryResults, p_indexWorkspace, false);
+                    p_extraWorkspace->m_loadPosting = true;
+                }
+                else
+                    resultCount++;
+            }
+            p_queryResults->SortResult();
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < resultCount; ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void* p_target, bool p_searchDeleted) const
+        {
+            if (!m_bReady) return nullptr;
+            auto extraWorkspace = m_workSpaceFactory->GetWorkSpace();
+            if (!extraWorkspace) {
+                extraWorkspace.reset(new ExtraWorkSpace());
+                extraWorkspace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_enableDataCompression);
+            }
+            extraWorkspace->m_relaxedMono = false;
+            extraWorkspace->m_loadedPostingNum = 0;
+            extraWorkspace->m_deduper.clear();
+            extraWorkspace->m_postingIDs.clear();
+            std::shared_ptr<ResultIterator> resultIterator =
+                std::make_shared<SPANNResultIterator<T>>(this, m_index.get(), p_target, std::move(extraWorkspace), m_options.m_headBatch);
+            return resultIterator;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR SPANN");
+            return ErrorCode::Undefined;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> space) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeEnd NOT SUPPORT FOR SPANN");
+            return ErrorCode::Fail;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchIndexIterativeEnd(std::unique_ptr<SPANN::ExtraWorkSpace> extraWorkspace) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            if(extraWorkspace != nullptr)
+                m_workSpaceFactory->ReturnWorkSpace(std::move(extraWorkspace));
+            
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        bool Index<T>::SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndexIterativeFromNeareast NOT SUPPORT FOR SPANN");
+            return false;
+        }
+
+        template<typename T>
         ErrorCode Index<T>::SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck, bool p_searchDeleted) const
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not Support Filter on SPANN Index!\n");
@@ -316,6 +411,48 @@ namespace SPTAG
             m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
             p_queryResults->SortResult();
             return ErrorCode::Success;
+        }
+
+        template <typename T>
+        bool Index<T>::SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query,
+            ExtraWorkSpace* extraWorkspace) const
+        {
+            if (extraWorkspace->m_loadPosting) {
+                COMMON::QueryResultSet<T>* p__headQueryResults = (COMMON::QueryResultSet<T>*) & p_headQuery;
+                //std::shared_ptr<ExtraWorkSpace> workSpace = m_workSpacePool->Rent();
+                //workSpace->m_deduper.clear();
+                extraWorkspace->m_postingIDs.clear();
+
+                //float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+
+                for (int i = 0; i < p__headQueryResults->GetResultNum(); ++i)
+                {
+                    auto res = p__headQueryResults->GetResult(i);
+                    //break or continue
+                    if (res->VID == -1) break;
+                    if (m_extraSearcher->CheckValidPosting(res->VID))
+                    {
+                        extraWorkspace->m_postingIDs.emplace_back(res->VID);
+                    }
+                    res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    if (res->VID == MaxSize)
+                    {
+                        res->VID = -1;
+                        res->Dist = MaxDist;
+                    }
+                }
+                if (extraWorkspace->m_loadedPostingNum >= m_options.m_searchInternalResultNum) extraWorkspace->m_relaxedMono = true;
+                extraWorkspace->m_loadedPostingNum += (int)(extraWorkspace->m_postingIDs.size());
+            }
+
+            return m_extraSearcher->SearchIterativeNext(extraWorkspace, p_query, m_index);
+        }
+
+        template<typename T>
+        std::unique_ptr<COMMON::WorkSpace> Index<T>::RentWorkSpace(int batch) const
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RentWorkSpace NOT SUPPORT FOR SPANN");
+            return nullptr;
         }
 
         template <typename T>

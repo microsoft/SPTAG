@@ -27,6 +27,10 @@ public:
     {
     }
 
+    QueryResult(int p_resultNum)
+    {
+        Init(nullptr, p_resultNum, true);
+    }
 
     QueryResult(const void* p_target, int p_resultNum, bool p_withMeta)
     {
@@ -107,13 +111,19 @@ public:
     }
 
 
+    inline void SetResultNum(int p_resultNum)
+    {
+        m_resultNum = p_resultNum;
+    }
+
+
     inline const void* GetTarget()
     {
         return m_target;
     }
 
 
-    inline void* GetQuantizedTarget()
+    inline const void* GetQuantizedTarget()
     {
         return m_quantizedTarget;
     }

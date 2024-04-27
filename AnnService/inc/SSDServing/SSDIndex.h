@@ -3,7 +3,6 @@
 
 #pragma once
 #include <limits>
-
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -110,7 +109,7 @@ namespace SPTAG {
                 std::atomic_size_t queriesSent(0);
 
                 std::vector<std::thread> threads;
-
+                threads.reserve(p_numThreads);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
 
                 Utils::StopW sw;

@@ -7,8 +7,8 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <mutex>
 #include <shared_mutex>
-
 #include "inc/Core/VectorIndex.h"
 
 #include "CommonUtils.h"
@@ -705,8 +705,12 @@ break;
                         int MaxBFSNodes = 100;
                         p_space.m_currBSPTQueue.Resize(MaxBFSNodes); p_space.m_nextBSPTQueue.Resize(MaxBFSNodes);
                         Heap<NodeDistPair>* p_curr = &p_space.m_currBSPTQueue, * p_next = &p_space.m_nextBSPTQueue;
-                        
                         p_curr->Top().distance = 1e9;
+                       
+                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                            _mm_prefetch((const char*)(data[m_pTreeRoots[begin].centerid]), _MM_HINT_T0);
+                        }
+                        
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
                             float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
@@ -727,6 +731,9 @@ break;
                                     p_space.m_SPTQueue.insert(tmp);
                                 }
                                 else {
+                                    for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
+                                        _mm_prefetch((const char*)(data[m_pTreeRoots[begin].centerid]), _MM_HINT_T0);
+                                    }
                                     if (!p_space.CheckAndSet(tnode.centerid)) {
                                         p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, tmp.distance));
                                     }
@@ -751,6 +758,9 @@ break;
                     }
                     else {
                         for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                            _mm_prefetch((const char*)(data[m_pTreeRoots[begin].centerid]), _MM_HINT_T0);
+                        }
+                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
                             SizeType index = m_pTreeRoots[begin].centerid;
                             p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                         }
@@ -774,6 +784,9 @@ break;
                         if (p_space.m_iNumberOfCheckedLeaves >= p_limits) break;
                     }
                     else {
+                        for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
+                            _mm_prefetch((const char*)(data[m_pTreeRoots[begin].centerid]), _MM_HINT_T0);
+                        }
                         if (!p_space.CheckAndSet(tnode.centerid)) {
                             p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, bcell.distance));
                         }

@@ -20,7 +20,6 @@ namespace SPTAG
                 for (int j = 0; j < numResults && count < m_iNeighborhoodSize; j++) {
                     const BasicResult& item = queryResults[j];
                     if (item.VID < 0) break;
-                    IF_DEBUG(if (item.VID >= index->GetNumSamples()) throw std::out_of_range("VID: "s + std::string(item->VID) + ", Samples: "s + std::string(index->GetNumSamples()));)
                     if (item.VID == node) continue;
 
                     bool good = true;
@@ -48,7 +47,7 @@ namespace SPTAG
                 _mm_prefetch((const char*)(insertVec), _MM_HINT_T0);
                 for (DimensionType i = 0; i < m_iNeighborhoodSize; i++) {
                     auto futureNode = nodes[i];
-                    if (futureNode < 0 || futureNode >= index->GetNumSamples()) break;
+                    if (futureNode < 0) break;
                     _mm_prefetch((const char*)(index->GetSample(futureNode)), _MM_HINT_T0);
                 }
 

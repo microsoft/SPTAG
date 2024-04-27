@@ -97,6 +97,7 @@ namespace SPTAG {
             float m_rngFactor;
             int m_samples;
             bool m_excludehead;
+            int m_postingVectorLimit;
 
             // GPU building
             int m_gpuSSDNumTrees;
@@ -121,6 +122,9 @@ namespace SPTAG {
             int m_debugBuildInternalResultNum;
             bool m_enableADC;
             int m_iotimeout;
+
+            // Iterative
+            int m_headBatch;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

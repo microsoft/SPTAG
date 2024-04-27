@@ -26,7 +26,7 @@
         auto& meta = $1->GetMetadata(i);
         jbyteArray bptr = jenv->NewByteArray(meta.Length());
         jenv->SetByteArrayRegion(bptr, 0, meta.Length(), (jbyte *)meta.Data());
-        jenv->SetObjectArrayElement(jresult, i, jenv->NewObject(retClass, jenv->GetMethodID(retClass, "<init>", "(IF[B)V"), (jint)($1->GetResult(i)->VID), (jfloat)($1->GetResult(i)->Dist), bptr));
+        jenv->SetObjectArrayElement(jresult, i, jenv->NewObject(retClass, jenv->GetMethodID(retClass, "<init>", "(IF[BZ)V"), (jint)($1->GetResult(i)->VID), (jfloat)($1->GetResult(i)->Dist), bptr, (jboolean)($1->GetResult(i)->RelaxedMono)));
     }
 }
 %typemap(javaout) std::shared_ptr<QueryResult> { return $jnicall; }
@@ -49,7 +49,7 @@
             auto& meta = ptr.GetMetadata(j);
             jbyteArray bptr = jenv->NewByteArray(meta.Length());
             jenv->SetByteArrayRegion(bptr, 0, meta.Length(), (jbyte *)meta.Data());
-            jenv->SetObjectArrayElement(jresult, id, jenv->NewObject(retClass, jenv->GetMethodID(retClass, "<init>", "(IF[B)V"), (jint)(ptr.GetResult(j)->VID), (jfloat)(ptr.GetResult(j)->Dist), bptr));
+            jenv->SetObjectArrayElement(jresult, id, jenv->NewObject(retClass, jenv->GetMethodID(retClass, "<init>", "(IF[BZ)V"), (jint)(ptr.GetResult(j)->VID), (jfloat)(ptr.GetResult(j)->Dist), bptr, (jboolean)(ptr.GetResult(j)->RelaxedMono)));
             id++;
         }
     }
