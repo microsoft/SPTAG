@@ -18,6 +18,9 @@ namespace SPTAG
             DIS_BulkRead = 0,
             DIS_UserRead,
             DIS_HighPriorityUserRead,
+            DIS_BulkWrite,
+            DIS_UserWrite,
+            DIS_HighPriorityUserWrite,
             DIS_Count
         };
 
@@ -26,7 +29,7 @@ namespace SPTAG
             std::uint64_t m_offset;
             std::uint64_t m_readSize;
             char* m_buffer;
-            std::function<void(AsyncReadRequest*)> m_callback;
+            std::function<void(bool)> m_callback;
             int m_status;
 
             // Carry items like counter for callback to process.
@@ -62,6 +65,9 @@ namespace SPTAG
             virtual std::uint64_t WriteString(const char* buffer, std::uint64_t offset = UINT64_MAX) = 0;
 
             virtual bool ReadFileAsync(AsyncReadRequest& readRequest) { return false; }
+
+            // interface method for waiting for async read to complete when underlying callback support is not available.
+            virtual void Wait(AsyncReadRequest& readRequest) { return; }
             
             virtual bool BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount) { return false; }
 
@@ -167,6 +173,7 @@ namespace SPTAG
                 streambuf(char* buffer, size_t size)
                 {
                     setg(buffer, buffer, buffer + size);
+                    setp(buffer, buffer + size);
                 }
 
                 std::uint64_t tellp()

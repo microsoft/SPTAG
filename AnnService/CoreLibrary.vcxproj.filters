@@ -85,6 +85,12 @@
     <ClInclude Include="inc\Core\MetadataSet.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\MultiIndexScan.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\ResultIterator.h">
+      <Filter>Header Files\Core</Filter>
+    </ClInclude>
     <ClInclude Include="inc\Core\VectorSet.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
@@ -220,6 +226,9 @@
     <ClInclude Include="inc\Core\Common\SIMDUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\SPANNResultIterator.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\VectorIndex.cpp">
@@ -235,6 +244,12 @@
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="src\Core\MetadataSet.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\MultiIndexScan.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\ResultIterator.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\Base64Encode.cpp">
@@ -282,14 +297,17 @@
     <ClCompile Include="src\Core\Common\CommonUtils.cpp">
       <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
+    <ClCompile Include="src\Core\Common\SIMDUtils.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Core\Common\TruthSet.cpp">
+      <Filter>Source Files\Core\Common</Filter>
+    </ClCompile>
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp">
       <Filter>Source Files\Core\SPANN</Filter>
     </ClCompile>
     <ClCompile Include="src\Helper\AsyncFileReader.cpp">
       <Filter>Source Files\Helper</Filter>
-    </ClCompile>
-    <ClCompile Include="src\Core\Common\SIMDUtils.cpp">
-      <Filter>Source Files\Core\Common</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

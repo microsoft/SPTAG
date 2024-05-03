@@ -95,6 +95,7 @@ DefineSSDParameter(m_tmpdir, std::string, std::string("."), "TmpDir")
 DefineSSDParameter(m_rngFactor, float, 1.0f, "RNGFactor")
 DefineSSDParameter(m_samples, int, 100, "RecallTestSampleNumber")
 DefineSSDParameter(m_excludehead, bool, true, "ExcludeHead")
+DefineSSDParameter(m_postingVectorLimit, int, 118, "PostingVectorLimit")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
@@ -119,5 +120,8 @@ DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
 DefineSSDParameter(m_debugBuildInternalResultNum, int, 64, "DebugBuildInternalResultNum")
 DefineSSDParameter(m_iotimeout, int, 30, "IOTimeout")
+
+// Iterative
+DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch")
 
 #endif

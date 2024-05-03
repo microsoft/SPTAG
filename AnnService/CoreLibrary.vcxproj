@@ -128,6 +128,11 @@
       <PreprocessorDefinitions>_MBCS;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/Zc:twoPhase- /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -159,6 +164,8 @@
     <ClInclude Include="inc\Core\CommonDataStructure.h" />
     <ClInclude Include="inc\Core\DefinitionList.h" />
     <ClInclude Include="inc\Core\MetadataSet.h" />
+    <ClInclude Include="inc\Core\MultiIndexScan.h" />
+    <ClInclude Include="inc\Core\ResultIterator.h" />
     <ClInclude Include="inc\Core\SearchQuery.h" />
     <ClInclude Include="inc\Core\SearchResult.h" />
     <ClInclude Include="inc\Core\SPANN\Compressor.h" />
@@ -167,6 +174,7 @@
     <ClInclude Include="inc\Core\SPANN\Index.h" />
     <ClInclude Include="inc\Core\SPANN\Options.h" />
     <ClInclude Include="inc\Core\SPANN\ParameterDefinitionList.h" />
+    <ClInclude Include="inc\Core\SPANN\SPANNResultIterator.h" />
     <ClInclude Include="inc\Core\VectorIndex.h" />
     <ClInclude Include="inc\Core\VectorSet.h" />
     <ClInclude Include="inc\Helper\ArgumentsParser.h" />
@@ -198,9 +206,12 @@
     <ClCompile Include="src\Core\Common\InstructionUtils.cpp" />
     <ClCompile Include="src\Core\Common\IQuantizer.cpp" />
     <ClCompile Include="src\Core\Common\SIMDUtils.cpp" />
+    <ClCompile Include="src\Core\Common\TruthSet.cpp" />
     <ClCompile Include="src\Core\SPANN\SPANNIndex.cpp" />
     <ClCompile Include="src\Core\VectorSet.cpp" />
     <ClCompile Include="src\Core\MetadataSet.cpp" />
+    <ClCompile Include="src\Core\MultiIndexScan.cpp" />
+    <ClCompile Include="src\Core\ResultIterator.cpp" />
     <ClCompile Include="src\Core\BKT\BKTIndex.cpp" />
     <ClCompile Include="src\Core\KDT\KDTIndex.cpp" />
     <ClCompile Include="src\Core\Common\NeighborhoodGraph.cpp" />

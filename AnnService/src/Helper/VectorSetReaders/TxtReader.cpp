@@ -62,16 +62,16 @@ TxtVectorReader::LoadFile(const std::string& p_filePaths)
     {
         if (fileInfo.second == (std::numeric_limits<std::size_t>::max)())
         {
-            LOG(Helper::LogLevel::LL_Error, "File %s not exists or can't access.\n", fileInfo.first.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "File %s not exists or can't access.\n", fileInfo.first.c_str());
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint32_t fileTaskCount = 1;
+        std::uint32_t fileTaskCount = 0;
         std::size_t blockSize = m_subTaskBlocksize;
         if (0 == blockSize)
         {
             fileTaskCount = m_options->m_threadNum;
-if(fileTaskCount == 0) fileTaskCount = 1;
+            if(fileTaskCount == 0) fileTaskCount = 1;
             blockSize = (fileInfo.second + fileTaskCount - 1) / fileTaskCount;
         }
         else
@@ -119,18 +119,18 @@ TxtVectorReader::GetVectorSet(SizeType start, SizeType end) const
 {
     auto ptr = f_createIO();
     if (ptr == nullptr || !ptr->Initialize(m_vectorOutput.c_str(), std::ios::binary | std::ios::in)) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file %s.\n", m_vectorOutput.c_str());
         throw std::runtime_error("Failed to read vectorset file");
     }
 
     SizeType row;
     DimensionType col;
     if (ptr->ReadBinary(sizeof(SizeType), (char*)&row) != sizeof(SizeType)) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
         throw std::runtime_error("Failed to read vectorset file");
     }
     if (ptr->ReadBinary(sizeof(DimensionType), (char*)&col) != sizeof(DimensionType)) {
-        LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
         throw std::runtime_error("Failed to read vectorset file");
     }
 
@@ -143,7 +143,7 @@ TxtVectorReader::GetVectorSet(SizeType start, SizeType end) const
         char* vecBuf = reinterpret_cast<char*>(vectorSet.Data());
         std::uint64_t offset = ((std::uint64_t)GetValueTypeSize(m_options->m_inputValueType)) * start * col + +sizeof(SizeType) + sizeof(DimensionType);
         if (ptr->ReadBinary(totalRecordVectorBytes, vecBuf, offset) != totalRecordVectorBytes) {
-            LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read VectorSet!\n");
             throw std::runtime_error("Failed to read vectorset file");
         }
     }
@@ -180,11 +180,11 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
     std::shared_ptr<Helper::DiskIO> input = f_createIO(), output = f_createIO(), meta = f_createIO(), metaIndex = f_createIO();
     if (input == nullptr || !input->Initialize(p_filePath.c_str(), std::ios::in | std::ios::binary))
     {
-        LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n",p_filePath.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n",p_filePath.c_str());
         return ErrorCode::FailedOpenFile;
     }
 
-    LOG(Helper::LogLevel::LL_Info, "Begin Subtask: %u, start offset position: %lld\n", p_subTaskID, startpos);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Subtask: %u, start offset position: %lld\n", p_subTaskID, startpos);
 
     std::string subFileSuffix("_");
     subFileSuffix += std::to_string(p_subTaskID);
@@ -194,7 +194,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         meta == nullptr || !meta->Initialize((m_metadataConentOutput + subFileSuffix).c_str(), std::ios::binary | std::ios::out) ||
         metaIndex == nullptr || !metaIndex->Initialize((m_metadataIndexOutput + subFileSuffix).c_str(), std::ios::binary | std::ios::out))
     {
-        LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", (m_vectorOutput + subFileSuffix).c_str(), (m_metadataConentOutput + subFileSuffix).c_str(), (m_metadataIndexOutput + subFileSuffix).c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", (m_vectorOutput + subFileSuffix).c_str(), (m_metadataConentOutput + subFileSuffix).c_str(), (m_metadataIndexOutput + subFileSuffix).c_str());
         return ErrorCode::FailedCreateFile;
     }
 
@@ -221,7 +221,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
 
         if (0 == tabIndex && currentLine[tabIndex] != '\t')
         {
-            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing line:%s\n", p_subTaskID, currentLine.get());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing line:%s\n", p_subTaskID, currentLine.get());
             return ErrorCode::FailedParseValue;
         }
 
@@ -243,7 +243,7 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
 
         if (!parseSuccess)
         {
-            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing vector:%s\n", p_subTaskID, currentLine.get());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot parsing vector:%s\n", p_subTaskID, currentLine.get());
             return ErrorCode::FailedParseValue;
         }
 
@@ -251,13 +251,13 @@ TxtVectorReader::LoadFileInternal(const std::string& p_filePath,
         if (output->WriteBinary(vectorByteSize, (char*)vector.get()) != vectorByteSize ||
             meta->WriteBinary(tabIndex, currentLine.get()) != tabIndex ||
             metaIndex->WriteBinary(sizeof(metaOffset), (const char*)&metaOffset) != sizeof(metaOffset)) {
-            LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write line:%s\n", p_subTaskID, currentLine.get());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write line:%s\n", p_subTaskID, currentLine.get());
             return ErrorCode::DiskIOFail;
         }
         metaOffset += tabIndex;
     }
     if (metaIndex->WriteBinary(sizeof(metaOffset), (const char*)&metaOffset) != sizeof(metaOffset)) {
-        LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write final offset!\n", p_subTaskID);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Subtask: %u cannot write final offset!\n", p_subTaskID);
         return ErrorCode::DiskIOFail;
     }
 
@@ -282,7 +282,7 @@ TxtVectorReader::MergeData()
         meta == nullptr || !meta->Initialize(m_metadataConentOutput.c_str(), std::ios::binary | std::ios::out) ||
         metaIndex == nullptr || !metaIndex->Initialize(m_metadataIndexOutput.c_str(), std::ios::binary | std::ios::out))
     {
-        LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", m_vectorOutput.c_str(), m_metadataConentOutput.c_str(), m_metadataIndexOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to create files: %s %s %s\n", m_vectorOutput.c_str(), m_metadataConentOutput.c_str(), m_metadataIndexOutput.c_str());
         return ErrorCode::FailedCreateFile;
     }
 
@@ -291,11 +291,11 @@ TxtVectorReader::MergeData()
 
     SizeType totalRecordCount = m_totalRecordCount;
     if (output->WriteBinary(sizeof(totalRecordCount), (char*)(&totalRecordCount)) != sizeof(totalRecordCount)) {
-        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
         return ErrorCode::DiskIOFail;
     }
     if (output->WriteBinary(sizeof(m_options->m_dimension), (char*)&(m_options->m_dimension)) != sizeof(m_options->m_dimension)) {
-        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
         return ErrorCode::DiskIOFail;
     }
 
@@ -308,16 +308,17 @@ TxtVectorReader::MergeData()
 
         if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
         {
-            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while (readSize != 0) {            
             if (output->WriteBinary(readSize, bufferHolder.get()) != readSize) {
-                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_vectorOutput.c_str());
                 return ErrorCode::DiskIOFail;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown();
         remove(file.c_str());
@@ -332,23 +333,24 @@ TxtVectorReader::MergeData()
 
         if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
         {
-            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
             return ErrorCode::FailedOpenFile;
         }
 
-        std::uint64_t readSize;
-        while ((readSize = input->ReadBinary(bufferSize, bufferHolder.get()))) {
+        std::uint64_t readSize = input->ReadBinary(bufferSize, bufferHolder.get());
+        while ( readSize != 0 ) {
             if (meta->WriteBinary(readSize, bufferHolder.get()) != readSize) {
-                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataConentOutput.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataConentOutput.c_str());
                 return ErrorCode::DiskIOFail;
             }
+            readSize = input->ReadBinary(bufferSize, bufferHolder.get());
         }
         input->ShutDown();
         remove(file.c_str());
     }
 
     if (metaIndex->WriteBinary(sizeof(totalRecordCount), (char*)(&totalRecordCount)) != sizeof(totalRecordCount)) {
-        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
         return ErrorCode::DiskIOFail;
     }
 
@@ -362,7 +364,7 @@ TxtVectorReader::MergeData()
 
         if (input == nullptr || !input->Initialize(file.c_str(), std::ios::binary | std::ios::in))
         {
-            LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to open file: %s\n", file.c_str());
             return ErrorCode::FailedOpenFile;
         }
 
@@ -370,23 +372,23 @@ TxtVectorReader::MergeData()
         {
             std::size_t readBytesCount = min(remains * sizeof(std::uint64_t), bufferSizeTrim64);
             if (input->ReadBinary(readBytesCount, buf) != readBytesCount) {
-                LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
                 return ErrorCode::DiskIOFail;
             }
             std::uint64_t* offset = reinterpret_cast<std::uint64_t*>(buf);
-            for (std::uint64_t i = 0; i < readBytesCount / sizeof(std::uint64_t); ++i)
+            for (std::uint64_t j = 0; j < readBytesCount / sizeof(std::uint64_t); ++j)
             {
-                offset[i] += totalOffset;
+                offset[j] += totalOffset;
             }
 
             if (metaIndex->WriteBinary(readBytesCount, buf) != readBytesCount) {
-                LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
                 return ErrorCode::DiskIOFail;
             }
             remains -= static_cast<SizeType>(readBytesCount / sizeof(std::uint64_t));
         }
         if (input->ReadBinary(sizeof(std::uint64_t), buf) != sizeof(std::uint64_t)) {
-            LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to read file: %s\n", file.c_str());
             return ErrorCode::DiskIOFail;
         }
         totalOffset += *(reinterpret_cast<std::uint64_t*>(buf));
@@ -396,7 +398,7 @@ TxtVectorReader::MergeData()
     }
 
     if (metaIndex->WriteBinary(sizeof(totalOffset), (char*)&totalOffset) != sizeof(totalOffset)) {
-        LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unable to write file: %s\n", m_metadataIndexOutput.c_str());
         return ErrorCode::DiskIOFail;
     }
     return ErrorCode::Success;

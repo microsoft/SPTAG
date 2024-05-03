@@ -35,7 +35,7 @@ Connection::Connection(ConnectionID p_connectionID,
 void
 Connection::Start()
 {
-    LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
             static_cast<uint32_t>(m_socket.local_endpoint().port()),
             m_socket.remote_endpoint().address().to_string().c_str(),
             static_cast<uint32_t>(m_socket.remote_endpoint().port()));
@@ -53,7 +53,7 @@ Connection::Start()
 void
 Connection::Stop()
 {
-    LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
             static_cast<uint32_t>(m_socket.local_endpoint().port()),
             m_socket.remote_endpoint().address().to_string().c_str(),
             static_cast<uint32_t>(m_socket.remote_endpoint().port()));

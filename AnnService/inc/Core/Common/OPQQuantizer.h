@@ -26,7 +26,7 @@ namespace SPTAG
 
             OPQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, std::unique_ptr<OPQMatrixType[]>&& OPQMatrix);
 
-            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout) const;
+            virtual void QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC = true) const;
 
             void ReconstructVector(const std::uint8_t* qvec, void* vecout) const;
 
@@ -94,7 +94,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout) const
+        void OPQQuantizer<T>::QuantizeVector(const void* vec, std::uint8_t* vecout, bool ADC) const
         {
             OPQMatrixType* mat_vec = (OPQMatrixType*) ALIGN_ALLOC(sizeof(OPQMatrixType) * m_matrixDim);
             OPQMatrixType* typed_vec;
@@ -111,7 +111,7 @@ namespace SPTAG
             }
 
             m_VectorMatrixMultiply<OPQMatrixType>(m_OPQMatrix_T.get(), typed_vec, mat_vec);
-            PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout);
+            PQQuantizer<OPQMatrixType>::QuantizeVector(mat_vec, vecout, ADC);
             ALIGN_FREE(mat_vec);
 
             ISNOTSAME(T, OPQMatrixType)
@@ -142,7 +142,7 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             IOBINARY(p_out, WriteBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
-            LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
         
@@ -157,7 +157,7 @@ namespace SPTAG
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
             m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
             IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
-            LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read OPQ Matrix.\n");
 
             m_InitMatrixTranspose();
             return ErrorCode::Success;

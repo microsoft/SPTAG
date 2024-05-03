@@ -3,7 +3,6 @@
 
 #pragma once
 #include <limits>
-
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -24,17 +23,17 @@ namespace SPTAG {
                 {
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(p_output.c_str(), std::ios::binary | std::ios::out)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed create file: %s\n", p_output.c_str());
                         return ErrorCode::FailedCreateFile;
                     }
                     int32_t i32Val = static_cast<int32_t>(p_results.size());
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                         return ErrorCode::DiskIOFail;
                     }
                     i32Val = p_resultNum;
                     if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                        LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                         return ErrorCode::DiskIOFail;
                     }
 
@@ -45,13 +44,13 @@ namespace SPTAG {
                         {
                             i32Val = p_results[i].GetResult(j)->VID;
                             if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                                 return ErrorCode::DiskIOFail;
                             }
 
                             fVal = p_results[i].GetResult(j)->Dist;
                             if (ptr->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
-                                LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                                 return ErrorCode::DiskIOFail;
                             }
                         }
@@ -75,7 +74,7 @@ namespace SPTAG {
 
                 std::sort(collects.begin(), collects.end());
 
-                LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMax\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg\t50tiles\t90tiles\t95tiles\t99tiles\t99.9tiles\tMax\n");
 
                 std::string formatStr("%.3lf");
                 for (int i = 1; i < 7; ++i)
@@ -86,7 +85,7 @@ namespace SPTAG {
 
                 formatStr += '\n';
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     formatStr.c_str(),
                     sum / collects.size(),
                     collects[static_cast<size_t>(collects.size() * 0.50)],
@@ -110,52 +109,55 @@ namespace SPTAG {
                 std::atomic_size_t queriesSent(0);
 
                 std::vector<std::thread> threads;
-
-                LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
+                threads.reserve(p_numThreads);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
 
                 Utils::StopW sw;
 
-                auto func = [&]()
-                {
-                    Utils::StopW threadws;
-                    size_t index = 0;
-                    while (true)
+                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
                     {
-                        index = queriesSent.fetch_add(1);
-                        if (index < numQueries)
+                        NumaStrategy ns = (p_index->GetDiskIndex() != nullptr) ? NumaStrategy::SCATTER : NumaStrategy::LOCAL; // Only for SPANN, we need to avoid IO threads overlap with search threads.
+                        Helper::SetThreadAffinity(i, threads[i], ns, OrderStrategy::ASC); 
+
+                        Utils::StopW threadws;
+                        size_t index = 0;
+                        while (true)
                         {
-                            if ((index & ((1 << 14) - 1)) == 0)
+                            index = queriesSent.fetch_add(1);
+                            if (index < numQueries)
                             {
-                                LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
+                                if ((index & ((1 << 14) - 1)) == 0)
+                                {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / numQueries);
+                                }
+
+                                double startTime = threadws.getElapsedMs();
+                                p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
+                                double endTime = threadws.getElapsedMs();
+                                p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
+                                double exEndTime = threadws.getElapsedMs();
+
+                                p_stats[index].m_exLatency = exEndTime - endTime;
+                                p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
                             }
-
-                            double startTime = threadws.getElapsedMs();
-                            p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
-                            double endTime = threadws.getElapsedMs();
-                            p_index->DebugSearchDiskIndex(p_results[index], p_internalResultNum, p_internalResultNum, &(p_stats[index]));
-                            double exEndTime = threadws.getElapsedMs();
-                            p_results[index].ClearTmp();
-
-                            p_stats[index].m_exLatency = exEndTime - endTime;
-                            p_stats[index].m_totalLatency = p_stats[index].m_totalSearchLatency = exEndTime - startTime;
+                            else
+                            {
+                                return;
+                            }
                         }
-                        else
-                        {
-                            return;
-                        }
-                    }
-                };
-
-                for (int i = 0; i < p_numThreads; i++) { threads.emplace_back(func); }
+                    });
+                }
                 for (auto& thread : threads) { thread.join(); }
 
                 double sendingCost = sw.getElapsedSec();
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "Finish sending in %.3lf seconds, actuallQPS is %.2lf, query count %u.\n",
                     sendingCost,
                     numQueries / sendingCost,
                     static_cast<uint32_t>(numQueries));
+
+                for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
             }
 
             template <typename ValueType>
@@ -171,24 +173,23 @@ namespace SPTAG {
                    p_index->m_pQuantizer->SetEnableADC(p_opts.m_enableADC);
                 }
 
-//                if (!p_opts.m_logFile.empty())
-//                {
-//                    g_pLogger.reset(new Helper::FileLogger(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
-//                }
-//                int numThreads = p_opts.m_iSSDNumberOfThreads;
-                int numThreads = 1;
+                if (!p_opts.m_logFile.empty())
+                {
+                    SetLogger(std::make_shared<Helper::FileLogger>(Helper::LogLevel::LL_Info, p_opts.m_logFile.c_str()));
+                }
+                int numThreads = p_opts.m_iSSDNumberOfThreads;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
 
                 if (!warmupFile.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
                     std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_warmupType, p_opts.m_warmupDelimiter));
                     auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                     if (ErrorCode::Success != queryReader->LoadFile(p_opts.m_warmupPath))
                     {
-                        LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
                         exit(1);
                     }
                     auto warmupQuerySet = queryReader->GetVectorSet();
@@ -202,17 +203,17 @@ namespace SPTAG {
                         warmupResults[i].Reset();
                     }
 
-                    LOG(Helper::LogLevel::LL_Info, "Start warmup...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start warmup...\n");
                     SearchSequential(p_index, numThreads, warmupResults, warmpUpStats, p_opts.m_queryCountLimit, internalResultNum);
-                    LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
                 std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
                 auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
                 if (ErrorCode::Success != queryReader->LoadFile(p_opts.m_queryPath))
                 {
-                    LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
                     exit(1);
                 }
                 auto querySet = queryReader->GetVectorSet();
@@ -227,11 +228,11 @@ namespace SPTAG {
                 }
 
 
-                LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
 
                 SearchSequential(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
 
-                LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
                 std::shared_ptr<VectorSet> vectorSet;
 
@@ -242,12 +243,12 @@ namespace SPTAG {
                     {
                         vectorSet = vectorReader->GetVectorSet();
                         if (p_opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(numThreads);
-                        LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLoad VectorSet(%d,%d).\n", vectorSet->Count(), vectorSet->Dimension());
                     }
                 }
 
                 if (p_opts.m_rerank > 0 && vectorSet != nullptr) {
-                    LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\n Begin rerank...\n");
                     for (int i = 0; i < results.size(); i++)
                     {
                         for (int j = 0; j < K; j++)
@@ -266,25 +267,25 @@ namespace SPTAG {
                 std::vector<std::set<SizeType>> truth;
                 if (!truthFile.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading TruthFile...\n");
 
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(truthFile.c_str(), std::ios::in | std::ios::binary)) {
-                        LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthFile.c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open truth file: %s\n", truthFile.c_str());
                         exit(1);
                     }
                     int originalK = truthK;
                     COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, p_opts.m_truthType);
                     char tmp[4];
                     if (ptr->ReadBinary(4, tmp) == 4) {
-                        LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
                     }
 
                     recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
-                    LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
                 }
 
-                LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -292,7 +293,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nHead Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -300,7 +301,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -308,7 +309,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
                     {
@@ -316,7 +317,7 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Disk Page Access Distribution:\n");
                 PrintPercentiles<int, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> int
                     {
@@ -324,7 +325,7 @@ namespace SPTAG {
                     },
                     "%4d");
 
-                LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Disk IO Distribution:\n");
                 PrintPercentiles<int, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> int
                     {
@@ -332,21 +333,21 @@ namespace SPTAG {
                     },
                     "%4d");
 
-                LOG(Helper::LogLevel::LL_Info, "\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\n");
 
                 if (!outputFile.empty())
                 {
-                    LOG(Helper::LogLevel::LL_Info, "Start output to %s\n", outputFile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start output to %s\n", outputFile.c_str());
                     OutputResult<ValueType>(outputFile, results, K);
                 }
 
-                LOG(Helper::LogLevel::LL_Info,
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "Recall@%d: %f MRR@%d: %f\n", K, recall, K, MRR);
 
-                LOG(Helper::LogLevel::LL_Info, "\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\n");
 
                 if (p_opts.m_recall_analysis) {
-                    LOG(Helper::LogLevel::LL_Info, "Start recall analysis...\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start recall analysis...\n");
 
                     std::shared_ptr<VectorIndex> headIndex = p_index->GetMemoryIndex();
                     SizeType sampleSize = numQueries < 100 ? numQueries : 100;
@@ -491,29 +492,29 @@ namespace SPTAG {
                         buildPostingCut += postingCut[i];
                     }
 
-                    LOG(Helper::LogLevel::LL_Info, "Query head recall @%d:%f.\n", internalResultNum, headacc / sampleSize / internalResultNum);
-                    LOG(Helper::LogLevel::LL_Info, "BF top %d postings truth recall @%d:%f.\n", sampleK, truthK, truthacc / sampleSize / truthK);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Query head recall @%d:%f.\n", internalResultNum, headacc / sampleSize / internalResultNum);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BF top %d postings truth recall @%d:%f.\n", sampleK, truthK, truthacc / sampleSize / truthK);
 
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "Percent of truths in postings have shorter distance than query selected heads: %f percent\n",
                         shorter / lost * 100);
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "Percent of truths in postings have longer distance than query selected heads: %f percent\n",
                         longer / lost * 100);
 
 
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "\tPercent of truths no shorter distance in query selected heads: %f percent\n",
                         (longer - buildNearQueryHeads) / lost * 100);
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "\tPercent of truths exists shorter distance in query selected heads: %f percent\n",
                         buildNearQueryHeads / lost * 100);
 
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "\t\tRNG rule ANN search loss: %f percent\n", buildAnnNotFound / lost * 100);
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "\t\tPosting cut loss: %f percent\n", buildPostingCut / lost * 100);
-                    LOG(Helper::LogLevel::LL_Info,
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                         "\t\tRNG rule loss: %f percent\n", buildRNGRule / lost * 100);
                 }
             }
