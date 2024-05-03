@@ -55,7 +55,7 @@ template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 
 
 template<typename T> __device__ T BASE() {}
 template<> __forceinline__ __device__ float BASE<float>() {return 1;}
-template<> __forceinline__ __device__ int32_t BASE<int32_t>() {return 16384;}
+template<> __forceinline__ __device__ int BASE<int>() {return 16384;}
 template<> __forceinline__ __device__ uint32_t BASE<uint32_t>() {return 65536;}
 
 
@@ -88,6 +88,24 @@ __device__ int32_t cosine_int8(int8_t* a, int8_t* b) {
   return BASE<int32_t>() - prod;
 }
 
+template<int Dim>
+__device__ float cosine_int8_rfloat(int8_t* a, int8_t* b) {
+  float prod=0;
+  float src=0;
+  float target=0;
+
+  uint32_t* newA = reinterpret_cast<uint32_t*>(a);
+  uint32_t* newB = reinterpret_cast<uint32_t*>(b);
+
+  for(int i=0; i<Dim/4; ++i) {
+    src = newA[i];
+    target = newB[i];
+    prod = (float)(__dp4a(src, target, (int32_t)prod));
+  }
+
+  return (float)(BASE<int32_t>()) - prod;
+}
+
 template<typename T, typename SUMTYPE, int Dim>
 __forceinline__ __device__ SUMTYPE l2(T* aVec, T* bVec) {
   SUMTYPE total[2]={0,0};
@@ -103,6 +121,9 @@ template<typename T, typename SUMTYPE, int Dim, int metric>
 __device__ SUMTYPE dist(T* a, T* b) {
   if(metric == (int)DistMetric::Cosine) {
     if(::cuda::std::is_same<T,int8_t>::value) {
+//      if(::cuda::std::is_same<SUMTYPE,float>::value) {
+//        return cosine_int8_rfloat<Dim>((int8_t*)a, (int8_t*)b);
+//      }
       return cosine_int8<Dim>((int8_t*)a, (int8_t*)b);
     }
     return cosine<T,SUMTYPE,Dim>(a, b);
