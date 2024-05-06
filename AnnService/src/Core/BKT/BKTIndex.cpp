@@ -937,10 +937,14 @@ namespace SPTAG
                     if (p_metadataSet != nullptr) {
                         m_pMetadata->AddBatch(*p_metadataSet);
                         if (HasMetaMapping()) {
-                            for (SizeType i = begin; i < end; i++) {
+                            for (SizeType i = begin; i < end && i < begin + p_metadataSet->Count(); i++) {
                                 ByteArray meta = m_pMetadata->GetMetadata(i);
                                 std::string metastr((char*)meta.Data(), meta.Length());
                                 UpdateMetaMapping(metastr, i);
+                            }
+                            for (SizeType i = begin + p_metadataSet->Count(); i < end; i++)
+                            {
+                                m_pMetadata->Add(ByteArray::c_empty);
                             }
                         }
                     }
