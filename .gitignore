@@ -1,3 +1,9 @@
+.vscode/
+Release/
+Debug/
+datasets/
+build/
+data/
 # Prerequisites
 *.d
 

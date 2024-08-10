@@ -5,6 +5,8 @@
 #define _SPTAG_SEARCHRESULT_H_
 
 #include "CommonDataStructure.h"
+#include "inc/Core/Common.h"
+#include <memory>
 
 namespace SPTAG
 {
@@ -67,6 +69,7 @@ namespace SPTAG
         SizeType VID;
         float Dist;
         ByteArray Meta;
+        ByteArray Vector;
         bool RelaxedMono;
 
         BasicResult() : VID(-1), Dist(MaxDist), RelaxedMono(false) {}
@@ -75,6 +78,8 @@ namespace SPTAG
 
         BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta) : VID(p_vid), Dist(p_dist), Meta(p_meta), RelaxedMono(false) {}
         BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta, bool p_relaxedMono) : VID(p_vid), Dist(p_dist), Meta(p_meta), RelaxedMono(p_relaxedMono) {}
+        BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta, ByteArray p_vector) : VID(p_vid), Dist(p_dist), Meta(p_meta), Vector(p_vector), RelaxedMono(false) {}
+        BasicResult(SizeType p_vid, float p_dist, ByteArray p_meta, ByteArray p_vector, bool p_relaxedMono) : VID(p_vid), Dist(p_dist), Meta(p_meta), Vector(p_vector), RelaxedMono(p_relaxedMono) {}
     };
 
 } // namespace SPTAG

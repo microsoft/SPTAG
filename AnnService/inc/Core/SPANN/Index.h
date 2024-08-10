@@ -141,6 +141,7 @@ namespace SPTAG
 
             ErrorCode SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats = nullptr) const;
 	        bool SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, ExtraWorkSpace* extraWorkspace) const;
+            ErrorCode SearchDoc2Doc(QueryResult &p_query, COMMON::QueryResultSet<T>* p_results, std::unique_ptr<ExtraWorkSpace> workSpace) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) const;
             ErrorCode UpdateIndex();

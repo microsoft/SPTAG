@@ -4,9 +4,12 @@
 #ifndef _SPTAG_COMMON_QUERYRESULTSET_H_
 #define _SPTAG_COMMON_QUERYRESULTSET_H_
 
+#include "inc/Core/Common.h"
+#include "inc/Core/CommonDataStructure.h"
 #include "inc/Core/SearchQuery.h"
 #include "DistanceUtils.h"
 #include <algorithm>
+#include <memory>
 #include "IQuantizer.h"
 
 namespace SPTAG
@@ -36,8 +39,18 @@ public:
     }
 
     QueryResultSet(const QueryResultSet& other) : QueryResult(other)
-    {
+    {   
     }
+
+    // QueryResultSet(const T*_target, int _K, bool _withResult) {
+    //     m_withResultVector = _withResult;
+    //     if(m_withResultVector) {
+    //         m_resultVectors.resize(_K);
+    //     }
+    //     for(auto& ptr : m_resultVectors) {
+    //         ptr = std::shared_ptr<T>(new T(), [](T* p) { delete p; });
+    //     }
+    // }
 
     ~QueryResultSet()
     {
@@ -86,11 +99,46 @@ public:
         return false;
     }
 
+    // bool NeedResultVector() const {
+    //     return m_withResultVector;
+    // }
+
+    // void RemoveResultVector() {
+    //     if(m_withResultVector) {
+    //         m_withResultVector = false;
+    //         m_resultVectors.clear();
+    //     }
+    // }
+
+    // if we want to use spread search, the query result should be copied to the result set
+    bool AddPoint(const SizeType index, float dist, ByteArray& vector) {
+        if (dist < m_results[0].Dist || (dist == m_results[0].Dist && index < m_results[0].VID))
+        {
+            m_results[0].VID = index;
+            m_results[0].Dist = dist;
+            m_results[0].Vector = vector;
+            // if(data != nullptr) // && m_withResultVector) 
+            // {
+            //     // copy data to m_resultVectors[0]
+            //     // since we have already allocated memory for each result vector, we can directly copy data to it
+            //     // memcpy(m_resultVectors[0].get(), data, sizeof(T));
+            //     memcpy()
+            // }
+            Heapify(m_resultNum);
+            return true;
+        }
+        return false;
+    }
+
     inline void SortResult()
     {
         for (int i = m_resultNum - 1; i >= 0; i--)
         {
             std::swap(m_results[0], m_results[i]);
+            // if(m_withResultVector) 
+            // {
+            //     std::swap(m_resultVectors[0], m_resultVectors[i]);
+            // }
             Heapify(i);
         }
     }
@@ -98,6 +146,17 @@ public:
     void Reverse()
     {
         std::reverse(m_results.Data(), m_results.Data() + m_resultNum);
+    }
+
+    // std::shared_ptr<T> GetVector(int idx) const
+    // {
+    //     if (idx < m_resultNum) return m_resultVectors[idx];
+    //     return nullptr;
+    // }
+    ByteArray GetVector(int idx) const
+    {
+        if (idx < m_resultNum) return m_results[idx].Vector;
+        return ByteArray();
     }
 
 private:
@@ -110,15 +169,30 @@ private:
             if (m_results[parent] < m_results[next])
             {
                 std::swap(m_results[next], m_results[parent]);
+                // if(m_withResultVector) 
+                // {
+                //     std::swap(m_resultVectors[next], m_resultVectors[parent]);
+                // }
                 parent = next;
                 next = (parent << 1) + 1;
             }
             else break;
         }
-        if (next == maxidx && m_results[parent] < m_results[next]) std::swap(m_results[parent], m_results[next]);
+        if (next == maxidx && m_results[parent] < m_results[next]) 
+        {
+            std::swap(m_results[parent], m_results[next]);
+            // if(m_withResultVector) 
+            // {
+            //     std::swap(m_resultVectors[parent], m_resultVectors[next]);
+            // }
+        }
     }
+
+    // bool m_withResultVector = false;
+    // std::vector<std::shared_ptr<T>> m_resultVectors;
 };
 }
 }
+
 
 #endif // _SPTAG_COMMON_QUERYRESULTSET_H_

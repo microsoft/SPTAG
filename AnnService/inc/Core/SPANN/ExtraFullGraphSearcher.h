@@ -4,6 +4,7 @@
 #ifndef _SPTAG_SPANN_EXTRASEARCHER_H_
 #define _SPTAG_SPANN_EXTRASEARCHER_H_
 
+#include "inc/Core/CommonDataStructure.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "IExtraSearcher.h"
@@ -125,7 +126,9 @@ namespace SPTAG
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
-            queryResults.AddPoint(vectorID, distance2leaf); \
+            SPTAG::ByteArray tmpVector = SPTAG::ByteArray::Alloc(sizeof(ValueType)* (m_vectorInfoSize - sizeof(int))); \
+            memcpy(tmpVector.Data(), p_postingListFullData + offsetVector, sizeof(ValueType)* (m_vectorInfoSize - sizeof(int))); \
+            queryResults.AddPoint(vectorID, distance2leaf, tmpVector); \
         } \
 
 #define ProcessPostingOffset() \
@@ -137,7 +140,9 @@ namespace SPTAG
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
-            queryResults.AddPoint(vectorID, distance2leaf); \
+            SPTAG::ByteArray tmpVector = SPTAG::ByteArray::Alloc(sizeof(ValueType)* (m_vectorInfoSize - sizeof(int))); \
+            memcpy(tmpVector.Data(), p_postingListFullData + offsetVector, sizeof(ValueType)* (m_vectorInfoSize - sizeof(int))); \
+            queryResults.AddPoint(vectorID, distance2leaf, tmpVector);\
             foundResult = true;\
             break;\
         } \

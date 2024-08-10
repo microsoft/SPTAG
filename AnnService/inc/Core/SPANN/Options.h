@@ -122,6 +122,9 @@ namespace SPTAG {
             int m_debugBuildInternalResultNum;
             bool m_enableADC;
             int m_iotimeout;
+            bool m_spreadSearch;
+            int m_doc2docRounds;
+            int m_doc2docResults;
 
             // Iterative
             int m_headBatch;

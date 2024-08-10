@@ -120,7 +120,9 @@ DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
 DefineSSDParameter(m_debugBuildInternalResultNum, int, 64, "DebugBuildInternalResultNum")
 DefineSSDParameter(m_iotimeout, int, 30, "IOTimeout")
-
+DefineSSDParameter(m_spreadSearch, bool, true, "SpreadSearch")
+DefineSSDParameter(m_doc2docRounds, int, 2, "doc2docRounds")
+DefineSSDParameter(m_doc2docResults, int, 32, "Doc2DocResults")
 // Iterative
 DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch")
 

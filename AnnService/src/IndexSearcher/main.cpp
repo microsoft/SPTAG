@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "inc/Core/Common.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Helper/CommonHelper.h"
@@ -40,6 +41,8 @@ public:
         AddOptionalOption(m_debugQuery, "-q", "--debugquery", "Debug query number.");
         AddOptionalOption(m_enableADC, "-adc", "--adc", "Enable ADC Distance computation");
         AddOptionalOption(m_outputformat, "-of", "--ouputformat", "0: TXT 1: BINARY.");
+        AddOptionalOption(m_truthType, "-rt", "--truthtype", "truth file type. (TXT, XVEC or DEFAULT)");
+        AddOptionalOption(m_spreadSearch, "-ss", "--spreadsearch", "Spread search.");
     }
 
     ~SearcherOptions() {}
@@ -58,6 +61,8 @@ public:
 
     VectorFileType m_dataFileType = VectorFileType::DEFAULT;
 
+    TruthFileType m_truthType = TruthFileType::DEFAULT;
+
     int m_withMeta = 0;
 
     int m_K = 32;
@@ -73,6 +78,8 @@ public:
     bool m_enableADC = false;
 
     int m_outputformat = 0;
+
+    bool m_spreadSearch = false;
 };
 
 template <typename T>
@@ -165,7 +172,14 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     if (index.GetIndexAlgoType() == IndexAlgoType::SPANN) {
         int SPANNInternalResultNum;
         if (SPTAG::Helper::Convert::ConvertStringTo<int>(index.GetParameter("SearchInternalResultNum", "BuildSSDIndex").c_str(), SPANNInternalResultNum))
+        {    
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANN Internal result number: %d\n", SPANNInternalResultNum);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Internal result number: %d\n", internalResultNum);
             internalResultNum = max(internalResultNum, SPANNInternalResultNum);
+        }
+        // internalResultNum = 1024;
+        // index.SetParameter("SearchInternalResultNum", std::to_string(internalResultNum).c_str(), "BuildSSDIndex");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Final Internal result number: %d\n", internalResultNum);
     }
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, internalResultNum, options->m_withMeta != 0));
     std::vector<float> latencies(options->m_batch, 0);
@@ -173,11 +187,13 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
     std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0), totalLatency(maxCheck.size(), 0.0);
+
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
+        
         for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
-        if (ftruth != nullptr) COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, (options->m_truthFile.find("bin") != std::string::npos)? TruthFileType::DEFAULT : TruthFileType::TXT);
+        if (ftruth != nullptr) COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, options->m_truthType);
 
 
         for (int mc = 0; mc < maxCheck.size(); mc++)
@@ -190,7 +206,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             std::vector<std::thread> threads;
             threads.reserve(options->m_threadNum);
             auto batchstart = std::chrono::high_resolution_clock::now();
-
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Spread Search Status: %d\n", options->m_spreadSearch);
             for (std::uint32_t i = 0; i < options->m_threadNum; i++) { 
                 threads.emplace_back([&, i] {
                     NumaStrategy ns = (index.GetIndexAlgoType() == IndexAlgoType::SPANN)? NumaStrategy::SCATTER: NumaStrategy::LOCAL; // Only for SPANN, we need to avoid IO threads overlap with search threads.
@@ -250,6 +266,7 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
             totalAvg[mc] += timeMean * numQuerys;
             total95[mc] += l95 * numQuerys;
@@ -349,6 +366,7 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
     auto ret = SPTAG::VectorIndex::LoadIndex(options->m_indexFolder, vecIndex);
     if (SPTAG::ErrorCode::Success != ret || nullptr == vecIndex)
@@ -385,6 +403,7 @@ int main(int argc, char** argv)
         for (const auto& iter : iniReader.GetParameters(sections[i]))
         {
             vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str(), sections[i]);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sections[i].c_str(), iter.first.c_str(), iter.second.c_str());
         }
     }
 

@@ -1,10 +1,17 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "inc/Core/Common.h"
+#include "inc/Core/CommonDataStructure.h"
+#include "inc/Core/SPANN/IExtraSearcher.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraFullGraphSearcher.h"
 #include <chrono>
+#include <cstdlib>
+#include <memory>
+#include <queue>
+#include <unordered_set>
 #include "inc/Core/ResultIterator.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -199,9 +206,11 @@ namespace SPTAG
                 p_queryResults = (COMMON::QueryResultSet<T>*) & p_query;
             else
                 p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
-
+            // p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
+            // auto t1 = std::chrono::high_resolution_clock::now();
             m_index->SearchIndex(*p_queryResults);
-            
+            [[maybe_unused]] int visited_postings = 0;
+            // std::set<SizeType> searchedPostingIDs;
             if (m_extraSearcher != nullptr) {
                 auto workSpace = m_workSpaceFactory->GetWorkSpace();
                 if (!workSpace) {
@@ -221,7 +230,15 @@ namespace SPTAG
                     if (res->VID == -1) break;
 
                     auto postingID = res->VID;
+                    // if (res->Vector.Data() == nullptr) {
+                        // we should find this vector in the m_index
+                    res->Vector = ByteArray::Alloc(m_index->GetFeatureDim() * sizeof(T));
+                    auto tmp = m_index->GetSample(res->VID);
+                    std::memcpy(res->Vector.Data(), tmp, m_index->GetFeatureDim() * sizeof(T));
+                    // }
+                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "PostingID: %d\n", postingID);
                     res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "VID: %d\n", res->VID);
                     if (res->VID == MaxSize) {
                         res->VID = -1;
                         res->Dist = MaxDist;
@@ -232,12 +249,26 @@ namespace SPTAG
                         (limitDist > 0.1 && res->Dist > limitDist) || 
                         !m_extraSearcher->CheckValidPosting(postingID)) 
                         continue;
+                    ++visited_postings;
                     workSpace->m_postingIDs.emplace_back(postingID);
                 }
+                // record searchedd postings, if we want to conduct doc2doc search we should avoid visiting them again
+                // searchedPostingIDs.insert(workSpace->m_postingIDs.begin(), workSpace->m_postingIDs.end());
 
                 p_queryResults->Reverse();
                 m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
-                m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+                if(!m_options.m_spreadSearch) 
+                {
+                    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+                }
+                else 
+                {   
+                    // We may need to do doc2doc search search, so don't sort the result here
+                    // Instead we put it after the doc2doc search stage
+
+                    // Use this workspace for doc2doc round, so don't return it
+                    SearchDoc2Doc(p_query, p_queryResults, std::move(workSpace));
+                }
                 p_queryResults->SortResult();
             }
 
@@ -254,6 +285,115 @@ namespace SPTAG
                     p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
                 }
             }
+            return ErrorCode::Success;
+        }
+
+        template<typename T>
+        ErrorCode Index<T>::SearchDoc2Doc(QueryResult &p_query, COMMON::QueryResultSet<T>* p_queryResults, std::unique_ptr<ExtraWorkSpace> workSpace) const {
+            // Use this set to store the visited posting ids, avoid visiting them again
+            std::unordered_set<SizeType> visited(workSpace->m_postingIDs.begin(), workSpace->m_postingIDs.end());
+            // Run doc2doc search for multiple rounds
+            for (int d = 0; d < m_options.m_doc2docRounds; ++d) {
+                // Store the doc2doc searched postings in this set
+                auto p_queryIntermediateResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
+                workSpace->m_postingIDs.clear();
+                // Search doc2docResults number of new centroids for each centroid in the previous round
+                auto p_newResultsToQuery = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), min(m_options.m_doc2docResults, p_queryResults->GetResultNum()));
+                for (int i = 0; i < p_newResultsToQuery->GetResultNum(); ++i) {
+                    p_newResultsToQuery->GetResult(i)->VID = -1;
+                    p_newResultsToQuery->GetResult(i)->Dist = MaxDist;
+                }
+                p_queryResults->SortResult();
+                std::set<SizeType> skippedIdx;
+                for (auto i = 0; i < min(m_options.m_doc2docResults, p_queryResults->GetResultNum()); ++i) {
+                    auto res = p_queryResults->GetResult(i);
+                    // Use this res to build a new query to search on m_index
+                    if (res->VID == -1) break;
+                    bool goodRNG = true;
+                    for (int k = 0; k < i; ++k) {
+                        // apply rng rule to filter out closed intermidiate results
+                        if (skippedIdx.find(k) == skippedIdx.end()
+                            && m_options.m_rngFactor * m_fComputeDistance((const T*)p_queryResults->GetVector(k).Data(), (const T*)res->Vector.Data(), m_index->GetFeatureDim()) < res->Dist) {
+                            goodRNG = false;
+                            skippedIdx.insert(i);
+                            break;
+                        }
+                    }
+                    if (!goodRNG) continue;
+                    
+                    p_queryIntermediateResults->SetTarget((const T*)res->Vector.Data(), nullptr);
+                    m_index->SearchIndex(*p_queryIntermediateResults);
+
+                    float limitDist = p_queryIntermediateResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+                    int foundDocs = 0;
+                    for (int j = 0; j < p_queryIntermediateResults->GetResultNum(); ++j)
+                    {
+                        auto res = p_queryIntermediateResults->GetResult(j);
+                        if (res->VID == -1) break;
+
+                        auto postingID = res->VID;
+                    
+                        res->VID = static_cast<SizeType>((m_vectorTranslateMap.get())[res->VID]);
+                        if (res->VID == MaxSize) {
+                            res->VID = -1;
+                            res->Dist = MaxDist;
+                        }
+
+                        // Don't do disk reads for irrelevant pages
+                        if (workSpace->m_postingIDs.size() >= m_options.m_searchInternalResultNum ||
+                            (limitDist > 0.1 && res->Dist > limitDist) || 
+                            !m_extraSearcher->CheckValidPosting(postingID)) 
+                            continue;
+                        // Don't visit the same posting again
+                        if (visited.find(postingID) != visited.end()) continue;
+                        
+                        // Priviously the distance is the distance to the intermediate query
+                        // Replace the distance with the distance to the original query
+                        res->Dist = m_fComputeDistance((const T*)m_index->GetSample(postingID), (const T*)p_query.GetTarget(), m_index->GetFeatureDim());
+                        
+                        // Add the new centroid to the new results to query, 
+                        // Increase the foundDocs count if the centroid is added successfully 
+                        if(p_newResultsToQuery->AddPoint(postingID, res->Dist)) {
+                            ++foundDocs;
+                        }
+                        visited.insert(postingID);
+                    }
+                    // If we found less than 2 new centroids, stop the current round
+                    if(foundDocs <= 2) break;
+
+                    p_queryIntermediateResults->Reset();
+                }
+                for(int i = 0; i < p_newResultsToQuery->GetResultNum(); ++i) {
+                    if (p_newResultsToQuery->GetResult(i)->VID == -1) break;
+
+                    workSpace->m_postingIDs.emplace_back(p_newResultsToQuery->GetResult(i)->VID);
+                }
+
+                p_queryResults->Reverse();
+
+                std::set<SizeType> oldResults;
+                for (int i = 0; i < p_queryResults->GetResultNum(); ++i) {
+                    if(p_queryResults->GetResult(i)->VID == -1) break;
+                    oldResults.insert(p_queryResults->GetResult(i)->VID);
+                    
+                }
+                m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
+                int foundNewNNCount = 0;
+                // Count the number of new NNs found in this doc2doc round
+                for (int i = 0; i < p_queryResults->GetResultNum(); ++i) {
+                    if(p_queryResults->GetResult(i)->VID == -1) break;
+                    if(oldResults.find(p_queryResults->GetResult(i)->VID) == oldResults.end()) {
+                        ++foundNewNNCount;
+                    }
+                }
+                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Found %d new NNs in round %d from %d new centroids\n", foundNewNNCount, d, workSpace->m_postingIDs.size());
+                delete p_queryIntermediateResults;
+                delete p_newResultsToQuery;
+                // If we cannot find more new NNs, stop the doc2doc search
+                if(foundNewNNCount == 0) break;
+                if (workSpace->m_postingIDs.size() == 0) break;
+            }
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));    
             return ErrorCode::Success;
         }
 

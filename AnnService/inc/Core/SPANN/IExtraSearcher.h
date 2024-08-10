@@ -8,6 +8,7 @@
 
 #include "inc/Core/VectorIndex.h"
 #include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/VectorSetReader.h"
 
 #include <memory>
 #include <vector>
@@ -229,6 +230,7 @@ namespace SPTAG {
             virtual bool CheckValidPosting(SizeType postingID) = 0;
 
             virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) = 0;
+        
         };
     } // SPANN
 } // SPTAG
