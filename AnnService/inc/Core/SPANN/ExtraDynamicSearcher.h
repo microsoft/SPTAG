@@ -1120,8 +1120,8 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             } else if (m_opt->m_useSPDK || m_opt->m_useFileIO) {
-                m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 		if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex).c_str())) {
+                	m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 			SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
 			std::shared_ptr<IExtraSearcher> storeExtraSearcher;
 			storeExtraSearcher.reset(new ExtraStaticSearcher<ValueType>());
@@ -1187,6 +1187,9 @@ namespace SPTAG::SPANN {
 			};
 			for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
 			for (auto& thread : threads) { thread.join(); }
+		    } else {
+                        m_versionMap->Load(m_opt->m_deleteIDFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+                        m_postingSizes.Load(m_opt->m_ssdInfoFile, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 		    } 
 	    }
             if (m_opt->m_update) {
@@ -1275,6 +1278,7 @@ namespace SPTAG::SPANN {
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: get results!postingLists.size:%d\n", (int)(postingLists.size()));
             for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 diskIO += ((postingLists[pi].size() + PageSize - 1) >> PageSizeEx);
             }
@@ -1284,9 +1288,10 @@ namespace SPTAG::SPANN {
             for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 std::string& postingList = postingLists[pi];
-
+                
                 int vectorNum = (int)(postingList.size() / m_vectorInfoSize);
 
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d size:%d m_vectorInfoSize:%d vectorNum:%d\n", pi, (int)(postingList.size()), m_vectorInfoSize, vectorNum);
                 int realNum = vectorNum;
 
                 diskRead += (int)(postingList.size());
@@ -1296,21 +1301,27 @@ namespace SPTAG::SPANN {
                 for (int i = 0; i < vectorNum; i++) {
                     char* vectorInfo = (char*)postingList.data() + i * m_vectorInfoSize;
                     int vectorID = *(reinterpret_cast<int*>(vectorInfo));
+		    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
                     if (m_versionMap->Deleted(vectorID)) {
                         realNum--;
                         listElements--;
                         continue;
                     }
+
+		    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
                     if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
+
+		    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
                 if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d finish!\n", pi);
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
                 if (truth) {

@@ -10,4 +10,4 @@
 	url = https://github.com/intel/isa-l_crypto
 [submodule "ThirdParty/RocksDB"]
 	path = ThirdParty/RocksDB
-	url = git@github.com:facebook/rocksdb.git
+	url = https://github.com/PtilopsisL/rocksdb

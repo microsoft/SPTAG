@@ -156,7 +156,7 @@ DefineSSDParameter(m_update, bool, false, "Update")
 DefineSSDParameter(m_inPlace, bool, false, "InPlace")
 DefineSSDParameter(m_outOfPlace, bool, false, "OutOfPlace")
 // latency limit
-DefineSSDParameter(m_latencyLimit, float, 2.0, "LatencyLimit")
+DefineSSDParameter(m_latencyLimit, float, 10.0, "LatencyLimit")
 // Update batch size
 DefineSSDParameter(m_step, int, 0, "Step")
 // Frontend update threadnum
