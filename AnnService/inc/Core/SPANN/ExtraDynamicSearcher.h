@@ -165,7 +165,9 @@ namespace SPTAG::SPANN {
 
     public:
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false, bool useFileIO = false) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:dbPath:%s\n", dbPath);
             if(useFileIO) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
                 db.reset(new FileIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             }
@@ -174,6 +176,7 @@ namespace SPTAG::SPANN {
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
                 db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
                 m_postingSizeLimit = postingBlockLimit;
 #endif
@@ -1118,73 +1121,74 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current posting num: %d.\n", m_postingSizes.GetPostingNum());
             } else if (m_opt->m_useSPDK || m_opt->m_useFileIO) {
                 m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
-                std::shared_ptr<IExtraSearcher> storeExtraSearcher;
-                storeExtraSearcher.reset(new ExtraStaticSearcher<ValueType>());
-                if (!storeExtraSearcher->LoadIndex(*m_opt, *m_versionMap, m_vectorTranslateMap, m_index)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
-                    exit(1);
-                }
-                int totalPostingNum = m_index->GetNumSamples();
+		if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex).c_str())) {
+			SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
+			std::shared_ptr<IExtraSearcher> storeExtraSearcher;
+			storeExtraSearcher.reset(new ExtraStaticSearcher<ValueType>());
+			if (!storeExtraSearcher->LoadIndex(*m_opt, *m_versionMap, m_vectorTranslateMap, m_index)) {
+			    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize Error\n");
+			    exit(1);
+			}
+			int totalPostingNum = m_index->GetNumSamples();
 
-                m_postingSizes.Initialize((SizeType)(totalPostingNum), m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+			m_postingSizes.Initialize((SizeType)(totalPostingNum), m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 
-                std::vector<std::thread> threads;
-                std::atomic_size_t vectorsSent(0);
+			std::vector<std::thread> threads;
+			std::atomic_size_t vectorsSent(0);
 
-                auto func = [&]()
-                {
-                    Initialize();
-                    size_t index = 0;
-                    while (true)
-                    {
-                        index = vectorsSent.fetch_add(1);
-                        if (index < totalPostingNum)
-                        {
+			auto func = [&]()
+			{
+			    Initialize();
+			    size_t index = 0;
+			    while (true)
+			    {
+				index = vectorsSent.fetch_add(1);
+				if (index < totalPostingNum)
+				{
 
-                            if ((index & ((1 << 14) - 1)) == 0)
-                            {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
-                            }
-                            std::string tempPosting;
-                            storeExtraSearcher->GetWritePosting(index, tempPosting);
-                            int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
+				    if ((index & ((1 << 14) - 1)) == 0)
+				    {
+					SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copy to SPDK: Sent %.2lf%%...\n", index * 100.0 / totalPostingNum);
+				    }
+				    std::string tempPosting;
+				    storeExtraSearcher->GetWritePosting(index, tempPosting);
+				    int vectorNum = (int)(tempPosting.size() / (m_vectorInfoSize - sizeof(uint8_t)));
 
-                            if (vectorNum > m_postingSizeLimit) vectorNum = m_postingSizeLimit;
-                            auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
-                            std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
-                            char* ptr = (char*)(newPosting.c_str());
-                            for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
-                                char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
-                                int VID = *(reinterpret_cast<int*>(vectorInfo));
-                                uint8_t version = m_versionMap->GetVersion(VID);
-                                memcpy(ptr, &VID, sizeof(int));
-                                memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
-                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
-                            }
-                            if (m_opt->m_excludehead) {
-                                auto VIDTrans = static_cast<SizeType>((m_vectorTranslateMap.get())[index]);
-                                uint8_t version = m_versionMap->GetVersion(VIDTrans);
-                                std::string appendPosting(m_vectorInfoSize, '\0');
-                                char* ptr = (char*)(appendPosting.c_str());
-                                memcpy(ptr, &VIDTrans, sizeof(VIDTrans));
-                                memcpy(ptr + sizeof(VIDTrans), &version, sizeof(version));
-                                memcpy(ptr + sizeof(int) + sizeof(uint8_t), m_index->GetSample(index), m_vectorInfoSize - sizeof(int) + sizeof(uint8_t));
-                                newPosting = appendPosting + newPosting;
-                            }
-                            GetWritePosting(index, newPosting, true);
-                        }
-                        else
-                        {
-                            ExitBlockController();
-                            return;
-                        }
-                    }
-                };
-                for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
-                for (auto& thread : threads) { thread.join(); }
-            } 
-
+				    if (vectorNum > m_postingSizeLimit) vectorNum = m_postingSizeLimit;
+				    auto* postingP = reinterpret_cast<char*>(&tempPosting.front());
+				    std::string newPosting(m_vectorInfoSize * vectorNum , '\0');
+				    char* ptr = (char*)(newPosting.c_str());
+				    for (int j = 0; j < vectorNum; ++j, ptr += m_vectorInfoSize) {
+					char* vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
+					int VID = *(reinterpret_cast<int*>(vectorInfo));
+					uint8_t version = m_versionMap->GetVersion(VID);
+					memcpy(ptr, &VID, sizeof(int));
+					memcpy(ptr + sizeof(int), &version, sizeof(uint8_t));
+					memcpy(ptr + sizeof(int) + sizeof(uint8_t), vectorInfo + sizeof(int), m_vectorInfoSize - sizeof(uint8_t) - sizeof(int));
+				    }
+				    if (m_opt->m_excludehead) {
+					auto VIDTrans = static_cast<SizeType>((m_vectorTranslateMap.get())[index]);
+					uint8_t version = m_versionMap->GetVersion(VIDTrans);
+					std::string appendPosting(m_vectorInfoSize, '\0');
+					char* ptr = (char*)(appendPosting.c_str());
+					memcpy(ptr, &VIDTrans, sizeof(VIDTrans));
+					memcpy(ptr + sizeof(VIDTrans), &version, sizeof(version));
+					memcpy(ptr + sizeof(int) + sizeof(uint8_t), m_index->GetSample(index), m_vectorInfoSize - sizeof(int) + sizeof(uint8_t));
+					newPosting = appendPosting + newPosting;
+				    }
+				    GetWritePosting(index, newPosting, true);
+				}
+				else
+				{
+				    ExitBlockController();
+				    return;
+				}
+			    }
+			};
+			for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
+			for (auto& thread : threads) { thread.join(); }
+		    } 
+	    }
             if (m_opt->m_update) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
                 m_splitThreadPool = std::make_shared<SPDKThreadPool>();
@@ -1417,11 +1421,11 @@ namespace SPTAG::SPANN {
                     }
 
                     float acc = 0;
-// #pragma omp parallel for schedule(dynamic)
-//                     for (int j = 0; j < sampleNum; j++)
-//                     {
-//                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
-//                     }
+                    #pragma omp parallel for schedule(dynamic)
+                    for (int j = 0; j < sampleNum; j++)
+                    {
+                         COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+                    }
                     acc = acc / sampleNum;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
 

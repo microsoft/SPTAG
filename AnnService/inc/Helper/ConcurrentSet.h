@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
+#include <mutex>
 #else
 #include <concurrent_unordered_map.h>
 #include <concurrent_queue.h>

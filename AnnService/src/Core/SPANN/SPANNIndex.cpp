@@ -176,6 +176,7 @@ namespace SPTAG
                 else if (m_options.m_useSPDK) {
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
                 } else if(m_options.m_useFileIO) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useFileIO.\n");
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, true));
                 } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
@@ -988,6 +989,7 @@ namespace SPTAG
                 }
                 else if (m_options.m_useKV)
                 {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useKV.\n");
                     if (m_options.m_inPlace) {
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
                     }
@@ -1004,7 +1006,8 @@ namespace SPTAG
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize));
                     }  
                 } else if (m_options.m_useFileIO) {
-                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, false, true));
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useFileIO.\n");
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, 3, false, true));
                 }
                 else {
                     if (m_pQuantizer) {
