@@ -190,7 +190,7 @@ namespace SPTAG::SPANN {
                     }
                 }
                 // Create sub I/O request pool
-		/*
+		
                 m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
                 m_currIoContext.in_flight = 0;
                 for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -207,7 +207,7 @@ namespace SPTAG::SPANN {
                     sr.ctrl = this;
                     m_currIoContext.free_sub_io_requests.push(&sr);
                 }
-		*/
+		
                 return ErrorCode::Success;
             }
         };

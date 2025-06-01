@@ -159,6 +159,8 @@ bool FileIO::BlockController::Initialize(int batchSize) {
     while(read_blocks_time_vec.size() <= id) {
         read_blocks_time_vec.push_back(0);
     }
+
+    InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_file_name = std::string("/nvme1n1/lml/") + std::to_string(m_numInitCalled) + "_debug.log";
     debug_fd = open(debug_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
@@ -234,7 +236,7 @@ bool FileIO::BlockController::ReleaseBlocks(AddressType* p_data, int p_size) {
 }
 
 bool FileIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 3";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -326,7 +328,7 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
 }
 
 bool FileIO::BlockController::ReadBlocks(AddressType* p_data, ByteArray& p_value, const std::chrono::microseconds &timeout) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
     std::uint8_t* outdata = new std::uint8_t[p_data[0]];    
     p_value.Set(outdata, p_data[0], false);
     AddressType currOffset = 0;
@@ -419,7 +421,7 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, ByteArray& p_value
 }
 
 bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 4";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -465,7 +467,7 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
         }
     }
 
-       SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: sub_io_requests.size:%d free_io_requests.size:%d\n", (int)(m_currIoContext.sub_io_requests.size()), (int)(m_currIoContext.free_sub_io_requests.size()));
+       //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: sub_io_requests.size:%d free_io_requests.size:%d\n", (int)(m_currIoContext.sub_io_requests.size()), (int)(m_currIoContext.free_sub_io_requests.size()));
     // Clear timeout I/Os
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
         int wait = m_ssdFileIoDepth - m_currIoContext.free_sub_io_requests.size();
@@ -500,8 +502,9 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
             iocbs[i] = &(currSubIo->myiocb);
             currSubIoIdx++;
         }
+
+        //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: totalToSubmit:%d\n", totalToSubmit);
         while (totalDone < totalToSubmit) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: totalDone:%d\n", totalDone);
             // Submit all I/Os
             if(totalSubmitted < totalToSubmit) {
                 int s = syscall(__NR_io_submit, iocp, totalToSubmit - totalSubmitted, iocbs.data() + totalSubmitted);
@@ -527,7 +530,7 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
         }
     }
 
-       SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: totalDone == totalToSubmit\n");
+       //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: totalDone == totalToSubmit\n");
     bool is_timeout = false;
     for (int i = 0; i < subIoRequestCount.size(); i++) {
         if (subIoRequestCount[i] != 0) {
@@ -540,12 +543,12 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
         m_batchReadTimeouts++;
     }
 
-       SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: finish\n");
+       //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: finish\n");
     return true;
 }
 
 bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<ByteArray>& p_values, const std::chrono::microseconds& timeout) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
     auto t1 = std::chrono::high_resolution_clock::now();
     p_values.resize(p_data.size());
     const int batch_size = m_batchSize;
@@ -644,7 +647,7 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
     return true;
 }
 bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 5";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -710,7 +713,7 @@ bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
 }
 
 bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const ByteArray& p_value) {
-    InitializeThreadContext();
+    //InitializeThreadContext();
     AddressType currBlockIdx = 0;
     int inflight = 0;
     SubIoRequest* currSubIo;
@@ -837,6 +840,7 @@ bool FileIO::BlockController::ShutDown() {
             AddressType currBlockAddress;
             m_blockAddresses.try_pop(currBlockAddress);
         }
+	close(fd);
     }
     m_idQueue.push(id);
     syscall(__NR_io_destroy, iocp);
@@ -849,8 +853,6 @@ bool FileIO::BlockController::ShutDown() {
     while(m_currIoContext.free_sub_io_requests.size()) {
         m_currIoContext.free_sub_io_requests.pop();
     }
-
-    close(fd);
     return true;
 }
 
