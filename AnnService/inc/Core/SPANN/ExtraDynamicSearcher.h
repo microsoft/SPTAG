@@ -167,16 +167,17 @@ namespace SPTAG::SPANN {
         ExtraDynamicSearcher(const char* dbPath, int dim, int postingBlockLimit, bool useDirectIO, float searchLatencyHardLimit, int mergeThreshold, bool useSPDK = false, int batchSize = 64, int bufferLength = 3, bool recovery = false, bool useFileIO = false) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:dbPath:%s\n", dbPath);
             if(useFileIO) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
                 db.reset(new FileIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             }
             else if (useSPDK) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseSPDK\n");
                 db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             } else {
 #ifdef ROCKSDB
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
                 db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
                 m_postingSizeLimit = postingBlockLimit;
 #endif
@@ -1272,8 +1273,7 @@ namespace SPTAG::SPANN {
 
             std::vector<std::string> postingLists;
 
-            //std::chrono::microseconds remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
-            std::chrono::microseconds remainLimit = m_hardLatencyLimit;
+            std::chrono::microseconds remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
 
             auto readStart = std::chrono::high_resolution_clock::now();
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
@@ -1289,7 +1289,7 @@ namespace SPTAG::SPANN {
             for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 std::string& postingList = postingLists[pi];
-                
+
                 int vectorNum = (int)(postingList.size() / m_vectorInfoSize);
 
                 //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d size:%d m_vectorInfoSize:%d vectorNum:%d\n", pi, (int)(postingList.size()), m_vectorInfoSize, vectorNum);
@@ -1308,14 +1308,10 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
-
-		    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
                     if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
-
-		    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }

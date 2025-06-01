@@ -120,15 +120,20 @@ file(GLOB_RECURSE SPFRESH_FILES ${AnnService}/src/SPFresh/*.cpp)
 file(GLOB_RECURSE KEYVALUETEST_HDR_FILES ${AnnService}/inc/KeyValueTest/*.h)
 file(GLOB_RECURSE KEYVALUETEST_FILES ${AnnService}/src/KeyValueTest/*.cpp)
 
+file(GLOB_RECURSE USEFULTOOL_FILES ${AnnService}/src/UsefulTool/*.cpp)
+
 add_executable(ssdserving ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 add_executable(spfresh ${SPFRESH_HDR_FILES} ${SPFRESH_FILES})
 add_executable(keyvaluetest ${KEYVALUETEST_HDR_FILES} ${KEYVALUETEST_FILES})
+add_executable(usefultool ${USEFULTOOL_FILES})
 target_link_libraries(ssdserving SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
 target_link_libraries(spfresh SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
 target_link_libraries(keyvaluetest SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
+target_link_libraries(usefultool SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES})
 target_compile_definitions(ssdserving PRIVATE _exe)
 target_compile_definitions(spfresh PRIVATE _exe)
 target_compile_definitions(keyvaluetest PRIVATE _exe)
+target_compile_definitions(usefultool PRIVATE _exe)
 
 # for Test
 add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})

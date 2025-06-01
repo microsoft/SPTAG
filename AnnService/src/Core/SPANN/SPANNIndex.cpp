@@ -166,6 +166,7 @@ namespace SPTAG
             else
             {
                 if (m_options.m_useKV) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:: UseKV.\n");
                     if (m_options.m_inPlace) {
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
                     }
@@ -174,9 +175,10 @@ namespace SPTAG
                     }
                 }
                 else if (m_options.m_useSPDK) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:: UseSPDK.\n");
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery));
                 } else if(m_options.m_useFileIO) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useFileIO.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:: UseFileIO.\n");
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, m_options.m_recovery, true));
                 } else {
                     m_extraSearcher.reset(new ExtraStaticSearcher<T>());
@@ -989,7 +991,7 @@ namespace SPTAG
                 }
                 else if (m_options.m_useKV)
                 {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useKV.\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex::BuildIndex::UseKV.\n");
                     if (m_options.m_inPlace) {
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_KVPath.c_str(), m_options.m_dim, INT_MAX, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold));
                     }
@@ -998,16 +1000,17 @@ namespace SPTAG
                     }
                 } else if (m_options.m_useSPDK)
                 {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex::BuildIndex::UseSPDK.\n");
                     if (m_options.m_inPlace) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Currently unsupport SPDK with inplace!\n");
                         exit(1);
                     }
                     else {
-                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize));
+                        m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, true, m_options.m_spdkBatchSize, m_options.m_bufferLength));
                     }  
                 } else if (m_options.m_useFileIO) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "useFileIO.\n");
-                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, 3, false, true));
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex::BuildIndex::UseFileIO.\n");
+                    m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options.m_spdkMappingPath.c_str(), m_options.m_dim, m_options.m_postingPageLimit, m_options.m_useDirectIO, m_options.m_latencyLimit, m_options.m_mergeThreshold, false, m_options.m_spdkBatchSize, m_options.m_bufferLength, false, true));
                 }
                 else {
                     if (m_pQuantizer) {

@@ -190,7 +190,6 @@ namespace SPTAG::SPANN {
                     }
                 }
                 // Create sub I/O request pool
-		
                 m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
                 m_currIoContext.in_flight = 0;
                 for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -207,7 +206,6 @@ namespace SPTAG::SPANN {
                     sr.ctrl = this;
                     m_currIoContext.free_sub_io_requests.push(&sr);
                 }
-		
                 return ErrorCode::Success;
             }
         };
@@ -660,7 +658,6 @@ namespace SPTAG::SPANN {
         ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout = std::chrono::microseconds::max()) {
             std::vector<AddressType*> blocks;
             std::set<int> lock_keys;
-
             if (m_fileIoUseLock) {
                 // 这里要去重？
                 // for (SizeType key : keys) {
@@ -673,7 +670,6 @@ namespace SPTAG::SPANN {
             SizeType r;
             values->resize(keys.size());
             int i = 0;
-
             for (SizeType key : keys) {
                 if (m_fileIoUseLock) {
                     m_updateMutex.lock_shared();
@@ -703,7 +699,6 @@ namespace SPTAG::SPANN {
                 }
                 i++;
             }
-
             // if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
             auto result = m_pBlockController.ReadBlocks(blocks, values, timeout);
             if (m_fileIoUseLock) {
