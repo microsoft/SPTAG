@@ -38,11 +38,12 @@ step = 0.2
 batch = []
 batch.append('')
 batch.append('Batch')
-for i in range(0,100):
-    batch.append(i+step)
-    batch.append(i+step*2)
-    batch.append(i+step*3)
-    batch.append(i+step*4)
+for i in range(0,120):
+    batch.append(i)
+    #batch.append(i+step)
+    #batch.append(i+step*2)
+    #batch.append(i+step*3)
+    #batch.append(i+step*4)
 
 
 with open('overall_performance_spacev.csv', 'w') as f:

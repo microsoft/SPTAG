@@ -1575,11 +1575,11 @@ namespace SPTAG::SPANN {
 
             std::vector<int> postingListSize_int(postingListSize.begin(), postingListSize.end());
 
-            WriteDownAllPostingToDB(postingListSize_int, selections, fullVectors);
+            if (ErrorCode::Success != WriteDownAllPostingToDB(postingListSize_int, selections, fullVectors)) return false;
 
             m_postingSizes.Initialize((SizeType)(postingListSize.size()), p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
             for (int i = 0; i < postingListSize.size(); i++) {
-                m_postingSizes.UpdateSize(i, postingListSize[i]);
+                m_postingSizes.UpdateSize(i, postingListSize_int[i]);
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing SSD Info\n");
             m_postingSizes.Save(m_opt->m_ssdInfoFile);
@@ -1592,8 +1592,19 @@ namespace SPTAG::SPANN {
             return true;
         }
 
-        void WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, std::shared_ptr<VectorSet> p_fullVectors) {
-    // #pragma omp parallel for num_threads(10)
+        ErrorCode WriteDownAllPostingToDB(const std::vector<int>& p_postingListSizes, Selection& p_postingSelections, std::shared_ptr<VectorSet> p_fullVectors) {
+            std::shared_ptr<std::uint64_t> vectorTranslateMap;
+	    {
+	        vectorTranslateMap.reset(new std::uint64_t[p_postingListSizes.size()], std::default_delete<std::uint64_t[]>());
+                std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
+                if (ptr == nullptr || !ptr->Initialize((m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile).c_str(), std::ios::binary | std::ios::in)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to open headIDFile file:%s\n", (m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile).c_str());
+                    return ErrorCode::Fail;
+                }
+                IOBINARY(ptr, ReadBinary, sizeof(std::uint64_t) * p_postingListSizes.size(), (char*)(vectorTranslateMap.get()));
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load vectorTranslateMap Successfully!\n");
+	    }
+
             std::vector<std::thread> threads;
             std::atomic_size_t vectorsSent(0);
             auto func = [&]()
@@ -1606,7 +1617,7 @@ namespace SPTAG::SPANN {
                     if (index < p_postingListSizes.size()) {
                         std::string postinglist(m_vectorInfoSize * p_postingListSizes[index], '\0');
                         char* ptr = (char*)postinglist.c_str();
-                        std::size_t selectIdx = p_postingSelections.lower_bound(index);
+			std::size_t selectIdx = p_postingSelections.lower_bound((int)index);
                         for (int j = 0; j < p_postingListSizes[index]; ++j) {
                             if (p_postingSelections[selectIdx].node != index) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
@@ -1619,6 +1630,14 @@ namespace SPTAG::SPANN {
                             Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
                             ptr += m_vectorInfoSize;
                         }
+			if (m_opt->m_excludehead) {
+                            auto VIDTrans = static_cast<SizeType>((vectorTranslateMap.get())[index]);
+                            uint8_t version = m_versionMap->GetVersion(VIDTrans);
+                            std::string appendPosting(m_vectorInfoSize, '\0');
+                            char* ptr = (char*)(appendPosting.c_str());
+			    Serialize(ptr, VIDTrans, version, p_fullVectors->GetVector(VIDTrans));
+                            postinglist = appendPosting + postinglist;
+			}
                         db->Put(index, postinglist);
                     }
                     else
@@ -1631,6 +1650,7 @@ namespace SPTAG::SPANN {
 
             for (int j = 0; j < 20; j++) { threads.emplace_back(func); }
             for (auto& thread : threads) { thread.join(); }
+	    return ErrorCode::Success;
         }
 
         ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,

@@ -460,9 +460,12 @@ namespace SPTAG::SPANN {
             if (recovery) {
                 m_mappingPath += "_blockmapping";
                 Load(m_mappingPath, blockSize, capacity);
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery load block mapping successfully!\n");
             } else if(fileexists(m_mappingPath.c_str())) {
                 Load(m_mappingPath, blockSize, capacity);
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping successfully!\n");
             } else {
+		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize block mapping successfully!\n");
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
             }
             for (int i = 0; i < bufferSize; i++) {

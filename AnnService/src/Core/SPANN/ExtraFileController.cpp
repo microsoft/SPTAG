@@ -114,6 +114,7 @@ void* FileIO::BlockController::InitializeFileIo(void* args) {
 }
 
 bool FileIO::BlockController::Initialize(int batchSize) {
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Initialize(%d)\n", batchSize);
     std::lock_guard<std::mutex> lock(m_initMutex);
     m_numInitCalled++;
 
@@ -825,16 +826,8 @@ bool FileIO::BlockController::ShutDown() {
     std::lock_guard<std::mutex> lock(m_initMutex);
     SubIoRequest* currSubIo;
     m_numInitCalled--;
-    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ShutDown\n");
-    if (m_numInitCalled == 0) {
-        m_fileIoThreadExiting = true;
-        pthread_join(m_fileIoTid, NULL);
-        while (!m_blockAddresses.empty()) {
-            AddressType currBlockAddress;
-            m_blockAddresses.try_pop(currBlockAddress);
-        }
-        close(fd);
-    }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ShutDown\n");
+
     m_idQueue.push(id);
     syscall(__NR_io_destroy, iocp);
     for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -846,6 +839,18 @@ bool FileIO::BlockController::ShutDown() {
     while(m_currIoContext.free_sub_io_requests.size()) {
         m_currIoContext.free_sub_io_requests.pop();
     }
+
+    if (m_numInitCalled == 0) {
+        m_fileIoThreadExiting = true;
+        pthread_join(m_fileIoTid, NULL);
+        while (!m_blockAddresses.empty()) {
+            AddressType currBlockAddress;
+            m_blockAddresses.try_pop(currBlockAddress);
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Close file handler\n");
+        close(fd);
+    }
+ 
     return true;
 }
 
