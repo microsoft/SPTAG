@@ -473,7 +473,6 @@ namespace SPTAG::SPANN {
         ErrorCode Split(VectorIndex* p_index, const SizeType headID, bool reassign = false, bool preReassign = false)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
-            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "into split: %d\n", headID);
             std::vector<SizeType> newHeadsID;
             std::vector<std::string> newPostingLists;
             double elapsedMSeconds;
@@ -493,6 +492,7 @@ namespace SPTAG::SPANN {
                 auto* postingP = reinterpret_cast<uint8_t*>(&postingList.front());
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
                
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: db get Posting %d successfully with length %d real length:%d vectorNum:%d\n", headID, (int)(postingList.size()), m_postingSizes.GetSize(headID), postVectorNum);
                 COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity, (ValueType*)postingP, true, nullptr, m_metaDataSize, m_vectorInfoSize);
                 //COMMON::Dataset<ValueType> smallSample(0, m_opt->m_dim, p_index->m_iDataBlockSize, p_index->m_iDataCapacity);  // smallSample[i] -> VID
                 //std::vector<int> localIndicesInsert(postVectorNum);  // smallSample[i] = j <-> localindices[j] = i
@@ -505,6 +505,7 @@ namespace SPTAG::SPANN {
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(int));
                     int VID = *((int*)(vectorId));
+		    //if (VID >= m_versionMap->Count()) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "DEBUG: vector ID:%d total size:%d\n", VID, m_versionMap->Count());
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
 
                     //localIndicesInsert[index] = VID;
@@ -515,8 +516,11 @@ namespace SPTAG::SPANN {
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
+		
                 if (m_opt->m_inPlace || (!preReassign && index < m_postingSizeLimit))
                 {
+
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: in place or not prereassign & index < m_postingSizeLimit. GC begin...\n");
                     char* ptr = (char*)(postingList.c_str());
                     for (int j = 0; j < index; j++, ptr += m_vectorInfoSize)
                     {
@@ -539,10 +543,10 @@ namespace SPTAG::SPANN {
                         // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
                         m_splitList.erase(headID);
                     }
-                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
                     return ErrorCode::Success;
                 }
-                //LOG(Helper::LogLevel::LL_Info, "Resize\n");
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Resize\n");
                 localIndices.resize(index);
 
                 auto clusterBegin = std::chrono::high_resolution_clock::now();
@@ -632,7 +636,7 @@ namespace SPTAG::SPANN {
                             exit(1);
                         }
                     }
-                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                     first += args.counts[k];
                     m_postingSizes.UpdateSize(newHeadVID, args.counts[k]);
                 }
@@ -643,7 +647,7 @@ namespace SPTAG::SPANN {
             }
             {
                 std::lock_guard<std::mutex> tmplock(m_runningLock);
-                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
                 m_splitList.erase(headID);
             }
             m_stat.m_splitNum++;
@@ -1279,7 +1283,6 @@ namespace SPTAG::SPANN {
             db->MultiGet(p_exWorkSpace->m_postingIDs, &postingLists, remainLimit);
             auto readEnd = std::chrono::high_resolution_clock::now();
 
-            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: get results!postingLists.size:%d\n", (int)(postingLists.size()));
             for (uint32_t pi = 0; pi < postingLists.size(); ++pi) {
                 diskIO += ((postingLists[pi].size() + PageSize - 1) >> PageSizeEx);
             }
@@ -1318,7 +1321,6 @@ namespace SPTAG::SPANN {
                 auto compEnd = std::chrono::high_resolution_clock::now();
                 if (realNum <= m_mergeThreshold && !m_opt->m_inPlace) MergeAsync(p_index.get(), curPostingID);
 
-                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d finish!\n", pi);
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
                 if (truth) {

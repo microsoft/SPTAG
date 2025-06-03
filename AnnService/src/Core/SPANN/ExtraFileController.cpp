@@ -238,7 +238,6 @@ bool FileIO::BlockController::ReleaseBlocks(AddressType* p_data, int p_size) {
 }
 
 bool FileIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout) {
-    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 3";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -328,7 +327,6 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
 }
 
 bool FileIO::BlockController::ReadBlocks(AddressType* p_data, ByteArray& p_value, const std::chrono::microseconds &timeout) {
-    //InitializeThreadContext();
     std::uint8_t* outdata = new std::uint8_t[p_data[0]];    
     p_value.Set(outdata, p_data[0], false);
     AddressType currOffset = 0;
@@ -420,7 +418,6 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, ByteArray& p_value
 }
 
 bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout) {
-    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 4";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -542,7 +539,6 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
 }
 
 bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<ByteArray>& p_values, const std::chrono::microseconds& timeout) {
-    //InitializeThreadContext();
     auto t1 = std::chrono::high_resolution_clock::now();
     p_values.resize(p_data.size());
     const int batch_size = m_batchSize;
@@ -641,7 +637,6 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
     return true;
 }
 bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value) {
-    //InitializeThreadContext();
 #ifdef USE_FILE_DEBUG
     auto debug_string = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - m_startTime).count()) + " 5";
     auto result = pwrite(debug_fd, debug_string.c_str(), debug_string.size(), 0);
@@ -707,7 +702,6 @@ bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
 }
 
 bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const ByteArray& p_value) {
-    //InitializeThreadContext();
     AddressType currBlockIdx = 0;
     int inflight = 0;
     SubIoRequest* currSubIo;
@@ -827,7 +821,16 @@ bool FileIO::BlockController::ShutDown() {
     SubIoRequest* currSubIo;
     m_numInitCalled--;
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ShutDown\n");
-
+    if (m_numInitCalled == 0) {
+        m_fileIoThreadExiting = true;
+        pthread_join(m_fileIoTid, NULL);
+        while (!m_blockAddresses.empty()) {
+            AddressType currBlockAddress;
+            m_blockAddresses.try_pop(currBlockAddress);
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Close file handler\n");
+        close(fd);
+    }
     m_idQueue.push(id);
     syscall(__NR_io_destroy, iocp);
     for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -839,18 +842,6 @@ bool FileIO::BlockController::ShutDown() {
     while(m_currIoContext.free_sub_io_requests.size()) {
         m_currIoContext.free_sub_io_requests.pop();
     }
-
-    if (m_numInitCalled == 0) {
-        m_fileIoThreadExiting = true;
-        pthread_join(m_fileIoTid, NULL);
-        while (!m_blockAddresses.empty()) {
-            AddressType currBlockAddress;
-            m_blockAddresses.try_pop(currBlockAddress);
-        }
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Close file handler\n");
-        close(fd);
-    }
- 
     return true;
 }
 
