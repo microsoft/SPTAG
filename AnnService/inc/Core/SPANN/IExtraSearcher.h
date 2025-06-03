@@ -297,13 +297,13 @@ namespace SPTAG {
 
             virtual bool SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
-                std::shared_ptr<VectorIndex> p_index) = 0;
+                std::shared_ptr<VectorIndex> p_index) { return false; }
 
-            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) = 0;
+            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) { return; }
 
             virtual bool SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
-		std::shared_ptr<VectorIndex>& p_index) = 0;
+		std::shared_ptr<VectorIndex>& p_index) { return false; }
 
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 

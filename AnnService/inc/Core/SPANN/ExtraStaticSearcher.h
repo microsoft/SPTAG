@@ -375,7 +375,7 @@ namespace SPTAG
                 }
             }
 
-            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace)
+            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) override
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
@@ -491,7 +491,7 @@ namespace SPTAG
 
             virtual bool SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
-		std::shared_ptr<VectorIndex>& p_index)
+		std::shared_ptr<VectorIndex>& p_index) override
             {
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
                 bool foundResult = false;
@@ -512,7 +512,7 @@ namespace SPTAG
 
             virtual bool SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace,
                  QueryResult& p_query,
-		 std::shared_ptr<VectorIndex> p_index)
+		 std::shared_ptr<VectorIndex> p_index) override
             {
                 if (p_exWorkSpace->m_loadPosting) {
                     SearchIndexWithoutParsing(p_exWorkSpace);
