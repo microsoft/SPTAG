@@ -117,10 +117,15 @@ endif()
 
 option(GPU "GPU" ON)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
-option(ROCKSDB "ROCKSDB" ON)
 
-if (ROCKSDB)
-    add_definitions(-DROCKSDB)
+if (RocksDB)
+    message(STATUS "RocksDB enabled")
+    add_definitions(-DRocksDB)
+endif()
+
+if (SPDK)
+    message(STATUS "SPDK enabled")
+    add_definitions(-DSPDK)
 endif()
 
 add_subdirectory (ThirdParty/zstd/build/cmake)

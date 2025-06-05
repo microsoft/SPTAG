@@ -2,14 +2,21 @@
 // Licensed under the MIT License.
 
 #include "inc/Test.h"
-// #include "inc/Core/SPANN/ExtraRocksDBController.h"
-#include "inc/Core/SPANN/ExtraSPDKController.h"
+#include "inc/Core/SPANN/ExtraFileController.h"
 
 #include <memory>
 #include <chrono>
 
 // enable rocksdb io_uring
+
+#ifdef RocksDB
+#include "inc/Core/SPANN/ExtraRocksDBController.h"
 // extern "C" bool RocksDbIOUringEnable() { return true; }
+#endif
+
+#ifdef SPDK
+#include "inc/Core/SPANN/ExtraSPDKController.h"
+#endif
 
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
@@ -43,11 +50,25 @@ void Test(std::string path, std::string type, bool debug = false)
     int totalNum = 1024;
     int mergeIters = 3;
     std::shared_ptr<Helper::KeyValueIO> db;
-    // if (type == "RocksDB") {
-    //     db.reset(new RocksDBIO(path.c_str(), true));
-    // } else if (type == "SPDK") {
+    if (type == "RocksDB") {
+#ifdef RocksDB
+        db.reset(new RocksDBIO(path.c_str(), true));
+#else
+        {
+            std::cerr << "RocksDB is not supported in this build." << std::endl;
+            return;
+        }  
+#endif
+    } else if (type == "SPDK") {
+#ifdef SPDK
         db.reset(new SPDKIO(path.c_str(), 1024 * 1024, MaxSize, 64));
-    // }
+#else
+        {
+            std::cerr << "SPDK is not supported in this build." << std::endl;
+            return;
+        }
+#endif
+    }
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < totalNum; i++) {

@@ -13,7 +13,6 @@
 #include "inc/Core/Common/FineGrainedLock.h"
 #include "PersistentBuffer.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
-#include "ExtraSPDKController.h"
 #include "ExtraFileController.h"
 #include <chrono>
 #include <cstdint>
@@ -26,12 +25,16 @@
 #include <random>
 #include <tbb/concurrent_hash_map.h>
 
-#ifdef ROCKSDB
+#ifdef SPDK
+#include "ExtraSPDKController.h"
+#endif
+
+#ifdef RocksDB
 #include "ExtraRocksDBController.h"
+extern "C" bool RocksDbIOUringEnable() { return true; }
 #endif
 
 // enable rocksdb io_uring
-extern "C" bool RocksDbIOUringEnable() { return true; }
 
 namespace SPTAG::SPANN {
     template <typename ValueType>
@@ -172,14 +175,22 @@ namespace SPTAG::SPANN {
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
             }
             else if (useSPDK) {
+#ifdef SPDK
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseSPDK\n");
                 db.reset(new SPDKIO(dbPath, 1024 * 1024, MaxSize, postingBlockLimit + bufferLength, 1024, batchSize, recovery));
                 m_postingSizeLimit = postingBlockLimit * PageSize / (sizeof(ValueType) * dim + sizeof(int) + sizeof(uint8_t));
+#else
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraDynamicSearcher:SPDK unsupport!\n");
+                exit(1);
+#endif
             } else {
-#ifdef ROCKSDB
+#ifdef RocksDB
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
                 db.reset(new RocksDBIO(dbPath, useDirectIO, false, recovery));
                 m_postingSizeLimit = postingBlockLimit;
+#else
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraDynamicSearcher:RocksDB unsupport!\n");
+                exit(1);
 #endif
             }
             m_metaDataSize = sizeof(int) + sizeof(uint8_t);
@@ -1208,8 +1219,13 @@ namespace SPTAG::SPANN {
                 if (m_opt->m_enableWAL) {
                     std::string p_persistenWAL = m_opt->m_persistentBufferPath + "_WAL";
                     std::shared_ptr<Helper::KeyValueIO> pdb;
+#ifdef RocksDB
                     pdb.reset(new RocksDBIO(p_persistenWAL.c_str(), false, false));
                     m_wal.reset(new PersistentBuffer(pdb));
+#else
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPFresh: Wal only support RocksDB!\n");
+                    exit(1);
+#endif
                 } 
             }
 

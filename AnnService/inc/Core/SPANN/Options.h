@@ -179,55 +179,8 @@ namespace SPTAG {
             bool m_stressTest;
             int m_bufferLength;
 
-
             // Iterative
             int m_headBatch;
-            int m_searchThreadNum;
-
-            // Calculating
-            std::string m_truthFilePrefix;
-            bool m_calTruth;
-            bool m_calAllTruth;
-            int m_searchTimes;
-            int m_minInternalResultNum;
-            int m_stepInternalResultNum;
-            int m_maxInternalResultNum;
-            bool m_onlySearchFinalBatch;
-
-            // Updating
-            bool m_disableReassign;
-            bool m_searchDuringUpdate;
-            int m_reassignK;
-            bool m_recovery;
-
-            // Updating(SPFresh Update Test)
-            bool m_update;
-            bool m_inPlace;
-            bool m_outOfPlace;
-            float m_latencyLimit;
-            int m_step;
-            int m_insertThreadNum;
-            int m_endVectorNum;
-            std::string m_persistentBufferPath;
-            int m_appendThreadNum;
-            int m_reassignThreadNum;
-            int m_batch;
-            std::string m_fullVectorPath;
-
-            // Steady State Update
-            std::string m_updateFilePrefix;
-            std::string m_updateMappingPrefix;
-            int m_days;
-            int m_deleteQPS;
-            int m_sampling;
-            bool m_showUpdateProgress;
-            int m_mergeThreshold;
-            bool m_loadAllVectors;
-            bool m_steadyState;
-            int m_spdkBatchSize;
-            bool m_stressTest;
-            int m_bufferLength;
-
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
