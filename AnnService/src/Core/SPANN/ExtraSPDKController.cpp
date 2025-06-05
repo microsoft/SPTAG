@@ -12,7 +12,7 @@ int SPDKIO::BlockController::m_ioCompleteCount = 0;
 std::unique_ptr<char[]> SPDKIO::BlockController::m_memBuffer;
 
 void SPDKIO::BlockController::SpdkBdevEventCallback(enum spdk_bdev_event_type type, struct spdk_bdev *bdev, void *event_ctx) {
-    fprintf(stderr, "SpdkBdevEventCallback: supported bdev event type %d\n", type);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SpdkBdevEventCallback: supported bdev event type %d\n", type);
 }
 
 void SPDKIO::BlockController::SpdkBdevIoCallback(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg) {
@@ -24,7 +24,7 @@ void SPDKIO::BlockController::SpdkBdevIoCallback(struct spdk_bdev_io *bdev_io, b
         m_ssdInflight--;
         SpdkIoLoop(currSubIo->ctrl);
     } else {
-        fprintf(stderr, "SpdkBdevIoCallback: I/O failed %p\n", currSubIo);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SpdkBdevIoCallback: I/O failed %p\n", currSubIo);
         spdk_app_stop(-1);
     }
 }
@@ -53,7 +53,7 @@ void SPDKIO::BlockController::SpdkIoLoop(void *arg) {
                     currSubIo->dma_buff, currSubIo->offset, PageSize, SpdkBdevIoCallback, currSubIo);
             }
             if (rc && rc != -ENOMEM) {
-                fprintf(stderr, "SPDKIO::BlockController::SpdkStart %s failed: %d, shutting down, offset: %ld\n",
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::SpdkStart %s failed: %d, shutting down, offset: %ld\n",
                     currSubIo->is_read ? "spdk_bdev_read" : "spdk_bdev_write", rc, currSubIo->offset);
                 spdk_app_stop(-1);
                 break;
@@ -81,7 +81,7 @@ void SPDKIO::BlockController::SpdkStart(void *arg) {
     // Open bdev
     rc = spdk_bdev_open_ext(ctrl->m_ssdSpdkBdevName, true, SpdkBdevEventCallback, NULL, &ctrl->m_ssdSpdkBdevDesc);
     if (rc) {
-        fprintf(stderr, "SPDKIO::BlockController::SpdkStart: spdk_bdev_open_ext failed, %d\n", rc);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::SpdkStart: spdk_bdev_open_ext failed, %d\n", rc);
         ctrl->m_ssdSpdkThreadStartFailed = true;
         spdk_app_stop(-1);
         return;
@@ -91,7 +91,7 @@ void SPDKIO::BlockController::SpdkStart(void *arg) {
     // Open I/O channel
     ctrl->m_ssdSpdkBdevIoChannel = spdk_bdev_get_io_channel(ctrl->m_ssdSpdkBdevDesc);
     if (ctrl->m_ssdSpdkBdevIoChannel == NULL) {
-        fprintf(stderr, "SPDKIO::BlockController::SpdkStart: spdk_bdev_get_io_channel failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::SpdkStart: spdk_bdev_get_io_channel failed\n");
         spdk_bdev_close(ctrl->m_ssdSpdkBdevDesc);
         ctrl->m_ssdSpdkThreadStartFailed = true;
         spdk_app_stop(-1);
@@ -127,10 +127,10 @@ void* SPDKIO::BlockController::InitializeSpdk(void *arg) {
     pthread_exit(NULL);
 }
 
-bool SPDKIO::BlockController::Initialize(int batchSize) {
+bool SPDKIO::BlockController::Initialize(std::string filePath, int batchSize) {
     std::lock_guard<std::mutex> lock(m_initMutex);
     m_numInitCalled++;
-
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Initialize(%s, %d)\n", filePath.c_str(), batchSize);
     const char* useMemImplEnvStr = getenv(kUseMemImplEnv);
     m_useMemImpl = useMemImplEnvStr && !strcmp(useMemImplEnvStr, "1");
     const char* useSsdImplEnvStr = getenv(kUseSsdImplEnv);
@@ -148,15 +148,14 @@ bool SPDKIO::BlockController::Initialize(int batchSize) {
     } else if (m_useSsdImpl) {
         if (m_numInitCalled == 1) {
             m_batchSize = batchSize;
-            for (AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
-                m_blockAddresses.push(i);
-            }
             pthread_create(&m_ssdSpdkTid, NULL, &InitializeSpdk, this);
             while (!m_ssdSpdkThreadReady && !m_ssdSpdkThreadStartFailed);
             if (m_ssdSpdkThreadStartFailed) {
-                fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::Initialize failed\n");
                 return false;
             }
+	    m_filePath = filePath;
+	    LoadBlockPool(m_filePath, true);
         }
         // Create sub I/O request pool
         m_currIoContext.sub_io_requests.resize(m_ssdSpdkIoDepth);
@@ -172,7 +171,7 @@ bool SPDKIO::BlockController::Initialize(int batchSize) {
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::Initialize failed\n");
         return false;
     }
 }
@@ -187,7 +186,7 @@ bool SPDKIO::BlockController::GetBlocks(AddressType* p_data, int p_size) {
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::GetBlocks failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::GetBlocks failed\n");
         return false;
     }
 }
@@ -201,7 +200,7 @@ bool SPDKIO::BlockController::ReleaseBlocks(AddressType* p_data, int p_size) {
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::ReleaseBlocks failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::ReleaseBlocks failed\n");
         return false;
     }
 }
@@ -266,7 +265,7 @@ bool SPDKIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::ReadBlocks single failed\n");
         return false;
     }
 }
@@ -366,7 +365,7 @@ bool SPDKIO::BlockController::ReadBlocks(std::vector<AddressType*>& p_data, std:
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::ReadBlocks batch failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::ReadBlocks batch failed\n");
         return false;
     }
 }
@@ -407,7 +406,7 @@ bool SPDKIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
         }
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::ReadBlocks single failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::ReadBlocks single failed\n");
         return false;
     }
 }
@@ -446,6 +445,7 @@ bool SPDKIO::BlockController::ShutDown() {
             m_ssdSpdkThreadExiting = true;
             spdk_app_start_shutdown();
             pthread_join(m_ssdSpdkTid, NULL);
+	    Checkpoint(m_filePath);
             while (!m_blockAddresses.empty()) {
                 AddressType currBlockAddress;
                 m_blockAddresses.try_pop(currBlockAddress);
@@ -470,7 +470,7 @@ bool SPDKIO::BlockController::ShutDown() {
         m_currIoContext.free_sub_io_requests.clear();
         return true;
     } else {
-        fprintf(stderr, "SPDKIO::BlockController::ShutDown failed\n");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::ShutDown failed\n");
         return false;
     }
 }

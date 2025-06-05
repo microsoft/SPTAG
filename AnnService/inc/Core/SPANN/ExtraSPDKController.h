@@ -43,6 +43,7 @@ namespace SPTAG::SPANN
             tbb::concurrent_queue<AddressType> m_blockAddresses;
             tbb::concurrent_queue<AddressType> m_blockAddresses_reserve;
 
+	        std::string m_filePath;
             bool m_useSsdImpl = false;
             const char* m_ssdSpdkBdevName = nullptr;
             pthread_t m_ssdSpdkTid;
@@ -98,7 +99,7 @@ namespace SPTAG::SPANN
 
             static void SpdkStop(void* args);
         public:
-            bool Initialize(int batchSize);
+            bool Initialize(std::string filePath, int batchSize);
 
             // get p_size blocks from front, and fill in p_data array
             bool GetBlocks(AddressType* p_data, int p_size);
@@ -147,23 +148,38 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
 
+	    ErrorCode LoadBlockPool(std::string prefix, bool allowinit) {
+	        std::string blockfile = prefix + "_blockpool";
+                if (allowinit && !fileexists(blockfile.c_str())) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Initialize blockpool\n");
+                    for(AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
+                        m_blockAddresses.push(i);
+                    }
+                } else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(blockfile.c_str(), std::ios::binary | std::ios::in)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open the blockpool file: %s\n", blockfile.c_str());
+    		        return ErrorCode::Fail;
+                    }
+                    int blocks;
+		    IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Reading %d blocks to pool\n", blocks);
+                    AddressType currBlockAddress = 0;
+                    for (int i = 0; i < blocks; i++) {
+                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                        m_blockAddresses.push(currBlockAddress);
+	            }    
+    	        }
+		return ErrorCode::Success;
+	    }
+
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
                 m_numInitCalled++;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK Recovery: Loading block pool\n");
-                std::string filename = prefix + "_blockpool";
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
-                    return ErrorCode::FailedCreateFile;
-                }
-                int blocks;
-                IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK Recovery: Reading %d blocks to pool\n", blocks);
-                AddressType currBlockAddress = 0;
-                for (int i = 0; i < blocks; i++) {
-                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-                    m_blockAddresses.push(currBlockAddress);
-                }
+		        ErrorCode ret = LoadBlockPool(prefix, false);
+                if (ret != ErrorCode::Success) return ret;
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK Recovery: Initializing SPDK\n");
                 const char* useMemImplEnvStr = getenv(kUseMemImplEnv);
@@ -243,7 +259,7 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Recover SPDK!\n");
                     exit(0);
                 }
-            } else if (!m_pBlockController.Initialize(batchSize)) {
+            } else if (!m_pBlockController.Initialize(std::string(filePath), batchSize)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize SPDK!\n");
                 exit(0);
             }
@@ -450,7 +466,7 @@ namespace SPTAG::SPANN
 
         bool Initialize(bool debug = false) override {
             if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
-            return m_pBlockController.Initialize(64);
+            return m_pBlockController.Initialize(m_mappingPath, 64);
         }
 
         bool ExitBlockController(bool debug = false) override { 

@@ -226,6 +226,21 @@
     <ClInclude Include="inc\Core\Common\SIMDUtils.h">
       <Filter>Header Files\Core\Common</Filter>
     </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ExtraRocksDBController.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ExtraDynamicSearcher.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Helper\KeyValueIO.h">
+      <Filter>Header Files\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\Common\VersionLabel.h">
+      <Filter>Header Files\Core\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\Core\SPANN\ExtraSPDKController.h">
+      <Filter>Header Files\Core\SPANN</Filter>
+    </ClInclude>
     <ClInclude Include="inc\Core\SPANN\SPANNResultIterator.h">
       <Filter>Header Files\Core\SPANN</Filter>
     </ClInclude>

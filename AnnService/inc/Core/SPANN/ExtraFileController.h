@@ -22,9 +22,8 @@ namespace SPTAG::SPANN {
     class FileIO : public Helper::KeyValueIO {
         class BlockController {
         private:
-            static constexpr const char* kFileIoPath = "SPFRESH_FILE_IO_PATH";
-            static char* filePath;
-            static int fd;
+            char* m_filePath = nullptr;
+            int fd = -1;
 
             static constexpr AddressType kSsdImplMaxNumBlocks = (300ULL << 30) >> PageSizeEx; // 300G
             static constexpr const char* kFileIoDepth = "SPFRESH_FILE_IO_DEPTH";
@@ -58,14 +57,12 @@ namespace SPTAG::SPANN {
             struct IoContext {
                 std::vector<SubIoRequest> sub_io_requests;
                 std::queue<SubIoRequest *> free_sub_io_requests;
-                int in_flight = 0;
             };
-            static thread_local struct IoContext m_currIoContext;
-            static thread_local int debug_fd;
-            static thread_local uint64_t iocp;
-            static std::chrono::high_resolution_clock::time_point m_startTime;
+            thread_local static struct IoContext m_currIoContext;
+            thread_local static tbb::concurrent_hash_map<int, std::pair<int, uint64_t>> fd_to_id_iocp;
+            thread_local static int debug_fd;
+            std::chrono::high_resolution_clock::time_point m_startTime;
 
-            static thread_local int id;
             int m_maxId = 0;
             std::queue<int> m_idQueue;
             std::vector<int> read_complete_vec;
@@ -78,9 +75,7 @@ namespace SPTAG::SPANN {
 
             std::mutex m_uniqueResourceMutex;
 
-            static int m_ssdInflight;
-
-            static std::unique_ptr<char[]> m_memBuffer;
+            std::unique_ptr<char[]> m_memBuffer;
 
             std::mutex m_initMutex;
             int m_numInitCalled = 0;
@@ -94,10 +89,10 @@ namespace SPTAG::SPANN {
             std::atomic<int64_t> m_batchReadTimes;
             std::atomic<int64_t> m_batchReadTimeouts;
 
-            static void* InitializeFileIo(void* args);
+            void InitializeFileIo();
 
             static void* IoStatisticsThread(void* args) {
-                auto ctrl = static_cast<BlockController*>(args);
+                //auto ctrl = static_cast<BlockController*>(args);
                 pthread_exit(NULL);
             };
 
@@ -110,9 +105,7 @@ namespace SPTAG::SPANN {
             // static void Stop(void* args);
 
         public:
-            bool Initialize(int batchSize);
-
-	    bool InitializeThreadContext();
+            bool Initialize(std::string filePath, int batchSize);
 
             bool GetBlocks(AddressType* p_data, int p_size);
 
@@ -160,43 +153,58 @@ namespace SPTAG::SPANN {
                 return ErrorCode::Success;
             }
 
+	    ErrorCode LoadBlockPool(std::string prefix, bool allowinit) {
+	        std::string blockfile = prefix + "_blockpool";
+                if (allowinit && !fileexists(blockfile.c_str())) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Initialize blockpool\n");
+                    for(AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
+                        m_blockAddresses.push(i);
+                    }
+                } else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
+                    auto ptr = f_createIO();
+                    if (ptr == nullptr || !ptr->Initialize(blockfile.c_str(), std::ios::binary | std::ios::in)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open the blockpool file: %s\n", blockfile.c_str());
+    		        return ErrorCode::Fail;
+                    }
+                    int blocks;
+		    IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Reading %d blocks to pool\n", blocks);
+                    AddressType currBlockAddress = 0;
+                    for (int i = 0; i < blocks; i++) {
+                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                        m_blockAddresses.push(currBlockAddress);
+	            }    
+    	        }
+		return ErrorCode::Success;
+	    }
+
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
                 m_numInitCalled++;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Loading block pool\n");
-                std::string filename = prefix + "_blockpool";
-                auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) {
-                    return ErrorCode::FailedCreateFile;
-                }
-                int blocks;
-                IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Reading %d blocks to pool\n", blocks);
-                AddressType currBlockAddress = 0;
-                for (int i = 0; i < blocks; i++) {
-                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-                    m_blockAddresses.push(currBlockAddress);
-                }
+                ErrorCode ret = LoadBlockPool(prefix, false);
+		        if (ErrorCode::Success != ret) return ret;
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO Recovery: Initializing FileIO\n");
                 
                 if (m_numInitCalled == 1) {
                     m_batchSize = batchSize;
-                    pthread_create(&m_fileIoTid, NULL, &InitializeFileIo, this);
+                    //pthread_create(&m_fileIoTid, NULL, &InitializeFileIo, this);
+		            InitializeFileIo();
                     while(!m_fileIoThreadReady && !m_fileIoThreadStartFailed);
                     if (m_fileIoThreadStartFailed) {
-                        fprintf(stderr, "SPDKIO::BlockController::Initialize failed\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize failed\n");
                         return ErrorCode::Fail;
                     }
                 }
                 // Create sub I/O request pool
                 m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
-                m_currIoContext.in_flight = 0;
                 for (auto &sr : m_currIoContext.sub_io_requests) {
                     sr.app_buff = nullptr;
                     auto buf_ptr = aligned_alloc(m_ssdFileIoAlignment, PageSize);
                     if (buf_ptr == nullptr) {
-                        fprintf(stderr, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
                         return ErrorCode::Fail;
                     }
                     sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
@@ -478,7 +486,7 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Recover FileIO!\n");
                     exit(0);
                 }
-            } else if (!m_pBlockController.Initialize(batchSize)) {
+            } else if (!m_pBlockController.Initialize(std::string(filePath), batchSize)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize FileIO!\n");
                 exit(0);
             }
@@ -1090,18 +1098,22 @@ namespace SPTAG::SPANN {
         bool Initialize(bool debug = false) override {
             if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize FileIO for new threads\n");
             m_freeIdMutex.lock();
-            if (m_freeId.empty()) {
-                id = m_maxId++;
-            }
-            else {
-                id = m_freeId.front();
-                m_freeId.pop();
-            }
+	        if (id < 0) {
+                if (m_freeId.empty()) {
+                    id = m_maxId++;
+                }
+                else {
+                    id = m_freeId.front();
+                    m_freeId.pop();
+                }
+	        } else {
+                if (id > m_maxId) m_maxId = id + 1;
+	        }
             while(read_time_vec.size() < m_maxId) read_time_vec.push_back(0);
             while(get_time_vec.size() < m_maxId) get_time_vec.push_back(0);
             while(get_times_vec.size() < m_maxId) get_times_vec.push_back(0);
             m_freeIdMutex.unlock();
-            return m_pBlockController.Initialize(64);
+            return m_pBlockController.Initialize(m_mappingPath, 64);
         }
 
         bool ExitBlockController(bool debug = false) override { 
@@ -1131,7 +1143,7 @@ namespace SPTAG::SPANN {
         static constexpr const char* kFileIoCacheShards = "SPFRESH_FILE_IO_CACHE_SHARDS";
         static constexpr int kSsdFileIoDefaultCacheShards = 4;
 
-        static thread_local int id;
+        thread_local static int id;
         int m_maxId = 0;
         std::queue<int> m_freeId;
         std::mutex m_freeIdMutex;

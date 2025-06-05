@@ -7,6 +7,8 @@
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include <shared_mutex>
 #include <chrono>
+#include <random>
+
 #include "inc/Core/ResultIterator.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
 #include <random>

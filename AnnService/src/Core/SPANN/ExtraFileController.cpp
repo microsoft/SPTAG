@@ -2,56 +2,45 @@
 
 namespace SPTAG::SPANN
 {
+typedef tbb::concurrent_hash_map<int, std::pair<int, uint64_t>> fdmap;
 thread_local struct FileIO::BlockController::IoContext FileIO::BlockController::m_currIoContext;
 thread_local int FileIO::BlockController::debug_fd = -1;
-thread_local int FileIO::id = 0;
+thread_local int FileIO::id = -1;
 #ifdef USE_ASYNC_IO
-thread_local uint64_t FileIO::BlockController::iocp = 0;
-thread_local int FileIO::BlockController::id = 0;
+thread_local fdmap FileIO::BlockController::fd_to_id_iocp;
 #endif
-std::chrono::high_resolution_clock::time_point FileIO::BlockController::m_startTime;
-int FileIO::BlockController::m_ssdInflight = 0;
 std::atomic<int> FileIO::BlockController::m_ioCompleteCount(0);
-int FileIO::BlockController::fd = -1;
-char* FileIO::BlockController::filePath = new char[1024];
-std::unique_ptr<char[]> FileIO::BlockController::m_memBuffer;
 
-void* FileIO::BlockController::InitializeFileIo(void* args) {
-    FileIO::BlockController* ctrl = (FileIO::BlockController *)args;
+void FileIO::BlockController::InitializeFileIo() {
     struct stat st;
-    const char* fileIoPath = getenv(kFileIoPath);
     auto fileSize = kSsdImplMaxNumBlocks << PageSizeEx;
-    if(fileIoPath) {
-        strcpy(filePath, fileIoPath);
-    }
-    else {
+    if(m_filePath == nullptr) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::InitializeFileIo failed: No filePath\n");
-        ctrl->m_fileIoThreadStartFailed = true;
+        m_fileIoThreadStartFailed = true;
         fd = -1;
-        // strcpy(filePath, "/home/lml/SPFreshTest/testfile");
     }
-    if(stat(filePath, &st) != 0) {
+    if(stat(m_filePath, &st) != 0) {
 	SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::Create a file\n");
-        fd = open(filePath, O_CREAT | O_WRONLY, 0666);
+        fd = open(m_filePath, O_CREAT | O_WRONLY, 0666);
         if(fd == -1) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExraFileController::BlockController::InitializeFileIo failed\n");
             // return nullptr;
-            ctrl->m_fileIoThreadStartFailed = true;
+            m_fileIoThreadStartFailed = true;
         }
         else {
             if (fallocate(fd, 0, 0, fileSize) == -1) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::InitializeFileIo failed: fallocate failed\n");
-                ctrl->m_fileIoThreadStartFailed = true;
+                m_fileIoThreadStartFailed = true;
                 fd = -1;
             } else {
                 close(fd);
-                fd = open(filePath, O_RDWR | O_DIRECT);
+                fd = open(m_filePath, O_RDWR | O_DIRECT);
                 if (fd == -1) {
                     auto err_str = strerror(errno);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::InitializeFileIo failed: open failed:%s\n", err_str);
-                    ctrl->m_fileIoThreadStartFailed = true;
+                    m_fileIoThreadStartFailed = true;
                 } else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s created, fd=%d\n", filePath, fd);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s created, fd=%d\n", m_filePath, fd);
                 }
             }
         }
@@ -60,77 +49,78 @@ void* FileIO::BlockController::InitializeFileIo(void* args) {
 	SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::Open a file\n");
         auto actualFileSize = st.st_blocks * st.st_blksize;
         if(actualFileSize < fileSize) {
-            fd = open(filePath, O_CREAT | O_WRONLY, 0666);
+            fd = open(m_filePath, O_CREAT | O_WRONLY, 0666);
             if(fd == -1) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::InitializeFileIo failed\n");
                 // return nullptr;
-                ctrl->m_fileIoThreadStartFailed = true;
+                m_fileIoThreadStartFailed = true;
             }
             else {
                 if (fallocate(fd, 0, 0, fileSize) == -1) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::InitializeFileIo failed: fallocate failed\n");
-                    ctrl->m_fileIoThreadStartFailed = true;
+                    m_fileIoThreadStartFailed = true;
                     fd = -1;
                 } else {
                     close(fd);
-                    fd = open(filePath, O_RDWR | O_DIRECT);
+                    fd = open(m_filePath, O_RDWR | O_DIRECT);
                     if (fd == -1) {
                         auto err_str = strerror(errno);
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::Open failed: %s\n", err_str);
-                        ctrl->m_fileIoThreadStartFailed = true;
+                        m_fileIoThreadStartFailed = true;
                     } else {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s created, fd=%d\n", filePath, fd);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s created, fd=%d\n", m_filePath, fd);
                     }
                 }
             }
         } else {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file has been created with enough space.\n", filePath, fd);
-            fd = open(filePath, O_RDWR | O_DIRECT);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file has been created with enough space.\n", m_filePath, fd);
+            fd = open(m_filePath, O_RDWR | O_DIRECT);
             if (fd == -1) {
                 auto err_str = strerror(errno);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraFileController::BlockController::Open failed: %s\n", err_str);
-                ctrl->m_fileIoThreadStartFailed = true;
+                m_fileIoThreadStartFailed = true;
             } else {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s opened, fd=%d\n", filePath, fd);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraFileController::BlockController::InitializeFileIo: file %s opened, fd=%d\n", m_filePath, fd);
             }
         }
     }
+
     const char* fileIoDepth = getenv(kFileIoDepth);
-    if (fileIoDepth) ctrl->m_ssdFileIoDepth = atoi(fileIoDepth);
+    if (fileIoDepth) m_ssdFileIoDepth = atoi(fileIoDepth);
     const char* fileIoThreadNum = getenv(kFileIoThreadNum);
-    if (fileIoThreadNum) ctrl->m_ssdFileIoThreadNum = atoi(fileIoThreadNum);
+    if (fileIoThreadNum) m_ssdFileIoThreadNum = atoi(fileIoThreadNum);
     const char* fileIoAlignment = getenv(kFileIoAlignment);
-    if (fileIoAlignment) ctrl->m_ssdFileIoAlignment = atoi(fileIoAlignment);
+    if (fileIoAlignment) m_ssdFileIoAlignment = atoi(fileIoAlignment);
 
-    ctrl->m_batchReadTimes = 0;
-    ctrl->m_batchReadTimeouts = 0;
+    m_batchReadTimes = 0;
+    m_batchReadTimeouts = 0;
 
-    if(ctrl->m_fileIoThreadStartFailed == false) {
-        ctrl->m_fileIoThreadReady = true;
-        // std::lock_guard<std::mutex> lock(ctrl->m_uniqueResourceMutex);
-        // m_ssdInflight = 0;
+    if(m_fileIoThreadStartFailed == false) {
+        m_fileIoThreadReady = true;
     }
-    pthread_exit(NULL);
 }
 
-bool FileIO::BlockController::Initialize(int batchSize) {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Initialize(%d)\n", batchSize);
+bool FileIO::BlockController::Initialize(std::string filePath, int batchSize) {
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Initialize(%s, %d)\n", filePath.c_str(), batchSize);
     std::lock_guard<std::mutex> lock(m_initMutex);
     m_numInitCalled++;
 
     if(m_numInitCalled == 1) {
         m_batchSize = batchSize;
+        if (m_filePath == nullptr) m_filePath = new char[1024];
+	strcpy(m_filePath, (filePath + "_postings").c_str());
         m_startTime = std::chrono::high_resolution_clock::now();
-        for(AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
-            m_blockAddresses.push(i);
-        }
-        pthread_create(&m_fileIoTid, NULL, &InitializeFileIo, this);
+        //pthread_create(&m_fileIoTid, NULL, &InitializeFileIo, this);
+	InitializeFileIo();
         while(!m_fileIoThreadReady && !m_fileIoThreadStartFailed);
         if(m_fileIoThreadStartFailed) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize failed\n");
             return false;
         }
+        LoadBlockPool(m_filePath, true);
     }
+
+    int id = 0;
     if (m_idQueue.empty()) {
         id = m_maxId;
         m_maxId++;
@@ -161,8 +151,35 @@ bool FileIO::BlockController::Initialize(int batchSize) {
         read_blocks_time_vec.push_back(0);
     }
 
-    InitializeThreadContext();
-
+    if (m_currIoContext.sub_io_requests.size() < m_ssdFileIoDepth) {
+        int original = m_currIoContext.sub_io_requests.size();
+        m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
+        for(int i = original; i < m_ssdFileIoDepth; i++) {
+            auto &sr = m_currIoContext.sub_io_requests[i];
+            sr.app_buff = nullptr;
+            memset(&(sr.myiocb), 0, sizeof(struct iocb));
+            auto buf_ptr = aligned_alloc(m_ssdFileIoAlignment, PageSize);
+            if (buf_ptr == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
+                return false;
+            }
+            sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
+            sr.myiocb.aio_fildes = fd;
+            sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
+            sr.myiocb.aio_nbytes = PageSize;
+            sr.ctrl = this;
+            m_currIoContext.free_sub_io_requests.push(&sr);
+        }
+    }
+    uint64_t iocp = 0;
+    auto ret = syscall(__NR_io_setup, m_ssdFileIoDepth, &iocp);
+    if (ret < 0) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize io_setup failed: %s\n", strerror(errno));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "m_ssdFileIoDepth = %d, iocp = %p\n", m_ssdFileIoDepth, &iocp);
+        return false;
+    }
+    fd_to_id_iocp.emplace(fd, std::make_pair(id, iocp));
+ 
 #ifdef USE_FILE_DEBUG
     auto debug_file_name = std::string("/nvme1n1/lml/") + std::to_string(m_numInitCalled) + "_debug.log";
     debug_fd = open(debug_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
@@ -171,37 +188,6 @@ bool FileIO::BlockController::Initialize(int batchSize) {
         return false;
     }
 #endif
-    return true;
-}
-
-
-bool FileIO::BlockController::InitializeThreadContext() {
-    if (m_currIoContext.sub_io_requests.size() >= m_ssdFileIoDepth) return true;
-
-    m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
-    m_currIoContext.in_flight = 0;
-    for(auto &sr : m_currIoContext.sub_io_requests) {
-        sr.app_buff = nullptr;
-        memset(&(sr.myiocb), 0, sizeof(struct iocb));
-        auto buf_ptr = aligned_alloc(m_ssdFileIoAlignment, PageSize);
-        if (buf_ptr == nullptr) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize failed: aligned_alloc failed\n");
-            return false;
-        }
-        sr.myiocb.aio_buf = reinterpret_cast<uint64_t>(buf_ptr);
-        sr.myiocb.aio_fildes = fd;
-        sr.myiocb.aio_data = reinterpret_cast<uintptr_t>(&sr);
-        sr.myiocb.aio_nbytes = PageSize;
-        sr.ctrl = this;
-        m_currIoContext.free_sub_io_requests.push(&sr);
-    }
-    iocp = 0;
-    auto ret = syscall(__NR_io_setup, m_ssdFileIoDepth, &iocp);
-    if (ret < 0) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Initialize io_setup failed: %s\n", strerror(errno));
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "m_ssdFileIoDepth = %d, iocp = %p\n", m_ssdFileIoDepth, &iocp);
-        return false;
-    }
     return true;
 }
 
@@ -255,6 +241,11 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, std::string* p_val
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::ReadBlocks: blockNum > m_ssdFileIoDepth\n");
         return false;
     }
+
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
     // clear timeout io
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
         auto wait = m_ssdFileIoDepth - m_currIoContext.free_sub_io_requests.size();
@@ -337,6 +328,11 @@ bool FileIO::BlockController::ReadBlocks(AddressType* p_data, ByteArray& p_value
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::ReadBlocks: blockNum > m_ssdFileIoDepth\n");
         return false;
     }
+
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
     // clear timeout io
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
         auto wait = m_ssdFileIoDepth - m_currIoContext.free_sub_io_requests.size();
@@ -461,6 +457,10 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
         }
     }
 
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
      //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ReadBlocks: sub_io_requests.size:%d free_io_requests.size:%d\n", (int)(m_currIoContext.sub_io_requests.size()), (int)(m_currIoContext.free_sub_io_requests.size()));
     // Clear timeout I/Os
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
@@ -568,6 +568,10 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType*>& p_data
         }
     }
 
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
     // Clear timeout I/Os
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
         int wait = m_ssdFileIoDepth - m_currIoContext.free_sub_io_requests.size();
@@ -646,9 +650,13 @@ bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
     fsync(debug_fd);
 #endif
     AddressType currBlockIdx = 0;
-    int inflight = 0;
     SubIoRequest* currSubIo;
     int totalSize = p_value.size();
+
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second; 
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBlocks: %d\n", p_size);
     // Clear timeout I/Os
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
@@ -703,9 +711,13 @@ bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const
 
 bool FileIO::BlockController::WriteBlocks(AddressType* p_data, int p_size, const ByteArray& p_value) {
     AddressType currBlockIdx = 0;
-    int inflight = 0;
     SubIoRequest* currSubIo;
     int totalSize = p_value.Length();
+
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WriteBlocks: %d\n", p_size);
     // Clear timeout I/Os
     while (m_currIoContext.free_sub_io_requests.size() < m_ssdFileIoDepth) {
@@ -820,15 +832,21 @@ bool FileIO::BlockController::ShutDown() {
     std::lock_guard<std::mutex> lock(m_initMutex);
     SubIoRequest* currSubIo;
     m_numInitCalled--;
+    fdmap::accessor accessor;
+    bool isFound = fd_to_id_iocp.find(accessor, fd);
+    int id = (accessor->second).first;
+    uint64_t iocp = (accessor->second).second;
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::ShutDown\n");
     if (m_numInitCalled == 0) {
         m_fileIoThreadExiting = true;
-        pthread_join(m_fileIoTid, NULL);
+        //pthread_join(m_fileIoTid, NULL);
+        Checkpoint(m_filePath);
         while (!m_blockAddresses.empty()) {
             AddressType currBlockAddress;
             m_blockAddresses.try_pop(currBlockAddress);
         }
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Close file handler\n");
+	    fd_to_id_iocp.erase(accessor);
         close(fd);
     }
     m_idQueue.push(id);
