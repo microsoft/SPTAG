@@ -25,7 +25,11 @@ namespace SPTAG::SPANN {
             char m_filePath[1024];
             int fd = -1;
 
-            static constexpr AddressType kSsdImplMaxNumBlocks = (300ULL << 30) >> PageSizeEx; // 300G
+            static constexpr AddressType kFileIoStartBlocks = (3ULL << 30) >> PageSizeEx; // 3GB start pool
+            static constexpr AddressType kFileIoGrowthBlocks = (1ULL << 30) >> PageSizeEx; // 1GB growth pool
+            static constexpr float fFileIoThreshold = 0.05f;
+            static constexpr AddressType kFileIODefaultMaxBlocks = (3000ULL << 30) >> PageSizeEx; // 300 GB            
+            
             static constexpr const char* kFileIoDepth = "SPFRESH_FILE_IO_DEPTH";
             static constexpr int kSsdFileIoDefaultIoDepth = 1024;
             static constexpr const char* kFileIoThreadNum = "SPFRESH_FILE_IO_THREAD_NUM";
@@ -35,6 +39,9 @@ namespace SPTAG::SPANN {
 
             tbb::concurrent_queue<AddressType> m_blockAddresses;
             tbb::concurrent_queue<AddressType> m_blockAddresses_reserve;
+
+            std::mutex m_expandLock;
+            std::atomic<AddressType> m_totalAllocatedBlocks { 0 };
             
             pthread_t m_fileIoTid;
             pthread_t m_ioStatisticsTid;
@@ -65,15 +72,7 @@ namespace SPTAG::SPANN {
 
             int m_maxId = 0;
             std::queue<int> m_idQueue;
-	    /*
-            std::vector<int> read_complete_vec;
-            std::vector<int> read_submit_vec;
-            std::vector<int> write_complete_vec;
-            std::vector<int> write_submit_vec;
-            std::vector<int64_t> read_bytes_vec;
-            std::vector<int64_t> write_bytes_vec;
-            std::vector<int64_t> read_blocks_time_vec;
-            */
+
             std::mutex m_uniqueResourceMutex;
 
             std::unique_ptr<char[]> m_memBuffer;
@@ -93,17 +92,12 @@ namespace SPTAG::SPANN {
             void InitializeFileIo();
 
             static void* IoStatisticsThread(void* args) {
-                //auto ctrl = static_cast<BlockController*>(args);
                 pthread_exit(NULL);
             };
 
-            // static void Start(void* args);
-
-            // static void FileIoLoop(void *arg);
-
-            // static void FileIoCallback(bool success, void *cb_arg);
-
-            // static void Stop(void* args);
+        private:
+            bool ExpandFile(AddressType blocksToAdd);
+            bool NeedsExpansion();
 
         public:
             bool Initialize(std::string filePath, int batchSize);
@@ -134,51 +128,103 @@ namespace SPTAG::SPANN {
 
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: saving block pool\n");
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload reserved blocks!\n");
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Starting block pool save...\n");
+
+                // Move reserved blocks back to main queue
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Reload reserved blocks...\n");
                 AddressType currBlockAddress = 0;
                 for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
-                    m_blockAddresses_reserve.try_pop(currBlockAddress);
-                    m_blockAddresses.push(currBlockAddress);
+                    if (m_blockAddresses_reserve.try_pop(currBlockAddress)) {
+                        m_blockAddresses.push(currBlockAddress);
+                    }
                 }
+
                 int blocks = RemainBlocks();
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s with %d remain blocks\n", filename.c_str(), blocks);
+                AddressType totalBlocks = m_totalAllocatedBlocks.load();
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Total allocated blocks: %llu\n",
+                            static_cast<unsigned long long>(totalBlocks));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Remaining free blocks: %d\n", blocks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Saving to file: %s\n", filename.c_str());
+
                 auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
-                for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
-                    IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::Checkpoint - Failed to open file: %s\n", filename.c_str());
+                    return ErrorCode::FailedCreateFile;
                 }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save Finish!\n");
+
+                // Write block count
+                IOBINARY(ptr, WriteBinary, sizeof(SizeType), reinterpret_cast<char*>(&blocks));
+                // Write total allocated blocks
+                IOBINARY(ptr, WriteBinary, sizeof(AddressType), reinterpret_cast<char*>(&totalBlocks));
+                // Write individual block addresses
+                for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); ++it) {
+                    IOBINARY(ptr, WriteBinary, sizeof(AddressType), reinterpret_cast<const char*>(&(*it)));
+                }
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Save completed successfully.\n");
                 return ErrorCode::Success;
             }
 
-	    ErrorCode LoadBlockPool(std::string prefix, bool allowinit) {
-	        std::string blockfile = prefix + "_blockpool";
+            ErrorCode LoadBlockPool(std::string prefix, bool allowinit) {
+                std::string blockfile = prefix + "_blockpool";
+
                 if (allowinit && !fileexists(blockfile.c_str())) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Initialize blockpool\n");
-                    for(AddressType i = 0; i < kSsdImplMaxNumBlocks; i++) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "BlockController::LoadBlockPool: initializing fresh pool (no existing file found: %s)\n",
+                        blockfile.c_str());
+
+                    for (AddressType i = 0; i < kFileIoStartBlocks; ++i) {
                         m_blockAddresses.push(i);
                     }
+
+                    m_totalAllocatedBlocks.store(kFileIoStartBlocks);
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "BlockController::LoadBlockPool: initialized with %llu blocks (%.2f GB)\n",
+                        static_cast<unsigned long long>(kFileIoStartBlocks),
+                        (kFileIoStartBlocks << PageSizeEx) / double(1 << 30));
+
                 } else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "BlockController::LoadBlockPool: loading from file %s\n", blockfile.c_str());
+
                     auto ptr = f_createIO();
                     if (ptr == nullptr || !ptr->Initialize(blockfile.c_str(), std::ios::binary | std::ios::in)) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open the blockpool file: %s\n", blockfile.c_str());
-    		        return ErrorCode::Fail;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "BlockController::LoadBlockPool: failed to open blockpool file: %s\n", blockfile.c_str());
+                        return ErrorCode::Fail;
                     }
-                    int blocks;
-		            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Reading %d blocks to pool\n", blocks);
+
+                    AddressType blocks = 0;
+                    AddressType totalAllocated = 0;
+
+                    // Read block count
+                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&blocks));
+                    // Read total allocated block count
+                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&totalAllocated));
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "BlockController::LoadBlockPool: reading %llu blocks into pool (%.2f GB), total allocated: %llu blocks\n",
+                        static_cast<unsigned long long>(blocks),
+                        (blocks << PageSizeEx) / static_cast<double>(1ULL << 30),
+                        static_cast<unsigned long long>(totalAllocated));
+
                     AddressType currBlockAddress = 0;
-                    for (int i = 0; i < blocks; i++) {
-                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                    for (AddressType i = 0; i < blocks; ++i) {
+                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&currBlockAddress));
                         m_blockAddresses.push(currBlockAddress);
-	                }
-    	        }
-		return ErrorCode::Success;
-	    }
+                    }
+
+                    m_totalAllocatedBlocks.store(totalAllocated);
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "BlockController::LoadBlockPool: block pool initialized. Available: %llu, Total allocated: %llu\n",
+                        static_cast<unsigned long long>(blocks),
+                        static_cast<unsigned long long>(totalAllocated));
+                }
+                return ErrorCode::Success;
+            }
 
             ErrorCode Recovery(std::string prefix, int batchSize) {
                 std::lock_guard<std::mutex> lock(m_initMutex);
@@ -191,7 +237,6 @@ namespace SPTAG::SPANN {
                 
                 if (m_numInitCalled == 1) {
                     m_batchSize = batchSize;
-                    //pthread_create(&m_fileIoTid, NULL, &InitializeFileIo, this);
 		            InitializeFileIo();
                     while(!m_fileIoThreadReady && !m_fileIoThreadStartFailed);
                     if (m_fileIoThreadStartFailed) {
@@ -199,6 +244,7 @@ namespace SPTAG::SPANN {
                         return ErrorCode::Fail;
                     }
                 }
+
                 // Create sub I/O request pool
                 m_currIoContext.sub_io_requests.resize(m_ssdFileIoDepth);
                 for (auto &sr : m_currIoContext.sub_io_requests) {
@@ -257,9 +303,9 @@ namespace SPTAG::SPANN {
                 auto it = cache.find(key);
                 if (it == cache.end()) {
                     mu.unlock();
-                    return false;  // 如果键不存在，返回 -1
+                    return false;  // If the key does not exist, return -1
                 }
-                // 更新访问顺序，将该键移动到链表头部
+                // Update access order, move the key to the head of the linked list
                 memcpy(value, it->second.first.data(), it->second.first.size());
                 keys.splice(keys.begin(), keys, it->second.second);
                 it->second.second = keys.begin();
@@ -320,7 +366,7 @@ namespace SPTAG::SPANN {
                 auto it = cache.find(key);
                 if (it == cache.end()) {
                     mu.unlock();
-                    return false;  // 如果键不存在，返回 false
+                    return false;  // If the key does not exist, return false
                 }
                 size -= it->second.first.size();
                 keys.erase(it->second.second);
@@ -336,7 +382,7 @@ namespace SPTAG::SPANN {
                 if (it == cache.end()) {
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "LRUCache: merge key not found\n");
                     mu.unlock();
-                    return false;  // 如果键不存在，返回 false
+                    return false;  // If the key does not exist, return false
                 }
                 if (merge_size + it->second.first.size() > capacity) {
                     size -= it->second.first.size();
@@ -419,7 +465,6 @@ namespace SPTAG::SPANN {
 
     public:
         FileIO(const char* filePath, SizeType blockSize, SizeType capacity, SizeType postingBlocks, SizeType bufferSize = 1024, int batchSize = 64, bool recovery = false, int compactionThreads = 1) {
-            // TODO: 后面还得再看看，可能需要修改
             m_mappingPath = std::string(filePath);
             m_blockLimit = postingBlocks + 1;
             m_bufferLimit = bufferSize;
@@ -468,9 +513,9 @@ namespace SPTAG::SPANN {
 
             if (fileexists(m_mappingPath.c_str())) {
                 Load(m_mappingPath, blockSize, capacity);
-		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping successfully from %s!\n", m_mappingPath.c_str());
+		        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load block mapping successfully from %s!\n", m_mappingPath.c_str());
             } else {
-		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize block mapping successfully!\n");
+		        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize block mapping successfully!\n");
                 m_pBlockMapping.Initialize(0, 1, blockSize, capacity);
             }
             for (int i = 0; i < bufferSize; i++) {
@@ -499,7 +544,7 @@ namespace SPTAG::SPANN {
                 return;
             }
             if (!m_mappingPath.empty()) Save(m_mappingPath);
-            // TODO: 这里是不是应该加锁？
+            // TODO: Should we add a lock here?
             for (int i = 0; i < m_pBlockMapping.R(); i++) {
                 if (At(i) != 0xffffffffffffffff) delete[]((AddressType*)At(i));
             }
@@ -667,10 +712,6 @@ namespace SPTAG::SPANN {
             std::vector<AddressType*> blocks;
             std::set<int> lock_keys;
             if (m_fileIoUseLock) {
-                // 这里要去重？
-                // for (SizeType key : keys) {
-                //     lock_keys.insert(hash(key));
-                // }
                 for (SizeType key : keys) {
                     m_rwMutex[hash(key)].lock_shared();
                 }
@@ -759,7 +800,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put key:%d value:%lld since value too long!\n", key, value.size());
                 return ErrorCode::Fail;
             }
-            // 计算是否需要更多的Mapping块
+            // Calculate whether more mapping blocks are needed
             if (m_fileIoUseLock) {
                 m_rwMutex[hash(key)].lock();
             }
@@ -773,7 +814,6 @@ namespace SPTAG::SPANN {
                 delta = key + 1 - m_pBlockMapping.R();
             }
             if (delta > 0) {
-                    // std::lock_guard<std::mutex> lock(m_updateMutex);
                 m_updateMutex.lock();
                 delta = key + 1 - m_pBlockMapping.R();
                 if (delta > 0) {
@@ -786,9 +826,9 @@ namespace SPTAG::SPANN {
                 m_pShardedLRUCache->put(key, (void *)(value.data()), value.size());
             }
 
-            // 如果这个key还没有分配过Mapping块，就分配一组
+            // If this key has not been assigned mapping blocks yet, allocate a batch.
             if (At(key) == 0xffffffffffffffff) {
-                // m_buffer里有多的块就直接用，没有就new一组
+                // If there are spare blocks in m_buffer, use them directly; otherwise, allocate a new batch.
                 if (m_buffer.unsafe_size() > m_bufferLimit) {
                     uintptr_t tmpblocks;
                     while (!m_buffer.try_pop(tmpblocks));
@@ -797,11 +837,11 @@ namespace SPTAG::SPANN {
                 else {
                     At(key) = (uintptr_t)(new AddressType[m_blockLimit]);
                 }
-                // 块地址列表里的0号元素代表数据大小，将其设为-1
+                // The 0th element of the block address list represents the data size; set it to -1.
                 memset((AddressType*)At(key), -1, sizeof(AddressType) * m_blockLimit);
             }
             int64_t* postingSize = (int64_t*)At(key);
-            // postingSize小于0说明是新分配的Mapping块，直接获取磁盘块，写入数据
+            // If postingSize is less than 0, it means the mapping block is newly allocated—directly
             if (*postingSize < 0) {
                 m_pBlockController.GetBlocks(postingSize + 1, blocks);
                 m_pBlockController.WriteBlocks(postingSize + 1, blocks, value);
@@ -809,15 +849,15 @@ namespace SPTAG::SPANN {
             }
             else {
                 uintptr_t tmpblocks;
-                // 从buffer里拿一组Mapping块，一会再还一组回去
+                // Take a batch of mapping blocks from the buffer, and return a batch back later.
                 while (!m_buffer.try_pop(tmpblocks));
-                // 获取一组新的磁盘块，直接写入数据
-                // 为保证Checkpoint的效果，这里必须分配新的块进行写入
+                // Acquire a new batch of disk blocks and write data directly.
+                // To ensure the effectiveness of the checkpoint, new blocks must be allocated for writing here.
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
                 m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
                 *((int64_t*)tmpblocks) = value.size();
 
-                // 释放原有的块
+                // Release the original blocks
                 m_pBlockController.ReleaseBlocks(postingSize + 1, (*postingSize + PageSize -1) >> PageSizeEx);
                 At(key) = tmpblocks;
                 m_buffer.push((uintptr_t)postingSize);
@@ -834,7 +874,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put key:%d value:%lld since value too long!\n", key, value.Length());
                 return ErrorCode::Fail;
             }
-            // 计算是否需要更多的Mapping块
+            // Calculate whether more mapping blocks are needed
             if (m_fileIoUseLock) {
                 m_rwMutex[hash(key)].lock();
             }
@@ -848,7 +888,6 @@ namespace SPTAG::SPANN {
                 delta = key + 1 - m_pBlockMapping.R();
             }
             if (delta > 0) {
-                    // std::lock_guard<std::mutex> lock(m_updateMutex);
                 m_updateMutex.lock();
                 delta = key + 1 - m_pBlockMapping.R();
                 if (delta > 0) {
@@ -861,9 +900,8 @@ namespace SPTAG::SPANN {
                 m_pShardedLRUCache->put(key, (void *)(value.Data()), value.Length());
             }
 
-            // 如果这个key还没有分配过Mapping块，就分配一组
+            // If this key hasn't been assigned any mapping blocks yet, allocate a batch for it.
             if (At(key) == 0xffffffffffffffff) {
-                // m_buffer里有多的块就直接用，没有就new一组
                 if (m_buffer.unsafe_size() > m_bufferLimit) {
                     uintptr_t tmpblocks;
                     while (!m_buffer.try_pop(tmpblocks));
@@ -872,11 +910,9 @@ namespace SPTAG::SPANN {
                 else {
                     At(key) = (uintptr_t)(new AddressType[m_blockLimit]);
                 }
-                // 块地址列表里的0号元素代表数据大小，将其设为-1
                 memset((AddressType*)At(key), -1, sizeof(AddressType) * m_blockLimit);
             }
             int64_t* postingSize = (int64_t*)At(key);
-            // postingSize小于0说明是新分配的Mapping块，直接获取磁盘块，写入数据
             if (*postingSize < 0) {
                 m_pBlockController.GetBlocks(postingSize + 1, blocks);
                 m_pBlockController.WriteBlocks(postingSize + 1, blocks, value);
@@ -884,15 +920,12 @@ namespace SPTAG::SPANN {
             }
             else {
                 uintptr_t tmpblocks;
-                // 从buffer里拿一组Mapping块，一会再还一组回去
                 while (!m_buffer.try_pop(tmpblocks));
-                // 获取一组新的磁盘块，直接写入数据
-                // 为保证Checkpoint的效果，这里必须分配新的块进行写入
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
                 m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
                 *((int64_t*)tmpblocks) = value.Length();
 
-                // 释放原有的块
+                // Release the original blocks
                 m_pBlockController.ReleaseBlocks(postingSize + 1, (*postingSize + PageSize -1) >> PageSizeEx);
                 At(key) = tmpblocks;
                 m_buffer.push((uintptr_t)postingSize);
@@ -936,19 +969,26 @@ namespace SPTAG::SPANN {
 
             auto newSize = *postingSize + value.size();
             int newblocks = ((newSize + PageSize - 1) >> PageSizeEx);
+
             if (newblocks >= m_blockLimit) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failt to merge key:%d value:%lld since value too long!\n", key, newSize);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Origin Size: %lld, merge size: %lld\n", *postingSize, value.size());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[Merge] Key %d failed: new size %lld bytes requires %d blocks (limit: %d)\n",
+                    key, static_cast<long long>(newSize), newblocks, m_blockLimit);
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[Merge] Original size: %lld bytes, Merge size: %lld bytes\n",
+                    static_cast<long long>(*postingSize), static_cast<long long>(value.size()));
+
                 if (m_fileIoUseLock) {
                     m_rwMutex[hash(key)].unlock();
                 }
                 return ErrorCode::Fail;
             }
 
-            auto sizeInPage = (*postingSize) % PageSize;    // 最后一个块的实际大小
+            auto sizeInPage = (*postingSize) % PageSize;    // Actual size of the last block
             int oldblocks = (*postingSize >> PageSizeEx);
             int allocblocks = newblocks - oldblocks;
-            // 最后一个块没有写满的话，需要先读出来，然后拼接新的数据，再写回去
+            // If the last block is not full, we need to read it first, then append the new data, and write it back.
             if (sizeInPage != 0) {
                 std::string newValue;
                 AddressType readreq[] = { sizeInPage, *(postingSize + 1 + oldblocks) };
@@ -962,12 +1002,12 @@ namespace SPTAG::SPANN {
                 m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
                 *((int64_t*)tmpblocks) = newSize;
 
-                // 这里也是为了保证Checkpoint，所以将原本没用满的块释放，分配一个新的
+                // This is also to ensure checkpoint correctness, so we release the partially used block and allocate a new one.
                 m_pBlockController.ReleaseBlocks(postingSize + 1 + oldblocks, 1);
                 At(key) = tmpblocks;
                 m_buffer.push((uintptr_t)postingSize);
             }
-            else {  // 否则直接分配一组块接在后面
+            else {  // Otherwise, directly allocate a new batch of blocks to append after the current ones.
                 m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks);
                 m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
                 *postingSize = newSize;
@@ -1030,8 +1070,9 @@ namespace SPTAG::SPANN {
         void GetStat() {
             int remainBlocks = m_pBlockController.RemainBlocks();
             int remainGB = (long long)remainBlocks << PageSizeEx >> 30;
-            // int remainGB = remainBlocks >> 20 << 2;
+
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
+
             uint64_t get_times = 0;
             uint64_t get_time = 0;
             uint64_t read_time = 0;

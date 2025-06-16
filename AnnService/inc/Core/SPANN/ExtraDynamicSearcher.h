@@ -1691,7 +1691,7 @@ namespace SPTAG::SPANN {
                     if (index < p_postingListSizes.size()) {
                         std::string postinglist(m_vectorInfoSize * p_postingListSizes[index], '\0');
                         char* ptr = (char*)postinglist.c_str();
-			std::size_t selectIdx = p_postingSelections.lower_bound((int)index);
+			            std::size_t selectIdx = p_postingSelections.lower_bound((int)index);
                         for (int j = 0; j < p_postingListSizes[index]; ++j) {
                             if (p_postingSelections[selectIdx].node != index) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Selection ID NOT MATCH\n");
@@ -1716,7 +1716,8 @@ namespace SPTAG::SPANN {
 
             for (int j = 0; j < 20; j++) { threads.emplace_back(func); }
             for (auto& thread : threads) { thread.join(); }
-	    return ErrorCode::Success;
+
+	        return ErrorCode::Success;
         }
 
         ErrorCode AddIndex(std::shared_ptr<VectorSet>& p_vectorSet,
@@ -1788,7 +1789,10 @@ namespace SPTAG::SPANN {
             }
         }
 
-        bool AllFinished() { return m_splitThreadPool->allClear() && m_reassignThreadPool->allClear(); }
+        bool AllFinished() { 
+            return m_splitThreadPool->allClear() && m_reassignThreadPool->allClear(); 
+        }
+
         void ForceCompaction() override { db->ForceCompaction(); }
         void GetDBStats() override { 
             db->GetStat();

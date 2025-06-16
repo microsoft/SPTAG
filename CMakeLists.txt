@@ -18,13 +18,21 @@ if(NOT WIN32)
     CXX_COMPILER_DUMPVERSION(CXX_COMPILER_VERSION)
 endif()
 
+option(USE_ASAN "Enable AddressSanitizer (ASAN) for memory debugging" OFF)
+
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     # require at least gcc 5.0
     if (CXX_COMPILER_VERSION VERSION_LESS 5.0)
         message(FATAL_ERROR "GCC version must be at least 5.0!")
     endif()
-    set (CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-delete-non-virtual-dtor -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++17 -fopenmp -fsanitize=address")
-    #set (CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-delete-non-virtual-dtor -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++17 -fopenmp")
+    set(CMAKE_CXX_FLAGS "-Wall -Wunreachable-code -Wno-reorder -Wno-delete-non-virtual-dtor -Wno-sign-compare -Wno-unknown-pragmas -Wcast-align -lm -lrt -std=c++17 -fopenmp")
+    
+    if(USE_ASAN)
+        message(STATUS "ASAN is enabled")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+        set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -fsanitize=address")
+    endif()
+    
     set (CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -march=native")
     set (CMAKE_CXX_FLAGS_DEBUG   "-g -DDEBUG")
 

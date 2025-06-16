@@ -1,414 +1,814 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
-
 #include "inc/Test.h"
-#include "inc/Helper/VectorSetReader.h"
-#include "inc/Helper/SimpleIniReader.h"
+#include "inc/TestDataGenerator.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Helper/DiskIO.h"
-#include "inc/Core/Common/CommonUtils.h"
+#include "inc/Helper/VectorSetReader.h"
 #include "inc/Core/Common/QueryResultSet.h"
-#include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/Common/CommonUtils.h"
+
+#include <memory>
+#include <vector>
+#include <string>
+#include <tuple>
 #include <thread>
-#include <unordered_set>
-#include <ctime>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
 
 using namespace SPTAG;
 
 namespace SPFreshTest {
-SizeType n = 10000, q = 100;
-DimensionType m = 100;
-int k = 10;
+    SizeType N = 1000;
+    DimensionType M = 100;
+    int K = 10;
 
-template <typename T>
-std::shared_ptr<SPTAG::VectorIndex> BuildIndex(SPTAG::IndexAlgoType algo, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::MetadataSet>& meta, const std::string out)
-{
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
-
-    std::string configstr =
-"[Base]\n\
-DistCalcMethod=L2\n\
-IndexAlgoType=BKT\n\
-ValueType=Int8\n\
-Dim=" + std::to_string(m) + "\n\
-IndexDirectory=" + out + "\n\
-[SelectHead]\n\
-isExecute=true\n\
-NumberOfThreads=16\n\
-SelectThreshold=0\n\
-SplitFactor=0\n\
-SplitThreshold=0\n\
-Ratio=0.2\n\
-[BuildHead]\n\
-isExecute=true\n\
-NumberOfThreads=16\n\
-[BuildSSDIndex]\n\
-isExecute=true\n\
-BuildSsdIndex=true\n\
-InternalResultNum=64\n\
-SearchInternalResultNum=64\n\
-NumberOfThreads=16\n\
-PostingPageLimit=4\n\
-SearchPostingPageLimit=4\n\
-TmpDir=tmpdir\n\
-UseFileIO=true\n\
-UseSPDKIO=false\n\
-UseKV=false\n\
-SpdkBatchSize=64\n\
-ExcludeHead=false\n\
-ResultNum=10\n\
-SearchThreadNum=2\n\
-Update=true\n\
-SteadyState=true\n\
-InsertThreadNum=1\n\
-AppendThreadNum=1\n\
-ReassignThreadNum=0\n\
-DisableReassign=false\n\
-ReassignK=64\n\
-LatencyLimit=50.0\n\
-SearchDuringUpdate=true\n\
-MergeThreshold=10\n\
-Sampling=4\n\
-BufferLength=6\n\
-InPlace=true\n\
-";
-
-    SPTAG::Helper::IniReader iniReader;
-    std::shared_ptr<SPTAG::Helper::DiskIO> bufferhandle(new SPTAG::Helper::SimpleBufferIO());
-    if (bufferhandle == nullptr || !bufferhandle->Initialize(configstr.data(), std::ios::in, configstr.size())) return nullptr;
-    if (SPTAG::ErrorCode::Success != iniReader.LoadIni(bufferhandle)) return nullptr;
-    
-    std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex" };
-    for (int i = 0; i < 4; i++) {
-    auto parameters = iniReader.GetParameters(sections[i].c_str());
-    for (auto iter = parameters.begin(); iter != parameters.end(); iter++) {
-        vecIndex->SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
-    }
-    }
-
-    vecIndex->BuildIndex(vec, meta, true, false, false);
-
-    //if (VectorIndex::LoadIndex(out, vecIndex) != ErrorCode::Success) {
-    //    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load index.\n");
-    //    exit(1);
-    //}
-    return vecIndex;
-}
-
-template <typename T>
-void Search(std::shared_ptr<VectorIndex>& vecIndex, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<SPTAG::VectorSet>& vec, std::shared_ptr<SPTAG::VectorSet>& addvec, int k, std::shared_ptr<VectorSet>& truth)
-{
-    SPTAG::SPANN::Index<T>* p_index = (SPTAG::SPANN::Index<T>*)vecIndex.get();
-    p_index->Initialize();
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Searching Index...\n");
-    std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, 64, true));
-    auto t1 = std::chrono::high_resolution_clock::now();
-    for (SizeType i = 0; i < queryset->Count(); i++)
+    template<typename T>
+    std::shared_ptr<VectorIndex> BuildIndex(
+        const std::string& outDirectory,
+        std::shared_ptr<VectorSet> vecset,
+        std::shared_ptr<MetadataSet> metaset,
+        const std::string& distMethod = "L2")
     {
-        res[i].SetTarget(queryset->GetVector(i));
-        vecIndex->SearchIndex(res[i]);
-	    //p_index->GetMemoryIndex()->SearchIndex(res[i]);
-        //p_index->SearchDiskIndex(res[i], nullptr);
+        auto vecIndex = VectorIndex::CreateInstance(IndexAlgoType::SPANN, GetEnumValueType<T>());
 
+        std::string configuration = R"(
+        [Base]
+            DistCalcMethod=L2
+            IndexAlgoType=BKT
+            ValueType=Int8
+            Dim=)" + std::to_string(M) + R"(
+            IndexDirectory=)" + outDirectory + R"(
+
+        [SelectHead]
+            isExecute=true
+            NumberOfThreads=16
+            SelectThreshold=0
+            SplitFactor=0
+            SplitThreshold=0
+            Ratio=0.2
+
+        [BuildHead]
+            isExecute=true
+            NumberOfThreads=16
+
+        [BuildSSDIndex]
+            isExecute=true
+            BuildSsdIndex=true
+            InternalResultNum=64
+            SearchInternalResultNum=64
+            NumberOfThreads=16
+            PostingPageLimit=4
+            SearchPostingPageLimit=4
+            TmpDir=tmpdir
+            UseFileIO=true
+            UseSPDKIO=false
+            UseKV=false
+            SpdkBatchSize=64
+            ExcludeHead=false
+            ResultNum=10
+            SearchThreadNum=2
+            Update=true
+            SteadyState=true
+            InsertThreadNum=1
+            AppendThreadNum=1
+            ReassignThreadNum=0
+            DisableReassign=false
+            ReassignK=64
+            LatencyLimit=50.0
+            SearchDuringUpdate=true
+            MergeThreshold=10
+            Sampling=4
+            BufferLength=6
+            InPlace=true
+        )";
+
+        std::shared_ptr<Helper::DiskIO> buffer(new Helper::SimpleBufferIO());
+        SPTAG::Helper::IniReader reader;
+        if (!buffer->Initialize(configuration.data(), std::ios::in, configuration.size())) return nullptr;
+        if (SPTAG::ErrorCode::Success != reader.LoadIni(buffer)) return nullptr;
+
+        std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex" };
+        for (const auto& sec : sections) {
+            auto params = reader.GetParameters(sec.c_str());
+            for (const auto& [key, val] : params) {
+                vecIndex->SetParameter(key.c_str(), val.c_str(), sec.c_str());
+            }
+        }
+
+        auto buildStatus = vecIndex->BuildIndex(vecset, metaset, true, false, false);
+        if (buildStatus != ErrorCode::Success) return nullptr;
+
+        return vecIndex;
     }
-    p_index->ExitBlockController();
 
-    auto t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "Search time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(queryset->Count())) << "us" << std::endl;
-
-    float eps = 1e-4f, recall = 0;
-    bool deleted;
-    int truthDimension = min(k, truth->Dimension());
-    for (SizeType i = 0; i < queryset->Count(); i++)
+    template <typename T>
+    std::vector<QueryResult> SearchOnly(std::shared_ptr<VectorIndex>& vecIndex,
+                                        std::shared_ptr<VectorSet>& queryset,
+                                        int k)
     {
-        SizeType* nn = (SizeType*)(truth->GetVector(i));
-        for (int j = 0; j < truthDimension; j++)
-        {
-            std::string truthstr = std::to_string(nn[j]);
-            ByteArray truthmeta = ByteArray((std::uint8_t*)(truthstr.c_str()), truthstr.length(), false);
-	    float truthdist = 0;
-	    if (nn[j] < n) truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), vec->GetVector(nn[j]));
-	    else truthdist = vecIndex->ComputeDistance(queryset->GetVector(i), addvec->GetVector(nn[j] - n));
-            for (int l = 0; l < k; l++)
-            {
-		if (nn[j] == res[i].GetResult(l)->VID) {
-		    recall += 1.0;
-		    break;
-		}
-		else if (fabs(truthdist - res[i].GetResult(l)->Dist) <= eps * (fabs(truthdist) + eps)) {
-                    recall += 1.0;
-                    break;
-                }
-            }
-        }
-    }
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall %d@%d: %f\n", k, truthDimension, recall / queryset->Count() / truthDimension);
-}
-
-template <typename T>
-void GenerateData(std::shared_ptr<VectorSet>& vecset, std::shared_ptr<MetadataSet>& metaset, std::shared_ptr<VectorSet>& queryset, std::shared_ptr<VectorSet>& truth, 
-    std::shared_ptr<VectorSet>& addvecset, std::shared_ptr<MetadataSet>& addmetaset, std::shared_ptr<VectorSet>& addtruth, std::string distCalcMethod, int k)
-{
-    if (fileexists("perftest_vector.bin") && fileexists("perftest_meta.bin") && fileexists("perftest_metaidx.bin") && fileexists("perftest_query.bin") && 
-        fileexists("perftest_addvector.bin") && fileexists("perftest_addmeta.bin") && fileexists("perftest_addmetaidx.bin")) {
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<T>(), m, VectorFileType::DEFAULT));
-        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("perftest_vector.bin"))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-            exit(1);
-        }
-        vecset = vectorReader->GetVectorSet();
-
-        metaset.reset(new MemMetadataSet("perftest_meta.bin", "perftest_metaidx.bin", vecset->Count() * 2, vecset->Count() * 2, 10));
-
-        if (ErrorCode::Success != vectorReader->LoadFile("perftest_query.bin"))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
-            exit(1);
-        }
-        queryset = vectorReader->GetVectorSet();
-
-        if (ErrorCode::Success != vectorReader->LoadFile("perftest_addvector.bin"))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-            exit(1);
-        }
-        addvecset = vectorReader->GetVectorSet();
-
-        addmetaset.reset(new MemMetadataSet("perftest_addmeta.bin", "perftest_addmetaidx.bin", addvecset->Count() * 2, addvecset->Count() * 2, 10));
-    }
-    else {
-        ByteArray vec = ByteArray::Alloc(sizeof(T) * n * m);
-        for (SizeType i = 0; i < n; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
-        }
-        vecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
-        vecset->Save("perftest_vector.bin");
-
-        ByteArray meta = ByteArray::Alloc(n * 6);
-        ByteArray metaoffset = ByteArray::Alloc((n + 1) * sizeof(std::uint64_t));
-        std::uint64_t offset = 0;
-        for (SizeType i = 0; i < n; i++) {
-            ((std::uint64_t*)metaoffset.Data())[i] = offset;
-            std::string a = std::to_string(i);
-            memcpy(meta.Data() + offset, a.c_str(), a.length());
-            offset += a.length();
-        }
-        ((std::uint64_t*)metaoffset.Data())[n] = offset;
-        metaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
-        metaset->SaveMetadata("perftest_meta.bin", "perftest_metaidx.bin");
-
-        ByteArray query = ByteArray::Alloc(sizeof(T) * q * m);
-        for (SizeType i = 0; i < q; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)query.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
-        }
-        queryset.reset(new BasicVectorSet(query, GetEnumValueType<T>(), m, q));
-        queryset->Save("perftest_query.bin");
-
-        for (SizeType i = 0; i < n; i++) {
-            for (DimensionType j = 0; j < m; j++) {
-                ((T*)vec.Data())[i * m + j] = (T)COMMON::Utils::rand(127, -127);
-            }
-        }
-        addvecset.reset(new BasicVectorSet(vec, GetEnumValueType<T>(), m, n));
-        addvecset->Save("perftest_addvector.bin");
-
-        offset = 0;
-        for (SizeType i = 0; i < n; i++) {
-            ((std::uint64_t*)metaoffset.Data())[i] = offset;
-            std::string a = std::to_string(i + n);
-            memcpy(meta.Data() + offset, a.c_str(), a.length());
-            offset += a.length();
-        }
-        ((std::uint64_t*)metaoffset.Data())[n] = offset;
-        addmetaset.reset(new MemMetadataSet(meta, metaoffset, n, n * 2, n * 2, 10));
-        addmetaset->SaveMetadata("perftest_addmeta.bin", "perftest_addmetaidx.bin");
-    }
-
-    if (fileexists(("perftest_truth." + distCalcMethod).c_str())) {
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), k, VectorFileType::DEFAULT));
-        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("perftest_truth." + distCalcMethod))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
-            exit(1);
-        }
-        truth = vectorReader->GetVectorSet();
-    }
-    else {
-        omp_set_num_threads(5);
-
-        DistCalcMethod distMethod;
-        Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
-        if (distMethod == DistCalcMethod::Cosine) {
-            std::cout << "Normalize vecset!" << std::endl;
-            COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
-        }
-
-        ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
-
-#pragma omp parallel for
-        for (SizeType i = 0; i < queryset->Count(); ++i)
-        {
-            SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
-
-            COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
-            for (SizeType j = 0; j < vecset->Count(); j++)
-            {
-                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
-                res.AddPoint(j, dist);
-            }
-            res.SortResult();
-            for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
-        }
-        truth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
-        truth->Save("perftest_truth." + distCalcMethod);
-    }
-
-    if (fileexists(("perftest_addtruth." + distCalcMethod).c_str())) {
-        std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<float>(), k, VectorFileType::DEFAULT));
-        auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-        if (ErrorCode::Success != vectorReader->LoadFile("perftest_addtruth." + distCalcMethod))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read truth file.\n");
-            exit(1);
-        }
-        addtruth = vectorReader->GetVectorSet();
-    }
-    else {
-        omp_set_num_threads(5);
-
-        DistCalcMethod distMethod;
-        Helper::Convert::ConvertStringTo(distCalcMethod.c_str(), distMethod);
-        if (distMethod == DistCalcMethod::Cosine) {
-            std::cout << "Normalize vecset!" << std::endl;
-            COMMON::Utils::BatchNormalize((T*)(vecset->GetData()), vecset->Count(), vecset->Dimension(), COMMON::Utils::GetBase<T>(), 5);
-        }
-
-        ByteArray tru = ByteArray::Alloc(sizeof(float) * queryset->Count() * k);
-
-#pragma omp parallel for
-        for (SizeType i = 0; i < queryset->Count(); ++i)
-        {
-            SizeType* neighbors = ((SizeType*)tru.Data()) + i * k;
-
-            COMMON::QueryResultSet<T> res((const T*)queryset->GetVector(i), k);
-            for (SizeType j = 0; j < vecset->Count(); j++)
-            {
-                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(vecset->GetVector(j)), queryset->Dimension(), distMethod);
-                res.AddPoint(j, dist);
-            }
-            for (SizeType j = 0; j < addvecset->Count(); j++)
-            {
-                float dist = COMMON::DistanceUtils::ComputeDistance(res.GetTarget(), reinterpret_cast<T*>(addvecset->GetVector(j)), queryset->Dimension(), distMethod);
-                res.AddPoint(j + n, dist);
-            }
-            res.SortResult();
-            for (int j = 0; j < k; j++) neighbors[j] = res.GetResult(j)->VID;
-        }
-        addtruth.reset(new BasicVectorSet(tru, GetEnumValueType<float>(), k, queryset->Count()));
-        addtruth->Save("perftest_addtruth." + distCalcMethod);
-    }
-}
-
-template <typename ValueType>
-void InsertVectors(SPANN::Index<ValueType>* p_index,
-    int insertThreads,
-    int step,
-    std::shared_ptr<SPTAG::VectorSet> addset,
-    std::shared_ptr<MetadataSet>& metaset)
-{
-    SPANN::Options& p_opts = *(p_index->GetOptions());
-    p_index->ForceCompaction();
-    p_index->GetDBStat();
- 
-    std::vector<std::thread> threads;
-
-    std::atomic_size_t vectorsSent(0);
-    //std::vector<double> latency_vector(step);
-
-    auto func = [&]()
-    {
+        auto* p_index = static_cast<SPTAG::SPANN::Index<T>*>(vecIndex.get());
         p_index->Initialize();
-        size_t index = 0;
-        while (true)
-        {
-            index = vectorsSent.fetch_add(1);
-            if (index < step)
-            {
-                if ((index & ((1 << 5) - 1)) == 0)
-                {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
+
+        std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (SizeType i = 0; i < queryset->Count(); i++) {
+            res[i].SetTarget(queryset->GetVector(i));
+            vecIndex->SearchIndex(res[i]);
+        }
+        p_index->ExitBlockController();
+        auto t2 = std::chrono::high_resolution_clock::now();
+
+        float avgUs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / static_cast<float>(queryset->Count());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Avg search time: %.2fus/query\n", avgUs);
+
+        return res;
+    }
+
+    template <typename T>
+    float EvaluateRecall(const std::vector<QueryResult>& res,
+                        std::shared_ptr<VectorIndex>& vecIndex,
+                        std::shared_ptr<VectorSet>& queryset,
+                        std::shared_ptr<VectorSet>& truth,
+                        std::shared_ptr<VectorSet>& baseVec,
+                        std::shared_ptr<VectorSet>& addVec,
+                        SizeType baseCount,
+                        int k)
+    {
+        if (!truth) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth data is null. Cannot compute recall.\n");
+            return 0.0f;
+        }
+
+        const SizeType recallK = std::min(k, static_cast<int>(truth->Dimension()));
+        float totalRecall = 0.0f;
+        float eps = 1e-4f;
+
+        if (truth->GetValueType() != GetEnumValueType<SizeType>()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Expected truth VectorSet to store SizeType, but got incompatible type.\n");
+            return 0.0f;
+        }
+
+        for (SizeType i = 0; i < queryset->Count(); ++i) {
+            const SizeType* truthNN = reinterpret_cast<const SizeType*>(truth->GetVector(i));
+            for (int j = 0; j < recallK; ++j) {
+                SizeType truthVid = truthNN[j];
+                float truthDist = (truthVid < baseCount)
+                    ? vecIndex->ComputeDistance(queryset->GetVector(i), baseVec->GetVector(truthVid))
+                    : vecIndex->ComputeDistance(queryset->GetVector(i), addVec->GetVector(truthVid - baseCount));
+
+                for (int l = 0; l < k; ++l) {
+                    const auto result = res[i].GetResult(l);
+                    if (truthVid == result->VID ||
+                        std::fabs(truthDist - result->Dist) <= eps * (std::fabs(truthDist) + eps)) {
+                        totalRecall += 1.0f;
+                        break;
+                    }
                 }
-                auto insertBegin = std::chrono::high_resolution_clock::now();
-		        ByteArray p_meta = metaset->GetMetadata((SizeType)index);
-		        std::uint64_t* offsets = new std::uint64_t[2]{ 0,  p_meta.Length()};
-                std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), true), 1));
-                p_index->AddIndex(addset->GetVector((SizeType)index), 1, p_opts.m_dim, meta, true);
-                auto insertEnd = std::chrono::high_resolution_clock::now();
-                //latency_vector[index] = std::chrono::duration_cast<std::chrono::microseconds>(insertEnd - insertBegin).count();
-            }
-            else
-            {
-                p_index->ExitBlockController();
-                return;
             }
         }
-    };
-    for (int j = 0; j < insertThreads; j++) { threads.emplace_back(func); }
-    for (auto& thread : threads) { thread.join(); }
 
-    while(!p_index->AllFinished())
+        float avgRecall = totalRecall / (queryset->Count() * recallK);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall %d@%d = %.4f\n", k, recallK, avgRecall);
+        return avgRecall;
+    }
+
+    template <typename T>
+    float Search(std::shared_ptr<VectorIndex>& vecIndex,
+                std::shared_ptr<VectorSet>& queryset,
+                std::shared_ptr<VectorSet>& baseVec,
+                std::shared_ptr<VectorSet>& addVec,
+                int k,
+                std::shared_ptr<VectorSet>& truth,
+                SizeType baseCount)
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        auto results = SearchOnly<T>(vecIndex, queryset, k);
+        return EvaluateRecall<T>(results, vecIndex, queryset, truth, baseVec, addVec, baseCount, k);
+    }
+
+    template <typename ValueType>
+    void InsertVectors(SPANN::Index<ValueType>* p_index,
+        int insertThreads,
+        int step,
+        std::shared_ptr<SPTAG::VectorSet> addset,
+        std::shared_ptr<MetadataSet>& metaset)
+    {
+        SPANN::Options& p_opts = *(p_index->GetOptions());
+        p_index->ForceCompaction();
+        p_index->GetDBStat();
+    
+        std::vector<std::thread> threads;
+
+        std::atomic_size_t vectorsSent(0);
+        auto func = [&]()
+        {
+            p_index->Initialize();
+            size_t index = 0;
+            while (true)
+            {
+                index = vectorsSent.fetch_add(1);
+                if (index < step)
+                {
+                    if ((index & ((1 << 5) - 1)) == 0)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Sent %.2lf%%...\n", index * 100.0 / step);
+                    }
+                    auto insertBegin = std::chrono::high_resolution_clock::now();
+                    ByteArray p_meta = metaset->GetMetadata((SizeType)index);
+                    std::uint64_t* offsets = new std::uint64_t[2]{ 0,  p_meta.Length()};
+                    std::shared_ptr<SPTAG::MetadataSet> meta(new SPTAG::MemMetadataSet(p_meta, ByteArray((std::uint8_t*)offsets, 2 * sizeof(std::uint64_t), true), 1));
+                    auto status = p_index->AddIndex(addset->GetVector((SizeType)index), 1, p_opts.m_dim, meta, true);
+                    BOOST_REQUIRE(status == ErrorCode::Success);
+                    auto insertEnd = std::chrono::high_resolution_clock::now();
+                }
+                else
+                {
+                    p_index->ExitBlockController();
+                    return;
+                }
+            }
+        };
+        for (int j = 0; j < insertThreads; j++) { threads.emplace_back(func); }
+        for (auto& thread : threads) { thread.join(); }
+
+        while(!p_index->AllFinished())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
     }
 }
 
-template <typename T>
-void CTest(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
-{
-    std::shared_ptr<VectorSet> vecset, queryset, truth, addset, addtruth;
-    std::shared_ptr<MetadataSet> metaset, addmetaset;
-    GenerateData<T>(vecset, metaset, queryset, truth, addset, addmetaset, addtruth, distCalcMethod, k); 
+bool CompareFilesWithLogging(const std::filesystem::path& file1, const std::filesystem::path& file2) {
+    std::ifstream f1(file1, std::ios::binary);
+    std::ifstream f2(file2, std::ios::binary);
 
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = BuildIndex<T>(algo, vecset, metaset, "testindices");
-    Search<T>(vecIndex, queryset, vecset, addset, k, truth);
-    vecIndex->SaveIndex("testindices");
-   
-    vecIndex.reset();
-    if (SPTAG::VectorIndex::LoadIndex("testindices", vecIndex) != ErrorCode::Success) return;
-    BOOST_CHECK(nullptr != vecIndex);
-    Search<T>(vecIndex, queryset, vecset, addset, k, truth);
-
-    SPANN::Index<T> * p_index = (SPANN::Index<T>*)vecIndex.get();
-    //p_index->AddIndex(addset, addmetaset, true, false);
-    InsertVectors<T>(p_index, 2, 1000, addset, addmetaset);
-    Search<T>(vecIndex, queryset, vecset, addset, k, addtruth);
-    vecIndex->SaveIndex("testindices");
-
-    vecIndex.reset();
-    if (SPTAG::VectorIndex::LoadIndex("testindices", vecIndex) != ErrorCode::Success) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load index.\n");
-        return;
+    if (!f1 || !f2) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+            "Failed to open one of the files:\n  %s\n  %s\n",
+            file1.string().c_str(),
+            file2.string().c_str());
+        return false;
     }
-    BOOST_CHECK(nullptr != vecIndex);
-    Search<T>(vecIndex, queryset, vecset, addset, k, addtruth);
+
+    char c1, c2;
+    size_t offset = 0;
+    size_t diffCount = 0;
+
+    while (f1.get(c1) && f2.get(c2)) {
+        if (c1 != c2) {
+            if (diffCount == 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "File mismatch at: %s\n", file1.filename().string().c_str());
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "  Byte %zu: 0x%02x != 0x%02x\n",
+                offset,
+                static_cast<unsigned char>(c1),
+                static_cast<unsigned char>(c2));
+            if (++diffCount >= 16) break;
+        }
+        ++offset;
+    }
+
+    if (f1.get(c1) || f2.get(c2)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+            "File size differs: %s\n", file1.filename().string().c_str());
+        return false;
+    }
+
+    return diffCount == 0;
 }
+
+bool CompareDirectoriesWithLogging(const std::filesystem::path& dir1,
+                                   const std::filesystem::path& dir2,
+                                   const std::unordered_set<std::string>& exceptions = {}) {
+    std::map<std::string, std::filesystem::path> files1, files2;
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir1)) {
+        if (entry.is_regular_file()) {
+            files1[std::filesystem::relative(entry.path(), dir1).string()] = entry.path();
+        }
+    }
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir2)) {
+        if (entry.is_regular_file()) {
+            files2[std::filesystem::relative(entry.path(), dir2).string()] = entry.path();
+        }
+    }
+
+    bool matched = true;
+
+    for (const auto& [relPath, filePath1] : files1) {
+        if (exceptions.count(relPath)) continue;
+
+        auto it = files2.find(relPath);
+        if (it == files2.end()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "Missing in %s: %s\n", dir2.string().c_str(), relPath.c_str());
+            matched = false;
+            continue;
+        }
+        if (!CompareFilesWithLogging(filePath1, it->second)) {
+            matched = false;
+        }
+    }
+
+    for (const auto& [relPath, _] : files2) {
+        if (exceptions.count(relPath)) continue;
+        if (files1.find(relPath) == files1.end()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "Extra in %s: %s\n", dir2.string().c_str(), relPath.c_str());
+            matched = false;
+        }
+    }
+
+    return matched;
 }
 
 BOOST_AUTO_TEST_SUITE(SPFreshTest)
 
-
-BOOST_AUTO_TEST_CASE(FlowTest)
+BOOST_AUTO_TEST_CASE(TestLoadAndSave)
 {
-	SPFreshTest::CTest<int8_t>(SPTAG::IndexAlgoType::SPANN, "L2");
+    using namespace SPFreshTest;
+
+    // Prepare test data using TestDataGenerator
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    auto originalIndex = BuildIndex<int8_t>("original_index", vecset, metaset);
+
+    auto status = originalIndex->SaveIndex("original_index");
+    BOOST_REQUIRE(status == ErrorCode::Success);
+
+    std::shared_ptr<VectorIndex> loadedIndex;
+    auto loadStatus = VectorIndex::LoadIndex("original_index", loadedIndex);
+    BOOST_REQUIRE(loadStatus == ErrorCode::Success);
+    BOOST_REQUIRE(loadedIndex != nullptr);
+
+    status = loadedIndex->SaveIndex("loaded_and_saved_index");
+    BOOST_REQUIRE(status == ErrorCode::Success);
+    BOOST_REQUIRE(loadedIndex != nullptr);
+
+    std::unordered_set<std::string> exceptions = {
+        "indexloader.ini"
+    };
+
+    // Compare files in both directories
+    BOOST_REQUIRE_MESSAGE(
+        CompareDirectoriesWithLogging("original_index", "loaded_and_saved_index", exceptions),
+        "Saved index does not match loaded-then-saved index"
+    );
+
+    std::filesystem::remove_all("original_index");
+    std::filesystem::remove_all("loaded_and_saved_index");
+}
+
+BOOST_AUTO_TEST_CASE(TestReopenIndexRecall)
+{
+    using namespace SPFreshTest;
+
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    auto originalIndex = BuildIndex<int8_t>("original_index", vecset, metaset);
+    BOOST_REQUIRE(originalIndex != nullptr);
+    BOOST_REQUIRE(originalIndex->SaveIndex("original_index") == ErrorCode::Success);
+
+    std::shared_ptr<VectorIndex> loadedOnce;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("original_index", loadedOnce) == ErrorCode::Success);
+    BOOST_REQUIRE(loadedOnce->SaveIndex("reopened_index") == ErrorCode::Success);
+
+    std::shared_ptr<VectorIndex> loadedTwice;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("reopened_index", loadedTwice) == ErrorCode::Success);
+
+    float recall1 = Search<int8_t>(originalIndex, queryset, vecset, addvecset, K, truth, N);
+    float recall2 = Search<int8_t>(loadedTwice, queryset, vecset, addvecset, K, truth, N);
+
+    BOOST_REQUIRE_MESSAGE(std::fabs(recall1 - recall2) < 1e-5,
+        "Recall mismatch between original and reopened index");
+
+    std::filesystem::remove_all("original_index");
+    std::filesystem::remove_all("reopened_index");
+}
+
+BOOST_AUTO_TEST_CASE(TestInsertAndSearch)
+{
+    using namespace SPFreshTest;
+
+    // Prepare test data using TestDataGenerator
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    // Build base index
+    auto index = BuildIndex<int8_t>("insert_test_index", vecset, metaset);
+    BOOST_REQUIRE(index->SaveIndex("insert_test_index") == ErrorCode::Success);
+
+    std::shared_ptr<VectorIndex> loadedOnce;
+    auto loadStatus = VectorIndex::LoadIndex("insert_test_index", loadedOnce);
+
+    InsertVectors<int8_t>(static_cast<SPANN::Index<int8_t>*>(loadedOnce.get()), 2, 1000, addvecset, addmetaset);
+    SearchOnly<int8_t>(loadedOnce, queryset, K);
+
+    std::filesystem::remove_all("insert_test_index");
+}
+
+BOOST_AUTO_TEST_CASE(TestClone)
+{
+    using namespace SPFreshTest;
+
+    // Prepare test data using TestDataGenerator
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    auto originalIndex = BuildIndex<int8_t>("original_index", vecset, metaset);
+
+    auto status = originalIndex->SaveIndex("original_index");
+    BOOST_REQUIRE(status == ErrorCode::Success);
+
+    auto clonedIndex = VectorIndex::Clone("original_index", "cloned_index");
+
+    status = clonedIndex->SaveIndex("cloned_index");
+    BOOST_REQUIRE(status == ErrorCode::Success);
+
+    std::unordered_set<std::string> exceptions = {
+        "indexloader.ini"
+    };
+
+    // Compare files in both directories
+    BOOST_REQUIRE_MESSAGE(
+        CompareDirectoriesWithLogging("original_index", "cloned_index", exceptions),
+        "Saved index does not match loaded-then-saved index"
+    );
+
+    std::filesystem::remove_all("original_index");
+    std::filesystem::remove_all("cloned_index");
+}
+
+BOOST_AUTO_TEST_CASE(TestCloneRecall)
+{
+    using namespace SPFreshTest;
+
+    // Prepare test data using TestDataGenerator
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    auto originalIndex = BuildIndex<int8_t>("original_index", vecset, metaset);
+
+    auto status = originalIndex->SaveIndex("original_index");
+    BOOST_REQUIRE(status == ErrorCode::Success);
+
+    auto clonedIndex = VectorIndex::Clone("original_index", "cloned_index");
+
+    BOOST_REQUIRE(clonedIndex != nullptr);
+
+    std::shared_ptr<VectorIndex> loadedClonedIndex;
+    auto loadStatus = VectorIndex::LoadIndex("cloned_index", loadedClonedIndex);
+    BOOST_REQUIRE(loadStatus == ErrorCode::Success);
+    BOOST_REQUIRE(loadedClonedIndex != nullptr);
+
+    // Run search on both
+    float originalRecall = Search<int8_t>(originalIndex, queryset, vecset, addvecset, K, truth, N);
+    float clonedRecall = Search<int8_t>(loadedClonedIndex, queryset, vecset, addvecset, K, truth, N);
+
+    BOOST_REQUIRE_MESSAGE(std::fabs(originalRecall - clonedRecall) < 1e-5,
+        "Recall mismatch between original and cloned index: "
+        << "original=" << originalRecall << ", cloned=" << clonedRecall);
+
+    std::filesystem::remove_all("original_index");
+    std::filesystem::remove_all("cloned_index");
+}
+
+BOOST_AUTO_TEST_CASE(IndexPersistenceAndInsertSanity)
+{
+    using namespace SPFreshTest;
+
+    // Prepare test data
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    // Build and save base index
+    auto baseIndex = BuildIndex<int8_t>("insert_test_index", vecset, metaset);
+    BOOST_REQUIRE(baseIndex != nullptr);
+    BOOST_REQUIRE(baseIndex->SaveIndex("insert_test_index") == ErrorCode::Success);
+
+    // Load the saved index
+    std::shared_ptr<VectorIndex> loadedOnce;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_test_index", loadedOnce) == ErrorCode::Success);
+    BOOST_REQUIRE(loadedOnce != nullptr);
+
+    // Search sanity check
+    SearchOnly<int8_t>(loadedOnce, queryset, K);
+
+    // Clone the loaded index
+    auto clonedIndex = VectorIndex::Clone("insert_test_index", "insert_cloned_index");
+    BOOST_REQUIRE(clonedIndex != nullptr);
+
+    // Save and reload the cloned index
+    BOOST_REQUIRE(clonedIndex->SaveIndex("insert_cloned_index") == ErrorCode::Success);
+    std::shared_ptr<VectorIndex> loadedClone;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_cloned_index", loadedClone) == ErrorCode::Success);
+    BOOST_REQUIRE(loadedClone != nullptr);
+
+    // Insert new vectors
+    InsertVectors<int8_t>(
+        static_cast<SPTAG::SPANN::Index<int8_t>*>(loadedClone.get()),
+        1,
+        static_cast<int>(addvecset->Count()),
+        addvecset,
+        addmetaset
+    );
+
+    // Final save and reload after insert
+    BOOST_REQUIRE(loadedClone->SaveIndex("insert_final_index") == ErrorCode::Success);
+    std::shared_ptr<VectorIndex> reloadedFinal;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_final_index", reloadedFinal) == ErrorCode::Success);
+
+    // Final search sanity
+    SearchOnly<int8_t>(reloadedFinal, queryset, K);
+
+    // Cleanup
+    std::filesystem::remove_all("insert_test_index");
+    std::filesystem::remove_all("insert_cloned_index");
+    std::filesystem::remove_all("insert_final_index");
+}
+
+BOOST_AUTO_TEST_CASE(IndexPersistenceAndInsertMultipleThreads)
+{
+    using namespace SPFreshTest;
+
+    // Prepare test data
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    // Build and save base index
+    auto baseIndex = BuildIndex<int8_t>("insert_test_index_multi", vecset, metaset);
+    BOOST_REQUIRE(baseIndex != nullptr);
+    BOOST_REQUIRE(baseIndex->SaveIndex("insert_test_index_multi") == ErrorCode::Success);
+
+    // Load the saved index
+    std::shared_ptr<VectorIndex> loadedOnce;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_test_index_multi", loadedOnce) == ErrorCode::Success);
+    BOOST_REQUIRE(loadedOnce != nullptr);
+
+    // Search sanity check
+    SearchOnly<int8_t>(loadedOnce, queryset, K);
+
+    // Clone the loaded index
+    auto clonedIndex = VectorIndex::Clone("insert_test_index_multi", "insert_cloned_index_multi");
+    BOOST_REQUIRE(clonedIndex != nullptr);
+
+    // Save and reload the cloned index
+    BOOST_REQUIRE(clonedIndex->SaveIndex("insert_cloned_index_multi") == ErrorCode::Success);
+    std::shared_ptr<VectorIndex> loadedClone;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_cloned_index_multi", loadedClone) == ErrorCode::Success);
+    BOOST_REQUIRE(loadedClone != nullptr);
+
+    // Insert new vectors
+    InsertVectors<int8_t>(
+        static_cast<SPTAG::SPANN::Index<int8_t>*>(loadedClone.get()),
+        2,
+        static_cast<int>(addvecset->Count()),
+        addvecset,
+        addmetaset
+    );
+
+    // Final save and reload after insert
+    BOOST_REQUIRE(loadedClone->SaveIndex("insert_final_index_multi") == ErrorCode::Success);
+    std::shared_ptr<VectorIndex> reloadedFinal;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("insert_final_index_multi", reloadedFinal) == ErrorCode::Success);
+
+    // Final search sanity
+    SearchOnly<int8_t>(reloadedFinal, queryset, K);
+
+    // Cleanup
+    std::filesystem::remove_all("insert_test_index_multi");
+    std::filesystem::remove_all("insert_cloned_index_multi");
+    std::filesystem::remove_all("insert_final_index_multi");
+}
+
+BOOST_AUTO_TEST_CASE(IndexSaveDuringQuery)
+{
+    using namespace SPFreshTest;
+
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    auto index = BuildIndex<int8_t>("save_during_query_index", vecset, metaset);
+    BOOST_REQUIRE(index != nullptr);
+
+    auto* spannIndex = static_cast<SPTAG::SPANN::Index<int8_t>*>(index.get());
+    spannIndex->Initialize();
+
+    std::atomic<bool> keepQuerying(true);
+    std::thread queryThread([&]() {
+        while (keepQuerying) {
+            for (int q = 0; q < queryset->Count(); ++q) {
+                QueryResult result(queryset->GetVector(q), K, true);
+                index->SearchIndex(result);
+            }
+        }
+    });
+
+    // Wait a bit before saving
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ErrorCode saveStatus = index->SaveIndex("save_during_query_index");
+    BOOST_REQUIRE(saveStatus == ErrorCode::Success);
+
+    keepQuerying = false;
+    queryThread.join();
+
+    std::shared_ptr<VectorIndex> reloaded;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("save_during_query_index", reloaded) == ErrorCode::Success);
+    BOOST_REQUIRE(reloaded != nullptr);
+
+    SearchOnly<int8_t>(reloaded, queryset, K);
+    std::filesystem::remove_all("save_during_query_index");
+}
+
+BOOST_AUTO_TEST_CASE(IndexMultiThreadedQuerySanity)
+{
+    using namespace SPFreshTest;
+
+    // Generate test data
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    // Build and save index
+    auto index = BuildIndex<int8_t>("multi_query_index", vecset, metaset);
+    BOOST_REQUIRE(index->SaveIndex("multi_query_index") == ErrorCode::Success);
+
+    // Reload the index
+    std::shared_ptr<VectorIndex> loaded;
+    BOOST_REQUIRE(VectorIndex::LoadIndex("multi_query_index", loaded) == ErrorCode::Success);
+    BOOST_REQUIRE(loaded != nullptr);
+
+    // Insert additional vectors
+    InsertVectors<int8_t>(
+        static_cast<SPTAG::SPANN::Index<int8_t>*>(loaded.get()),
+        2,
+        static_cast<int>(addvecset->Count()),
+        addvecset,
+        addmetaset
+    );
+
+    // Perform multithreaded query
+    const int threadCount = 4;
+    std::vector<std::thread> threads;
+    std::atomic<int> nextQuery(0);
+    std::atomic<int> completedQueries(0);
+
+    for (int t = 0; t < threadCount; ++t) {
+        threads.emplace_back([&, t]() {
+            auto* p_index = static_cast<SPTAG::SPANN::Index<int8_t>*>(loaded.get());
+            p_index->Initialize();
+
+            QueryResult result(nullptr, K, true);
+            while (true) {
+                int i = nextQuery.fetch_add(1);
+                if (i >= queryset->Count()) break;
+
+                result.SetTarget(queryset->GetVector(static_cast<SPTAG::SizeType>(i)));
+                loaded->SearchIndex(result);
+
+                ++completedQueries;
+            }
+
+            p_index->ExitBlockController();
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Multithreaded query completed: %d queries\n", completedQueries.load());
+
+    // Cleanup
+    std::filesystem::remove_all("multi_query_index");
+}
+
+BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
+{
+    using namespace SPFreshTest;
+
+    constexpr int iterations = 5;
+    constexpr int insertBatchSize = 100;
+
+    std::shared_ptr<VectorSet> vecset, queryset, truth, addvecset, addtruth;
+    std::shared_ptr<MetadataSet> metaset, addmetaset;
+
+    TestUtils::TestDataGenerator<int8_t> generator(N, 10, M, K, "L2");
+    generator.Run(vecset, metaset, queryset, truth, addvecset, addmetaset, addtruth);
+
+    const std::string baseIndexName = "base_index";
+    BOOST_REQUIRE(BuildIndex<int8_t>(baseIndexName, vecset, metaset)->SaveIndex(baseIndexName) == ErrorCode::Success);
+
+    std::string previousIndexName = baseIndexName;
+
+    for (int iter = 0; iter < iterations; ++iter)
+    {
+        std::string shadowIndexName = "shadow_index_" + std::to_string(iter);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[%d] Loading index: %s\n", iter, previousIndexName.c_str());
+
+        // Load previous index
+        std::shared_ptr<VectorIndex> loaded;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(previousIndexName, loaded) == ErrorCode::Success);
+
+        // Query check
+        auto* index = static_cast<SPTAG::SPANN::Index<int8_t>*>(loaded.get());
+        index->Initialize();
+        for (int i = 0; i < std::min<SizeType>(queryset->Count(), 5); ++i) {
+            QueryResult result(queryset->GetVector(i), K, true);
+            loaded->SearchIndex(result);
+        }
+        index->ExitBlockController();
+
+        // Cleanup previous base index after first iteration
+        if (iter == 1) {
+            std::filesystem::remove_all(baseIndexName);
+        }
+
+        // Clone to shadow
+        BOOST_REQUIRE(VectorIndex::Clone(previousIndexName, shadowIndexName) != nullptr);
+
+        std::shared_ptr<VectorIndex> shadowLoaded;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(shadowIndexName, shadowLoaded) == ErrorCode::Success);
+        auto* shadowIndex = static_cast<SPTAG::SPANN::Index<int8_t>*>(shadowLoaded.get());
+
+        // Prepare insert batch
+        const int insertOffset = (iter * insertBatchSize) % static_cast<int>(addvecset->Count());
+        const int insertCount = std::min(insertBatchSize, static_cast<int>(addvecset->Count()) - insertOffset);
+
+        std::vector<std::uint8_t> metaBytes;
+        std::vector<std::uint64_t> offsetTable(insertCount + 1);
+        std::uint64_t offset = 0;
+        for (int i = 0; i < insertCount; ++i) {
+            ByteArray meta = addmetaset->GetMetadata(insertOffset + i);
+            offsetTable[i] = offset;
+            metaBytes.insert(metaBytes.end(), meta.Data(), meta.Data() + meta.Length());
+            offset += meta.Length();
+        }
+        offsetTable[insertCount] = offset;
+
+        ByteArray metaBuf(new std::uint8_t[metaBytes.size()], metaBytes.size(), true);
+        std::memcpy(metaBuf.Data(), metaBytes.data(), metaBytes.size());
+
+        ByteArray offsetBuf(new std::uint8_t[offsetTable.size() * sizeof(std::uint64_t)], offsetTable.size() * sizeof(std::uint64_t), true);
+        std::memcpy(offsetBuf.Data(), offsetTable.data(), offsetTable.size() * sizeof(std::uint64_t));
+
+        auto batchMeta = std::make_shared<SPTAG::MemMetadataSet>(metaBuf, offsetBuf, insertCount);
+        const void* vectorStart = addvecset->GetVector(insertOffset);
+
+        shadowIndex->AddIndex(vectorStart, insertCount, shadowIndex->GetOptions()->m_dim, batchMeta, true);
+        shadowIndex->ExitBlockController();
+
+        while (!shadowIndex->AllFinished()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        BOOST_REQUIRE(shadowLoaded->SaveIndex(shadowIndexName) == ErrorCode::Success);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[%d] Created new shadow index: %s\n", iter, shadowIndexName.c_str());
+
+        previousIndexName = shadowIndexName;
+    }
+
+    // Keep the final shadow index directory for debugging/inspection
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Kept final index: %s\n", previousIndexName.c_str());
+
+    // Cleanup all created indexes after test
+    std::filesystem::remove_all(baseIndexName);
+    for (int iter = 0; iter < iterations; ++iter) {
+        std::string shadow = "shadow_index_" + std::to_string(iter);
+        std::filesystem::remove_all(shadow);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

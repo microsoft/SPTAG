@@ -289,7 +289,11 @@ namespace SPTAG
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
         public:
-            bool AllFinished() { if (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO) return m_extraSearcher->AllFinished(); return true; }
+            bool AllFinished() { 
+                if (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO) 
+                    return m_extraSearcher->AllFinished(); 
+                return true; 
+            }
 
             void GetDBStat() { 
                 if (m_options.m_useKV || m_options.m_useSPDK || m_options.m_useFileIO) m_extraSearcher->GetDBStats(); 
