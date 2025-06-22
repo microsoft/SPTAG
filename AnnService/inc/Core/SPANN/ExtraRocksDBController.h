@@ -181,8 +181,17 @@ namespace SPTAG::SPANN
             rocksdb::PinnableSlice* slice_values = new rocksdb::PinnableSlice[num_keys];
             rocksdb::Status* statuses = new rocksdb::Status[num_keys];
 
+            // RocksDB uses Slice for keys, which doen't own the memory.
+            // We need to convert SizeType keys to string slices.
+
+            std::vector<std::string> str_keys(num_keys);
+
             for (int i = 0; i < num_keys; i++) {
-                slice_keys[i] = rocksdb::Slice(std::string((char*)&keys[i], sizeof(SizeType)));
+                str_keys[i] = std::string((char*)&keys[i], sizeof(SizeType));
+            }
+
+            for (int i = 0; i < num_keys; i++) {
+                slice_keys[i] = rocksdb::Slice(str_keys[i]);
             }
 
             db->MultiGet(rocksdb::ReadOptions(), db->DefaultColumnFamily(),
