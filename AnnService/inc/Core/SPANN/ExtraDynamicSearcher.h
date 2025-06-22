@@ -640,11 +640,11 @@ namespace SPTAG::SPANN {
                     else {
                         int begin, end = 0;
                         p_index->AddIndexId(args.centers + k * args._D, 1, m_opt->m_dim, begin, end);
-			{
+			            if (m_opt->m_excludehead){
                             std::lock_guard<std::mutex> tmplock(m_runningLock);
-                            m_vectorTranslateMap->AddBatch(1);    
+                            m_vectorTranslateMap->AddBatch(1);
+                            *(m_vectorTranslateMap->At(begin)) = MaxSize;    
                         }
-                        *(m_vectorTranslateMap->At(begin)) = MaxSize;
                         newHeadVID = begin;
                         newHeadsID.push_back(begin);
                         auto splitPutBegin = std::chrono::high_resolution_clock::now();

@@ -153,8 +153,10 @@ namespace SPTAG
             m_index->UpdateIndex();
             m_index->SetReady(true);
          
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headID map\n");
-	    m_vectorTranslateMap.Load(p_indexStreams[m_index->GetIndexFiles()->size()], m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+            if (m_options.m_excludehead) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headID map\n");
+                m_vectorTranslateMap.Load(p_indexStreams[m_index->GetIndexFiles()->size()], m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+            }
 
 	        std::string kvpath = m_options.m_indexDirectory + FolderSep + m_options.m_KVFile;
 	        std::string ssdmappingpath = m_options.m_indexDirectory + FolderSep + m_options.m_ssdMappingFile;
