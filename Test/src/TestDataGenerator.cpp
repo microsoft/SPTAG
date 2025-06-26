@@ -33,7 +33,7 @@ namespace TestUtils {
         if (fileexists("perftest_vector.bin") && fileexists("perftest_meta.bin") && fileexists("perftest_metaidx.bin")) {
             auto reader = LoadReader("perftest_vector.bin");
             vecset = reader->GetVectorSet();
-            metaset.reset(new MemMetadataSet("perftest_meta.bin", "perftest_metaidx.bin", vecset->Count() * 2, vecset->Count() * 2, 10));
+            metaset.reset(new MemMetadataSet("perftest_meta.bin", "perftest_metaidx.bin", vecset->Count() * 2, MaxSize, 10));
         }
         else {
             vecset = GenerateRandomVectorSet(m_n, m_m);
@@ -62,7 +62,7 @@ namespace TestUtils {
         if (fileexists("perftest_addvector.bin") && fileexists("perftest_addmeta.bin") && fileexists("perftest_addmetaidx.bin")) {
             auto reader = LoadReader("perftest_addvector.bin");
             addvecset = reader->GetVectorSet();
-            addmetaset.reset(new MemMetadataSet("perftest_addmeta.bin", "perftest_addmetaidx.bin", addvecset->Count() * 2, addvecset->Count() * 2, 10));
+            addmetaset.reset(new MemMetadataSet("perftest_addmeta.bin", "perftest_addmetaidx.bin", addvecset->Count() * 2, MaxSize, 10));
         }
         else {
             addvecset = GenerateRandomVectorSet(m_n, m_m);
@@ -80,7 +80,12 @@ namespace TestUtils {
         std::shared_ptr<VectorSet>& truth,
         bool normalize) {
         if (fileexists(filename.c_str())) {
-            auto reader = LoadReader(filename);
+            auto opts = std::make_shared<Helper::ReaderOptions>(GetEnumValueType<float>(), m_m, VectorFileType::DEFAULT);
+            auto reader = Helper::VectorSetReader::CreateInstance(opts);
+            if (ErrorCode::Success != reader->LoadFile(filename)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read file %s\n", filename.c_str());
+                exit(1);
+            }
             truth = reader->GetVectorSet();
             return;
         }
@@ -128,7 +133,7 @@ namespace TestUtils {
             offset += id.length();
         }
         ((std::uint64_t*)metaoffset.Data())[count] = offset;
-        return std::make_shared<MemMetadataSet>(meta, metaoffset, count, count * 2, count * 2, 10);
+        return std::make_shared<MemMetadataSet>(meta, metaoffset, count, count * 2, MaxSize, 10);
     }
 
     template <typename T>
@@ -151,4 +156,5 @@ namespace TestUtils {
     // Explicit instantiation
     template class TestDataGenerator<int8_t>;
     template class TestDataGenerator<uint8_t>;
+    template class TestDataGenerator<float>;
 }

@@ -148,22 +148,22 @@ DefineSSDParameter(m_maxInternalResultNum, int, -1, "MaxInternalResultNum")
 // For update mode: current only update
 DefineSSDParameter(m_update, bool, false, "Update")
 // For Test Mode
-DefineSSDParameter(m_inPlace, bool, false, "InPlace")
+DefineSSDParameter(m_inPlace, bool, true, "InPlace")
 DefineSSDParameter(m_outOfPlace, bool, false, "OutOfPlace")
 // latency limit
 DefineSSDParameter(m_latencyLimit, float, 10.0, "LatencyLimit")
 // Update batch size
 DefineSSDParameter(m_step, int, 0, "Step")
 // Frontend update threadnum
-DefineSSDParameter(m_insertThreadNum, int, 16, "InsertThreadNum")
+DefineSSDParameter(m_insertThreadNum, int, 1, "InsertThreadNum")
 // Update limit
 DefineSSDParameter(m_endVectorNum, int, -1, "EndVectorNum")
 // Persistent buffer path
 DefineSSDParameter(m_persistentBufferPath, std::string, std::string(""), "PersistentBufferPath")
 // Background append threadnum
-DefineSSDParameter(m_appendThreadNum, int, 16, "AppendThreadNum")
+DefineSSDParameter(m_appendThreadNum, int, 1, "AppendThreadNum")
 // Background reassign threadnum
-DefineSSDParameter(m_reassignThreadNum, int, 16, "ReassignThreadNum")
+DefineSSDParameter(m_reassignThreadNum, int, 0, "ReassignThreadNum")
 // Background process batch size
 DefineSSDParameter(m_batch, int, 1000, "Batch")
 // Total Vector Path

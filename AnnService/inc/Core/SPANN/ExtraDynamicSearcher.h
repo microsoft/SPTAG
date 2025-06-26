@@ -124,7 +124,6 @@ namespace SPTAG::SPANN {
                 for (int i = 0; i < numberOfThreads; i++)
                 {
                     m_threads.emplace_back([this, extraIndex] {
-                        extraIndex->Initialize();
                         Job *j;
                         ExtraWorkSpace workSpace;
                         extraIndex->InitWorkSpace(&workSpace);
@@ -142,7 +141,6 @@ namespace SPTAG::SPANN {
                             
                             delete j;
                         }
-                        extraIndex->ExitBlockController();
                     });
                 }
             }
@@ -178,7 +176,8 @@ namespace SPTAG::SPANN {
             m_vectorInfoSize = p_opt.m_dim * sizeof(ValueType) + m_metaDataSize;
             p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * m_vectorInfoSize + PageSize - 1) / PageSize));
             m_postingSizeLimit = p_opt.m_postingPageLimit * PageSize / m_vectorInfoSize;
-            
+            m_bufferSizeLimit = p_opt.m_bufferLength * PageSize / m_vectorInfoSize;
+
             if(p_opt.m_storage == Storage::FILEIO) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
                 db.reset(new FileIO(p_opt));
@@ -446,7 +445,6 @@ namespace SPTAG::SPANN {
                 auto func = [&]()
                 {
                     int index = 0;
-                    Initialize();
                     ExtraWorkSpace workSpace;
                     InitWorkSpace(&workSpace);
                     while (true)
@@ -466,7 +464,6 @@ namespace SPTAG::SPANN {
                         }
                         else
                         {
-                            ExitBlockController();
                             return;
                         }
                     }
@@ -496,14 +493,15 @@ namespace SPTAG::SPANN {
             }
         }
 
-        ErrorCode Split(ExtraWorkSpace* p_exWorkSpace, VectorIndex* p_index, const SizeType headID, bool reassign = false, bool preReassign = false)
+        ErrorCode Split(ExtraWorkSpace* p_exWorkSpace, VectorIndex* p_index, const SizeType headID, bool reassign = false, bool preReassign = false, bool requirelock = true)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
             std::vector<SizeType> newHeadsID;
             std::vector<std::string> newPostingLists;
             double elapsedMSeconds;
             {
-                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
+                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID], std::defer_lock);
+                if (requirelock) lock.lock();
 
                 std::string postingList;
                 auto splitGetBegin = std::chrono::high_resolution_clock::now();
@@ -543,7 +541,7 @@ namespace SPTAG::SPANN {
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
 		
-                if (m_opt->m_inPlace || (!preReassign && index < m_postingSizeLimit))
+                if (!preReassign && index < m_postingSizeLimit)
                 {
 
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: in place or not prereassign & index < m_postingSizeLimit. GC begin...\n");
@@ -1059,6 +1057,12 @@ namespace SPTAG::SPANN {
                 if (!p_index->ContainSample(headID)) {
                     goto checkDeleted;
                 }
+                if (m_postingSizes.GetSize(headID) + appendNum > (m_postingSizeLimit + m_bufferSizeLimit)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "After appending, the number of vectors exceeds the postingsize + buffersize (%d + %d)! Do split now...\n", m_postingSizeLimit, m_bufferSizeLimit);
+                    Split(p_exWorkSpace, p_index, headID, !m_opt->m_disableReassign, false, false);
+                    goto checkDeleted;
+                }
+
                 auto appendIOBegin = std::chrono::high_resolution_clock::now();
                 if (db->Merge(headID, appendPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge failed! Posting Size:%d, limit: %d\n", m_postingSizes.GetSize(headID), m_postingSizeLimit);
@@ -1181,8 +1185,6 @@ namespace SPTAG::SPANN {
 
 			        auto func = [&]()
 			        {
-			            Initialize();
-
                         ExtraWorkSpace workSpace;
                         InitWorkSpace(&workSpace);
 			            size_t index = 0;
@@ -1216,7 +1218,6 @@ namespace SPTAG::SPANN {
 				}
 				else
 				{
-				    ExitBlockController();
 				    return;
 				}
 			    }
@@ -1644,6 +1645,7 @@ namespace SPTAG::SPANN {
                 m_opt->m_searchPostingPageLimit = m_opt->m_postingPageLimit;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build index with posting page limit:%d\n", m_opt->m_postingPageLimit);
                 m_postingSizeLimit = static_cast<int>(m_opt->m_postingPageLimit * PageSize / m_vectorInfoSize);
+                m_bufferSizeLimit = static_cast<int>(m_opt->m_bufferLength * PageSize / m_vectorInfoSize);
             }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", m_postingSizeLimit);
@@ -1760,7 +1762,6 @@ namespace SPTAG::SPANN {
             std::atomic_size_t vectorsSent(0);
             auto func = [&]()
             {
-                Initialize();
                 ExtraWorkSpace workSpace;
                 InitWorkSpace(&workSpace);
                 size_t index = 0;
@@ -1787,7 +1788,6 @@ namespace SPTAG::SPANN {
                     }
                     else
                     {
-                        ExitBlockController();
                         return;
                     }
                 }
@@ -1880,14 +1880,6 @@ namespace SPTAG::SPANN {
             return (postingID < m_postingSizes.GetPostingNum()) && (m_postingSizes.GetSize(postingID) > 0);
         }
 
-        bool Initialize() override {
-            return db->Initialize();
-        }
-
-        bool ExitBlockController() override {
-            return db->ExitBlockController();
-        }
-
         void GetWritePosting(ExtraWorkSpace* p_exWorkSpace, SizeType pid, std::string& posting, bool write = false) override {
             if (write) {
                 db->Put(pid, posting, MaxTimeout, &(p_exWorkSpace->m_diskRequests));
@@ -1961,6 +1953,8 @@ namespace SPTAG::SPANN {
         int m_vectorInfoSize = 0;
 
         int m_postingSizeLimit = INT_MAX;
+
+        int m_bufferSizeLimit = INT_MAX;
 
         std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 

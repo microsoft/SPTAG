@@ -23,6 +23,16 @@
 #endif
 #endif
 
+#ifdef SPDK
+extern "C" {
+#include "spdk/env.h"
+#include "spdk/event.h"
+#include "spdk/log.h"
+#include "spdk/thread.h"
+#include "spdk/bdev.h"
+}
+#endif
+
 namespace SPTAG
 {
     namespace Helper
@@ -84,6 +94,7 @@ namespace SPTAG
 
             // Carry exension metadata needed by some DiskIO implementations
             void* m_extension;
+            void* m_ctrl;
 
 #ifdef _MSC_VER
             DiskUtils::PrioritizedDiskFileReaderResource myres;
@@ -108,7 +119,11 @@ namespace SPTAG
                 if (m_pageBufferSize < p_size)
                 {
                     m_pageBufferSize = p_size;
+#ifdef SPDK
+                    m_pageBuffer.reset(static_cast<T*>(spdk_dma_zmalloc(sizeof(T) * m_pageBufferSize, PageSize, NULL)), [=](T* ptr) { spdk_free(ptr); });
+#else
                     m_pageBuffer.reset(static_cast<T*>(BLOCK_ALLOC(sizeof(T) * m_pageBufferSize, PageSize)), [=](T* ptr) { BLOCK_FREE(ptr, PageSize); });
+#endif
                 }
             }
 

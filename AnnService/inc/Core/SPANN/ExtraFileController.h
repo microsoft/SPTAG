@@ -1,7 +1,7 @@
 #ifndef _SPTAG_SPANN_EXTRAFILECONTROLLER_H_
 #define _SPTAG_SPANN_EXTRAFILECONTROLLER_H_
 #define USE_ASYNC_IO
-// #define USE_FILE_DEBUG
+
 #include "inc/Helper/KeyValueIO.h"
 #include "inc/Core/Common/Dataset.h"
 #include "inc/Core/VectorIndex.h"
@@ -28,9 +28,6 @@ namespace SPTAG::SPANN {
             tbb::concurrent_queue<AddressType> m_blockAddresses;
             tbb::concurrent_queue<AddressType> m_blockAddresses_reserve;
 
-#ifdef DEBUG
-            thread_local static int debug_fd;
-#endif
 	        std::atomic<int64_t> read_complete_vec = 0;
 	        std::atomic<int64_t> read_submit_vec = 0;
 	        std::atomic<int64_t> write_complete_vec = 0;
@@ -134,13 +131,13 @@ namespace SPTAG::SPANN {
 	        ErrorCode LoadBlockPool(std::string prefix, AddressType startNumBlocks, bool allowinit) {
 	            std::string blockfile = prefix + "_blockpool";
                 if (allowinit && !fileexists(blockfile.c_str())) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BlockController::LoadBlockPool: initializing fresh pool (no existing file found: %s)\n", blockfile.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::LoadBlockPool: initializing fresh pool (no existing file found: %s)\n", blockfile.c_str());
                     for(AddressType i = 0; i < startNumBlocks; i++) {
                         m_blockAddresses.push(i);
                     }
                     m_totalAllocatedBlocks.store(startNumBlocks);
 
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BlockController::LoadBlockPool: initialized with %llu blocks (%.2f GB)\n", 
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::LoadBlockPool: initialized with %llu blocks (%.2f GB)\n", 
                         static_cast<unsigned long long>(startNumBlocks), static_cast<float>(startNumBlocks >> (30 - PageSizeEx)));
                 } else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
@@ -158,7 +155,7 @@ namespace SPTAG::SPANN {
                     IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&totalAllocated));
 
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "BlockController::LoadBlockPool: reading %llu free blocks into pool (%.2f GB), total allocated: %llu blocks\n",
+                        "FileIO::BlockController::LoadBlockPool: reading %llu free blocks into pool (%.2f GB), total allocated: %llu blocks\n",
                         static_cast<unsigned long long>(blocks),
                         static_cast<float>(blocks >> (30 - PageSizeEx)),
                         static_cast<unsigned long long>(totalAllocated));
@@ -172,7 +169,7 @@ namespace SPTAG::SPANN {
                     m_totalAllocatedBlocks.store(totalAllocated);
 
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "BlockController::LoadBlockPool: block pool initialized. Available: %llu, Total allocated: %llu\n",
+                        "FileIO::BlockController::LoadBlockPool: block pool initialized. Available: %llu, Total allocated: %llu\n",
                         static_cast<unsigned long long>(blocks),
                         static_cast<unsigned long long>(totalAllocated));
     	        }
@@ -375,7 +372,7 @@ namespace SPTAG::SPANN {
     public:
         FileIO(SPANN::Options& p_opt) {
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
-            m_blockLimit = p_opt.m_postingPageLimit + p_opt.m_bufferLength + 1;
+            m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
             m_bufferLimit = 1024;
 
             const char* fileIoUseLock = getenv(kFileIoUseLock);
@@ -488,7 +485,7 @@ namespace SPTAG::SPANN {
                 uintptr_t ptr = 0xffffffffffffffff;
                 if (m_buffer.try_pop(ptr)) delete[]((AddressType*)ptr);
             }
-	    m_pBlockController.ShutDown();
+	        m_pBlockController.ShutDown();
             if (m_fileIoUseCache) {
                 delete m_pShardedLRUCache;
             }
@@ -765,7 +762,9 @@ namespace SPTAG::SPANN {
 
                 // Release the original blocks
                 m_pBlockController.ReleaseBlocks(postingSize + 1, (*postingSize + PageSize - 1) >> PageSizeEx);
-                At(key) = tmpblocks;
+                while (InterlockedCompareExchange(&At(key), tmpblocks, (uintptr_t)postingSize) != (uintptr_t)postingSize) {
+                    postingSize = (int64_t*)At(key);
+                }
                 m_buffer.push((uintptr_t)postingSize);
             }
             if (m_fileIoUseLock) {
@@ -863,7 +862,9 @@ namespace SPTAG::SPANN {
 
                 // This is also to ensure checkpoint correctness, so we release the partially used block and allocate a new one.
                 m_pBlockController.ReleaseBlocks(postingSize + 1 + oldblocks, 1);
-                At(key) = tmpblocks;
+                while (InterlockedCompareExchange(&At(key), tmpblocks, (uintptr_t)postingSize) != (uintptr_t)postingSize) {
+                    postingSize = (int64_t*)At(key);
+                }
                 m_buffer.push((uintptr_t)postingSize);
             }
             else {  // Otherwise, directly allocate a new batch of blocks to append after the current ones.
@@ -1003,16 +1004,6 @@ namespace SPTAG::SPANN {
             }
 	    */
             return ErrorCode::Success;
-        }
-
-        bool Initialize(bool debug = false) override {
-            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize FileIO for new threads\n");
-            return true;
-        }
-
-        bool ExitBlockController(bool debug = false) override { 
-            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Exit FileIO for thread\n");
-            return true; 
         }
 
         ErrorCode Checkpoint(std::string prefix) override {

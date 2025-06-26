@@ -24,7 +24,7 @@ namespace SPTAG
                 count = 0;
                 lastlevel = int(pow(2.0, floor(log2((float)size))));
             }
-            ~Heap() {}
+            ~Heap() { heap.reset(); }
             inline int size() { return count; }
             inline bool empty() { return count == 0; }
             inline void clear(int size)

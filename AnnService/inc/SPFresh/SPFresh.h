@@ -275,7 +275,6 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
-                    p_index->Initialize();
                     StopWSPFresh threadws;
                     size_t index = 0;
                     while (true)
@@ -297,7 +296,6 @@ namespace SPTAG {
                         }
                         else
                         {
-                            p_index->ExitBlockController();
                             return;
                         }
                     }
@@ -747,7 +745,6 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
-                    p_index->Initialize();
                     size_t index = 0;
                     while (true)
                     {
@@ -780,7 +777,6 @@ namespace SPTAG {
                         }
                         else
                         {
-                            p_index->ExitBlockController();
                             return;
                         }
                     }
@@ -1048,7 +1044,6 @@ namespace SPTAG {
 
                 auto func = [&]()
                 {
-                    p_index->Initialize();
                     size_t index = 0;
                     while (true)
                     {
@@ -1066,7 +1061,6 @@ namespace SPTAG {
                         }
                         else
                         {
-                            p_index->ExitBlockController();
                             return;
                         }
                     }

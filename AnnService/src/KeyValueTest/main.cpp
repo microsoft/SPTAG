@@ -116,14 +116,12 @@ MultiThreadTest:
         }
         for (int i = 0; i < thread_num; i++) {
             threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, i]() {
-                fileIO.Initialize();
                 SPTAG::SPANN::ExtraWorkSpace workspace;
                 workspace.Initialize(4096, 2, 64, 4 * PageSize, true, false);
  
                 for (auto key : thread_keys[i]) {
                     fileIO.Put(key, dataset[values[key]], MaxTimeout, &(workspace.m_diskRequests));
                 }
-                fileIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -139,7 +137,6 @@ MultiThreadTest:
         }
         for (int i = 0; i < thread_num; i++) {
             threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i]() {
-                fileIO.Initialize();
                 SPTAG::SPANN::ExtraWorkSpace workspace;
                 workspace.Initialize(4096, 2, 64, 4 * PageSize, true, false);
  
@@ -164,7 +161,6 @@ MultiThreadTest:
                         return;
                     }
                 }
-                fileIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -208,7 +204,6 @@ MultiGetTest:
         }
         for (int i = 0; i < thread_num; i++) {
             threads.emplace_back([&fileIO, &values, &thread_keys, &errors, &error_mtx, &dataset, i]() {
-                fileIO.Initialize();
                 SPTAG::SPANN::ExtraWorkSpace workspace;
                 workspace.Initialize(4096, 2, 64, 4 * PageSize, true, false);
  
@@ -244,7 +239,6 @@ MultiGetTest:
                         }
                     }
                 }
-                fileIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -284,7 +278,6 @@ MixReadWriteTest:
         }
         for (int i = 0; i < thread_num; i++) {
             threads.emplace_back([&fileIO, &values, &thread_keys, &dataset, &errors, &error_mtx, i, max_blocks, read_rate, iter_num, dataset_size]() {
-                fileIO.Initialize();
                 SPTAG::SPANN::ExtraWorkSpace workspace;
                 workspace.Initialize(4096, 2, 64, 4 * PageSize, true, false);
  
@@ -363,7 +356,6 @@ MixReadWriteTest:
                         write_count++;
                     }
                 }
-                fileIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {
@@ -456,7 +448,6 @@ ConflictTest:
         }
         for (int i = 0; i < thread_num; i++) {
             threads.emplace_back([&fileIO, &errors, &error_mtx, &dataset, iter_num, kv_num, i]() {
-                fileIO.Initialize();
                 SPTAG::SPANN::ExtraWorkSpace workspace;
                 workspace.Initialize(4096, 2, 64, 4 * PageSize, true, false);
  
@@ -546,7 +537,6 @@ ConflictTest:
                         fileIO.Put(key, tmp_str, MaxTimeout, &(workspace.m_diskRequests));
                     }
                 }
-                fileIO.ExitBlockController();
             });
         }
         for (auto& thread : threads) {

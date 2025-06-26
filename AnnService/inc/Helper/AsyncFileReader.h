@@ -88,8 +88,22 @@ namespace SPTAG
                 return true;
             }
 
+            bool try_pop(AsyncReadRequest*& j) {
+                DWORD cBytes;
+                ULONG_PTR key;
+                OVERLAPPED* ol;
+                BOOL ret = ::GetQueuedCompletionStatus(m_handle.GetHandle(),
+                    &cBytes,
+                    &key,
+                    &ol,
+                    0);
+                if (FALSE == ret || nullptr == ol) return false;
+                j = reinterpret_cast<AsyncReadRequest*>(ol);
+                return true;
+            }
+
             void* handle() {
-                return m_handle.GetHandle();
+                return (void*)(this);
             }
 
         private:
@@ -103,26 +117,95 @@ namespace SPTAG
 
             virtual ~AsyncFileIO() { ShutDown(); }
 
+            virtual bool NewFile(const char* filePath, uint64_t maxFileSize) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO: Create a file\n");
+                m_fileHandle.Reset(::CreateFile(filePath,
+                    GENERIC_WRITE,
+                    0,
+                    NULL,
+                    CREATE_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL,
+                    NULL));
+                if (!m_fileHandle.IsValid()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileIO::InitializeFileIo failed\n");
+                    return false;
+                }
+
+                LARGE_INTEGER pos = { 0 };
+                pos.QuadPart = maxFileSize;
+                if (!SetFilePointerEx(m_fileHandle.GetHandle(), pos, NULL, FILE_BEGIN) || 
+                    !SetEndOfFile(m_fileHandle.GetHandle())) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileIO::InitializeFileIo failed: fallocate failed\n");
+                    m_fileHandle.Close();
+                    return false;
+                }
+
+                m_fileHandle.Close();
+                m_currSize = (uint64_t)filesize(filePath);
+                if (m_currSize != maxFileSize) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot fallocate enough space actural size (%llu) < max size (%llu)\n", m_currSize, maxFileSize);
+                return true;
+            }
+
+            virtual bool ExpandFile(uint64_t expandSize) {
+                LARGE_INTEGER old_pos = { 0 }, new_pos = { 0 }, zero = { 0 };
+                new_pos.QuadPart = m_currSize + expandSize;
+                if (!SetFilePointerEx(m_fileHandle.GetHandle(), zero, &old_pos, FILE_CURRENT) ||
+                    !SetFilePointerEx(m_fileHandle.GetHandle(), new_pos, NULL, FILE_END) ||
+                    !SetEndOfFile(m_fileHandle.GetHandle())) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "AsyncFileReader:[ExpandFile] fallocate failed at offset %lld for size %lld bytes\n",
+                        static_cast<long long>(m_currSize),
+                        static_cast<long long>(expandSize));
+                    m_fileHandle.Close();
+                    return false;
+                }
+                m_currSize += expandSize;
+                return true;
+            }
+
             virtual bool Initialize(const char* filePath, int openMode,
-                std::uint64_t maxIOSize = (1 << 20),
+                std::uint64_t maxNumBlocks = (1 << 20),
                 std::uint32_t maxReadRetries = 2,
                 std::uint32_t maxWriteRetries = 2,
                 std::uint16_t threadPoolSize = 4,
                 std::uint64_t maxFileSize = (300ULL << 30))
             {
+                if (!fileexists(filePath)) {
+                    if (openMode == GENERIC_READ) {
+                        SPTAGLIB_LOG(LogLevel::LL_Error, "Failed to open file handle: %s\n", filePath);
+                        return false;
+                    }
+                    if (!NewFile(filePath, maxFileSize)) return false;
+                }
+                else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open a file\n");
+                    m_currSize = filesize(filePath);
+                    if (openMode == GENERIC_READ || m_currSize >= maxFileSize) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file has been created with enough space.\n");
+                    }
+                    else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open failed! currSize(%llu) < maxFileSize(%llu)\n", m_currSize, maxFileSize);
+                        if (!NewFile(filePath, maxFileSize)) return false;
+                    }
+                }
+
                 m_fileHandle.Reset(::CreateFile(filePath,
-                    GENERIC_READ,
+                    GENERIC_READ | GENERIC_WRITE,
                     FILE_SHARE_READ,
                     NULL,
                     OPEN_EXISTING,
                     FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,
                     NULL));
 
-                if (!m_fileHandle.IsValid()) return false;
+                if (!m_fileHandle.IsValid()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileIO::Open failed for %s!\n", filePath);
+                    return false;
+                }
 
                 m_diskSectorSize = static_cast<uint32_t>(GetSectorSize(filePath));
-                SPTAGLIB_LOG(LogLevel::LL_Info, "Success open file handle: %s DiskSectorSize: %u\n", filePath, m_diskSectorSize);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file %s opened, DiskSectorSize=%u threads=%d maxNumBlocks=%d\n", filePath, m_diskSectorSize, threadPoolSize, maxNumBlocks);
 
+                m_shutdown = false;
                 int iocpThreads = threadPoolSize;
                 m_fileIocp.Reset(::CreateIoCompletionPort(m_fileHandle.GetHandle(), NULL, NULL, iocpThreads));
                 for (int i = 0; i < iocpThreads; ++i)
@@ -130,10 +213,6 @@ namespace SPTAG
                     m_fileIocpThreads.emplace_back(std::thread(std::bind(&AsyncFileIO::ListionIOCP, this, i)));
                 }
                 return m_fileIocp.IsValid();
-            }
-
-            virtual bool ExpandFile(uint64_t expandSize) {
-                return false;
             }
 
             virtual std::uint64_t ReadBinary(std::uint64_t readSize, char* buffer, std::uint64_t offset = UINT64_MAX)
@@ -184,7 +263,7 @@ namespace SPTAG
 
                 if (!::ReadFile(m_fileHandle.GetHandle(),
                     readRequest.m_buffer,
-                    static_cast<DWORD>(readRequest.m_readSize),
+                    static_cast<DWORD>(PageSize),
                     nullptr,
                     &col) && GetLastError() != ERROR_IO_PENDING)
                 {
@@ -201,41 +280,103 @@ namespace SPTAG
 
             virtual std::uint32_t BatchReadFile(AsyncReadRequest* readRequests, std::uint32_t requestCount, const std::chrono::microseconds& timeout, int batchSize = -1)
             {
-                std::uint32_t remaining = requestCount;
-                HANDLE completeQueue = readRequests[0].m_extension;
-                for (std::uint32_t i = 0; i < requestCount; i++) {
-                    AsyncReadRequest* readRequest = &(readRequests[i]);
-                    if (!ReadFileAsync(*readRequest)) remaining--;
-                }
+                if (requestCount <= 0) return 0;
 
-                std::uint32_t totalRead = remaining;
-                while (remaining > 0) {
-                    DWORD cBytes;
-                    ULONG_PTR key;
-                    OVERLAPPED* ol;
-                    BOOL ret = ::GetQueuedCompletionStatus(completeQueue,
-                        &cBytes,
-                        &key,
-                        &ol,
-                        INFINITE);
-                    if (FALSE == ret || nullptr == ol) break;
-                    remaining--;
-                    AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>(ol);
-                    req->m_callback(true);
+                auto t1 = std::chrono::high_resolution_clock::now();
+                if (batchSize < 0 || batchSize > requestCount) batchSize = requestCount;
 
+                RequestQueue* completeQueue = reinterpret_cast<RequestQueue*>(readRequests[0].m_extension);
+                uint32_t batchTotalDone = 0, skip = 0;
+                uint32_t currId = 0;
+                AsyncReadRequest* req;
+                while (currId < requestCount) {
+                    int totalSubmitted = 0, totalDone = 0;
+                    uint32_t batchStart = currId;
+                    while (currId < requestCount && totalSubmitted < batchSize) {
+                        AsyncReadRequest* readRequest = &(readRequests[currId++]);
+                        if (readRequest->m_readSize == 0) {
+                            skip++;
+                            continue;
+                        }
+                        if (ReadFileAsync(*readRequest)) totalSubmitted++;
+
+                    }
+                    while (totalDone < totalSubmitted) {
+                        if (!completeQueue->pop(req)) break;
+                        totalDone++;
+                        if (req->m_callback) req->m_callback(true);
+                    }
+                 
+                    batchTotalDone += totalDone;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1) > timeout) {
+                        if (batchTotalDone < requestCount - skip) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileReader::ReadBlocks (batch[%u:%u]) : timeout\n", batchStart, currId);
+                        }
+                        break;
+                    }
                 }
-                return totalRead;
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileReader::ReadBlocks: finish\n");
+                return batchTotalDone;
             }
 
             virtual std::uint32_t BatchWriteFile(AsyncReadRequest* readRequests, std::uint32_t requestCount, const std::chrono::microseconds& timeout, int batchSize = -1)
             {
-                return 0;
+                if (requestCount <= 0) return 0;
+
+                auto t1 = std::chrono::high_resolution_clock::now();
+                if (batchSize < 0 || batchSize > requestCount) batchSize = requestCount;
+
+                RequestQueue* completeQueue = reinterpret_cast<RequestQueue*>(readRequests[0].m_extension);
+                uint32_t batchTotalDone = 0;
+                uint32_t currId = 0;
+                AsyncReadRequest* req;
+                while (currId < requestCount) {
+                    int totalSubmitted = 0, totalDone = 0;
+                    uint32_t batchStart = currId;
+                    while (currId < requestCount && totalSubmitted < batchSize) {
+                        AsyncReadRequest* readRequest = &(readRequests[currId++]);
+
+                        DiskUtils::CallbackOverLapped& col = readRequest->myres.m_col;
+                        col.Offset = (readRequest->m_offset & 0xffffffff);
+                        col.OffsetHigh = (readRequest->m_offset >> 32);
+
+                        if (!::WriteFile(m_fileHandle.GetHandle(),
+                            readRequest->m_buffer,
+                            static_cast<DWORD>(PageSize),
+                            nullptr,
+                            &col) && GetLastError() != ERROR_IO_PENDING)
+                        {
+                            continue;
+                        }
+                        totalSubmitted++;
+                    }
+                    while (totalDone < totalSubmitted) {
+                        if (!completeQueue->pop(req)) break;
+                        totalDone++;
+                        if (req->m_callback) req->m_callback(true);
+                    }
+
+                    batchTotalDone += totalDone;
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1) > timeout) {
+                        if (batchTotalDone < requestCount) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileReader::WriteBlocks (batch[%u:%u]) : timeout\n", batchStart, currId);
+                        }
+                        break;
+                    }
+                }
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileReader::WriteBlocks: %d reqs finish\n", requestCount);
+                return batchTotalDone;
             }
 
             virtual std::uint64_t TellP() { return 0; }
 
             virtual void ShutDown()
             {
+                if (m_shutdown) return;
+
+                m_shutdown = true;
                 m_fileHandle.Close();
                 m_fileIocp.Close();
 
@@ -354,7 +495,7 @@ namespace SPTAG
                         INFINITE);
                     if (FALSE == ret || nullptr == ol)
                     {
-                        //We exit the thread
+                        //SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileReader::ListionIOCP thread failed!\n");
                         return;
                     }
 
@@ -363,14 +504,18 @@ namespace SPTAG
 
                     if (nullptr != req)
                     {
-                        ::PostQueuedCompletionStatus(req->m_extension, 0, NULL, reinterpret_cast<LPOVERLAPPED>(req));
+                        reinterpret_cast<RequestQueue*>(req->m_extension)->push(req);
                     }
                 }
             }
 
         private:
+            bool m_shutdown;
+
             HandleWrapper m_fileHandle;
 
+            uint64_t m_currSize;
+            
             HandleWrapper m_fileIocp;
 
             std::vector<std::thread> m_fileIocpThreads;
@@ -409,9 +554,16 @@ namespace SPTAG
                 return true;
             }
 
+            bool try_pop(AsyncReadRequest*& j) {
+                if (m_front == m_end) return false;
+                j = m_queue[m_front++];
+                if (m_front == m_capacity) m_front = 0;
+                return true;
+            }
+
             void* handle() 
             {
-                return nullptr;
+                return (void*)(this);
             }
 
         protected:
@@ -429,7 +581,7 @@ namespace SPTAG
                 ShutDown(); 
 	    }
 
-            virtual bool CreateFile(const char* filePath, uint64_t maxFileSize) {
+            virtual bool NewFile(const char* filePath, uint64_t maxFileSize) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO: Create a file\n");
                 m_fileHandle = open(filePath, O_CREAT | O_WRONLY, 0666);
                 if (m_fileHandle == -1) {
@@ -443,7 +595,7 @@ namespace SPTAG
                     return false;
                 }
                 close(m_fileHandle);
-		m_currSize = filesize(filePath);
+		        m_currSize = filesize(filePath);
                 if (m_currSize != maxFileSize) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot fallocate enough space actural size (%llu) < max size (%llu)\n", m_currSize, maxFileSize);
                 return true;
             }
@@ -473,16 +625,16 @@ namespace SPTAG
                         SPTAGLIB_LOG(LogLevel::LL_Error, "Failed to open file handle: %s\n", filePath);
                         return false;
                     }
-                    if (!CreateFile(filePath, maxFileSize)) return false;
+                    if (!NewFile(filePath, maxFileSize)) return false;
                 }
                 else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open a file\n");
-                    auto m_currSize = filesize(filePath);
+                    m_currSize = filesize(filePath);
                     if (openMode == (O_RDONLY | O_DIRECT) || m_currSize >= maxFileSize) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file has been created with enough space.\n");
                     } else {
 			            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::Open failed! currSize(%llu) < maxFileSize(%llu)\n", m_currSize, maxFileSize);
-                        if (!CreateFile(filePath, maxFileSize)) return false;
+                        if (!NewFile(filePath, maxFileSize)) return false;
                    }
                 }
                 m_fileHandle = open(filePath, O_RDWR | O_DIRECT);

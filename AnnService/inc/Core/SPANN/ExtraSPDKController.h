@@ -5,6 +5,8 @@
 #define _SPTAG_SPANN_EXTRASPDKCONTROLLER_H_
 
 #include "inc/Helper/KeyValueIO.h"
+#include "inc/Helper/DiskIO.h"
+#include "inc/Helper/ConcurrentSet.h"
 #include "inc/Core/Common/Dataset.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/SPANN/Options.h"
@@ -32,17 +34,12 @@ namespace SPTAG::SPANN
         class BlockController {
         private:
             static constexpr const char* kUseMemImplEnv = "SPFRESH_SPDK_USE_MEM_IMPL";
-            static constexpr AddressType kMemImplMaxNumBlocks = (1ULL << 30) >> PageSizeEx; // 1GB
             static constexpr const char* kUseSsdImplEnv = "SPFRESH_SPDK_USE_SSD_IMPL";
-            static constexpr AddressType kSsdImplMaxNumBlocks = (1ULL << 40) >> PageSizeEx; // 1T
-            // static constexpr AddressType kSsdImplMaxNumBlocks = 1700*1024*256; // 1.7T
             static constexpr const char* kSpdkConfEnv = "SPFRESH_SPDK_CONF";
             static constexpr const char* kSpdkBdevNameEnv = "SPFRESH_SPDK_BDEV";
-            static constexpr const char* kSpdkIoDepth = "SPFRESH_SPDK_IO_DEPTH";
-            static constexpr int kSsdSpdkDefaultIoDepth = 1024;
 
-            tbb::concurrent_queue<AddressType> m_blockAddresses;
-            tbb::concurrent_queue<AddressType> m_blockAddresses_reserve;
+            Helper::Concurrent::ConcurrentQueue<AddressType> m_blockAddresses;
+            Helper::Concurrent::ConcurrentQueue<AddressType> m_blockAddresses_reserve;
 
 	        std::string m_filePath;
             bool m_useSsdImpl = false;
@@ -55,38 +52,28 @@ namespace SPTAG::SPANN
             struct spdk_bdev_desc *m_ssdSpdkBdevDesc = nullptr;
             struct spdk_io_channel *m_ssdSpdkBdevIoChannel = nullptr;
 
-            int m_ssdSpdkIoDepth = kSsdSpdkDefaultIoDepth;
-            struct SubIoRequest {
-                tbb::concurrent_queue<SubIoRequest *>* completed_sub_io_requests;
-                void* app_buff;
-                void* dma_buff;
-                AddressType real_size;
-                AddressType offset;
-                bool is_read;
-                BlockController* ctrl;
-                int posting_id;
-            };
-            tbb::concurrent_queue<SubIoRequest *> m_submittedSubIoRequests;
-            struct IoContext {
-                std::vector<SubIoRequest> sub_io_requests;
-                std::vector<SubIoRequest *> free_sub_io_requests;
-                tbb::concurrent_queue<SubIoRequest *> completed_sub_io_requests;
-                int in_flight = 0;
-            };
-            static thread_local struct IoContext m_currIoContext;
+            Helper::Concurrent::ConcurrentQueue<Helper::AsyncReadRequest*> m_submittedSubIoRequests;
 
             static int m_ssdInflight;
 
             bool m_useMemImpl = false;
             static std::unique_ptr<char[]> m_memBuffer;
 
-            std::mutex m_initMutex;
-            int m_numInitCalled = 0;
+            float m_growthThreshold = 0.05;
+            AddressType m_growthBlocks = 0;
+            AddressType m_maxBlocks = 0;
+            int m_batchSize = 64;
 
-            int m_batchSize;
             static int m_ioCompleteCount;
             int m_preIOCompleteCount = 0;
             std::chrono::time_point<std::chrono::high_resolution_clock> m_preTime = std::chrono::high_resolution_clock::now();
+
+            std::mutex m_expandLock;
+            std::atomic<AddressType> m_totalAllocatedBlocks = 0;
+
+            bool ExpandFile(AddressType blocksToAdd);
+            
+            bool NeedsExpansion();
 
             static void* InitializeSpdk(void* args);
 
@@ -111,14 +98,14 @@ namespace SPTAG::SPANN
             // read a posting list. p_data[0] is the total data size, 
             // p_data[1], p_data[2], ..., p_data[((p_data[0] + PageSize - 1) >> PageSizeEx)] are the addresses of the blocks
             // concat all the block contents together into p_value string.
-            bool ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds &timeout = (std::chrono::microseconds::max)());
+            bool ReadBlocks(AddressType* p_data, std::string* p_value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
 
             // parallel read a list of posting lists.
-            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds &timeout = (std::chrono::microseconds::max)());
-            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<Helper::PageBuffer<std::uint8_t>>& p_values, const std::chrono::microseconds& timeout = (std::chrono::microseconds::max)());
+            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<std::string>* p_values, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
+            bool ReadBlocks(std::vector<AddressType*>& p_data, std::vector<Helper::PageBuffer<std::uint8_t>>& p_values, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
 
             // write p_value into p_size blocks start from p_data
-            bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value);
+            bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
 
             bool IOStatistics();
 
@@ -137,12 +124,21 @@ namespace SPTAG::SPANN
                     m_blockAddresses_reserve.try_pop(currBlockAddress);
                     m_blockAddresses.push(currBlockAddress);
                 }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Reload Finish!\n");
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save blockpool To %s\n", filename.c_str());
+                AddressType blocks = RemainBlocks();
+                AddressType totalBlocks = m_totalAllocatedBlocks.load();
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Checkpoint - Total allocated blocks: %llu\n", static_cast<unsigned long long>(totalBlocks));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Checkpoint - Remaining free blocks: %llu\n", blocks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Checkpoint - Saving to file: %s\n", filename.c_str());
+
                 auto ptr = f_createIO();
-                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
-                int blocks = RemainBlocks();
-                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&blocks);
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPDKIO::BlockController::Checkpoint - Failed to open file: %s\n", filename.c_str());
+                    return ErrorCode::FailedCreateFile;
+                }
+                IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&blocks);
+                IOBINARY(ptr, WriteBinary, sizeof(AddressType), reinterpret_cast<char*>(&totalBlocks));
                 for (auto it = m_blockAddresses.unsafe_begin(); it != m_blockAddresses.unsafe_end(); it++) {
                     IOBINARY(ptr, WriteBinary, sizeof(AddressType), (char*)&(*it));
                 }
@@ -150,28 +146,48 @@ namespace SPTAG::SPANN
                 return ErrorCode::Success;
             }
 
-	    ErrorCode LoadBlockPool(std::string prefix, AddressType maxNumBlocks, bool allowinit) {
+	    ErrorCode LoadBlockPool(std::string prefix, AddressType startNumBlocks, bool allowinit) {
 	        std::string blockfile = prefix + "_blockpool";
-                if (allowinit && !fileexists(blockfile.c_str())) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Initialize blockpool\n");
-                    for(AddressType i = 0; i < maxNumBlocks; i++) {
-                        m_blockAddresses.push(i);
-                    }
-                } else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
-                    auto ptr = f_createIO();
-                    if (ptr == nullptr || !ptr->Initialize(blockfile.c_str(), std::ios::binary | std::ios::in)) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open the blockpool file: %s\n", blockfile.c_str());
+            if (allowinit && !fileexists(blockfile.c_str())) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::LoadBlockPool: initializing fresh pool (no existing file found: %s)\n", blockfile.c_str());
+                for(AddressType i = 0; i < startNumBlocks; i++) {
+                    m_blockAddresses.push(i);
+                }
+                m_totalAllocatedBlocks.store(startNumBlocks);
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::LoadBlockPool: initialized with %llu blocks (%.2f GB)\n",
+                    static_cast<unsigned long long>(startNumBlocks), static_cast<float>(startNumBlocks >> (30 - PageSizeEx)));
+            } else {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Load blockpool from %s\n", blockfile.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(blockfile.c_str(), std::ios::binary | std::ios::in)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open the blockpool file: %s\n", blockfile.c_str());
     		        return ErrorCode::Fail;
-                    }
-                    int blocks;
-		            IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&blocks);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDKIO::BlockController::Reading %d blocks to pool\n", blocks);
-                    AddressType currBlockAddress = 0;
-                    for (int i = 0; i < blocks; i++) {
-                        IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
-                        m_blockAddresses.push(currBlockAddress);
-	            }    
+                }
+                AddressType blocks = 0;
+                AddressType totalAllocated = 0;
+
+                // Read block count
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&blocks));
+                IOBINARY(ptr, ReadBinary, sizeof(AddressType), reinterpret_cast<char*>(&totalAllocated));
+                    
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "SPDKIO::BlockController::LoadBlockPool: reading %llu free blocks into pool (%.2f GB), total allocated: %llu blocks\n",
+                    static_cast<unsigned long long>(blocks),
+                    static_cast<float>(blocks >> (30 - PageSizeEx)),
+                    static_cast<unsigned long long>(totalAllocated));
+
+                AddressType currBlockAddress = 0;
+                for (int i = 0; i < blocks; i++) {
+                    IOBINARY(ptr, ReadBinary, sizeof(AddressType), (char*)&(currBlockAddress));
+                    m_blockAddresses.push(currBlockAddress);
+	            }
+                m_totalAllocatedBlocks.store(totalAllocated);
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "SPDKIO::BlockController::LoadBlockPool: block pool initialized. Available: %llu, Total allocated: %llu\n",
+                    static_cast<unsigned long long>(blocks),
+                    static_cast<unsigned long long>(totalAllocated));
     	    }
 		    return ErrorCode::Success;
 	    }
@@ -183,7 +199,7 @@ namespace SPTAG::SPANN
         {
             m_opt = &p_opt;
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
-            m_blockLimit = p_opt.m_postingPageLimit + p_opt.m_bufferLength + 1;
+            m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
             m_bufferLimit = 1024;
 
             if (p_opt.m_recovery) {
@@ -199,11 +215,11 @@ namespace SPTAG::SPANN
             }
             else {
                 if (fileexists(m_mappingPath.c_str())) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load blockmapping from %s\n", m_mappingPath.c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load blockmapping successfully from %s\n", m_mappingPath.c_str());
                     Load(m_mappingPath, 1024 * 1024, MaxSize);
                 }
                 else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Init blockmapping\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize block mapping successfully!\n");
                     m_pBlockMapping.Initialize(0, 1, 1024 * 1024, MaxSize);
                 }
             }
@@ -212,10 +228,12 @@ namespace SPTAG::SPANN
             }
             m_compactionThreadPool = std::make_shared<Helper::ThreadPool>();
             m_compactionThreadPool->init(1);
+
             if (!m_pBlockController.Initialize(p_opt)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize SPDK!\n");
                 exit(0);
             }
+
             m_shutdownCalled = false;
         }
 
@@ -246,7 +264,7 @@ namespace SPTAG::SPANN
         ErrorCode Get(const SizeType key, std::string* value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) override {
             if (key >= m_pBlockMapping.R()) return ErrorCode::Fail;
 
-            if (m_pBlockController.ReadBlocks((AddressType*)At(key), value)) return ErrorCode::Success;
+            if (m_pBlockController.ReadBlocks((AddressType*)At(key), value, timeout, reqs)) return ErrorCode::Success;
             return ErrorCode::Fail;
         }
 
@@ -259,7 +277,7 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, m_pBlockMapping.R());
                 }
             }
-            if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
+            if (m_pBlockController.ReadBlocks(blocks, values, timeout, reqs)) return ErrorCode::Success;
             return ErrorCode::Fail; 
         }
 
@@ -271,7 +289,7 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, m_pBlockMapping.R());
                 }
             }
-            if (m_pBlockController.ReadBlocks(blocks, values, timeout)) return ErrorCode::Success;
+            if (m_pBlockController.ReadBlocks(blocks, values, timeout, reqs)) return ErrorCode::Success;
             return ErrorCode::Fail;
         }
 
@@ -285,7 +303,10 @@ namespace SPTAG::SPANN
             if (delta > 0) {
                 {
                     std::lock_guard<std::mutex> lock(m_updateMutex);
-                    m_pBlockMapping.AddBatch(delta);
+                    delta = key + 1 - m_pBlockMapping.R();
+                    if (delta > 0) {
+                        m_pBlockMapping.AddBatch(delta);
+                    }
                 }
             }
             if (At(key) == 0xffffffffffffffff) {
@@ -302,14 +323,14 @@ namespace SPTAG::SPANN
             int64_t* postingSize = (int64_t*)At(key);
             if (*postingSize < 0) {
                 m_pBlockController.GetBlocks(postingSize + 1, blocks);
-                m_pBlockController.WriteBlocks(postingSize + 1, blocks, value);
+                m_pBlockController.WriteBlocks(postingSize + 1, blocks, value, timeout, reqs);
                 *postingSize = value.size();
             }
             else {
                 uintptr_t tmpblocks = 0xffffffffffffffff;
                 while (!m_buffer.try_pop(tmpblocks));
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value);
+                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value, timeout, reqs);
                 *((int64_t*)tmpblocks) = value.size();
 
                 m_pBlockController.ReleaseBlocks(postingSize + 1, (*postingSize + PageSize -1) >> PageSizeEx);
@@ -331,8 +352,13 @@ namespace SPTAG::SPANN
             auto newSize = *postingSize + value.size();
             int newblocks = ((newSize + PageSize - 1) >> PageSizeEx);
             if (newblocks >= m_blockLimit) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failt to merge key:%d value:%lld since value too long!\n", key, newSize);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Origin Size: %lld, merge size: %lld\n", *postingSize, value.size());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[Merge] Key %d failed: new size %lld bytes requires %d blocks (limit: %d)\n",
+                    key, static_cast<long long>(newSize), newblocks, m_blockLimit);
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[Merge] Original size: %lld bytes, Merge size: %lld bytes\n",
+                    static_cast<long long>(*postingSize), static_cast<long long>(value.size()));
                 return ErrorCode::Fail;
             }
 
@@ -342,14 +368,14 @@ namespace SPTAG::SPANN
             if (sizeInPage != 0) {
                 std::string newValue;
                 AddressType readreq[] = { sizeInPage, *(postingSize + 1 + oldblocks) };
-                m_pBlockController.ReadBlocks(readreq, &newValue);
+                m_pBlockController.ReadBlocks(readreq, &newValue, timeout, reqs);
                 newValue += value;
 
                 uintptr_t tmpblocks = 0xffffffffffffffff;
                 while (!m_buffer.try_pop(tmpblocks));
                 memcpy((AddressType*)tmpblocks, postingSize, sizeof(AddressType) * (oldblocks + 1));
                 m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue);
+                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue, timeout, reqs);
                 *((int64_t*)tmpblocks) = newSize;
 
                 m_pBlockController.ReleaseBlocks(postingSize + 1 + oldblocks, 1);
@@ -360,7 +386,7 @@ namespace SPTAG::SPANN
             }
             else {
                 m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value);
+                m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value, timeout, reqs);
                 *postingSize = newSize;
             }
             return ErrorCode::Success;
@@ -384,7 +410,7 @@ namespace SPTAG::SPANN
 
         void GetStat() {
             int remainBlocks = m_pBlockController.RemainBlocks();
-            int remainGB = remainBlocks >> 20 << 2;
+            int remainGB = (long long)remainBlocks << PageSizeEx >> 30;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
             m_pBlockController.IOStatistics();
         }
@@ -430,21 +456,11 @@ namespace SPTAG::SPANN
             return ErrorCode::Success;
         }
 
-        bool Initialize(bool debug = false) override {
-            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Initialize SPDK for new threads\n");
-            return m_pBlockController.Initialize(*m_opt);
-        }
-
-        bool ExitBlockController(bool debug = false) override { 
-            if (debug) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Exit SPDK for thread\n");
-            return m_pBlockController.ShutDown(); 
-        }
-
         ErrorCode Checkpoint(std::string prefix) override {
             std::string filename = prefix + FolderSep + m_mappingPath.substr(m_mappingPath.find_last_of(FolderSep) + 1);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPDK: saving block mapping to %s\n", filename.c_str());
             Save(filename);
-            return m_pBlockController.Checkpoint(prefix);
+            return m_pBlockController.Checkpoint(filename + "_postings");
         }
 
     private:

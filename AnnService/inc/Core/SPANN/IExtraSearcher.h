@@ -189,7 +189,6 @@ namespace SPTAG {
             void Clear(int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
                 if (p_internalResultNum > m_pageBuffers.size() || p_maxPages > m_pageBuffers[0].GetPageSize()) {
                     m_postingIDs.reserve(p_internalResultNum);
-                    m_processIocp.reset(p_internalResultNum);
                     m_pageBuffers.resize(p_internalResultNum);
                     for (int pi = 0; pi < p_internalResultNum; pi++) {
                         m_pageBuffers[pi].ReservePageBuffer(p_maxPages);
@@ -197,6 +196,7 @@ namespace SPTAG {
                     m_blockIO = p_blockIO;
                     if (p_blockIO) {
                         int numPages = (p_maxPages >> PageSizeEx);
+                        m_processIocp.reset(p_internalResultNum * numPages);
                         m_diskRequests.resize(p_internalResultNum * numPages);
 			            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WorkSpace Init %d*%d reqs\n", p_internalResultNum, numPages);
                         for (int pi = 0; pi < p_internalResultNum; pi++) {
@@ -218,6 +218,7 @@ namespace SPTAG {
                         }
                     }
                     else {
+                        m_processIocp.reset(p_internalResultNum);
                         m_diskRequests.resize(p_internalResultNum);
 			            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "WorkSpace Init %d reqs\n", p_internalResultNum);
                         for (int pi = 0; pi < p_internalResultNum; pi++) {
@@ -334,10 +335,6 @@ namespace SPTAG {
             virtual void ForceGC(ExtraWorkSpace* p_exWorkSpace, VectorIndex* p_index) { return; }
 
             virtual void GetWritePosting(ExtraWorkSpace* p_exWorkSpace, SizeType pid, std::string& posting, bool write = false) { return; }
-
-            virtual bool Initialize() { return false; }
-
-            virtual bool ExitBlockController() { return false; }
 
             virtual void Checkpoint(std::string prefix) { return; }
         };

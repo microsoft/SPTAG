@@ -74,7 +74,7 @@ namespace SPTAG
         public:
             OptHashPosVector(): m_secondHash(false), m_exp(2), m_poolSize(8191) {}
 
-            ~OptHashPosVector() {}
+            ~OptHashPosVector() { m_hashTable.reset(); }
 
 
             void Init(SizeType size, int exp)
@@ -172,6 +172,8 @@ namespace SPTAG
             
         public:
             DistPriorityQueue(): m_size(0), m_length(0), m_count(0) {}
+
+            ~DistPriorityQueue() { m_data.reset(); }
 
             void Resize(int size_) {
                 m_size = size_;

@@ -247,9 +247,6 @@ namespace SPTAG
                 m_extraSearcher->ForceGC(workSpace.get(), m_index.get()); 
             }
 
-            bool Initialize() { return m_extraSearcher->Initialize(); }
-
-            bool ExitBlockController() { return m_extraSearcher->ExitBlockController(); }
             void Checkpoint() {
                 /** Lock & wait until all jobs done **/
 

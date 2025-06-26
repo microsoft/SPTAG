@@ -11,6 +11,7 @@
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/Common/DistanceUtils.h"
+#include "inc/Core/SPANN/SPANNResultIterator.h"
 
 #include <memory>
 #include <vector>
@@ -63,8 +64,8 @@ namespace SPFreshTest {
             InternalResultNum=64
             SearchInternalResultNum=64
             NumberOfThreads=16
-            PostingPageLimit=4
-            SearchPostingPageLimit=4
+	    PostingPageLimit=)" + std::to_string(4 * sizeof(T)) + R"(
+            SearchPostingPageLimit=)" + std::to_string(4 * sizeof(T)) + R"(
             TmpDir=tmpdir
             Storage=FILEIO
             SpdkBatchSize=64
@@ -112,8 +113,6 @@ namespace SPFreshTest {
         int k)
     {
         auto* p_index = static_cast<SPTAG::SPANN::Index<T>*>(vecIndex.get());
-        p_index->Initialize();
-
         std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
 
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -121,7 +120,6 @@ namespace SPFreshTest {
             res[i].SetTarget(queryset->GetVector(i));
             vecIndex->SearchIndex(res[i]);
         }
-        p_index->ExitBlockController();
         auto t2 = std::chrono::high_resolution_clock::now();
 
         float avgUs = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / static_cast<float>(queryset->Count());
@@ -148,11 +146,6 @@ namespace SPFreshTest {
         const SizeType recallK = min(k, static_cast<int>(truth->Dimension()));
         float totalRecall = 0.0f;
         float eps = 1e-4f;
-
-        if (truth->GetValueType() != GetEnumValueType<SizeType>()) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Expected truth VectorSet to store SizeType, but got incompatible type.\n");
-            return 0.0f;
-        }
 
         for (SizeType i = 0; i < queryset->Count(); ++i) {
             const SizeType* truthNN = reinterpret_cast<const SizeType*>(truth->GetVector(i));
@@ -207,7 +200,6 @@ namespace SPFreshTest {
         std::atomic_size_t vectorsSent(0);
         auto func = [&]()
             {
-                p_index->Initialize();
                 size_t index = 0;
                 while (true)
                 {
@@ -228,7 +220,6 @@ namespace SPFreshTest {
                     }
                     else
                     {
-                        p_index->ExitBlockController();
                         return;
                     }
                 }
@@ -247,7 +238,7 @@ bool CompareFilesWithLogging(const std::filesystem::path& file1, const std::file
     std::ifstream f1(file1, std::ios::binary);
     std::ifstream f2(file2, std::ios::binary);
 
-    if (!f1 || !f2) {
+    if (!f1.is_open() || !f2.is_open()) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
             "Failed to open one of the files:\n  %s\n  %s\n",
             file1.string().c_str(),
@@ -255,33 +246,31 @@ bool CompareFilesWithLogging(const std::filesystem::path& file1, const std::file
         return false;
     }
 
-    char c1, c2;
-    size_t offset = 0;
-    size_t diffCount = 0;
-
-    while (f1.get(c1) && f2.get(c2)) {
-        if (c1 != c2) {
-            if (diffCount == 0) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                    "File mismatch at: %s\n", file1.filename().string().c_str());
-            }
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                "  Byte %zu: 0x%02x != 0x%02x\n",
-                offset,
-                static_cast<unsigned char>(c1),
-                static_cast<unsigned char>(c2));
-            if (++diffCount >= 16) break;
-        }
-        ++offset;
-    }
-
-    if (f1.get(c1) || f2.get(c2)) {
+    // Check file sizes first
+    f1.seekg(0, std::ios::end);
+    f2.seekg(0, std::ios::end);
+    if (f1.tellg() != f2.tellg()) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
             "File size differs: %s\n", file1.filename().string().c_str());
         return false;
     }
 
-    return diffCount == 0;
+    f1.seekg(0, std::ios::beg);
+    f2.seekg(0, std::ios::beg);
+
+    const int bufferSize = 4096; // Adjust buffer size as needed
+    std::vector<char> buffer1(bufferSize);
+    std::vector<char> buffer2(bufferSize);
+
+    while (f1.read(buffer1.data(), bufferSize) && f2.read(buffer2.data(), bufferSize)) {
+        if (std::memcmp(buffer1.data(), buffer2.data(), f1.gcount()) != 0) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "File mismatch at: %s\n", file1.filename().string().c_str());
+            return false; // Mismatch found
+        }
+    }
+
+    return true;
 }
 
 bool CompareDirectoriesWithLogging(const std::filesystem::path& dir1,
@@ -314,6 +303,8 @@ bool CompareDirectoriesWithLogging(const std::filesystem::path& dir1,
             continue;
         }
         if (!CompareFilesWithLogging(filePath1, it->second)) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "File end differs: %s\n", filePath1.filename().string().c_str());
             matched = false;
         }
     }
@@ -328,6 +319,36 @@ bool CompareDirectoriesWithLogging(const std::filesystem::path& dir1,
     }
 
     return matched;
+}
+
+void NormalizeVector(float* embedding, int dimension) {
+    // get magnitude
+    float magnitude = 0.0f;
+    {
+        float sum = 0.0;
+        for (int i = 0; i < dimension; i++) {
+            sum += embedding[i] * embedding[i];
+        }
+        magnitude = std::sqrt(sum);
+    }
+
+    // normalized target vector
+    for (int i = 0; i < dimension; i++) {
+        embedding[i] /= magnitude;
+    }
+}
+
+template<typename T>
+std::shared_ptr<VectorSet> get_embeddings(uint32_t row_id, uint32_t end_id, uint32_t embedding_dim, uint32_t array_index) {
+    uint32_t count = end_id - row_id;
+    ByteArray vec = ByteArray::Alloc(sizeof(T) * count * embedding_dim);
+    for (uint32_t rid = 0; rid < count; rid++) {
+        for (int idx = 0; idx < embedding_dim; ++idx) {
+            ((T*)vec.Data())[rid * embedding_dim + idx] = (row_id + rid) * 17 + idx * 19 + (array_index + 1) * 23;
+        }
+        NormalizeVector(((T*)vec.Data()) + rid * embedding_dim, embedding_dim);
+    }
+    return std::make_shared<BasicVectorSet>(vec, GetEnumValueType<T>(), embedding_dim, count);
 }
 
 BOOST_AUTO_TEST_SUITE(SPFreshTest)
@@ -643,7 +664,6 @@ BOOST_AUTO_TEST_CASE(IndexSaveDuringQuery)
     BOOST_REQUIRE(index != nullptr);
 
     auto* spannIndex = static_cast<SPTAG::SPANN::Index<int8_t>*>(index.get());
-    spannIndex->Initialize();
 
     std::atomic<bool> keepQuerying(true);
     std::thread queryThread([&]() {
@@ -715,8 +735,6 @@ BOOST_AUTO_TEST_CASE(IndexMultiThreadedQuerySanity)
     for (int t = 0; t < threadCount; ++t) {
         threads.emplace_back([&, t]() {
             auto* p_index = static_cast<SPTAG::SPANN::Index<int8_t>*>(loaded.get());
-            p_index->Initialize();
-
             QueryResult result(nullptr, K, true);
             while (true) {
                 int i = nextQuery.fetch_add(1);
@@ -727,8 +745,6 @@ BOOST_AUTO_TEST_CASE(IndexMultiThreadedQuerySanity)
 
                 ++completedQueries;
             }
-
-            p_index->ExitBlockController();
             });
     }
 
@@ -773,12 +789,10 @@ BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
 
         // Query check
         auto* index = static_cast<SPTAG::SPANN::Index<int8_t>*>(loaded.get());
-        index->Initialize();
         for (int i = 0; i < std::min<SizeType>(queryset->Count(), 5); ++i) {
             QueryResult result(queryset->GetVector(i), K, true);
             loaded->SearchIndex(result);
         }
-        index->ExitBlockController();
 
         // Cleanup previous base index after first iteration
         if (iter == 1) {
@@ -792,7 +806,7 @@ BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
         std::shared_ptr<VectorIndex> shadowLoaded;
         BOOST_REQUIRE(VectorIndex::LoadIndex(shadowIndexName, shadowLoaded) == ErrorCode::Success);
         BOOST_REQUIRE(shadowLoaded != nullptr);
-	auto* shadowIndex = static_cast<SPTAG::SPANN::Index<int8_t>*>(shadowLoaded.get());
+	    auto* shadowIndex = static_cast<SPTAG::SPANN::Index<int8_t>*>(shadowLoaded.get());
 
         // Prepare insert batch
         const int insertOffset = (iter * insertBatchSize) % static_cast<int>(addvecset->Count());
@@ -819,7 +833,6 @@ BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
         const void* vectorStart = addvecset->GetVector(insertOffset);
 
         shadowIndex->AddIndex(vectorStart, insertCount, shadowIndex->GetOptions()->m_dim, batchMeta, true);
-        shadowIndex->ExitBlockController();
 
         while (!shadowIndex->AllFinished()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -841,6 +854,55 @@ BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
         std::string shadow = "shadow_index_" + std::to_string(iter);
         std::filesystem::remove_all(shadow);
     }
+}
+
+BOOST_AUTO_TEST_CASE(IterativeSearch)
+{
+    using namespace SPFreshTest;
+
+    constexpr int insertIterations = 4;
+    constexpr int insertBatchSize = 100;
+    constexpr int dimension = 1024;
+    std::shared_ptr<SPTAG::VectorSet> vecset = get_embeddings<float>(0, insertBatchSize, dimension, -1);
+    std::shared_ptr<SPTAG::MetadataSet> metaset = TestUtils::TestDataGenerator<float>::GenerateMetadataSet(insertBatchSize, 0);
+
+    auto originalIndex = BuildIndex<float>("original_index", vecset, metaset);
+    BOOST_REQUIRE(originalIndex != nullptr);
+    BOOST_REQUIRE(originalIndex->SaveIndex("original_index") == ErrorCode::Success);
+    
+    SPANN::Index<float>* spannIndex = static_cast<SPANN::Index<float>*>(originalIndex.get());
+    for (int iter = 0; iter < insertIterations; iter++) {
+        std::shared_ptr<SPTAG::VectorSet> tmpvecs = get_embeddings<float>((iter + 1) * insertBatchSize, (iter + 2) * insertBatchSize, dimension, -1);
+        std::shared_ptr<SPTAG::MetadataSet> tmpmetas = TestUtils::TestDataGenerator<float>::GenerateMetadataSet(insertBatchSize, (iter + 1) * insertBatchSize);
+        InsertVectors<float>(spannIndex, 1, insertBatchSize, tmpvecs, tmpmetas);
+    }
+
+    std::shared_ptr<SPTAG::VectorSet> embedding = get_embeddings<float>(150, 151, dimension, -1);
+    std::shared_ptr<ResultIterator> resultIterator = spannIndex->GetIterator(embedding->GetData(), false);
+    int batch = 100;
+    int ri = 0;
+    float current = INT_MAX, previous = INT_MAX;
+    bool relaxMono = false;
+    while  (current <= previous) {
+        auto results = resultIterator->Next(batch);
+        int resultCount = results->GetResultNum();
+        if (resultCount <= 0) break;
+        BOOST_CHECK(resultCount == batch);
+        previous = current;
+        current = 0;
+        for (int j = 0; j < resultCount; j++) {
+            std::cout << "Result[" << ri << "] VID:" << results->GetResult(j)->VID << " Dist:" << results->GetResult(j)->Dist << " RelaxedMono:"
+                << results->GetResult(j)->RelaxedMono << " current:" << current << " previous:" << previous <<std::endl;
+	    relaxMono = results->GetResult(j)->RelaxedMono;
+            current += results->GetResult(j)->Dist;
+            ri++;
+        }
+        current /= resultCount;
+    }
+    resultIterator->Close();
+    
+    originalIndex = nullptr;
+    std::filesystem::remove_all("original_index");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
