@@ -74,7 +74,7 @@ bool FileIO::BlockController::ExpandFile(AddressType blocksToAdd)
         static_cast<unsigned long long>(currentTotal),
         static_cast<unsigned long long>(newTotal),
         static_cast<unsigned long long>(allowedBlocks),
-        static_cast<float>(allowedBlocks << (30 - PageSizeEx - 20)));
+        static_cast<float>(allowedBlocks >> (30 - PageSizeEx)));
 
     if (allowedBlocks < blocksToAdd) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
