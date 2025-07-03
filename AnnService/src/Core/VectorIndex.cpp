@@ -841,19 +841,9 @@ VectorIndex::LoadIndex(const std::string& p_config, const std::vector<ByteArray>
     return ErrorCode::Success;
 }
 
-std::shared_ptr<VectorIndex> VectorIndex::Clone(std::string p_original, std::string p_clone) {
-    if (!copydirectory(p_original, p_clone)) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n", p_clone.c_str());
-        return nullptr;
-    }     
-    
-    std::shared_ptr<VectorIndex> clone;
-    auto status = LoadIndex(p_clone, clone);
-    if (status != ErrorCode::Success) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load index from %s!\n", p_clone.c_str());
-        return nullptr;
-    }
-    return clone;
+std::shared_ptr<VectorIndex> VectorIndex::Clone(std::string p_clone) {
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Clone not implemented for VectorIndex!\n");
+    return nullptr;
 }
 
 std::uint64_t VectorIndex::EstimatedVectorCount(std::uint64_t p_memory, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize)

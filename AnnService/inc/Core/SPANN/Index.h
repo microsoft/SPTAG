@@ -206,6 +206,7 @@ namespace SPTAG
 
             ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
             
+            std::shared_ptr<VectorIndex> Clone(std::string p_clone) override;
         private:
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);

@@ -463,11 +463,11 @@ BOOST_AUTO_TEST_CASE(TestClone)
     auto originalIndex = BuildIndex<int8_t>("original_index", vecset, metaset);
     BOOST_REQUIRE(originalIndex != nullptr);
     BOOST_REQUIRE(originalIndex->SaveIndex("original_index") == ErrorCode::Success);
-    originalIndex = nullptr;
 
-    auto clonedIndex = VectorIndex::Clone("original_index", "cloned_index");
+    auto clonedIndex = originalIndex->Clone("cloned_index");
     BOOST_REQUIRE(clonedIndex != nullptr);
     BOOST_REQUIRE(clonedIndex->SaveIndex("cloned_index") == ErrorCode::Success);
+    originalIndex.reset();
     clonedIndex = nullptr;
 
     std::unordered_set<std::string> exceptions = {
@@ -499,10 +499,10 @@ BOOST_AUTO_TEST_CASE(TestCloneRecall)
     BOOST_REQUIRE(originalIndex != nullptr);
     BOOST_REQUIRE(originalIndex->SaveIndex("original_index") == ErrorCode::Success);
     float originalRecall = Search<int8_t>(originalIndex, queryset, vecset, addvecset, K, truth, N);
-    originalIndex = nullptr;
-
-    auto clonedIndex = VectorIndex::Clone("original_index", "cloned_index");
+    
+    auto clonedIndex = originalIndex->Clone("cloned_index");
     BOOST_REQUIRE(clonedIndex != nullptr);
+    originalIndex.reset();
     clonedIndex = nullptr;
 
     std::shared_ptr<VectorIndex> loadedClonedIndex;
@@ -543,14 +543,14 @@ BOOST_AUTO_TEST_CASE(IndexPersistenceAndInsertSanity)
 
     // Search sanity check
     SearchOnly<int8_t>(loadedOnce, queryset, K);
-    loadedOnce = nullptr;
-
+    
     // Clone the loaded index
-    auto clonedIndex = VectorIndex::Clone("insert_test_index", "insert_cloned_index");
+    auto clonedIndex = loadedOnce->Clone("insert_cloned_index");
     BOOST_REQUIRE(clonedIndex != nullptr);
 
     // Save and reload the cloned index
     BOOST_REQUIRE(clonedIndex->SaveIndex("insert_cloned_index") == ErrorCode::Success);
+    loadedOnce.reset();
     clonedIndex = nullptr;
 
     std::shared_ptr<VectorIndex> loadedClone;
@@ -607,14 +607,14 @@ BOOST_AUTO_TEST_CASE(IndexPersistenceAndInsertMultipleThreads)
 
     // Search sanity check
     SearchOnly<int8_t>(loadedOnce, queryset, K);
-    loadedOnce = nullptr;
-
+    
     // Clone the loaded index
-    auto clonedIndex = VectorIndex::Clone("insert_test_index_multi", "insert_cloned_index_multi");
+    auto clonedIndex = loadedOnce->Clone("insert_cloned_index_multi");
     BOOST_REQUIRE(clonedIndex != nullptr);
 
     // Save and reload the cloned index
     BOOST_REQUIRE(clonedIndex->SaveIndex("insert_cloned_index_multi") == ErrorCode::Success);
+    loadedOnce.reset();
     clonedIndex = nullptr;
 
     std::shared_ptr<VectorIndex> loadedClone;
@@ -791,10 +791,10 @@ BOOST_AUTO_TEST_CASE(IndexShadowCloneLifecycleKeepLast)
         if (iter == 1) {
             std::filesystem::remove_all(baseIndexName);
         }
-        loaded = nullptr;
-
+        
         // Clone to shadow
-        BOOST_REQUIRE(VectorIndex::Clone(previousIndexName, shadowIndexName) != nullptr);
+        BOOST_REQUIRE(loaded->Clone(shadowIndexName) != nullptr);
+        loaded.reset();
 
         std::shared_ptr<VectorIndex> shadowLoaded;
         BOOST_REQUIRE(VectorIndex::LoadIndex(shadowIndexName, shadowLoaded) == ErrorCode::Success);
@@ -864,15 +864,14 @@ BOOST_AUTO_TEST_CASE(IterativeSearch)
     BOOST_REQUIRE(originalIndex->SaveIndex("original_index") == ErrorCode::Success);
     originalIndex = nullptr;
 
+    std::string prevPath = "original_index";
     for (int iter = 0; iter < insertIterations; iter++) {
         std::string clone_path = "clone_index_" + std::to_string(iter);
-        std::shared_ptr<SPTAG::VectorIndex> cloneIndex;
-        if (iter == 0) {
-            cloneIndex = VectorIndex::Clone("original_index", clone_path);
-        }
-        else {
-            cloneIndex = VectorIndex::Clone("clone_index_" + std::to_string(iter - 1), clone_path);
-        }
+        std::shared_ptr<SPTAG::VectorIndex> prevIndex;
+        BOOST_REQUIRE(VectorIndex::LoadIndex(prevPath, prevIndex) == ErrorCode::Success);
+        BOOST_REQUIRE(prevIndex != nullptr);
+	    
+        auto cloneIndex = prevIndex->Clone(clone_path);
         auto* cloneIndexPtr = static_cast<SPTAG::SPANN::Index<float>*>(cloneIndex.get());
         std::shared_ptr<SPTAG::VectorSet> tmpvecs = get_embeddings<float>((iter + 1) * insertBatchSize, (iter + 2) * insertBatchSize, dimension, -1);
         std::shared_ptr<SPTAG::MetadataSet> tmpmetas = TestUtils::TestDataGenerator<float>::GenerateMetadataSet(insertBatchSize, (iter + 1) * insertBatchSize);

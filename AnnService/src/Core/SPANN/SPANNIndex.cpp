@@ -11,7 +11,7 @@
 
 #include "inc/Core/ResultIterator.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
-#include <random>
+#include <filesystem>
 
 #pragma warning(disable:4242)  // '=' : conversion from 'int' to 'short', possible loss of data
 #pragma warning(disable:4244)  // '=' : conversion from 'int' to 'short', possible loss of data
@@ -1319,6 +1319,66 @@ namespace SPTAG
             SizeType p_id = m_extraSearcher->SearchVector(workSpace.get(), vectorSet, m_index);
             if (p_id == -1) return ErrorCode::VectorNotFound;
             return DeleteIndex(p_id);
+        }
+
+
+        namespace fs = std::filesystem;
+
+        bool copydirectory(const fs::path& sourceDir, const fs::path& destinationDir) {
+            try {
+                // Ensure the destination directory exists.
+                // create_directories will create parent directories if they don't exist.
+                if (!fs::exists(destinationDir)) {
+                    if (!fs::create_directories(destinationDir)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Could not create destination directory %s\n", destinationDir.string().c_str());
+                        return false;
+                    }
+                } else if (!fs::is_directory(destinationDir)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error: Destination path %s exists but is not a directory.\n", destinationDir.string().c_str());
+                    return false;
+                }
+
+                // Iterate through all entries in the source directory
+                for (const auto& entry : fs::directory_iterator(sourceDir)) {
+                    fs::path currentPath = entry.path();
+                    fs::path destinationPath = destinationDir / currentPath.filename(); // Append filename to destination path
+
+                    if (fs::is_directory(currentPath)) {
+                        // If it's a subdirectory, recursively copy its contents
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying directory: %s to %s\n", currentPath.string().c_str(), destinationPath.string().c_str());
+                        if (!copydirectory(currentPath, destinationPath)) {
+                            return false; // Propagate error from recursive call
+                        }
+                    } else {
+                        // If it's a file, copy it directly
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying file: %s to %s\n", currentPath.string().c_str(), destinationPath.string().c_str());
+                        // Use copy_options::overwrite_existing to replace files if they exist in destination
+                        fs::copy(currentPath, destinationPath, fs::copy_options::overwrite_existing);
+                    }
+                }
+            } catch (const fs::filesystem_error& e) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Filesystem error: %s\n", e.what());
+                return false;
+            } catch (const std::exception& e) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "General error: %s\n", e.what());
+                return false;
+            }
+            return true;
+        }
+        template <typename T>
+        std::shared_ptr<VectorIndex> Index<T>::Clone(std::string p_clone) {
+            if (!copydirectory(m_options.m_indexDirectory, p_clone)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n", p_clone.c_str());
+                return nullptr;
+            }     
+            
+            std::shared_ptr<VectorIndex> clone;
+            auto status = VectorIndex::LoadIndex(p_clone, clone);
+            if (status != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load index from %s!\n", p_clone.c_str());
+                return nullptr;
+            }
+            return clone;
         }
     }
 }
