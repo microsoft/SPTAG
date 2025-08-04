@@ -1883,10 +1883,6 @@ namespace SPTAG::SPANN {
             }
         }
 
-        ErrorCode ReclaimMemory() override {
-            return db->ReclaimMemory();
-        }
-
         void Checkpoint(std::string prefix) override {
             /**flush SPTAG, versionMap, block mapping, block pool**/
             /** Wait **/

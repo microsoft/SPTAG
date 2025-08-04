@@ -197,8 +197,6 @@ public:
     void UpdateMetaMapping(const std::string& meta, SizeType i);
 
     void BuildMetaMapping(bool p_checkDeleted = true);
-
-    ErrorCode ReclaimMemory() { return ErrorCode::Undefined; }
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 

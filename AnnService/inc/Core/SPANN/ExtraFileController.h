@@ -39,6 +39,7 @@ namespace SPTAG::SPANN {
             int m_batchSize = 64;
             int m_preIOCompleteCount = 0;
             int64_t m_preIOBytes = 0;
+            bool m_disableCheckpoint = false;
 
             std::chrono::high_resolution_clock::time_point m_startTime;
             std::chrono::time_point<std::chrono::high_resolution_clock> m_preTime = std::chrono::high_resolution_clock::now();
@@ -83,22 +84,6 @@ namespace SPTAG::SPANN {
             int RemainBlocks() {
                 return (int)(m_blockAddresses.unsafe_size());
             };
-
-            ErrorCode ReclaimMemory() {
-                AddressType currBlockAddress = 0;
-                for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
-                    if (m_blockAddresses_reserve.try_pop(currBlockAddress)) {
-                        m_blockAddresses.push(currBlockAddress);
-                    }
-                }
-                AddressType blocks = RemainBlocks();
-                AddressType totalBlocks = m_totalAllocatedBlocks.load();
-
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Total allocated blocks: %llu\n", static_cast<unsigned long long>(totalBlocks));
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Remaining free blocks: %llu\n", blocks);
-
-                return ErrorCode::Success;
-            }
 
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
@@ -1017,10 +1002,6 @@ namespace SPTAG::SPANN {
             }
 	    */
             return ErrorCode::Success;
-        }
-
-        ErrorCode ReclaimMemory() override {
-            return m_pBlockController.ReclaimMemory();
         }
 
         ErrorCode Checkpoint(std::string prefix) override {
