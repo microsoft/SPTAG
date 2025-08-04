@@ -197,6 +197,7 @@ public:
     void UpdateMetaMapping(const std::string& meta, SizeType i);
 
     void BuildMetaMapping(bool p_checkDeleted = true);
+
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
