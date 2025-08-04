@@ -84,6 +84,22 @@ namespace SPTAG::SPANN {
                 return (int)(m_blockAddresses.unsafe_size());
             };
 
+            ErrorCode ReclaimMemory() {
+                AddressType currBlockAddress = 0;
+                for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
+                    if (m_blockAddresses_reserve.try_pop(currBlockAddress)) {
+                        m_blockAddresses.push(currBlockAddress);
+                    }
+                }
+                AddressType blocks = RemainBlocks();
+                AddressType totalBlocks = m_totalAllocatedBlocks.load();
+
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Total allocated blocks: %llu\n", static_cast<unsigned long long>(totalBlocks));
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Remaining free blocks: %llu\n", blocks);
+
+                return ErrorCode::Success;
+            }
+
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Starting block pool save...\n");
@@ -1001,6 +1017,10 @@ namespace SPTAG::SPANN {
             }
 	    */
             return ErrorCode::Success;
+        }
+
+        ErrorCode ReclaimMemory() override {
+            return m_pBlockController.ReclaimMemory();
         }
 
         ErrorCode Checkpoint(std::string prefix) override {

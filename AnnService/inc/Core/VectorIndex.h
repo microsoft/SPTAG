@@ -198,6 +198,7 @@ public:
 
     void BuildMetaMapping(bool p_checkDeleted = true);
 
+    ErrorCode ReclaimMemory() { return ErrorCode::Undefined; }
 private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 

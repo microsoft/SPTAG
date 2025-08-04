@@ -339,6 +339,7 @@ namespace SPTAG {
 
             virtual void GetWritePosting(ExtraWorkSpace* p_exWorkSpace, SizeType pid, std::string& posting, bool write = false) { return; }
 
+            virtual ErrorCode ReclaimMemory() { return ErrorCode::Undefined; }
             virtual void Checkpoint(std::string prefix) { return; }
         };
     } // SPANN

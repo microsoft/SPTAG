@@ -170,6 +170,12 @@ namespace SPTAG
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) { return ErrorCode::Undefined; }
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) { return ErrorCode::Undefined; }
+            ErrorCode ReclaimMemory() override {
+                if (m_extraSearcher) {
+                    return m_extraSearcher->ReclaimMemory();
+                }
+                return ErrorCode::Undefined;
+            }
 
             ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {
