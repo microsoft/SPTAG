@@ -20,6 +20,8 @@ namespace Service
 {
 
 class SearchExecutionContext;
+class InsertExecutionContext;
+class DeleteExecutionContext;
 
 class SearchService
 {
@@ -40,6 +42,16 @@ private:
     void SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
 
     void SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_exeContext,
+                               Socket::Packet p_srcPacket);
+
+    void InsertHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void InsertHandlerCallback(std::shared_ptr<InsertExecutionContext> p_exeContext,
+                               Socket::Packet p_srcPacket);
+
+    void DeleteHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void DeleteHandlerCallback(std::shared_ptr<DeleteExecutionContext> p_exeContext,
                                Socket::Packet p_srcPacket);
 
 private:

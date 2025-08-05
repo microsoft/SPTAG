@@ -122,6 +122,7 @@
     <ClInclude Include="inc\Server\SearchService.h" />
     <ClInclude Include="inc\Server\ServiceContext.h" />
     <ClInclude Include="inc\Server\ServiceSettings.h" />
+    <ClInclude Include="inc\Server\InsertDeleteExecutor.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Server\main.cpp" />
@@ -131,6 +132,7 @@
     <ClCompile Include="src\Server\SearchService.cpp" />
     <ClCompile Include="src\Server\ServiceContext.cpp" />
     <ClCompile Include="src\Server\ServiceSettings.cpp" />
+    <ClCompile Include="src\Server\InsertDeleteExecutor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

@@ -462,3 +462,9 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Exclude specific folders for spfresh_async_benchmark branch
+store_murren1m_linux/
+store_murren1m_windows/
+target_datasets/
+.vscode/

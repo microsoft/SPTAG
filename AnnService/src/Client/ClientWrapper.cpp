@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "inc/Client/ClientWrapper.h"
+#include "inc/Socket/RemoteInsertDeleteQuery.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Socket;
@@ -84,6 +85,108 @@ void ClientWrapper::SendQueryAsync(const Socket::RemoteQuery &p_query, Callback 
     m_client->SendPacket(conn.first, std::move(packet), connectCallback);
 }
 
+void ClientWrapper::SendInsertAsync(const Socket::RemoteInsertQuery& p_query,
+                                   InsertDeleteCallback p_callback,
+                                   const ClientOptions& p_options)
+{
+    if (!bool(p_callback))
+    {
+        return;
+    }
+
+    auto conn = GetConnection();
+
+    auto timeoutCallback = [this](std::shared_ptr<InsertDeleteCallback> p_callback) {
+        DecreaseUnfnishedJobCount();
+        if (nullptr != p_callback)
+        {
+            Socket::RemoteInsertDeleteResult result;
+            result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+            result.m_message = "Operation timeout";
+
+            (*p_callback)(std::move(result));
+        }
+    };
+
+    auto connectCallback = [p_callback, this](bool p_connectSucc) {
+        if (!p_connectSucc)
+        {
+            Socket::RemoteInsertDeleteResult result;
+            result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+            result.m_message = "Network connection failed";
+
+            p_callback(std::move(result));
+            DecreaseUnfnishedJobCount();
+        }
+    };
+
+    Socket::Packet packet;
+    packet.Header().m_connectionID = c_invalidConnectionID;
+    packet.Header().m_packetType = PacketType::InsertRequest;
+    packet.Header().m_processStatus = PacketProcessStatus::Ok;
+    packet.Header().m_resourceID = m_insertDeleteCallbackManager.Add(std::make_shared<InsertDeleteCallback>(std::move(p_callback)),
+                                                                     p_options.m_searchTimeout, std::move(timeoutCallback));
+
+    packet.Header().m_bodyLength = static_cast<std::uint32_t>(p_query.EstimateBufferSize());
+    packet.AllocateBuffer(packet.Header().m_bodyLength);
+    p_query.Write(packet.Body());
+    packet.Header().WriteBuffer(packet.HeaderBuffer());
+
+    ++m_unfinishedJobCount;
+    m_client->SendPacket(conn.first, std::move(packet), connectCallback);
+}
+
+void ClientWrapper::SendDeleteAsync(const Socket::RemoteDeleteQuery& p_query,
+                                   InsertDeleteCallback p_callback,
+                                   const ClientOptions& p_options)
+{
+    if (!bool(p_callback))
+    {
+        return;
+    }
+
+    auto conn = GetConnection();
+
+    auto timeoutCallback = [this](std::shared_ptr<InsertDeleteCallback> p_callback) {
+        DecreaseUnfnishedJobCount();
+        if (nullptr != p_callback)
+        {
+            Socket::RemoteInsertDeleteResult result;
+            result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+            result.m_message = "Operation timeout";
+
+            (*p_callback)(std::move(result));
+        }
+    };
+
+    auto connectCallback = [p_callback, this](bool p_connectSucc) {
+        if (!p_connectSucc)
+        {
+            Socket::RemoteInsertDeleteResult result;
+            result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+            result.m_message = "Network connection failed";
+
+            p_callback(std::move(result));
+            DecreaseUnfnishedJobCount();
+        }
+    };
+
+    Socket::Packet packet;
+    packet.Header().m_connectionID = c_invalidConnectionID;
+    packet.Header().m_packetType = PacketType::DeleteRequest;
+    packet.Header().m_processStatus = PacketProcessStatus::Ok;
+    packet.Header().m_resourceID = m_insertDeleteCallbackManager.Add(std::make_shared<InsertDeleteCallback>(std::move(p_callback)),
+                                                                     p_options.m_searchTimeout, std::move(timeoutCallback));
+
+    packet.Header().m_bodyLength = static_cast<std::uint32_t>(p_query.EstimateBufferSize());
+    packet.AllocateBuffer(packet.Header().m_bodyLength);
+    p_query.Write(packet.Body());
+    packet.Header().WriteBuffer(packet.HeaderBuffer());
+
+    ++m_unfinishedJobCount;
+    m_client->SendPacket(conn.first, std::move(packet), connectCallback);
+}
+
 void ClientWrapper::WaitAllFinished()
 {
     if (m_unfinishedJobCount > 0)
@@ -113,6 +216,12 @@ PacketHandlerMapPtr ClientWrapper::GetHandlerMap()
                         });
 
     handlerMap->emplace(PacketType::SearchResponse, std::bind(&ClientWrapper::SearchResponseHanlder, this,
+                                                              std::placeholders::_1, std::placeholders::_2));
+
+    handlerMap->emplace(PacketType::InsertResponse, std::bind(&ClientWrapper::InsertResponseHandler, this,
+                                                              std::placeholders::_1, std::placeholders::_2));
+
+    handlerMap->emplace(PacketType::DeleteResponse, std::bind(&ClientWrapper::DeleteResponseHandler, this,
                                                               std::placeholders::_1, std::placeholders::_2));
 
     return handlerMap;
@@ -172,6 +281,52 @@ void ClientWrapper::SearchResponseHanlder(Socket::ConnectionID p_localConnection
         (*callback)(std::move(result));
     }
 
+    DecreaseUnfnishedJobCount();
+}
+
+void ClientWrapper::InsertResponseHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+{
+    std::shared_ptr<InsertDeleteCallback> callback = m_insertDeleteCallbackManager.GetAndRemove(p_packet.Header().m_resourceID);
+    if (nullptr == callback)
+    {
+        return;
+    }
+    
+    Socket::RemoteInsertDeleteResult result;
+    if (p_packet.Header().m_processStatus != Socket::PacketProcessStatus::Ok || 0 == p_packet.Header().m_bodyLength)
+    {
+        result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+        result.m_message = "Failed to execute insert operation";
+    }
+    else
+    {
+        result.Read(p_packet.Body());
+    }
+    
+    (*callback)(std::move(result));
+    DecreaseUnfnishedJobCount();
+}
+
+void ClientWrapper::DeleteResponseHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+{
+    std::shared_ptr<InsertDeleteCallback> callback = m_insertDeleteCallbackManager.GetAndRemove(p_packet.Header().m_resourceID);
+    if (nullptr == callback)
+    {
+        return;
+    }
+    
+    Socket::RemoteInsertDeleteResult result;
+    if (p_packet.Header().m_processStatus != Socket::PacketProcessStatus::Ok || 0 == p_packet.Header().m_bodyLength)
+    {
+        result.m_status = Socket::RemoteInsertDeleteResult::ResultStatus::Failed;
+        result.m_message = "Failed to execute delete operation";
+    }
+    else
+    {
+        result.Read(p_packet.Body());
+    }
+    
+    (*callback)(std::move(result));
     DecreaseUnfnishedJobCount();
 }
 

@@ -5,7 +5,9 @@
 #include "inc/Helper/ArgumentsParser.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Server/SearchExecutor.h"
+#include "inc/Server/InsertDeleteExecutor.h"
 #include "inc/Socket/RemoteSearchQuery.h"
+#include "inc/Socket/RemoteInsertDeleteQuery.h"
 
 #include <iostream>
 
@@ -53,11 +55,17 @@ SearchService::~SearchService()
 
 bool SearchService::Initialize(int p_argNum, char *p_args[])
 {
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Starting SearchService initialization...\n");
+    
     Local::SerivceCmdOptions cmdOptions;
     if (!cmdOptions.Parse(p_argNum - 1, p_args + 1))
     {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to parse command line arguments!\n");
         return false;
     }
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Parsed arguments - Mode: %s, Config: %s, Log: %s\n", 
+                 cmdOptions.m_serveMode.c_str(), cmdOptions.m_configFile.c_str(), cmdOptions.m_logFile.c_str());
 
     if (Helper::StrUtils::StrEqualIgnoreCase(cmdOptions.m_serveMode.c_str(), "interactive"))
     {
@@ -78,9 +86,13 @@ bool SearchService::Initialize(int p_argNum, char *p_args[])
         SetLogger(std::make_shared<Helper::FileLogger>(Helper::LogLevel::LL_Debug, cmdOptions.m_logFile.c_str()));
     }
 
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Creating ServiceContext with config file: %s\n", cmdOptions.m_configFile.c_str());
+
     m_serviceContext.reset(new ServiceContext(cmdOptions.m_configFile));
 
     m_initialized = m_serviceContext->IsInitialized();
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ServiceContext initialized: %s\n", m_initialized ? "SUCCESS" : "FAILED");
 
     return m_initialized;
 }
@@ -116,6 +128,16 @@ void SearchService::RunSocketMode()
     handlerMap->emplace(Socket::PacketType::SearchRequest, [this](Socket::ConnectionID p_srcID,
                                                                   Socket::Packet p_packet) {
         boost::asio::post(*m_threadPool, std::bind(&SearchService::SearchHanlder, this, p_srcID, std::move(p_packet)));
+    });
+    
+    handlerMap->emplace(Socket::PacketType::InsertRequest, [this](Socket::ConnectionID p_srcID,
+                                                                  Socket::Packet p_packet) {
+        boost::asio::post(*m_threadPool, std::bind(&SearchService::InsertHandler, this, p_srcID, std::move(p_packet)));
+    });
+    
+    handlerMap->emplace(Socket::PacketType::DeleteRequest, [this](Socket::ConnectionID p_srcID,
+                                                                  Socket::Packet p_packet) {
+        boost::asio::post(*m_threadPool, std::bind(&SearchService::DeleteHandler, this, p_srcID, std::move(p_packet)));
     });
 
     m_socketServer.reset(new Socket::Server(m_serviceContext->GetServiceSettings()->m_listenAddr,
@@ -237,6 +259,114 @@ void SearchService::SearchHanlderCallback(std::shared_ptr<SearchExecutionContext
         remoteResult.m_allIndexResults.swap(p_exeContext->GetResults());
         ret.AllocateBuffer(static_cast<std::uint32_t>(remoteResult.EstimateBufferSize()));
         auto bodyEnd = remoteResult.Write(ret.Body());
+
+        ret.Header().m_bodyLength = static_cast<std::uint32_t>(bodyEnd - ret.Body());
+        ret.Header().WriteBuffer(ret.HeaderBuffer());
+    }
+
+    m_socketServer->SendPacket(p_srcPacket.Header().m_connectionID, std::move(ret), nullptr);
+}
+
+void SearchService::InsertHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+{
+    if (p_packet.Header().m_bodyLength == 0)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty insert package with body length equals 0!\n");
+        return;
+    }
+
+    if (Socket::c_invalidConnectionID == p_packet.Header().m_connectionID)
+    {
+        p_packet.Header().m_connectionID = p_localConnectionID;
+    }
+
+    Socket::RemoteInsertQuery remoteQuery;
+    if (remoteQuery.Read(p_packet.Body()) == nullptr)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read insert query - version mismatch!\n");
+        return;
+    }
+
+    auto callback = std::bind(&SearchService::InsertHandlerCallback, this, std::placeholders::_1, std::move(p_packet));
+
+    InsertExecutor executor(std::move(remoteQuery), m_serviceContext, callback);
+    executor.Execute();
+}
+
+void SearchService::InsertHandlerCallback(std::shared_ptr<InsertExecutionContext> p_exeContext,
+                                          Socket::Packet p_srcPacket)
+{
+    Socket::Packet ret;
+    ret.Header().m_packetType = Socket::PacketType::InsertResponse;
+    ret.Header().m_processStatus = Socket::PacketProcessStatus::Ok;
+    ret.Header().m_connectionID = p_srcPacket.Header().m_connectionID;
+    ret.Header().m_resourceID = p_srcPacket.Header().m_resourceID;
+
+    if (nullptr == p_exeContext)
+    {
+        ret.Header().m_processStatus = Socket::PacketProcessStatus::Failed;
+        ret.AllocateBuffer(0);
+        ret.Header().WriteBuffer(ret.HeaderBuffer());
+    }
+    else
+    {
+        Socket::RemoteInsertDeleteResult result = p_exeContext->GetResult();
+        ret.AllocateBuffer(static_cast<std::uint32_t>(result.EstimateBufferSize()));
+        auto bodyEnd = result.Write(ret.Body());
+
+        ret.Header().m_bodyLength = static_cast<std::uint32_t>(bodyEnd - ret.Body());
+        ret.Header().WriteBuffer(ret.HeaderBuffer());
+    }
+
+    m_socketServer->SendPacket(p_srcPacket.Header().m_connectionID, std::move(ret), nullptr);
+}
+
+void SearchService::DeleteHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+{
+    if (p_packet.Header().m_bodyLength == 0)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty delete package with body length equals 0!\n");
+        return;
+    }
+
+    if (Socket::c_invalidConnectionID == p_packet.Header().m_connectionID)
+    {
+        p_packet.Header().m_connectionID = p_localConnectionID;
+    }
+
+    Socket::RemoteDeleteQuery remoteQuery;
+    if (remoteQuery.Read(p_packet.Body()) == nullptr)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read delete query - version mismatch!\n");
+        return;
+    }
+
+    auto callback = std::bind(&SearchService::DeleteHandlerCallback, this, std::placeholders::_1, std::move(p_packet));
+
+    DeleteExecutor executor(std::move(remoteQuery), m_serviceContext, callback);
+    executor.Execute();
+}
+
+void SearchService::DeleteHandlerCallback(std::shared_ptr<DeleteExecutionContext> p_exeContext,
+                                          Socket::Packet p_srcPacket)
+{
+    Socket::Packet ret;
+    ret.Header().m_packetType = Socket::PacketType::DeleteResponse;
+    ret.Header().m_processStatus = Socket::PacketProcessStatus::Ok;
+    ret.Header().m_connectionID = p_srcPacket.Header().m_connectionID;
+    ret.Header().m_resourceID = p_srcPacket.Header().m_resourceID;
+
+    if (nullptr == p_exeContext)
+    {
+        ret.Header().m_processStatus = Socket::PacketProcessStatus::Failed;
+        ret.AllocateBuffer(0);
+        ret.Header().WriteBuffer(ret.HeaderBuffer());
+    }
+    else
+    {
+        Socket::RemoteInsertDeleteResult result = p_exeContext->GetResult();
+        ret.AllocateBuffer(static_cast<std::uint32_t>(result.EstimateBufferSize()));
+        auto bodyEnd = result.Write(ret.Body());
 
         ret.Header().m_bodyLength = static_cast<std::uint32_t>(bodyEnd - ret.Body());
         ret.Header().WriteBuffer(ret.HeaderBuffer());

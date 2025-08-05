@@ -4,9 +4,10 @@ WORKDIR /app
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get -y install wget build-essential swig cmake git libnuma-dev python3.8-dev python3-distutils gcc-8 g++-8 \
-    libboost-filesystem-dev libboost-test-dev libboost-serialization-dev libboost-regex-dev libboost-serialization-dev libboost-regex-dev libboost-thread-dev libboost-system-dev
+    libboost-filesystem-dev libboost-test-dev libboost-serialization-dev libboost-regex-dev libboost-serialization-dev libboost-regex-dev libboost-thread-dev libboost-system-dev \
+    libtbb-dev
 
-RUN wget https://bootstrap.pypa.io/get-pip.py && python3.8 get-pip.py && python3.8 -m pip install numpy
+RUN wget https://bootstrap.pypa.io/pip/3.8/get-pip.py && python3.8 get-pip.py && python3.8 -m pip install numpy
 
 ENV PYTHONPATH=/app/Release
 
@@ -17,4 +18,19 @@ COPY Wrappers ./Wrappers/
 COPY GPUSupport ./GPUSupport/
 COPY ThirdParty ./ThirdParty/
 
-RUN export CC=/usr/bin/gcc-8 && export CXX=/usr/bin/g++-8 && mkdir build && cd build && cmake .. && make -j && cd ..
+RUN export CC=/usr/bin/gcc-8 && export CXX=/usr/bin/g++-8 && mkdir build && cd build && cmake -DSPDK=OFF -DROCKSDB=OFF .. && make -j && cd ..
+
+# Create directories for runtime data and config
+RUN mkdir -p /app/data /app/config
+
+# Copy default config (can be overridden at runtime)
+COPY AnnService.docker.ini /app/config/AnnService.ini
+
+# Set working directory to Release folder where binaries are
+WORKDIR /app/Release
+
+# Expose the service port
+EXPOSE 8000
+
+# Default command (can be overridden)
+CMD ["./server", "-m", "socket", "-c", "/app/config/AnnService.ini"]

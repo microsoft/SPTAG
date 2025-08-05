@@ -6,6 +6,7 @@
 
 #include "inc/Socket/Client.h"
 #include "inc/Socket/RemoteSearchQuery.h"
+#include "inc/Socket/RemoteInsertDeleteQuery.h"
 #include "inc/Socket/ResourceManager.h"
 #include "Options.h"
 
@@ -27,6 +28,7 @@ class ClientWrapper
 {
 public:
     typedef std::function<void(Socket::RemoteSearchResult)> Callback;
+    typedef std::function<void(Socket::RemoteInsertDeleteResult)> InsertDeleteCallback;
 
     ClientWrapper(const ClientOptions& p_options);
 
@@ -35,6 +37,14 @@ public:
     void SendQueryAsync(const Socket::RemoteQuery& p_query,
                         Callback p_callback,
                         const ClientOptions& p_options);
+
+    void SendInsertAsync(const Socket::RemoteInsertQuery& p_query,
+                         InsertDeleteCallback p_callback,
+                         const ClientOptions& p_options);
+
+    void SendDeleteAsync(const Socket::RemoteDeleteQuery& p_query,
+                         InsertDeleteCallback p_callback,
+                         const ClientOptions& p_options);
 
     void WaitAllFinished();
 
@@ -50,6 +60,10 @@ private:
     const ConnectionPair& GetConnection();
 
     void SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void InsertResponseHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void DeleteResponseHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
 
     void HandleDeadConnection(Socket::ConnectionID p_cid);
 
@@ -71,10 +85,12 @@ private:
     std::atomic<std::uint32_t> m_spinCountOfConnection;
 
     Socket::ResourceManager<Callback> m_callbackManager;
+
+    Socket::ResourceManager<InsertDeleteCallback> m_insertDeleteCallbackManager;
 };
 
 
-} // namespace Socket
+} // namespace Client
 } // namespace SPTAG
 
-#endif // _SPTAG_CLIENT_OPTIONS_H_
+#endif // _SPTAG_CLIENT_CLIENTWRAPPER_H_
