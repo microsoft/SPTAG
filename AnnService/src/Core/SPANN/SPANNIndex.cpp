@@ -115,6 +115,11 @@ namespace SPTAG
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
             }
 
+            if(!m_extraSearcher->Available()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Extrasearcher is not available and failed to initialize.\n");
+                return ErrorCode::Fail;
+            }
+
             if (!m_extraSearcher->LoadIndex(m_options, m_versionMap, m_vectorTranslateMap, m_index)) return ErrorCode::Fail;
             
             m_vectorTranslateMap.Initialize(m_index->GetNumSamples(), 1, m_index->m_iDataBlockSize, m_index->m_iDataCapacity, p_indexBlobs.back().Data(), false);
@@ -179,6 +184,11 @@ namespace SPTAG
                     m_extraSearcher.reset(new ExtraDynamicSearcher<std::uint8_t>(m_options));
                 else
                     m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
+            }
+
+            if (!m_extraSearcher->Available()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Extrasearcher is not available and failed to initialize.\n");
+                return ErrorCode::Fail;
             }
 
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
@@ -1028,6 +1038,11 @@ namespace SPTAG
                         m_extraSearcher.reset(new ExtraDynamicSearcher<std::uint8_t>(m_options));
                     else
                         m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
+                }
+
+                if (!m_extraSearcher->Available()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraSearcher is not available and failed to initialize!\n");
+                    return ErrorCode::Fail;
                 }
 
                 if (m_options.m_buildSsdIndex) {
