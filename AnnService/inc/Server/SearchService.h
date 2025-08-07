@@ -6,6 +6,7 @@
 
 #include "ServiceContext.h"
 #include "../Socket/Server.h"
+#include "../HTTP/Server.h"
 
 #include <boost/asio.hpp>
 
@@ -38,6 +39,10 @@ private:
     void RunSocketMode();
 
     void RunInteractiveMode();
+    
+    void RunHTTPMode();
+    
+    void StartHTTPServer();
 
     void SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
 
@@ -59,12 +64,16 @@ private:
     {
         Interactive,
 
-        Socket
+        Socket,
+        
+        HTTP
     };
 
     std::shared_ptr<ServiceContext> m_serviceContext;
 
     std::shared_ptr<Socket::Server> m_socketServer;
+    
+    std::shared_ptr<HTTP::Server> m_httpServer;
 
     bool m_initialized;
 

@@ -85,8 +85,10 @@ install(TARGETS SPTAGLib SPTAGLibStatic
   LIBRARY DESTINATION lib)
 
 if (NOT LIBRARYONLY)
-    file(GLOB SERVER_HDR_FILES ${AnnService}/inc/Server/*.h ${AnnService}/inc/Socket/*.h)
-    file(GLOB SERVER_FILES ${AnnService}/src/Server/*.cpp ${AnnService}/src/Socket/*.cpp)
+    file(GLOB SERVER_HDR_FILES ${AnnService}/inc/Server/*.h ${AnnService}/inc/Socket/*.h ${AnnService}/inc/HTTP/*.h)
+    file(GLOB SERVER_FILES ${AnnService}/src/Server/*.cpp ${AnnService}/src/Socket/*.cpp ${AnnService}/src/HTTP/*.cpp)
+    # Remove test files from server build
+    list(REMOVE_ITEM SERVER_FILES ${AnnService}/src/HTTP/test_http.cpp)
     add_executable (server ${SERVER_FILES} ${SERVER_HDR_FILES})
     target_link_libraries(server ${Boost_LIBRARIES} SPTAGLibStatic)
 

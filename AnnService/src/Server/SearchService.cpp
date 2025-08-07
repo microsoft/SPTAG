@@ -75,6 +75,10 @@ bool SearchService::Initialize(int p_argNum, char *p_args[])
     {
         m_serveMode = ServeMode::Socket;
     }
+    else if (Helper::StrUtils::StrEqualIgnoreCase(cmdOptions.m_serveMode.c_str(), "http"))
+    {
+        m_serveMode = ServeMode::HTTP;
+    }
     else
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed parse Serve Mode!\n");
@@ -112,6 +116,10 @@ void SearchService::Run()
 
     case ServeMode::Socket:
         RunSocketMode();
+        break;
+        
+    case ServeMode::HTTP:
+        RunHTTPMode();
         break;
 
     default:
@@ -265,6 +273,83 @@ void SearchService::SearchHanlderCallback(std::shared_ptr<SearchExecutionContext
     }
 
     m_socketServer->SendPacket(p_srcPacket.Header().m_connectionID, std::move(ret), nullptr);
+}
+
+void SearchService::RunHTTPMode()
+{
+    auto threadNum = max((SizeType)1, m_serviceContext->GetServiceSettings()->m_threadNum);
+    m_threadPool.reset(new boost::asio::thread_pool(threadNum));
+
+    // Start HTTP server
+    StartHTTPServer();
+
+    // Also start TCP socket server if configured
+    if (m_serviceContext->GetServiceSettings()->m_enableSocket) {
+        Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
+        handlerMap->emplace(Socket::PacketType::SearchRequest, [this](Socket::ConnectionID p_srcID,
+                                                                      Socket::Packet p_packet) {
+            boost::asio::post(*m_threadPool, std::bind(&SearchService::SearchHanlder, this, p_srcID, std::move(p_packet)));
+        });
+        
+        handlerMap->emplace(Socket::PacketType::InsertRequest, [this](Socket::ConnectionID p_srcID,
+                                                                      Socket::Packet p_packet) {
+            boost::asio::post(*m_threadPool, std::bind(&SearchService::InsertHandler, this, p_srcID, std::move(p_packet)));
+        });
+        
+        handlerMap->emplace(Socket::PacketType::DeleteRequest, [this](Socket::ConnectionID p_srcID,
+                                                                      Socket::Packet p_packet) {
+            boost::asio::post(*m_threadPool, std::bind(&SearchService::DeleteHandler, this, p_srcID, std::move(p_packet)));
+        });
+
+        m_socketServer.reset(new Socket::Server(m_serviceContext->GetServiceSettings()->m_listenAddr,
+                                                m_serviceContext->GetServiceSettings()->m_listenPort, handlerMap,
+                                                m_serviceContext->GetServiceSettings()->m_socketThreadNum));
+
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Also listening on TCP socket %s:%s ...\n",
+                     m_serviceContext->GetServiceSettings()->m_listenAddr.c_str(),
+                     m_serviceContext->GetServiceSettings()->m_listenPort.c_str());
+    }
+
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "HTTP Server running on %s:%s\n",
+                 m_serviceContext->GetServiceSettings()->m_httpListenAddr.c_str(),
+                 m_serviceContext->GetServiceSettings()->m_httpListenPort.c_str());
+
+    // Setup shutdown signals
+    m_shutdownSignals.add(SIGINT);
+    m_shutdownSignals.add(SIGTERM);
+    #ifdef SIGQUIT
+    m_shutdownSignals.add(SIGQUIT);
+    #endif
+
+    m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signal.\n");
+        if (m_httpServer) m_httpServer->Stop();
+        if (m_socketServer) m_socketServer.reset();
+    });
+
+    m_ioContext.run();
+    
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Shutting down servers.\n");
+    m_threadPool->stop();
+    m_threadPool->join();
+}
+
+void SearchService::StartHTTPServer()
+{
+    m_httpServer = std::make_shared<HTTP::Server>(
+        m_serviceContext->GetServiceSettings()->m_httpListenAddr,
+        m_serviceContext->GetServiceSettings()->m_httpListenPort,
+        m_serviceContext,
+        m_serviceContext->GetServiceSettings()->m_httpThreadNum,
+        m_serviceContext->GetServiceSettings()->m_maxHttpConnections
+    );
+    
+    // Enable WebSocket for real-time queries if configured
+    if (m_serviceContext->GetServiceSettings()->m_enableWebSocket) {
+        m_httpServer->EnableWebSocket("/v1/ws");
+    }
+    
+    m_httpServer->Start();
 }
 
 void SearchService::InsertHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
