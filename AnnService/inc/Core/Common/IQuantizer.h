@@ -39,7 +39,7 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in) = 0;
 
-            virtual ErrorCode LoadQuantizer(uint8_t* raw_bytes) = 0;
+            virtual ErrorCode LoadQuantizer(uint8_t* raw_bytes, SizeType num_bytes) = 0;
 
             static std::shared_ptr<IQuantizer> LoadIQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 

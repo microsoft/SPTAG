@@ -666,7 +666,7 @@ case VectorValueType::Name: \
                             for (SizeType i = begin; i < end; i++) {
                                 ByteArray meta = m_pMetadata->GetMetadata(i);
                                 std::string metastr((char*)meta.Data(), meta.Length());
-                                UpdateMetaMapping(metastr, i);
+                                RETURN_IF_ERROR(UpdateMetaMapping(metastr, i));
                             }
                         }
                     }

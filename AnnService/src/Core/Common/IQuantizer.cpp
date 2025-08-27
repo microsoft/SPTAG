@@ -55,11 +55,14 @@ namespace SPTAG
         std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
         {
             auto raw_bytes = bytes.Data();
+            SizeType num_bytes = bytes.Length();
             QuantizerType quantizerType = *(QuantizerType*) raw_bytes;
             raw_bytes += sizeof(QuantizerType);
+            num_bytes -= sizeof(QuantizerType);
 
             VectorValueType reconstructType = *(VectorValueType*)raw_bytes;
             raw_bytes += sizeof(VectorValueType);
+            num_bytes -= sizeof(VectorValueType);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading quantizer of type %s with reconstructtype %s.\n", Helper::Convert::ConvertToString<QuantizerType>(quantizerType).c_str(), Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
             std::shared_ptr<IQuantizer> ret = nullptr;
 
@@ -80,7 +83,7 @@ namespace SPTAG
                 default: break;
                 }
 
-                if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
+                if (ret->LoadQuantizer(raw_bytes, num_bytes) != ErrorCode::Success) ret.reset();
                 return ret;
             case QuantizerType::OPQQuantizer:
                 switch (reconstructType) {
@@ -94,7 +97,7 @@ namespace SPTAG
                 default: break;
                 }
 
-                if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success) ret.reset();
+                if (ret->LoadQuantizer(raw_bytes, num_bytes) != ErrorCode::Success) ret.reset();
                 return ret;
             }
             return ret;

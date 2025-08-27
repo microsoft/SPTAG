@@ -232,13 +232,14 @@ VectorIndex::GetMetaMapping(std::string& meta) const
 }
 
 
-void
+ErrorCode
 VectorIndex::UpdateMetaMapping(const std::string& meta, SizeType i)
 {
     MetadataMap* ptr = static_cast<MetadataMap*>(m_pMetaToVec.get());
     auto iter = ptr->find(meta);
-    if (iter != ptr->end()) DeleteIndex(iter->second);;
+    if (iter != ptr->end()) RETURN_IF_ERROR(DeleteIndex(iter->second));
     (*ptr)[meta] = i;
+    return ErrorCode::Success;
 }
 
 
@@ -331,7 +332,7 @@ VectorIndex::SaveIndex(const std::string& p_folderPath)
             if (!copyfile(file.c_str(), (newFolder + FolderSep + filename).c_str()))
                 return ErrorCode::DiskIOFail;
         }
-        SetParameter("IndexDirectory", p_folderPath, "Base");
+        RETURN_IF_ERROR(SetParameter("IndexDirectory", p_folderPath, "Base"));
     }
 
     ErrorCode ret = ErrorCode::Success;
@@ -446,7 +447,7 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
         BuildMetaMapping(false);
     }
-    BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized, p_shareOwnership);
+    RETURN_IF_ERROR_WITH_LOG(BuildIndex(p_vectorSet->GetData(), p_vectorSet->Count(), p_vectorSet->Dimension(), p_normalized, p_shareOwnership), Helper::LogLevel::LL_Error, "Building index failed.\n");
     return ErrorCode::Success;
 }
 
@@ -454,12 +455,17 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
 ErrorCode
 VectorIndex::SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const {
     size_t vectorSize = GetValueTypeSize(GetVectorValueType()) * GetFeatureDim();
+    ErrorCode ret = ErrorCode::Success;
 #pragma omp parallel for schedule(dynamic,10)
     for (int i = 0; i < p_vectorCount; i++) {
         QueryResult res((char*)p_vector + i * vectorSize, p_neighborCount, p_withMeta, p_results + i * p_neighborCount);
-        SearchIndex(res);
+        ErrorCode ret_internal = SearchIndex(res);
+        if (ret_internal != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SearchIndex failed for vector %d\n", i);
+            ret = ret_internal;
+        }
     }
-    return ErrorCode::Success;
+    return ret;
 }
 
 
@@ -500,7 +506,11 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
                 ByteArray meta = p_addindex->GetMetadata(i);
                 std::uint64_t offsets[2] = { 0, meta.Length() };
                 std::shared_ptr<MetadataSet> p_metaSet(new MemMetadataSet(meta, ByteArray((std::uint8_t*)offsets, sizeof(offsets), false), 1));
-                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
+                ErrorCode add_ret = AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), p_metaSet);
+                if (add_ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Cannot add vector! ID: %llu\n", i);
+                    ret = add_ret;
+                }
             }
 
             if (p_abort != nullptr && p_abort->ShouldAbort()) 
@@ -517,7 +527,11 @@ VectorIndex::MergeIndex(VectorIndex* p_addindex, int p_threadnum, IAbortOperatio
 
             if (p_addindex->ContainSample(i))
             {
-                AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
+                ErrorCode add_ret = AddIndex(p_addindex->GetSample(i), 1, p_addindex->GetFeatureDim(), nullptr);
+                if (add_ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Cannot add vector! ID: %llu\n", i);
+                    ret = add_ret;
+                }
             }
 
             if (p_abort != nullptr && p_abort->ShouldAbort())

@@ -66,7 +66,7 @@ namespace SPTAG
             for (int i = 0; i < 4; i++) {
                 auto parameters = p_reader.GetParameters(sections[i].c_str());
                 for (auto iter = parameters.begin(); iter != parameters.end(); iter++) {
-                    SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
+                    RETURN_IF_ERROR(SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str()));
                 }
             }
 
@@ -84,10 +84,10 @@ namespace SPTAG
             m_index->SetQuantizer(m_pQuantizer);
             if (m_index->LoadIndexDataFromMemory(p_indexBlobs) != ErrorCode::Success) return ErrorCode::Fail;
 
-            m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+            RETURN_IF_ERROR(m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads)));
             //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
-            m_index->UpdateIndex();
+            RETURN_IF_ERROR(m_index->UpdateIndex());
             m_index->SetReady(true);
 
             if (m_pQuantizer)
@@ -113,10 +113,10 @@ namespace SPTAG
             m_index->SetQuantizer(m_pQuantizer);
             if (m_index->LoadIndexData(p_indexStreams) != ErrorCode::Success) return ErrorCode::Fail;
 
-            m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+            RETURN_IF_ERROR(m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads)));
             //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
-            m_index->UpdateIndex();
+            RETURN_IF_ERROR(m_index->UpdateIndex());
             m_index->SetReady(true);
 
             if (m_pQuantizer)
@@ -161,7 +161,7 @@ namespace SPTAG
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineBuildHeadParameter
 
-            m_index->SaveConfig(p_configOut);
+            RETURN_IF_ERROR_WITH_LOG(m_index->SaveConfig(p_configOut), Helper::LogLevel::LL_Error, "Failed to save head index config.\n");
 
             Helper::Convert::ConvertStringTo<int>(m_index->GetParameter("HashTableExponent").c_str(), m_options.m_hashExp);
             IOSTRING(p_configOut, WriteString, "[BuildSSDIndex]\n");
@@ -200,7 +200,7 @@ namespace SPTAG
             else
                 p_queryResults = new COMMON::QueryResultSet<T>((const T*)p_query.GetTarget(), m_options.m_searchInternalResultNum);
 
-            m_index->SearchIndex(*p_queryResults);
+            RETURN_IF_ERROR(m_index->SearchIndex(*p_queryResults));
             
             if (m_extraSearcher != nullptr) {
                 auto workSpace = m_workSpaceFactory->GetWorkSpace();
@@ -751,7 +751,11 @@ namespace SPTAG
                     bktFileNameBuilder << m_options.m_vectorPath << ".bkt." << m_options.m_iBKTKmeansK << "_"
                         << m_options.m_iBKTLeafSize << "_" << m_options.m_iTreeNumber << "_" << m_options.m_iSamples << "_"
                         << static_cast<int>(m_options.m_distCalcMethod) << ".bin";
-                    bkt->SaveTrees(bktFileNameBuilder.str());
+                    ErrorCode saveTreesRet = bkt->SaveTrees(bktFileNameBuilder.str());
+                    if (saveTreesRet != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save BKT to file %s\n", bktFileNameBuilder.str().c_str());
+                        return false;
+                    }
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Finish generating BKT.\n");
 
@@ -851,11 +855,11 @@ namespace SPTAG
                 auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
 
                 m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
-                m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+                RETURN_IF_ERROR(m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod)));
                 m_index->SetQuantizer(m_pQuantizer);
                 for (const auto& iter : m_headParameters)
                 {
-                    m_index->SetParameter(iter.first.c_str(), iter.second.c_str());
+                    RETURN_IF_ERROR(m_index->SetParameter(iter.first.c_str(), iter.second.c_str()));
                 }
 
                 std::shared_ptr<Helper::ReaderOptions> vectorOptions(new Helper::ReaderOptions(valueType, dims, VectorFileType::DEFAULT));
@@ -897,10 +901,10 @@ namespace SPTAG
                 m_index->SetQuantizer(m_pQuantizer);
                 if (!CheckHeadIndexType()) return ErrorCode::Fail;
 
-                m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
-                m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-                m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
-                m_index->UpdateIndex();
+                RETURN_IF_ERROR(m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads)));
+                RETURN_IF_ERROR(m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck)));
+                RETURN_IF_ERROR(m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp)));
+                RETURN_IF_ERROR(m_index->UpdateIndex());
 
                 if (m_pQuantizer)
                 {
@@ -1021,11 +1025,20 @@ namespace SPTAG
             Index<T>::UpdateIndex()
         {
             omp_set_num_threads(m_options.m_iSSDNumberOfThreads);
-            m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+            ErrorCode ret = m_index->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+            if (ret != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to set NumberOfThreads parameter to %d\n", m_options.m_iSSDNumberOfThreads);
+                return ret;
+            }
             //m_index->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
             //m_index->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
-            m_index->UpdateIndex();
-            return ErrorCode::Success;
+            ret = m_index->UpdateIndex();
+            if (ret != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to update index\n");
+            }
+            return ret;
         }
 
         template <typename T>
@@ -1037,7 +1050,7 @@ namespace SPTAG
                 else m_headParameters[p_param] = p_value;
             }
             else {
-                m_options.SetParameter(p_section, p_param, p_value);
+                RETURN_IF_ERROR(m_options.SetParameter(p_section, p_param, p_value));
             }
             if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod")) {
                 if (m_pQuantizer)

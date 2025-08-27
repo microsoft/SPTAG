@@ -188,7 +188,7 @@ public:
 
     inline SizeType GetMetaMapping(std::string& meta) const;
 
-    void UpdateMetaMapping(const std::string& meta, SizeType i);
+    ErrorCode UpdateMetaMapping(const std::string& meta, SizeType i);
 
     void BuildMetaMapping(bool p_checkDeleted = true);
 

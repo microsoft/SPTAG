@@ -506,6 +506,7 @@ break;
                 newGraph->m_iGraphSize = R;
                 newGraph->m_iNeighborhoodSize = m_iNeighborhoodSize;
 
+                ErrorCode ret = ErrorCode::Success;
 #pragma omp parallel for schedule(dynamic)
                 for (SizeType i = 0; i < R; i++)
                 {
@@ -514,7 +515,11 @@ break;
                     SizeType* outnodes = newGraph->m_pNeighborhoodGraph[i];
 
                     COMMON::QueryResultSet<T> query((const T*)index->GetSample(indices[i]), m_iCEF + 1);
-                    index->RefineSearchIndex(query, false);
+                    ErrorCode internal_ret =index->RefineSearchIndex(query, false);
+                    if (internal_ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RefineSearchIndex failed \n");
+                        ret = internal_ret;
+                    }
                     RebuildNeighbors(index, indices[i], outnodes, query.GetResults(), m_iCEF + 1);
 
                     std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -527,8 +532,8 @@ break;
                         outnodes[m_iNeighborhoodSize - 1] = -2 - iter->second;
                 }
 
-                if (output != nullptr) newGraph->SaveGraph(output);
-                return ErrorCode::Success;
+                if (output != nullptr) RETURN_IF_ERROR(newGraph->SaveGraph(output));
+                return ret;
             }
 
             template <typename T>

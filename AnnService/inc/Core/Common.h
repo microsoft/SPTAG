@@ -130,6 +130,8 @@ extern std::shared_ptr<Helper::DiskIO>(*f_createIO)();
 
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
+#define RETURN_IF_ERROR(expr) { ErrorCode ret = expr; if (ret != ErrorCode::Success) return ret; }
+#define RETURN_IF_ERROR_WITH_LOG(expr, log_level, ...) { ErrorCode ret = expr; if (ret != ErrorCode::Success) { SPTAGLIB_LOG(log_level, __VA_ARGS__); return ret; } }
 
 extern Helper::LoggerHolder& GetLoggerHolder();
 extern std::shared_ptr<Helper::Logger> GetLogger();
@@ -150,7 +152,7 @@ public:
 #endif
 };
 
-enum class ErrorCode : std::uint16_t
+enum class [[nodiscard]] ErrorCode : std::uint16_t
 {
 #define DefineErrorCode(Name, Value) Name = Value,
 #include "DefinitionList.h"

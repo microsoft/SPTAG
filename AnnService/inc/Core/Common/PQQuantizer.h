@@ -49,7 +49,7 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
-            virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
+            virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes, SizeType num_bytes);
 
             virtual DimensionType GetNumSubvectors() const;
 
@@ -260,20 +260,38 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
+        ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes, SizeType num_bytes)
         {
+            std::uint8_t* original_ptr = raw_bytes;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             m_NumSubvectors = *(DimensionType*)raw_bytes;
             raw_bytes += sizeof(DimensionType);
+            if (raw_bytes - original_ptr > num_bytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not enough bytes to read NumSubvectors.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read subvecs: %s.\n", std::to_string(m_NumSubvectors).c_str());
             m_KsPerSubvector = *(SizeType*)raw_bytes;
             raw_bytes += sizeof(SizeType);
+            if (raw_bytes - original_ptr > num_bytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not enough bytes to read KsPerSubvector.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read ks: %s.\n", std::to_string(m_KsPerSubvector).c_str());
             m_DimPerSubvector = *(DimensionType*)raw_bytes;
             raw_bytes += sizeof(DimensionType);
+            if (raw_bytes - original_ptr > num_bytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not enough bytes to read DimPerSubvector.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dim: %s.\n", std::to_string(m_DimPerSubvector).c_str());
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
+            SizeType codebook_bytes = sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector;
+            if (raw_bytes - original_ptr + codebook_bytes > num_bytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not enough bytes to read codebooks.\n");
+                return ErrorCode::MemoryOverFlow;
+            }
             std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
 

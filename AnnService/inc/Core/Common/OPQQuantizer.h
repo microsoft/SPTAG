@@ -34,7 +34,7 @@ namespace SPTAG
 
             virtual ErrorCode LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in);
 
-            virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes);
+            virtual ErrorCode LoadQuantizer(std::uint8_t* raw_bytes, SizeType num_bytes);
 
             virtual SizeType ReconstructSize() const;
 
@@ -164,13 +164,26 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode OPQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
+        ErrorCode OPQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes, SizeType num_bytes)
         {
-            PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
+            std::uint8_t* original_ptr = raw_bytes;
+            ErrorCode code = PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes, num_bytes);
+            if (code != ErrorCode::Success)
+            {
+                return code;
+            }
+
+            // read OPQ matrix
             raw_bytes += sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + (sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
             m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
-            std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);
+
+            SizeType matrix_bytes = sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim;
+            if (raw_bytes - original_ptr + matrix_bytes > num_bytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not enough bytes for OPQ matrix\n");
+                return ErrorCode::Fail;
+            }
+            std::memcpy(m_OPQMatrix.get(), raw_bytes, matrix_bytes);
             raw_bytes += sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim;
 
             m_InitMatrixTranspose();
