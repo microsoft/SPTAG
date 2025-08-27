@@ -1052,7 +1052,7 @@ namespace SPTAG::SPANN {
                     }
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss Do Not To ReAssign: VID: %d, version: %d, current version: %d\n", *(int*)(&appendPosting[idx]), m_versionMap->GetVersion(*(int*)(&appendPosting[idx])), version);
                 }
-                return ErrorCode::Undefined;
+                return ErrorCode::Success;
             }
             double appendIOSeconds = 0;
             {
