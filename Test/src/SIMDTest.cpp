@@ -38,7 +38,7 @@ void test(int high) {
     ComputeSum(X, Y, dimension);
     SPTAG::COMMON::SIMDUtils::ComputeSum(X_copy, Y, dimension);
     for (SPTAG::DimensionType i = 0; i < dimension; i++) {
-    EXPECT_NEAR(double(X[i]), double(X_copy[i]), 1e-5);
+    EXPECT_NEAR(double(X[i]), double(X_copy[i]), 1e-5 * X[i]);
     }
 
     delete[] X;

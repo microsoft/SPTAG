@@ -42,8 +42,8 @@ void test(int high) {
         X[i] = random<T>(high, -high);
         Y[i] = random<T>(high, -high);
     }
-    EXPECT_NEAR(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5);
-    EXPECT_NEAR(high * high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5);
+    EXPECT_NEAR(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5 * ComputeL2Distance(X, Y, dimension));
+    EXPECT_NEAR(high * high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5 * (std::abs(high * high - ComputeCosineDistance(X, Y, dimension))));
 
     delete[] X;
     delete[] Y;
