@@ -160,11 +160,11 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
 
-            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
+            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
             ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const;
             ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
             bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
-            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
+            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
 
             ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
@@ -179,7 +179,8 @@ namespace SPTAG
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;
             ErrorCode UpdateIndex();
 
-            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort);
+            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,
+                                  IAbortOperation *p_abort, std::vector<SizeType> *p_mapping);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
             ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {

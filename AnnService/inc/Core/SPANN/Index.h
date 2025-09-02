@@ -50,7 +50,7 @@ namespace SPTAG
         {
         private:
             std::shared_ptr<VectorIndex> m_index;
-	    COMMON::Dataset<std::uint64_t> m_vectorTranslateMap;
+	        COMMON::Dataset<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
 
             COMMON::VersionLabel m_versionMap;
@@ -63,7 +63,7 @@ namespace SPTAG
             int m_iBaseSquare;
 
             std::mutex m_dataAddLock;
-            
+            std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
  
@@ -140,18 +140,18 @@ namespace SPTAG
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
 
-            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const;
+            std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
             ErrorCode SearchIndexIterativeNext(QueryResult& p_results, COMMON::WorkSpace* workSpace, int batch, int& resultCount, bool p_isFirst, bool p_searchDeleted = false) const;
             ErrorCode SearchIndexIterativeEnd(std::unique_ptr<COMMON::WorkSpace> workSpace) const;
             ErrorCode SearchIndexIterativeEnd(std::unique_ptr<SPANN::ExtraWorkSpace> extraWorkspace) const;
             bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const;
-            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const;
+            std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
             ErrorCode SearchIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, COMMON::WorkSpace* p_indexWorkspace, ExtraWorkSpace* p_extraWorkspace, int p_batch, int& resultCount, bool first) const;
 
             ErrorCode SearchIndexWithFilter(QueryResult& p_query, std::function<bool(const ByteArray&)> filterFunc, int maxCheck = 0, bool p_searchDeleted = false) const;
 
             ErrorCode SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats = nullptr) const;
-	        bool SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, ExtraWorkSpace* extraWorkspace) const;
+	        ErrorCode SearchDiskIndexIterative(QueryResult& p_headQuery, QueryResult& p_query, ExtraWorkSpace* extraWorkspace) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) const;
             ErrorCode UpdateIndex();
@@ -161,15 +161,21 @@ namespace SPTAG
 
             inline const void* GetSample(const SizeType idx) const { return nullptr; }
             inline SizeType GetNumDeleted() const { return m_versionMap.GetDeleteCount(); }
-            inline bool NeedRefine() const { return false; }
+            inline bool NeedRefine() const
+            {
+                return m_versionMap.GetDeleteCount() > (size_t)(GetNumSamples() * m_options.m_fDeletePercentageForRefine);
+            }
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const { return ErrorCode::Undefined; }
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
             ErrorCode DeleteIndex(const SizeType& p_id);
 
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
-            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) { return ErrorCode::Undefined; }
+            ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,
+                                  IAbortOperation *p_abort, std::vector<SizeType> *p_mapping);
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex) { return ErrorCode::Undefined; }
+
+            ErrorCode Check() override;
 
             ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory)
             {
@@ -205,7 +211,7 @@ namespace SPTAG
             }
 
             ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
-            
+
         private:
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
@@ -237,33 +243,41 @@ namespace SPTAG
                 auto workSpace = m_workSpaceFactory->GetWorkSpace();
                 if (!workSpace) {
                     workSpace.reset(new ExtraWorkSpace());
-                    workSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_storage != Storage::STATIC, m_options.m_enableDataCompression);
+                    m_extraSearcher->InitWorkSpace(workSpace.get(), false);
                 }
                 else {
-                    workSpace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_storage != Storage::STATIC, m_options.m_enableDataCompression);
+                    m_extraSearcher->InitWorkSpace(workSpace.get(), true);
                 }
                 workSpace->m_deduper.clear();
                 workSpace->m_postingIDs.clear();
                 m_extraSearcher->ForceGC(workSpace.get(), m_index.get()); 
             }
-
-            void Checkpoint() {
+            
+            ErrorCode Checkpoint() {
                 /** Lock & wait until all jobs done **/
+                while (!AllFinished())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
 
                 /** Lock **/
-                if (m_options.m_persistentBufferPath == "") return;
+                if (m_options.m_persistentBufferPath == "") return ErrorCode::FailedCreateFile;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Locking Index\n");
                 std::unique_lock<std::shared_timed_mutex> lock(m_checkPointLock);
 
                 // Flush block pool states & block mapping states
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving storage states\n");
-                m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath);
+                ErrorCode ret;
+                if ((ret = m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath)) != ErrorCode::Success)
+                    return ret;
 
                 /** Flush the checkpoint file: SPTAG states, block pool states, block mapping states **/
                 std::string filename = m_options.m_persistentBufferPath + FolderSep + m_options.m_headIndexFolder;
                 // Flush SPTAG
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving in-memory index to %s\n", filename.c_str());
-                m_index->SaveIndex(filename);
+                if ((ret = m_index->SaveIndex(filename)) != ErrorCode::Success)
+                    return ret;
+                return ErrorCode::Success;
             }
 
             ErrorCode AddIndexSPFresh(const void *p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType* VID) {
@@ -286,8 +300,8 @@ namespace SPTAG
                     if (begin == 0) { return ErrorCode::EmptyIndex; }
 
                     if (m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
-                        exit(1);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow: VID: %d, Map Size:%d\n", begin, m_versionMap.BufferSize());
+                        return ErrorCode::MemoryOverFlow;
                     }
                 }
                 for (int i = 0; i < p_vectorNum; i++) VID[i] = begin + i;
@@ -310,10 +324,10 @@ namespace SPTAG
                 auto workSpace = m_workSpaceFactory->GetWorkSpace();
                 if (!workSpace) {
                     workSpace.reset(new ExtraWorkSpace());
-                    workSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_storage != Storage::STATIC, m_options.m_enableDataCompression);
+                    m_extraSearcher->InitWorkSpace(workSpace.get(), false);
                 }
                 else {
-                    workSpace->Clear(m_options.m_searchInternalResultNum, max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx, m_options.m_storage != Storage::STATIC, m_options.m_enableDataCompression);
+                    m_extraSearcher->InitWorkSpace(workSpace.get(), true);
                 }
                 workSpace->m_deduper.clear();
                 workSpace->m_postingIDs.clear();

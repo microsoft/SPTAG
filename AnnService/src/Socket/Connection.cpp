@@ -2,43 +2,34 @@
 // Licensed under the MIT License.
 
 #include "inc/Socket/Connection.h"
-#include "inc/Socket/ConnectionManager.h"
 #include "inc/Core/Common.h"
+#include "inc/Socket/ConnectionManager.h"
 
-#include <boost/asio/read.hpp>
-#include <boost/asio/write.hpp>
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/placeholders.hpp>
+#include <boost/asio/read.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
 
 #include <chrono>
 
 using namespace SPTAG::Socket;
 
-Connection::Connection(ConnectionID p_connectionID,
-                       boost::asio::ip::tcp::socket&& p_socket,
-                       const PacketHandlerMapPtr& p_handlerMap,
-                       std::weak_ptr<ConnectionManager> p_connectionManager)
-    : c_connectionID(p_connectionID),
-      c_handlerMap(p_handlerMap),
-      c_connectionManager(std::move(p_connectionManager)),
-      m_socket(std::move(p_socket)),
-      m_strand((boost::asio::io_context&)p_socket.get_executor().context()),
-      m_heartbeatTimer((boost::asio::io_context&)p_socket.get_executor().context()),
-      m_remoteConnectionID(c_invalidConnectionID),
-      m_stopped(true),
-      m_heartbeatStarted(false)
+Connection::Connection(ConnectionID p_connectionID, boost::asio::ip::tcp::socket &&p_socket,
+                       const PacketHandlerMapPtr &p_handlerMap, std::weak_ptr<ConnectionManager> p_connectionManager)
+    : c_connectionID(p_connectionID), c_handlerMap(p_handlerMap), c_connectionManager(std::move(p_connectionManager)),
+      m_socket(std::move(p_socket)), m_strand((boost::asio::io_context &)p_socket.get_executor().context()),
+      m_heartbeatTimer((boost::asio::io_context &)p_socket.get_executor().context()),
+      m_remoteConnectionID(c_invalidConnectionID), m_stopped(true), m_heartbeatStarted(false)
 {
 }
 
-
-void
-Connection::Start()
+void Connection::Start()
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
-            static_cast<uint32_t>(m_socket.local_endpoint().port()),
-            m_socket.remote_endpoint().address().to_string().c_str(),
-            static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
+                 m_socket.remote_endpoint().address().to_string().c_str(),
+                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
 
     if (!m_stopped.exchange(false))
     {
@@ -49,14 +40,12 @@ Connection::Start()
     AsyncReadHeader();
 }
 
-
-void
-Connection::Stop()
+void Connection::Stop()
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
-            static_cast<uint32_t>(m_socket.local_endpoint().port()),
-            m_socket.remote_endpoint().address().to_string().c_str(),
-            static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
+                 m_socket.remote_endpoint().address().to_string().c_str(),
+                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
 
     if (m_stopped.exchange(true))
     {
@@ -68,14 +57,12 @@ Connection::Stop()
     {
         m_heartbeatTimer.cancel(errCode);
     }
-    
+
     m_socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, errCode);
     m_socket.close(errCode);
 }
 
-
-void
-Connection::StartHeartbeat(std::size_t p_intervalSeconds)
+void Connection::StartHeartbeat(std::size_t p_intervalSeconds)
 {
     if (m_stopped || m_heartbeatStarted.exchange(true))
     {
@@ -85,23 +72,17 @@ Connection::StartHeartbeat(std::size_t p_intervalSeconds)
     SendHeartbeat(p_intervalSeconds);
 }
 
-
-ConnectionID
-Connection::GetConnectionID() const
+ConnectionID Connection::GetConnectionID() const
 {
     return c_connectionID;
 }
 
-
-ConnectionID
-Connection::GetRemoteConnectionID() const
+ConnectionID Connection::GetRemoteConnectionID() const
 {
     return m_remoteConnectionID;
 }
 
-
-void
-Connection::AsyncSend(Packet p_packet, std::function<void(bool)> p_callback)
+void Connection::AsyncSend(Packet p_packet, std::function<void(bool)> p_callback)
 {
     if (m_stopped)
     {
@@ -114,33 +95,26 @@ Connection::AsyncSend(Packet p_packet, std::function<void(bool)> p_callback)
     }
 
     auto sharedThis = shared_from_this();
-    boost::asio::post(m_strand,
-                      [sharedThis, p_packet, p_callback]()
-                      {
-                          auto handler = [p_callback, p_packet, sharedThis](boost::system::error_code p_ec,
-                                                                            std::size_t p_bytesTransferred)
-                                         {
-                                             if (p_ec && boost::asio::error::operation_aborted != p_ec)
-                                             {
-                                                 sharedThis->OnConnectionFail(p_ec);
-                                             }
+    boost::asio::post(m_strand, [sharedThis, p_packet, p_callback]() {
+        auto handler = [p_callback, p_packet, sharedThis](boost::system::error_code p_ec,
+                                                          std::size_t p_bytesTransferred) {
+            if (p_ec && boost::asio::error::operation_aborted != p_ec)
+            {
+                sharedThis->OnConnectionFail(p_ec);
+            }
 
-                                             if (bool(p_callback))
-                                             {
-                                                 p_callback(!p_ec);
-                                             }
-                                         };
+            if (bool(p_callback))
+            {
+                p_callback(!p_ec);
+            }
+        };
 
-                          boost::asio::async_write(sharedThis->m_socket,
-                                                   boost::asio::buffer(p_packet.Buffer(),
-                                                                       p_packet.BufferLength()),
-                                                   std::move(handler));
-                      });
+        boost::asio::async_write(sharedThis->m_socket, boost::asio::buffer(p_packet.Buffer(), p_packet.BufferLength()),
+                                 std::move(handler));
+    });
 }
 
-
-void
-Connection::AsyncReadHeader()
+void Connection::AsyncReadHeader()
 {
     if (m_stopped)
     {
@@ -148,23 +122,16 @@ Connection::AsyncReadHeader()
     }
 
     auto sharedThis = shared_from_this();
-    boost::asio::post(m_strand,
-                      [sharedThis]()
-                      {
-                          auto handler = boost::bind(&Connection::HandleReadHeader,
-                                                     sharedThis,
-                                                     boost::asio::placeholders::error,
-                                                     boost::asio::placeholders::bytes_transferred);
-                  
-                          boost::asio::async_read(sharedThis->m_socket,
-                                                  boost::asio::buffer(sharedThis->m_packetHeaderReadBuffer),
-                                                  std::move(handler));
-                      });
+    boost::asio::post(m_strand, [sharedThis]() {
+        auto handler = boost::bind(&Connection::HandleReadHeader, sharedThis, boost::asio::placeholders::error,
+                                   boost::asio::placeholders::bytes_transferred);
+
+        boost::asio::async_read(sharedThis->m_socket, boost::asio::buffer(sharedThis->m_packetHeaderReadBuffer),
+                                std::move(handler));
+    });
 }
 
-
-void
-Connection::AsyncReadBody()
+void Connection::AsyncReadBody()
 {
     if (m_stopped)
     {
@@ -172,24 +139,18 @@ Connection::AsyncReadBody()
     }
 
     auto sharedThis = shared_from_this();
-    boost::asio::post(m_strand,
-                      [sharedThis]()
-                      {
-                          auto handler = boost::bind(&Connection::HandleReadBody,
-                                                     sharedThis,
-                                                     boost::asio::placeholders::error,
-                                                     boost::asio::placeholders::bytes_transferred);
+    boost::asio::post(m_strand, [sharedThis]() {
+        auto handler = boost::bind(&Connection::HandleReadBody, sharedThis, boost::asio::placeholders::error,
+                                   boost::asio::placeholders::bytes_transferred);
 
-                          boost::asio::async_read(sharedThis->m_socket,
-                                                  boost::asio::buffer(sharedThis->m_packetRead.Body(),
-                                                                      sharedThis->m_packetRead.Header().m_bodyLength),
-                                                  std::move(handler));
-                      });
+        boost::asio::async_read(
+            sharedThis->m_socket,
+            boost::asio::buffer(sharedThis->m_packetRead.Body(), sharedThis->m_packetRead.Header().m_bodyLength),
+            std::move(handler));
+    });
 }
 
-
-void
-Connection::HandleReadHeader(boost::system::error_code p_ec, std::size_t p_bytesTransferred)
+void Connection::HandleReadHeader(boost::system::error_code p_ec, std::size_t p_bytesTransferred)
 {
     if (!p_ec)
     {
@@ -215,9 +176,7 @@ Connection::HandleReadHeader(boost::system::error_code p_ec, std::size_t p_bytes
     AsyncReadHeader();
 }
 
-
-void
-Connection::HandleReadBody(boost::system::error_code p_ec, std::size_t p_bytesTransferred)
+void Connection::HandleReadBody(boost::system::error_code p_ec, std::size_t p_bytesTransferred)
 {
     if (!p_ec)
     {
@@ -268,9 +227,7 @@ Connection::HandleReadBody(boost::system::error_code p_ec, std::size_t p_bytesTr
     AsyncReadHeader();
 }
 
-
-void
-Connection::SendHeartbeat(std::size_t p_intervalSeconds)
+void Connection::SendHeartbeat(std::size_t p_intervalSeconds)
 {
     if (m_stopped)
     {
@@ -281,21 +238,17 @@ Connection::SendHeartbeat(std::size_t p_intervalSeconds)
     msg.Header().m_packetType = PacketType::HeartbeatRequest;
     msg.Header().m_processStatus = PacketProcessStatus::Ok;
     msg.Header().m_connectionID = 0;
-    
+
     msg.AllocateBuffer(0);
     msg.Header().WriteBuffer(msg.HeaderBuffer());
 
     AsyncSend(std::move(msg), nullptr);
 
     m_heartbeatTimer.expires_from_now(boost::posix_time::seconds(p_intervalSeconds));
-    m_heartbeatTimer.async_wait(boost::bind(&Connection::SendHeartbeat,
-                                            shared_from_this(),
-                                            p_intervalSeconds));
+    m_heartbeatTimer.async_wait(boost::bind(&Connection::SendHeartbeat, shared_from_this(), p_intervalSeconds));
 }
 
-
-void
-Connection::SendRegister()
+void Connection::SendRegister()
 {
     Packet msg;
     msg.Header().m_packetType = PacketType::RegisterRequest;
@@ -308,9 +261,7 @@ Connection::SendRegister()
     AsyncSend(std::move(msg), nullptr);
 }
 
-
-void
-Connection::HandleHeartbeatRequest()
+void Connection::HandleHeartbeatRequest()
 {
     Packet msg;
     msg.Header().m_packetType = PacketType::HeartbeatResponse;
@@ -318,8 +269,7 @@ Connection::HandleHeartbeatRequest()
 
     msg.AllocateBuffer(0);
 
-    if (0 == m_packetRead.Header().m_connectionID
-        || c_connectionID == m_packetRead.Header().m_connectionID)
+    if (0 == m_packetRead.Header().m_connectionID || c_connectionID == m_packetRead.Header().m_connectionID)
     {
         m_packetRead.Header().m_connectionID;
         msg.Header().WriteBuffer(msg.HeaderBuffer());
@@ -343,9 +293,7 @@ Connection::HandleHeartbeatRequest()
     }
 }
 
-
-void
-Connection::HandleRegisterRequest()
+void Connection::HandleRegisterRequest()
 {
     Packet msg;
     msg.Header().m_packetType = PacketType::RegisterResponse;
@@ -359,16 +307,12 @@ Connection::HandleRegisterRequest()
     AsyncSend(std::move(msg), nullptr);
 }
 
-
-void
-Connection::HandleRegisterResponse()
+void Connection::HandleRegisterResponse()
 {
     m_remoteConnectionID = m_packetRead.Header().m_connectionID;
 }
 
-
-void
-Connection::HandleNoHandlerResponse()
+void Connection::HandleNoHandlerResponse()
 {
     auto packetType = m_packetRead.Header().m_packetType;
     if (!PacketTypeHelper::IsRequestPacket(packetType))
@@ -388,9 +332,7 @@ Connection::HandleNoHandlerResponse()
     AsyncSend(std::move(msg), nullptr);
 }
 
-
-void
-Connection::OnConnectionFail(const boost::system::error_code& p_ec)
+void Connection::OnConnectionFail(const boost::system::error_code &p_ec)
 {
     auto mgr = c_connectionManager.lock();
     if (nullptr != mgr)

@@ -166,8 +166,6 @@ namespace SPTAG
     const int PageSizeEx = 12;
     const std::chrono::microseconds MaxTimeout = (std::chrono::microseconds::max)();
 
-    extern std::mt19937 rg;
-
 #define IOBINARY(ptr, func, bytes, ...) if (ptr->func(bytes, __VA_ARGS__) != bytes) return ErrorCode::DiskIOFail
 #define IOSTRING(ptr, func, ...) if (ptr->func(__VA_ARGS__) == 0) return ErrorCode::DiskIOFail
 

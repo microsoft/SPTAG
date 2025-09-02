@@ -2,16 +2,15 @@
 // Licensed under the MIT License.
 
 #include "inc/Server/SearchService.h"
+#include "inc/Helper/ArgumentsParser.h"
+#include "inc/Helper/CommonHelper.h"
 #include "inc/Server/SearchExecutor.h"
 #include "inc/Socket/RemoteSearchQuery.h"
-#include "inc/Helper/CommonHelper.h"
-#include "inc/Helper/ArgumentsParser.h"
 
 #include <iostream>
 
 using namespace SPTAG;
 using namespace SPTAG::Service;
-
 
 namespace
 {
@@ -20,11 +19,8 @@ namespace Local
 
 class SerivceCmdOptions : public Helper::ArgumentsParser
 {
-public:
-    SerivceCmdOptions()
-        : m_serveMode("interactive"),
-          m_configFile("AnnService.ini"),
-          m_logFile("")
+  public:
+    SerivceCmdOptions() : m_serveMode("interactive"), m_configFile("AnnService.ini"), m_logFile("")
     {
         AddOptionalOption(m_serveMode, "-m", "--mode", "Service mode, interactive or socket.");
         AddOptionalOption(m_configFile, "-c", "--config", "Service config file path.");
@@ -42,26 +38,20 @@ public:
     std::string m_logFile;
 };
 
-}
+} // namespace Local
 
 } // namespace
 
-
 SearchService::SearchService()
-    : m_initialized(false),
-      m_shutdownSignals(m_ioContext),
-      m_serveMode(ServeMode::Interactive)
+    : m_initialized(false), m_shutdownSignals(m_ioContext), m_serveMode(ServeMode::Interactive)
 {
 }
-
 
 SearchService::~SearchService()
 {
 }
 
-
-bool
-SearchService::Initialize(int p_argNum, char* p_args[])
+bool SearchService::Initialize(int p_argNum, char *p_args[])
 {
     Local::SerivceCmdOptions cmdOptions;
     if (!cmdOptions.Parse(p_argNum - 1, p_args + 1))
@@ -83,7 +73,8 @@ SearchService::Initialize(int p_argNum, char* p_args[])
         return false;
     }
 
-    if (!cmdOptions.m_logFile.empty()) {
+    if (!cmdOptions.m_logFile.empty())
+    {
         SetLogger(std::make_shared<Helper::FileLogger>(Helper::LogLevel::LL_Debug, cmdOptions.m_logFile.c_str()));
     }
 
@@ -94,9 +85,7 @@ SearchService::Initialize(int p_argNum, char* p_args[])
     return m_initialized;
 }
 
-
-void
-SearchService::Run()
+void SearchService::Run()
 {
     if (!m_initialized)
     {
@@ -118,29 +107,24 @@ SearchService::Run()
     }
 }
 
-
-void
-SearchService::RunSocketMode()
+void SearchService::RunSocketMode()
 {
     auto threadNum = max((SizeType)1, m_serviceContext->GetServiceSettings()->m_threadNum);
     m_threadPool.reset(new boost::asio::thread_pool(threadNum));
 
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
-    handlerMap->emplace(Socket::PacketType::SearchRequest,
-                        [this](Socket::ConnectionID p_srcID, Socket::Packet p_packet)
-                        {
-                            boost::asio::post(*m_threadPool, std::bind(&SearchService::SearchHanlder, this, p_srcID, std::move(p_packet)));
-                        });
+    handlerMap->emplace(Socket::PacketType::SearchRequest, [this](Socket::ConnectionID p_srcID,
+                                                                  Socket::Packet p_packet) {
+        boost::asio::post(*m_threadPool, std::bind(&SearchService::SearchHanlder, this, p_srcID, std::move(p_packet)));
+    });
 
     m_socketServer.reset(new Socket::Server(m_serviceContext->GetServiceSettings()->m_listenAddr,
-                                            m_serviceContext->GetServiceSettings()->m_listenPort,
-                                            handlerMap,
+                                            m_serviceContext->GetServiceSettings()->m_listenPort, handlerMap,
                                             m_serviceContext->GetServiceSettings()->m_socketThreadNum));
 
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "Start to listen %s:%s ...\n",
-            m_serviceContext->GetServiceSettings()->m_listenAddr.c_str(),
-            m_serviceContext->GetServiceSettings()->m_listenPort.c_str());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to listen %s:%s ...\n",
+                 m_serviceContext->GetServiceSettings()->m_listenAddr.c_str(),
+                 m_serviceContext->GetServiceSettings()->m_listenPort.c_str());
 
     m_shutdownSignals.add(SIGINT);
     m_shutdownSignals.add(SIGTERM);
@@ -148,10 +132,9 @@ SearchService::RunSocketMode()
     m_shutdownSignals.add(SIGQUIT);
 #endif
 
-    m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
-                                 {
-                                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
-                                 });
+    m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
+    });
 
     m_ioContext.run();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start shutdown procedure.\n");
@@ -161,9 +144,7 @@ SearchService::RunSocketMode()
     m_threadPool->join();
 }
 
-
-void
-SearchService::RunInteractiveMode()
+void SearchService::RunInteractiveMode()
 {
     const std::size_t bufferSize = 1 << 16;
     std::unique_ptr<char[]> inputBuffer(new char[bufferSize]);
@@ -175,8 +156,7 @@ SearchService::RunInteractiveMode()
             break;
         }
 
-        auto callback = [](std::shared_ptr<SearchExecutionContext> p_exeContext)
-        {
+        auto callback = [](std::shared_ptr<SearchExecutionContext> p_exeContext) {
             std::cout << "Result:" << std::endl;
             if (nullptr == p_exeContext)
             {
@@ -184,20 +164,20 @@ SearchService::RunInteractiveMode()
                 return;
             }
 
-            const auto& results = p_exeContext->GetResults();
-            for (const auto& result : results)
+            const auto &results = p_exeContext->GetResults();
+            for (const auto &result : results)
             {
                 std::cout << "Index: " << result.m_indexName << std::endl;
                 int idx = 0;
-                for (const auto& res : result.m_results)
+                for (const auto &res : result.m_results)
                 {
                     std::cout << "------------------" << std::endl;
                     std::cout << "DocIndex: " << res.VID << " Distance: " << res.Dist;
                     if (result.m_results.WithMeta())
                     {
-                        const auto& metadata = result.m_results.GetMetadata(idx);
-                        std::cout << " MetaData: " << std::string((char*)metadata.Data(), metadata.Length());
-                    } 
+                        const auto &metadata = result.m_results.GetMetadata(idx);
+                        std::cout << " MetaData: " << std::string((char *)metadata.Data(), metadata.Length());
+                    }
                     std::cout << std::endl;
                     ++idx;
                 }
@@ -209,9 +189,7 @@ SearchService::RunInteractiveMode()
     }
 }
 
-
-void
-SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+void SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
 {
     if (p_packet.Header().m_bodyLength == 0)
     {
@@ -225,26 +203,20 @@ SearchService::SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::P
     }
 
     Socket::RemoteQuery remoteQuery;
-    if(remoteQuery.Read(p_packet.Body()) == nullptr) {
+    if (remoteQuery.Read(p_packet.Body()) == nullptr)
+    {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "majorVersion is not match!\n");
         return;
     }
 
-    auto callback = std::bind(&SearchService::SearchHanlderCallback,
-                              this,
-                              std::placeholders::_1,
-                              std::move(p_packet));
+    auto callback = std::bind(&SearchService::SearchHanlderCallback, this, std::placeholders::_1, std::move(p_packet));
 
-    SearchExecutor executor(std::move(remoteQuery.m_queryString),
-                            m_serviceContext,
-                            callback);
+    SearchExecutor executor(std::move(remoteQuery.m_queryString), m_serviceContext, callback);
     executor.Execute();
 }
 
-
-void
-SearchService::SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_exeContext,
-                                     Socket::Packet p_srcPacket)
+void SearchService::SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_exeContext,
+                                          Socket::Packet p_srcPacket)
 {
     Socket::Packet ret;
     ret.Header().m_packetType = Socket::PacketType::SearchResponse;
@@ -265,7 +237,7 @@ SearchService::SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_e
         remoteResult.m_allIndexResults.swap(p_exeContext->GetResults());
         ret.AllocateBuffer(static_cast<std::uint32_t>(remoteResult.EstimateBufferSize()));
         auto bodyEnd = remoteResult.Write(ret.Body());
-        
+
         ret.Header().m_bodyLength = static_cast<std::uint32_t>(bodyEnd - ret.Body());
         ret.Header().WriteBuffer(ret.HeaderBuffer());
     }

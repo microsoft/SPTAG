@@ -22,9 +22,10 @@ namespace SPTAG
 		public:
 			SPANNResultIterator(const Index<T>* p_spannIndex, const VectorIndex* p_index, const void* p_target,
 				std::unique_ptr<SPANN::ExtraWorkSpace> p_extraWorkspace,
-				int p_batch): ResultIterator(p_index, p_target, false, p_batch),
+				int p_batch, int p_maxCheck): ResultIterator(p_index, p_target, false, p_batch, nullptr, p_maxCheck),
 				m_spannIndex(p_spannIndex),
-				m_extraWorkspace(std::move(p_extraWorkspace))
+                m_extraWorkspace(std::move(p_extraWorkspace)), 
+				m_errorCode(ErrorCode::Success)
 		    {
 			    m_headQueryResult = std::make_unique<QueryResult>(p_target, p_batch, false);
 		    }
@@ -50,7 +51,7 @@ namespace SPTAG
 				 if (m_workspace == nullptr) return m_queryResult;
 
 				 int resultCount = 0;
-			     m_spannIndex->SearchIndexIterative(*m_headQueryResult, *m_queryResult,
+			     m_errorCode = m_spannIndex->SearchIndexIterative(*m_headQueryResult, *m_queryResult,
 					 (COMMON::WorkSpace*)GetWorkSpace(), m_extraWorkspace.get(), batch, resultCount, m_isFirstResult);
 			     m_isFirstResult = false;
 
@@ -69,6 +70,11 @@ namespace SPTAG
 				return m_extraWorkspace->m_relaxedMono;
 			}
 
+			virtual ErrorCode GetErrorCode()
+			{
+                return m_errorCode;
+			}
+
 			virtual void Close()
 			{
 				ResultIterator::Close();
@@ -82,6 +88,7 @@ namespace SPTAG
 			const Index<T>* m_spannIndex;
 			std::unique_ptr<QueryResult> m_headQueryResult;
 			std::unique_ptr<SPANN::ExtraWorkSpace> m_extraWorkspace;
+            ErrorCode m_errorCode;
 		};
 	}// namespace SPANN
 } // namespace SPTAG

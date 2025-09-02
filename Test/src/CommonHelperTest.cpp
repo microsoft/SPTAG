@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Test.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Test.h"
 
 #include <memory>
 
@@ -40,12 +40,8 @@ TEST(CommonHelperTest, FindTrimmedSegmentTest) {
     using namespace SPTAG::Helper::StrUtils;
     std::string input("\t Space   End    \r\n\t");
 
-    const auto& pos = FindTrimmedSegment(input.c_str(),
-        input.c_str() + input.size(),
-        [](char p_val)->bool
-    {
-        return std::isspace(p_val) > 0;
-    });
+    const auto &pos = FindTrimmedSegment(input.c_str(), input.c_str() + input.size(),
+                                         [](char p_val) -> bool { return std::isspace(p_val) > 0; });
 
     EXPECT_EQ(pos.first, input.c_str() + 2);
     EXPECT_EQ(pos.second, input.c_str() + 13);

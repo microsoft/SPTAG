@@ -7,15 +7,11 @@ using namespace SPTAG;
 using namespace SPTAG::Socket;
 using namespace SPTAG::Client;
 
-ClientWrapper::ClientWrapper(const ClientOptions& p_options)
-    : m_options(p_options),
-      m_unfinishedJobCount(0),
-      m_isWaitingFinish(false)
+ClientWrapper::ClientWrapper(const ClientOptions &p_options)
+    : m_options(p_options), m_unfinishedJobCount(0), m_isWaitingFinish(false)
 {
     m_client.reset(new SPTAG::Socket::Client(GetHandlerMap(), p_options.m_socketThreadNum, 30));
-    m_client->SetEventOnConnectionClose(std::bind(&ClientWrapper::HandleDeadConnection,
-                                                  this,
-                                                  std::placeholders::_1));
+    m_client->SetEventOnConnectionClose(std::bind(&ClientWrapper::HandleDeadConnection, this, std::placeholders::_1));
 
     m_connections.reserve(m_options.m_threadNum);
     for (std::uint32_t i = 0; i < m_options.m_threadNum; ++i)
@@ -36,16 +32,12 @@ ClientWrapper::ClientWrapper(const ClientOptions& p_options)
     }
 }
 
-
 ClientWrapper::~ClientWrapper()
 {
 }
 
-
-void
-ClientWrapper::SendQueryAsync(const Socket::RemoteQuery& p_query,
-                              Callback p_callback,
-                              const ClientOptions& p_options)
+void ClientWrapper::SendQueryAsync(const Socket::RemoteQuery &p_query, Callback p_callback,
+                                   const ClientOptions &p_options)
 {
     if (!bool(p_callback))
     {
@@ -54,8 +46,7 @@ ClientWrapper::SendQueryAsync(const Socket::RemoteQuery& p_query,
 
     auto conn = GetConnection();
 
-    auto timeoutCallback = [this](std::shared_ptr<Callback> p_callback)
-    {
+    auto timeoutCallback = [this](std::shared_ptr<Callback> p_callback) {
         DecreaseUnfnishedJobCount();
         if (nullptr != p_callback)
         {
@@ -66,9 +57,7 @@ ClientWrapper::SendQueryAsync(const Socket::RemoteQuery& p_query,
         }
     };
 
-
-    auto connectCallback = [p_callback, this](bool p_connectSucc)
-    {
+    auto connectCallback = [p_callback, this](bool p_connectSucc) {
         if (!p_connectSucc)
         {
             Socket::RemoteSearchResult result;
@@ -84,8 +73,7 @@ ClientWrapper::SendQueryAsync(const Socket::RemoteQuery& p_query,
     packet.Header().m_packetType = PacketType::SearchRequest;
     packet.Header().m_processStatus = PacketProcessStatus::Ok;
     packet.Header().m_resourceID = m_callbackManager.Add(std::make_shared<Callback>(std::move(p_callback)),
-                                                         p_options.m_searchTimeout,
-                                                         std::move(timeoutCallback));
+                                                         p_options.m_searchTimeout, std::move(timeoutCallback));
 
     packet.Header().m_bodyLength = static_cast<std::uint32_t>(p_query.EstimateBufferSize());
     packet.AllocateBuffer(packet.Header().m_bodyLength);
@@ -96,9 +84,7 @@ ClientWrapper::SendQueryAsync(const Socket::RemoteQuery& p_query,
     m_client->SendPacket(conn.first, std::move(packet), connectCallback);
 }
 
-
-void
-ClientWrapper::WaitAllFinished()
+void ClientWrapper::WaitAllFinished()
 {
     if (m_unfinishedJobCount > 0)
     {
@@ -111,36 +97,28 @@ ClientWrapper::WaitAllFinished()
     }
 }
 
-
-PacketHandlerMapPtr
-ClientWrapper::GetHandlerMap()
+PacketHandlerMapPtr ClientWrapper::GetHandlerMap()
 {
     PacketHandlerMapPtr handlerMap(new PacketHandlerMap);
     handlerMap->emplace(PacketType::RegisterResponse,
-                        [this](ConnectionID p_localConnectionID, Packet p_packet) -> void
-    {
-        for (auto& conn : m_connections)
-        {
-            if (conn.first == p_localConnectionID)
-            {
-                conn.second = p_packet.Header().m_connectionID;
-                return;
-            }
-        }
-    });
+                        [this](ConnectionID p_localConnectionID, Packet p_packet) -> void {
+                            for (auto &conn : m_connections)
+                            {
+                                if (conn.first == p_localConnectionID)
+                                {
+                                    conn.second = p_packet.Header().m_connectionID;
+                                    return;
+                                }
+                            }
+                        });
 
-    handlerMap->emplace(PacketType::SearchResponse,
-                        std::bind(&ClientWrapper::SearchResponseHanlder,
-                                  this,
-                                  std::placeholders::_1,
-                                  std::placeholders::_2));
+    handlerMap->emplace(PacketType::SearchResponse, std::bind(&ClientWrapper::SearchResponseHanlder, this,
+                                                              std::placeholders::_1, std::placeholders::_2));
 
     return handlerMap;
 }
 
-
-void
-ClientWrapper::DecreaseUnfnishedJobCount()
+void ClientWrapper::DecreaseUnfnishedJobCount()
 {
     --m_unfinishedJobCount;
     if (0 == m_unfinishedJobCount)
@@ -154,9 +132,7 @@ ClientWrapper::DecreaseUnfnishedJobCount()
     }
 }
 
-
-const ClientWrapper::ConnectionPair&
-ClientWrapper::GetConnection()
+const ClientWrapper::ConnectionPair &ClientWrapper::GetConnection()
 {
     if (m_connections.size() == 1)
     {
@@ -174,9 +150,7 @@ ClientWrapper::GetConnection()
     return m_connections[pos];
 }
 
-
-void
-ClientWrapper::SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+void ClientWrapper::SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
 {
     std::shared_ptr<Callback> callback = m_callbackManager.GetAndRemove(p_packet.Header().m_resourceID);
     if (nullptr == callback)
@@ -201,11 +175,9 @@ ClientWrapper::SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, S
     DecreaseUnfnishedJobCount();
 }
 
-
-void
-ClientWrapper::HandleDeadConnection(Socket::ConnectionID p_cid)
+void ClientWrapper::HandleDeadConnection(Socket::ConnectionID p_cid)
 {
-    for (auto& conn : m_connections)
+    for (auto &conn : m_connections)
     {
         if (conn.first == p_cid)
         {
@@ -227,9 +199,7 @@ ClientWrapper::HandleDeadConnection(Socket::ConnectionID p_cid)
     }
 }
 
-
-bool
-ClientWrapper::IsAvailable() const
+bool ClientWrapper::IsAvailable() const
 {
     return !m_connections.empty();
 }

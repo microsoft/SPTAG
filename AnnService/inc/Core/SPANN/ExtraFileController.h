@@ -39,6 +39,7 @@ namespace SPTAG::SPANN {
             int m_batchSize = 64;
             int m_preIOCompleteCount = 0;
             int64_t m_preIOBytes = 0;
+            bool m_disableCheckpoint = false;
 
             std::chrono::high_resolution_clock::time_point m_startTime;
             std::chrono::time_point<std::chrono::high_resolution_clock> m_preTime = std::chrono::high_resolution_clock::now();
@@ -51,7 +52,7 @@ namespace SPTAG::SPANN {
 
         private:
             bool ExpandFile(AddressType blocksToAdd);
-            bool NeedsExpansion();
+            bool NeedsExpansion(int psize);
 
             // static void Start(void* args);
 
@@ -82,7 +83,15 @@ namespace SPTAG::SPANN {
 
             int RemainBlocks() {
                 return (int)(m_blockAddresses.unsafe_size());
-            };
+            }
+
+            int ReserveBlocks() {
+                return (int)(m_blockAddresses_reserve.unsafe_size());
+            }
+
+            int TotalBlocks() {
+                return (int)(m_totalAllocatedBlocks.load());
+            }
 
             ErrorCode Checkpoint(std::string prefix) {
                 std::string filename = prefix + "_blockpool";
@@ -90,10 +99,9 @@ namespace SPTAG::SPANN {
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Checkpoint - Reload reserved blocks...\n");
                 AddressType currBlockAddress = 0;
-                for (int count = 0; count < m_blockAddresses_reserve.unsafe_size(); count++) {
-                    if (m_blockAddresses_reserve.try_pop(currBlockAddress)) {
-                        m_blockAddresses.push(currBlockAddress);
-                    }
+                while (m_blockAddresses_reserve.try_pop(currBlockAddress))
+                {
+                    m_blockAddresses.push(currBlockAddress);
                 }
                 AddressType blocks = RemainBlocks();
                 AddressType totalBlocks = m_totalAllocatedBlocks.load();
@@ -371,6 +379,7 @@ namespace SPTAG::SPANN {
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
             m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
             m_bufferLimit = 1024;
+            m_shutdownCalled = true;
 
             const char* fileIoUseLock = getenv(kFileIoUseLock);
             if(fileIoUseLock) {
@@ -422,7 +431,7 @@ namespace SPTAG::SPANN {
                 }
                 else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot recover block mapping from %s!\n", recoverpath.c_str());
-                    exit(1);
+                    return;
                 }
             }
             else {
@@ -459,7 +468,7 @@ namespace SPTAG::SPANN {
 
             if (!m_pBlockController.Initialize(p_opt)) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to Initialize FileIO!\n");
-                exit(0);
+                return;
             }
 
             m_shutdownCalled = false;
@@ -469,14 +478,32 @@ namespace SPTAG::SPANN {
             ShutDown();
         }
 
+        bool Available() override
+        {
+            return !m_shutdownCalled;
+        }
+
         void ShutDown() override {
             if (m_shutdownCalled) {
                 return;
             }
+            m_shutdownCalled = true;
+            while (!m_key_reserve.empty())
+            {
+                SizeType cleanKey = 0xffffffff;
+                if (m_key_reserve.try_pop(cleanKey))
+                {
+                    At(cleanKey) = 0xffffffffffffffff;
+                }
+            }
             if (!m_mappingPath.empty()) Save(m_mappingPath);
             // TODO: Should we add a lock here?
             for (int i = 0; i < m_pBlockMapping.R(); i++) {
-                if (At(i) != 0xffffffffffffffff) delete[]((AddressType*)At(i));
+                if (At(i) != 0xffffffffffffffff) {
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "delete at %d for addr: %llu\n", i, At(i));
+                    delete[]((AddressType*)At(i));
+                    At(i) = 0xffffffffffffffff;
+                }
             }
             while (!m_buffer.empty()) {
                 uintptr_t ptr = 0xffffffffffffffff;
@@ -486,7 +513,6 @@ namespace SPTAG::SPANN {
             if (m_fileIoUseCache) {
                 delete m_pShardedLRUCache;
             }
-            m_shutdownCalled = true;
         }
 
         inline uintptr_t& At(SizeType key) {
@@ -507,7 +533,7 @@ namespace SPTAG::SPANN {
             else {
                 r = m_pBlockMapping.R();
             }
-            if (key >= r) return ErrorCode::Fail;
+            if (key >= r) return ErrorCode::Key_OverFlow;
 
             if (m_fileIoUseCache) {
                 auto size = ((AddressType*)At(key))[0];
@@ -697,7 +723,7 @@ namespace SPTAG::SPANN {
             int blocks = (int)(((value.size() + PageSize - 1) >> PageSizeEx));
             if (blocks >= m_blockLimit) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put key:%d value:%lld since value too long!\n", key, value.size());
-                return ErrorCode::Fail;
+                return ErrorCode::Posting_OverFlow;
             }
             // Calculate whether more mapping blocks are needed
             if (m_fileIoUseLock) {
@@ -743,8 +769,19 @@ namespace SPTAG::SPANN {
             int64_t* postingSize = (int64_t*)At(key);
             // If postingSize is less than 0, it means the mapping block is newly allocated—directly
             if (*postingSize < 0) {
-                m_pBlockController.GetBlocks(postingSize + 1, blocks);
-                m_pBlockController.WriteBlocks(postingSize + 1, blocks, value, timeout, reqs);
+                if (!m_pBlockController.GetBlocks(postingSize + 1, blocks))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "[Put] Not enough blocks in the pool can be allocated!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+                if (!m_pBlockController.WriteBlocks(postingSize + 1, blocks, value, timeout, reqs))
+                {
+                    m_pBlockController.ReleaseBlocks(postingSize + 1, blocks);
+                    memset(postingSize + 1, -1, sizeof(AddressType) * blocks);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Put] Write new block failed!\n");
+                    return ErrorCode::DiskIOFail;
+                }
                 *postingSize = value.size();
             }
             else {
@@ -753,8 +790,16 @@ namespace SPTAG::SPANN {
                 while (!m_buffer.try_pop(tmpblocks));
                 // Acquire a new batch of disk blocks and write data directly.
                 // To ensure the effectiveness of the checkpoint, new blocks must be allocated for writing here.
-                m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value, timeout, reqs);
+                if (!m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1, blocks))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Put] Not enough blocks in the pool can be allocated!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+                if (!m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1, blocks, value, timeout, reqs))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Put] Write new block failed!\n");
+                    return ErrorCode::DiskIOFail;
+                }
                 *((int64_t*)tmpblocks) = value.size();
 
                 // Release the original blocks
@@ -774,10 +819,81 @@ namespace SPTAG::SPANN {
             return Put(std::stoi(key), value, timeout, reqs);
         }
 
+        ErrorCode Check(const SizeType key, int size) override
+        {
+            if (m_fileIoUseLock)
+            {
+                m_rwMutex[hash(key)].lock();
+            }
+            SizeType r;
+            if (m_fileIoUseLock)
+            {
+                m_updateMutex.lock_shared();
+                r = m_pBlockMapping.R();
+                m_updateMutex.unlock_shared();
+            }
+            else
+            {
+                r = m_pBlockMapping.R();
+            }
+
+            if (key >= r || At(key) == 0xffffffffffffffff)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Check] Key range error: key: %d, mapping size: %d\n", key, r);
+                if (m_fileIoUseLock)
+                {
+                    m_rwMutex[hash(key)].unlock();
+                }
+                return ErrorCode::Key_OverFlow;
+            }
+
+            int64_t *postingSize = (int64_t *)At(key);
+            if ((*postingSize) != size)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Check] Key %d failed: postingSize %d is not match real size %d\n", key, (int)(*postingSize), size);
+                if (m_fileIoUseLock)
+                {
+                    m_rwMutex[hash(key)].unlock();
+                }
+                return ErrorCode::Posting_SizeError;
+            }
+
+            int blocks = ((*postingSize + PageSize - 1) >> PageSizeEx);
+            std::vector<bool> checked(m_pBlockController.TotalBlocks(), false);
+            for (int i = 1; i <= blocks; i++)
+            {
+                if (postingSize[i] < 0 || postingSize[i] >= m_pBlockController.TotalBlocks())
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "[Check] Key %d failed: error block id %d (should be 0 ~ %d)\n", key,
+                                 (int)(postingSize[i]), m_pBlockController.TotalBlocks());
+                    if (m_fileIoUseLock)
+                    {
+                        m_rwMutex[hash(key)].unlock();
+                    }
+                    return ErrorCode::Block_IDError;
+                }
+                if (checked[postingSize[i]])
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Check] Block %lld double used!\n", postingSize[i]);
+                    return ErrorCode::Block_IDError;
+                }
+                else
+                {
+                    checked[postingSize[i]] = true;
+                }
+            }
+            if (m_fileIoUseLock)
+            {
+                m_rwMutex[hash(key)].unlock();
+            }
+            return ErrorCode::Success;
+        }
+
         void PrintPostingDiff(std::string& p1, std::string& p2, const char* pos) {
             if (p1.size() != p2.size()) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge %s: p1 and p2 have different sizes: before=%u after=%u\n", pos, p1.size(), p2.size());
-                exit(1);
+                return;
             }
             std::string diff = "";
             for (size_t i = 0; i < p1.size(); i+=4) {
@@ -787,7 +903,6 @@ namespace SPTAG::SPANN {
             }
             if (diff.size() != 0) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge %s: %s\n", pos, diff.c_str());
-                exit(1);
             }
         }
 
@@ -804,16 +919,27 @@ namespace SPTAG::SPANN {
             else {
                 r = m_pBlockMapping.R();
             }
-            if (key >= r) {
+            if (key >= r || At(key) == 0xffffffffffffffff)
+            {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Key range error: key: %d, mapping size: %d\n", key, r);
                 if (m_fileIoUseLock) {
                     m_rwMutex[hash(key)].unlock();
                 }
-                return ErrorCode::Fail;
+                return ErrorCode::Key_OverFlow;
             }
             
             int64_t* postingSize = (int64_t*)At(key);
-
+            if (*postingSize < 0)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Merge] Key %d failed: postingSize < 0\n", key);
+                if (m_fileIoUseLock)
+                {
+                    m_rwMutex[hash(key)].unlock();
+                }
+                return ErrorCode::Key_NotFound;
+                //return Put(key, value, timeout, reqs);
+            }
+            
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->merge(key, (void *)(value.data()), value.size());
             }
@@ -832,7 +958,7 @@ namespace SPTAG::SPANN {
                 if (m_fileIoUseLock) {
                     m_rwMutex[hash(key)].unlock();
                 }
-                return ErrorCode::Fail;
+                return ErrorCode::Posting_OverFlow;
             }
 
             //std::string before;
@@ -845,7 +971,11 @@ namespace SPTAG::SPANN {
             if (sizeInPage != 0) {
                 std::string newValue;
                 AddressType readreq[] = { sizeInPage, *(postingSize + 1 + oldblocks) };
-                m_pBlockController.ReadBlocks(readreq, &newValue, timeout, reqs);
+                if (!m_pBlockController.ReadBlocks(readreq, &newValue, timeout, reqs))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Merge] Cannot read original posting!\n");
+                    return ErrorCode::DiskIOFail;
+                }
                 //std::string lastblock = before.substr(before.size() - sizeInPage);
                 //PrintPostingDiff(lastblock, newValue, "0");
                 newValue += value;
@@ -853,8 +983,18 @@ namespace SPTAG::SPANN {
                 uintptr_t tmpblocks = 0xffffffffffffffff;
                 while (!m_buffer.try_pop(tmpblocks));
                 memcpy((AddressType*)tmpblocks, postingSize, sizeof(AddressType) * (oldblocks + 1));
-                m_pBlockController.GetBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks((AddressType*)tmpblocks + 1 + oldblocks, allocblocks, newValue, timeout, reqs);
+                if (!m_pBlockController.GetBlocks((AddressType *)tmpblocks + 1 + oldblocks, allocblocks))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Merge] Not enough blocks in the pool can be allocated!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+                if (!m_pBlockController.WriteBlocks((AddressType *)tmpblocks + 1 + oldblocks, allocblocks, newValue,
+                                                    timeout, reqs))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "[Merge] Write new block failed!\n");
+                    return ErrorCode::DiskIOFail;
+                }
                 *((int64_t*)tmpblocks) = newSize;
 
                 // This is also to ensure checkpoint correctness, so we release the partially used block and allocate a new one.
@@ -865,8 +1005,17 @@ namespace SPTAG::SPANN {
                 m_buffer.push((uintptr_t)postingSize);
             }
             else {  // Otherwise, directly allocate a new batch of blocks to append after the current ones.
-                m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks);
-                m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value, timeout, reqs);
+                if (!m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, allocblocks))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "[Merge] Not enough blocks in the pool can be allocated!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+                if (!m_pBlockController.WriteBlocks(postingSize + 1 + oldblocks, allocblocks, value, timeout, reqs))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Merge] Write new block failed!\n");
+                    return ErrorCode::DiskIOFail;
+                }
                 *postingSize = newSize;
             }
 	    /*
@@ -898,23 +1047,35 @@ namespace SPTAG::SPANN {
             else {
                 r = m_pBlockMapping.R();
             }
-            if (key >= r) return ErrorCode::Fail;
+            if (key >= r) return ErrorCode::Key_OverFlow;
 
             if (m_fileIoUseCache) {
                 m_pShardedLRUCache->del(key);
             }
 
             int64_t* postingSize = (int64_t*)At(key);
-            if (*postingSize < 0) {
+            if (((uintptr_t)postingSize) == 0xffffffffffffffff || *postingSize < 0)
+            {
                 if (m_fileIoUseLock) {
                     m_rwMutex[hash(key)].unlock();
                 }
-                return ErrorCode::Fail;
+                return ErrorCode::Key_NotFound;
             }
 
             int blocks = ((*postingSize + PageSize - 1) >> PageSizeEx);
             m_pBlockController.ReleaseBlocks(postingSize + 1, blocks);
             m_buffer.push((uintptr_t)postingSize);
+            //m_key_reserve.push(key);
+            /*
+            while (m_key_reserve.unsafe_size() > m_bufferLimit)
+            {
+                SizeType cleanKey = 0;
+                if (m_key_reserve.try_pop(cleanKey))
+                {
+                    At(cleanKey) = 0xffffffffffffffff;
+                }
+            }
+            */
             At(key) = 0xffffffffffffffff;
             if (m_fileIoUseLock) {
                 m_rwMutex[hash(key)].unlock();
@@ -932,9 +1093,11 @@ namespace SPTAG::SPANN {
 
         void GetStat() {
             int remainBlocks = m_pBlockController.RemainBlocks();
-            int remainGB = (long long)remainBlocks << PageSizeEx >> 30;
+            int reserveBlocks = m_pBlockController.ReserveBlocks();
+            int totalBlocks = m_pBlockController.TotalBlocks();
+            int remainGB = ((long long)(remainBlocks + reserveBlocks) >> (30 - PageSizeEx));
             // int remainGB = remainBlocks >> 20 << 2;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Remain %d blocks, totally %d GB\n", remainBlocks, remainGB);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total %d blocks, Remain %d blocks, Reserve %d blocks, totally %d GB\n", totalBlocks, remainBlocks, reserveBlocks, remainGB);
             double average_read_time = (double)read_time_vec / get_times_vec;
             double average_get_time = (double)get_time_vec / get_times_vec;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Get times: %llu, get time: %llu us, read time: %llu us\n", get_times_vec.load(), get_time_vec.load(), read_time_vec.load());
@@ -1034,6 +1197,7 @@ namespace SPTAG::SPANN {
         COMMON::Dataset<uintptr_t> m_pBlockMapping;
         SizeType m_bufferLimit;
         Helper::Concurrent::ConcurrentQueue<uintptr_t> m_buffer;
+        Helper::Concurrent::ConcurrentQueue<SizeType> m_key_reserve;
 
         std::shared_ptr<Helper::ThreadPool> m_compactionThreadPool;
         BlockController m_pBlockController;

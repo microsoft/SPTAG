@@ -31,6 +31,7 @@
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -89,11 +90,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="inc\Core\Common\Checksum.h" />
     <ClInclude Include="inc\Core\Common\FineGrainedLock.h" />
     <ClInclude Include="inc\Core\Common\InstructionUtils.h" />
     <ClInclude Include="inc\Core\Common\KNearestNeighborhoodGraph.h" />
     <ClInclude Include="inc\Core\Common\Labelset.h" />
     <ClInclude Include="inc\Core\Common\OPQQuantizer.h" />
+    <ClInclude Include="inc\Core\Common\PostingSizeRecord.h" />
     <ClInclude Include="inc\Core\Common\PQQuantizer.h" />
     <ClInclude Include="inc\Core\Common\IQuantizer.h" />
     <ClInclude Include="inc\Core\Common\SIMDUtils.h" />
@@ -189,13 +192,5 @@
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
-  </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
-  </Target>
+  <ImportGroup Label="ExtensionTargets" />
 </Project>

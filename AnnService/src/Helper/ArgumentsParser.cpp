@@ -5,34 +5,28 @@
 
 using namespace SPTAG::Helper;
 
-
 ArgumentsParser::IArgument::IArgument()
 {
 }
-
 
 ArgumentsParser::IArgument::~IArgument()
 {
 }
 
-
 ArgumentsParser::ArgumentsParser()
 {
 }
-
 
 ArgumentsParser::~ArgumentsParser()
 {
 }
 
-
-bool
-ArgumentsParser::Parse(int p_argc, char** p_args)
+bool ArgumentsParser::Parse(int p_argc, char **p_args)
 {
     while (p_argc > 0)
     {
         int last = p_argc;
-        for (auto& option : m_arguments)
+        for (auto &option : m_arguments)
         {
             if (!option->ParseValue(p_argc, p_args))
             {
@@ -50,7 +44,7 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
     }
 
     bool isValid = true;
-    for (auto& option : m_arguments)
+    for (auto &option : m_arguments)
     {
         if (option->IsRequiredButNotSet())
         {
@@ -71,12 +65,10 @@ ArgumentsParser::Parse(int p_argc, char** p_args)
     return true;
 }
 
-
-void
-ArgumentsParser::PrintHelp()
+void ArgumentsParser::PrintHelp()
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "Usage: ");
-    for (auto& option : m_arguments)
+    for (auto &option : m_arguments)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Empty, "\n  ");
         option->PrintDescription();

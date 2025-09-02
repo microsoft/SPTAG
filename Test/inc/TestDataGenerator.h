@@ -29,6 +29,10 @@ namespace TestUtils {
 
         static std::shared_ptr<SPTAG::MetadataSet> GenerateMetadataSet(SPTAG::SizeType count, SPTAG::SizeType offsetStart);
 
+        void RunBatches(std::shared_ptr<SPTAG::VectorSet> &vecset, std::shared_ptr<SPTAG::MetadataSet> &metaset,
+                        std::shared_ptr<SPTAG::VectorSet> &addvecset, std::shared_ptr<SPTAG::MetadataSet> &addmetaset,
+                        std::shared_ptr<SPTAG::VectorSet> &queryset, int base, int batchinsert, int batchdelete, int batches, 
+                        std::shared_ptr<SPTAG::VectorSet> &truths);
     private:
         int m_n, m_q, m_m, m_k;
         std::string m_distMethod;
@@ -48,6 +52,11 @@ namespace TestUtils {
             std::shared_ptr<SPTAG::VectorSet> queryset,
             std::shared_ptr<SPTAG::VectorSet>& truth,
             bool normalize);
+
+        void LoadOrGenerateBatchTruth(const std::string &filename, std::shared_ptr<SPTAG::VectorSet> vecset,
+                                      std::shared_ptr<SPTAG::VectorSet> queryset,
+                                      std::shared_ptr<SPTAG::VectorSet> &truths, int base, int batchinsert,
+                                      int batchdelete, int batches, bool normalize);
 
         std::shared_ptr<SPTAG::VectorSet> CombineVectorSets(std::shared_ptr<SPTAG::VectorSet> base,
             std::shared_ptr<SPTAG::VectorSet> additional);

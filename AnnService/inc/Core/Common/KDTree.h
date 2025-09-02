@@ -96,22 +96,48 @@ break;
 
                 m_pTreeRoots.resize(m_iTreeNumber * localindices.size());
                 m_pTreeStart.resize(m_iTreeNumber, 0);
-#pragma omp parallel for num_threads(numOfThreads)
-                for (int i = 0; i < m_iTreeNumber; i++)
+                std::vector<std::thread> mythreads;
+                mythreads.reserve(numOfThreads);
+                std::atomic_size_t sent(0);
+                for (int tid = 0; tid < numOfThreads; tid++)
                 {
-                    if (abort && abort->ShouldAbort()) continue;
+                    mythreads.emplace_back([&, tid]() {
+                        size_t i = 0;
+                        std::mt19937 rg;
+                        while (true)
+                        {
+                            i = sent.fetch_add(1);
+                            if (i < m_iTreeNumber)
+                            {
+                                if (abort && abort->ShouldAbort())
+                                    continue;
 
-                    Sleep(i * 100); std::srand(clock());
+                                Sleep(i * 100);
+                                std::srand(clock());
 
-                    std::vector<SizeType> pindices(localindices.begin(), localindices.end());
-                    std::shuffle(pindices.begin(), pindices.end(), rg);
+                                std::vector<SizeType> pindices(localindices.begin(), localindices.end());
+                                std::shuffle(pindices.begin(), pindices.end(), rg);
 
-                    m_pTreeStart[i] = i * (SizeType)pindices.size();
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
-                    SizeType iTreeSize = m_pTreeStart[i];
-                    DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i], iTreeSize, abort);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1, iTreeSize - m_pTreeStart[i], pindices.size());
+                                m_pTreeStart[i] = i * (SizeType)pindices.size();
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to build KDTree %d\n", i + 1);
+                                SizeType iTreeSize = m_pTreeStart[i];
+                                DivideTree<T, R>(data, pindices, 0, (SizeType)pindices.size() - 1, m_pTreeStart[i],
+                                                 iTreeSize, abort);
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d KDTree built, %d %zu\n", i + 1,
+                                             iTreeSize - m_pTreeStart[i], pindices.size());
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    });
                 }
+                for (auto &t : mythreads)
+                {
+                    t.join();
+                }
+                mythreads.clear();
             }
 
             inline std::uint64_t BufferSize() const 

@@ -135,6 +135,7 @@ namespace SPTAG::SPANN
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
             if (s != rocksdb::Status::OK()) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
+                ShutDown();
             }
         }
 
@@ -144,17 +145,21 @@ namespace SPTAG::SPANN
             db->GetProperty("rocksdb.stats", &stats);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB Status: %s\n%s", dbPath.c_str(),stats.c_str());
             */
-
-            if (db) {
-                ShutDown();
-	    }
+            ShutDown();
         }
 
         void ShutDown() override {
+            if (db == nullptr) return;
+
             db->Close();
             //DestroyDB(dbPath, dbOptions);
             delete db;
-	    db = nullptr;
+	        db = nullptr;
+        }
+
+        bool Available() override
+        {
+            return (db != nullptr);
         }
 
         ErrorCode Get(const std::string& key, std::string* value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) override {

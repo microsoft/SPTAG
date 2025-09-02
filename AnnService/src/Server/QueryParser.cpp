@@ -9,24 +9,17 @@
 using namespace SPTAG;
 using namespace SPTAG::Service;
 
+const char *QueryParser::c_defaultVectorSeparator = "|";
 
-const char* QueryParser::c_defaultVectorSeparator = "|";
-
-
-QueryParser::QueryParser()
-    : m_vectorBase64(nullptr),
-      m_vectorBase64Length(0)
+QueryParser::QueryParser() : m_vectorBase64(nullptr), m_vectorBase64Length(0)
 {
 }
-
 
 QueryParser::~QueryParser()
 {
 }
 
-
-ErrorCode
-QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
+ErrorCode QueryParser::Parse(const std::string &p_query, const char *p_vectorSeparator)
 {
     if (p_vectorSeparator == nullptr)
     {
@@ -52,14 +45,14 @@ QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
 
     State currState = State::None;
 
-    char* optionName = nullptr;
-    char* vectorStrBegin = nullptr;
-    char* vectorStrEnd = nullptr;
+    char *optionName = nullptr;
+    char *vectorStrBegin = nullptr;
+    char *vectorStrEnd = nullptr;
     SizeType estDimension = 0;
 
-    char* iter = nullptr;
+    char *iter = nullptr;
 
-    for (iter = reinterpret_cast<char*>(m_dataHolder.Data()); *iter != '\0'; ++iter)
+    for (iter = reinterpret_cast<char *>(m_dataHolder.Data()); *iter != '\0'; ++iter)
     {
         if (std::isspace(*iter))
         {
@@ -180,30 +173,22 @@ QueryParser::Parse(const std::string& p_query, const char* p_vectorSeparator)
     return ErrorCode::Success;
 }
 
-
-const std::vector<const char*>&
-QueryParser::GetVectorElements() const
+const std::vector<const char *> &QueryParser::GetVectorElements() const
 {
     return m_vectorElements;
 }
 
-
-const std::vector<QueryParser::OptionPair>&
-QueryParser::GetOptions() const
+const std::vector<QueryParser::OptionPair> &QueryParser::GetOptions() const
 {
     return m_options;
 }
 
-
-const char*
-QueryParser::GetVectorBase64() const
+const char *QueryParser::GetVectorBase64() const
 {
     return m_vectorBase64;
 }
 
-
-SizeType
-QueryParser::GetVectorBase64Length() const
+SizeType QueryParser::GetVectorBase64Length() const
 {
     return m_vectorBase64Length;
 }

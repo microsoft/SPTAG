@@ -13,16 +13,13 @@ using namespace SPTAG::Helper;
 
 const IniReader::ParameterValueMap IniReader::c_emptyParameters;
 
-
 IniReader::IniReader()
 {
 }
 
-
 IniReader::~IniReader()
 {
 }
-
 
 ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
 {
@@ -38,14 +35,12 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
         m_parameters.emplace(currSection, currParamMap);
     }
 
-    auto isSpace = [](char p_ch) -> bool
-    {
-        return std::isspace(p_ch) != 0;
-    };
+    auto isSpace = [](char p_ch) -> bool { return std::isspace(p_ch) != 0; };
 
     while (true)
     {
-        if (!p_input->ReadString(c_bufferSize, line)) break;
+        if (!p_input->ReadString(c_bufferSize, line))
+            break;
 
         std::uint64_t len = 0;
         while (len < c_bufferSize && line[len] != '\0')
@@ -98,7 +93,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
         else
         {
             // Parameter Value Pair.
-            const char* equalSignLoc = nonSpaceSeg.first;
+            const char *equalSignLoc = nonSpaceSeg.first;
             while (equalSignLoc < nonSpaceSeg.second && '=' != *equalSignLoc)
             {
                 ++equalSignLoc;
@@ -133,27 +128,22 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
     return ErrorCode::Success;
 }
 
-
-ErrorCode
-IniReader::LoadIniFile(const std::string& p_iniFilePath)
+ErrorCode IniReader::LoadIniFile(const std::string &p_iniFilePath)
 {
     auto ptr = f_createIO();
-    if (ptr == nullptr || !ptr->Initialize(p_iniFilePath.c_str(), std::ios::in)) return ErrorCode::FailedOpenFile;
+    if (ptr == nullptr || !ptr->Initialize(p_iniFilePath.c_str(), std::ios::in))
+        return ErrorCode::FailedOpenFile;
     return LoadIni(ptr);
 }
 
-
-bool
-IniReader::DoesSectionExist(const std::string& p_section) const
+bool IniReader::DoesSectionExist(const std::string &p_section) const
 {
     std::string section(p_section);
     StrUtils::ToLowerInPlace(section);
     return m_parameters.count(section) != 0;
 }
 
-
-bool
-IniReader::DoesParameterExist(const std::string& p_section, const std::string& p_param) const
+bool IniReader::DoesParameterExist(const std::string &p_section, const std::string &p_param) const
 {
     std::string name(p_section);
     StrUtils::ToLowerInPlace(name);
@@ -163,7 +153,7 @@ IniReader::DoesParameterExist(const std::string& p_section, const std::string& p
         return false;
     }
 
-    const auto& paramMap = iter->second;
+    const auto &paramMap = iter->second;
     if (paramMap == nullptr)
     {
         return false;
@@ -174,9 +164,7 @@ IniReader::DoesParameterExist(const std::string& p_section, const std::string& p
     return paramMap->count(name) != 0;
 }
 
-
-bool
-IniReader::GetRawValue(const std::string& p_section, const std::string& p_param, std::string& p_value) const
+bool IniReader::GetRawValue(const std::string &p_section, const std::string &p_param, std::string &p_value) const
 {
     std::string name(p_section);
     StrUtils::ToLowerInPlace(name);
@@ -186,7 +174,7 @@ IniReader::GetRawValue(const std::string& p_section, const std::string& p_param,
         return false;
     }
 
-    const auto& paramMap = sectionIter->second;
+    const auto &paramMap = sectionIter->second;
     if (paramMap == nullptr)
     {
         return false;
@@ -204,9 +192,7 @@ IniReader::GetRawValue(const std::string& p_section, const std::string& p_param,
     return true;
 }
 
-
-const IniReader::ParameterValueMap&
-IniReader::GetParameters(const std::string& p_section) const
+const IniReader::ParameterValueMap &IniReader::GetParameters(const std::string &p_section) const
 {
     std::string name(p_section);
     StrUtils::ToLowerInPlace(name);
@@ -219,13 +205,12 @@ IniReader::GetParameters(const std::string& p_section) const
     return *(sectionIter->second);
 }
 
-void
-IniReader::SetParameter(const std::string& p_section, const std::string& p_param, const std::string& p_val)
+void IniReader::SetParameter(const std::string &p_section, const std::string &p_param, const std::string &p_val)
 {
     std::string name(p_section);
     StrUtils::ToLowerInPlace(name);
     auto sectionIter = m_parameters.find(name);
-    if (sectionIter == m_parameters.cend() || sectionIter->second == nullptr) 
+    if (sectionIter == m_parameters.cend() || sectionIter->second == nullptr)
     {
         m_parameters[name] = std::shared_ptr<ParameterValueMap>(new ParameterValueMap);
     }

@@ -102,10 +102,12 @@ namespace SPTAG {
             std::string m_KVFile;
             std::string m_ssdMappingFile;
             std::string m_ssdInfoFile;
+            std::string m_checksumFile;
             bool m_useDirectIO;
             bool m_preReassign;
             float m_preReassignRatio;
             bool m_enableWAL;
+            bool m_disableCheckpoint;
 
             // GPU building
             int m_gpuSSDNumTrees;
@@ -180,6 +182,8 @@ namespace SPTAG {
             int m_startFileSize;
             int m_growthFileSize;
             float m_growThreshold;
+            float m_fDeletePercentageForRefine;
+            bool m_oneClusterCutMax;
 
             // Iterative
             int m_headBatch;

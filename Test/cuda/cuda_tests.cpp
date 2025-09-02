@@ -2,10 +2,12 @@
 
 #include <cstdlib>
 #include <chrono>
+#include <cstdlib>
 
 #include <iostream>
 #include "inc/Test.h"
 #include <boost/filesystem.hpp>
+#include <iostream>
 
 int GPUBuildKNNTest();
 
@@ -18,7 +20,7 @@ TEST(GPUTest, RandomTests) {
 }
 
 /*
-int GPUTestDistance_All(); 
+int GPUTestDistance_All();
 
 // TEST(GPUTest, DistanceTests) {
   int errs = GPUTestDistance_All();

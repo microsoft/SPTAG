@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Test.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include "inc/Core/SPANN/IExtraSearcher.h"
-#include <memory>
+#include "inc/Test.h"
 #include <chrono>
+#include <memory>
 
 // enable rocksdb io_uring
 
@@ -21,27 +21,32 @@
 using namespace SPTAG;
 using namespace SPTAG::SPANN;
 
-void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int totalSize, int times, bool debug, SPTAG::SPANN::ExtraWorkSpace& workspace) { 
+void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int totalSize, int times, bool debug,
+            SPTAG::SPANN::ExtraWorkSpace &workspace)
+{
     std::vector<SizeType> headIDs(internalResultNum, 0);
 
     std::vector<std::string> values;
     double latency = 0;
-    for (int i = 0; i < times; i++) {
+    for (int i = 0; i < times; i++)
+    {
         values.clear();
-        for (int j = 0; j < internalResultNum; j++) headIDs[j] = (j + i * internalResultNum) % totalSize;
+        for (int j = 0; j < internalResultNum; j++)
+            headIDs[j] = (j + i * internalResultNum) % totalSize;
         auto t1 = std::chrono::high_resolution_clock::now();
         db->MultiGet(headIDs, &values, MaxTimeout, &(workspace.m_diskRequests));
         auto t2 = std::chrono::high_resolution_clock::now();
         latency += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
 
-        if (debug) {
-            for (int j = 0; j < internalResultNum; j++) {
+        if (debug)
+        {
+            for (int j = 0; j < internalResultNum; j++)
+            {
                 std::cout << values[j].substr(PageSize) << std::endl;
             }
         }
     }
     std::cout << "avg get time: " << (latency / (float)(times)) << "us" << std::endl;
-
 }
 
 void RunTest(std::string path, std::string type, bool debug = false)
@@ -55,18 +60,21 @@ void RunTest(std::string path, std::string type, bool debug = false)
     auto idx = path.find_last_of(FolderSep);
     opt.m_indexDirectory = path.substr(0, idx);
     opt.m_ssdMappingFile = path.substr(idx + 1);
-    workspace.Initialize(4096, 2, internalResultNum, 4*PageSize, true, false);
+    workspace.Initialize(4096, 2, internalResultNum, 4 * PageSize, true, false);
 
-    if (type == "RocksDB") {
+    if (type == "RocksDB")
+    {
 #ifdef ROCKSDB
         db.reset(new RocksDBIO(path.c_str(), true));
 #else
         {
             std::cerr << "RocksDB is not supported in this build." << std::endl;
             return;
-        }  
+        }
 #endif
-    } else if (type == "SPDK") {
+    }
+    else if (type == "SPDK")
+    {
 #ifdef SPDK
         db.reset(new SPDKIO(opt));
 #else
@@ -75,29 +83,39 @@ void RunTest(std::string path, std::string type, bool debug = false)
             return;
         }
 #endif
-    } else {
+    }
+    else
+    {
         db.reset(new FileIO(opt));
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < totalNum; i++) {
+    for (int i = 0; i < totalNum; i++)
+    {
         int len = std::to_string(i).length();
         std::string val(PageSize - len, '0');
         db->Put(i, val, MaxTimeout, &(workspace.m_diskRequests));
     }
     auto t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "avg put time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum)) << "us" << std::endl;
+    std::cout << "avg put time: "
+              << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum)) << "us"
+              << std::endl;
 
     db->ForceCompaction();
 
     t1 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < totalNum; i++) {
-        for (int j = 0; j < mergeIters; j++) {
+    for (int i = 0; i < totalNum; i++)
+    {
+        for (int j = 0; j < mergeIters; j++)
+        {
             db->Merge(i, std::to_string(i), MaxTimeout, &(workspace.m_diskRequests));
         }
     }
     t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "avg merge time: " << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / (float)(totalNum * mergeIters)) << "us" << std::endl;
+    std::cout << "avg merge time: "
+              << (std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() /
+                  (float)(totalNum * mergeIters))
+              << "us" << std::endl;
 
     Search(db, internalResultNum, totalNum, 10, debug, workspace);
 
@@ -128,6 +146,5 @@ TEST(KVTest, FileTest) {
     if(!direxists("tmp_file")) mkdir("tmp_file");
     RunTest(std::string("tmp_file") + FolderSep + "test", "File", false);
 }
-
 
 }

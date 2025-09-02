@@ -9,6 +9,7 @@
 #include "Heap.h"
 
 #include <stdarg.h>
+#include <functional>
 
 namespace SPTAG
 {
@@ -319,6 +320,7 @@ namespace SPTAG
             Heap<NodeDistPair> m_nextBSPTQueue;
 
             DistPriorityQueue m_Results;
+            std::function<bool(const ByteArray&)> m_filterFunc;
         };
     }
 }

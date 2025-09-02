@@ -7,14 +7,17 @@
 #include <string>
 //#include "zstd.h"
 //#include "zdict.h"
+#ifdef ZSTD
 #include <zstd.h>
 #include <zdict.h>
+#endif
 #include "inc/Core/Common.h"
 
 namespace SPTAG
 {
     namespace SPANN
     {
+        #ifdef ZSTD
         class Compressor
         {
         private:
@@ -177,6 +180,51 @@ namespace SPTAG
             ZSTD_CDict *cdict;
             ZSTD_DDict *ddict;
         };
+        #else
+    class Compressor
+    {
+      public:
+        Compressor(int level = 0, int bufferCapacity = 102400)
+        {
+        }
+
+        virtual ~Compressor()
+        {
+        }
+
+        std::size_t TrainDict(const std::string &samplesBuffer, const size_t *samplesSizes, unsigned nbSamples)
+        {
+            return 0;
+        }
+
+        std::string GetDictBuffer()
+        {
+            return "";
+        }
+
+        void SetDictBuffer(const std::string &buffer)
+        {
+        }
+
+        std::string Compress(const std::string &src, const bool useDict)
+        {
+            
+            return src;
+        }
+
+        std::size_t Decompress(const char *src, size_t srcSize, char *dst, size_t dstCapacity, const bool useDict)
+        {
+            memcpy(dst, src, srcSize);
+            return srcSize;
+        }
+
+        // return the compressed sie
+        size_t GetCompressedSize(const std::string &src, bool useDict)
+        {
+            return src.size();
+        }
+    };
+        #endif
     } // SPANN
 } // SPTAG
 

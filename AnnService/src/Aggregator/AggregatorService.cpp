@@ -2,27 +2,22 @@
 // Licensed under the MIT License.
 
 #include "inc/Aggregator/AggregatorService.h"
-#include "inc/Server/QueryParser.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Helper/Base64Encode.h"
+#include "inc/Server/QueryParser.h"
 
 using namespace SPTAG;
 using namespace SPTAG::Aggregator;
 
-AggregatorService::AggregatorService()
-    : m_shutdownSignals(m_ioContext),
-      m_pendingConnectServersTimer(m_ioContext)
+AggregatorService::AggregatorService() : m_shutdownSignals(m_ioContext), m_pendingConnectServersTimer(m_ioContext)
 {
 }
-
 
 AggregatorService::~AggregatorService()
 {
 }
 
-
-bool
-AggregatorService::Initialize()
+bool AggregatorService::Initialize()
 {
     std::string configFilePath = "Aggregator.ini";
     m_aggregatorContext.reset(new AggregatorContext(configFilePath));
@@ -32,9 +27,7 @@ AggregatorService::Initialize()
     return m_initalized;
 }
 
-
-void
-AggregatorService::Run()
+void AggregatorService::Run()
 {
     auto threadNum = max((SPTAG::SizeType)1, GetContext()->GetSettings()->m_threadNum);
     m_threadPool.reset(new boost::asio::thread_pool(threadNum));
@@ -44,39 +37,29 @@ AggregatorService::Run()
     WaitForShutdown();
 }
 
-
-void
-AggregatorService::StartClient()
+void AggregatorService::StartClient()
 {
     auto context = GetContext();
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
-    handlerMap->emplace(Socket::PacketType::SearchResponse,
-                        [this](Socket::ConnectionID p_srcID, Socket::Packet p_packet)
-                        {
-                            boost::asio::post(*m_threadPool,
-                                              std::bind(&AggregatorService::SearchResponseHanlder,
-                                                        this,
-                                                        p_srcID,
-                                                        std::move(p_packet)));
-                        });
+    handlerMap->emplace(
+        Socket::PacketType::SearchResponse, [this](Socket::ConnectionID p_srcID, Socket::Packet p_packet) {
+            boost::asio::post(*m_threadPool,
+                              std::bind(&AggregatorService::SearchResponseHanlder, this, p_srcID, std::move(p_packet)));
+        });
 
+    m_socketClient.reset(new Socket::Client(handlerMap, context->GetSettings()->m_socketThreadNum, 30));
 
-    m_socketClient.reset(new Socket::Client(handlerMap,
-                                            context->GetSettings()->m_socketThreadNum,
-                                            30));
-
-    m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid)
-                                              {
-                                                  auto context = this->GetContext();
-                                                  for (const auto& server : context->GetRemoteServers())
-                                                  {
-                                                      if (nullptr != server && p_cid == server->m_connectionID)
-                                                      {
-                                                          server->m_status = RemoteMachineStatus::Disconnected;
-                                                          this->AddToPendingServers(server);
-                                                      }
-                                                  }
-                                              });
+    m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid) {
+        auto context = this->GetContext();
+        for (const auto &server : context->GetRemoteServers())
+        {
+            if (nullptr != server && p_cid == server->m_connectionID)
+            {
+                server->m_status = RemoteMachineStatus::Disconnected;
+                this->AddToPendingServers(server);
+            }
+        }
+    });
 
     {
         std::lock_guard<std::mutex> guard(m_pendingConnectServersMutex);
@@ -86,36 +69,24 @@ AggregatorService::StartClient()
     ConnectToPendingServers();
 }
 
-
-void
-AggregatorService::StartListen()
+void AggregatorService::StartListen()
 {
     auto context = GetContext();
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
-    handlerMap->emplace(Socket::PacketType::SearchRequest,
-                        [this](Socket::ConnectionID p_srcID, Socket::Packet p_packet)
-                        {
-                            boost::asio::post(*m_threadPool,
-                                              std::bind(&AggregatorService::SearchRequestHanlder,
-                                                        this,
-                                                        p_srcID,
-                                                        std::move(p_packet)));
-                        });
+    handlerMap->emplace(
+        Socket::PacketType::SearchRequest, [this](Socket::ConnectionID p_srcID, Socket::Packet p_packet) {
+            boost::asio::post(*m_threadPool,
+                              std::bind(&AggregatorService::SearchRequestHanlder, this, p_srcID, std::move(p_packet)));
+        });
 
-    m_socketServer.reset(new Socket::Server(context->GetSettings()->m_listenAddr,
-                                            context->GetSettings()->m_listenPort,
-                                            handlerMap,
-                                            context->GetSettings()->m_socketThreadNum));
+    m_socketServer.reset(new Socket::Server(context->GetSettings()->m_listenAddr, context->GetSettings()->m_listenPort,
+                                            handlerMap, context->GetSettings()->m_socketThreadNum));
 
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "Start to listen %s:%s ...\n",
-            context->GetSettings()->m_listenAddr.c_str(),
-            context->GetSettings()->m_listenPort.c_str());
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start to listen %s:%s ...\n", context->GetSettings()->m_listenAddr.c_str(),
+                 context->GetSettings()->m_listenPort.c_str());
 }
 
-
-void
-AggregatorService::WaitForShutdown()
+void AggregatorService::WaitForShutdown()
 {
     m_shutdownSignals.add(SIGINT);
     m_shutdownSignals.add(SIGTERM);
@@ -123,8 +94,7 @@ AggregatorService::WaitForShutdown()
     m_shutdownSignals.add(SIGQUIT);
 #endif
 
-    m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal)
-    {
+    m_shutdownSignals.async_wait([this](boost::system::error_code p_ec, int p_signal) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Received shutdown signals.\n");
         m_pendingConnectServersTimer.cancel();
     });
@@ -137,9 +107,7 @@ AggregatorService::WaitForShutdown()
     m_threadPool->join();
 }
 
-
-void
-AggregatorService::ConnectToPendingServers()
+void AggregatorService::ConnectToPendingServers()
 {
     auto context = GetContext();
     std::vector<std::shared_ptr<RemoteMachine>> pendingList;
@@ -150,7 +118,7 @@ AggregatorService::ConnectToPendingServers()
         pendingList.swap(m_pendingConnectServers);
     }
 
-    for (auto& pendingServer : pendingList)
+    for (auto &pendingServer : pendingList)
     {
         if (pendingServer->m_status != RemoteMachineStatus::Disconnected)
         {
@@ -159,113 +127,115 @@ AggregatorService::ConnectToPendingServers()
 
         pendingServer->m_status = RemoteMachineStatus::Connecting;
         std::shared_ptr<RemoteMachine> server = pendingServer;
-        auto runner = [server, this]()
-                      {
-                          ErrorCode errCode;
-                          auto cid = m_socketClient->ConnectToServer(server->m_address, server->m_port, errCode);
-                          if (Socket::c_invalidConnectionID == cid)
-                          {
-                              if (ErrorCode::Socket_FailedResolveEndPoint == errCode)
-                              {
-                                  SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                          "[Error] Failed to resolve %s %s.\n",
-                                          server->m_address.c_str(),
-                                          server->m_port.c_str());
-                              }
-                              else
-                              {
-                                  this->AddToPendingServers(std::move(server));
-                              }
-                          }
-                          else
-                          {
-                              server->m_connectionID = cid;
-                              server->m_status = RemoteMachineStatus::Connected;
-                          }
-                      };
+        auto runner = [server, this]() {
+            ErrorCode errCode;
+            auto cid = m_socketClient->ConnectToServer(server->m_address, server->m_port, errCode);
+            if (Socket::c_invalidConnectionID == cid)
+            {
+                if (ErrorCode::Socket_FailedResolveEndPoint == errCode)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[Error] Failed to resolve %s %s.\n",
+                                 server->m_address.c_str(), server->m_port.c_str());
+                }
+                else
+                {
+                    this->AddToPendingServers(std::move(server));
+                }
+            }
+            else
+            {
+                server->m_connectionID = cid;
+                server->m_status = RemoteMachineStatus::Connected;
+            }
+        };
         boost::asio::post(*m_threadPool, std::move(runner));
     }
 
     m_pendingConnectServersTimer.expires_from_now(boost::posix_time::seconds(30));
-    m_pendingConnectServersTimer.async_wait([this](const boost::system::error_code& p_ec)
-                                            {
-                                                if (boost::asio::error::operation_aborted != p_ec)
-                                                {
-                                                    ConnectToPendingServers();
-                                                }
-                                            });
+    m_pendingConnectServersTimer.async_wait([this](const boost::system::error_code &p_ec) {
+        if (boost::asio::error::operation_aborted != p_ec)
+        {
+            ConnectToPendingServers();
+        }
+    });
 }
 
-
-void
-AggregatorService::AddToPendingServers(std::shared_ptr<RemoteMachine> p_remoteServer)
+void AggregatorService::AddToPendingServers(std::shared_ptr<RemoteMachine> p_remoteServer)
 {
     std::lock_guard<std::mutex> guard(m_pendingConnectServersMutex);
     m_pendingConnectServers.emplace_back(std::move(p_remoteServer));
 }
 
-
-void
-AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+void AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
 {
     auto context = GetContext();
     std::vector<Socket::ConnectionID> remoteServers;
     remoteServers.reserve(context->GetRemoteServers().size());
 
-	if (context->GetSettings()->m_topK > 0 && context->GetRemoteServers().size() == context->GetCenters()->Count()) {
-		Socket::RemoteQuery remoteQuery;
-		remoteQuery.Read(p_packet.Body());
+    if (context->GetSettings()->m_topK > 0 && context->GetRemoteServers().size() == context->GetCenters()->Count())
+    {
+        Socket::RemoteQuery remoteQuery;
+        remoteQuery.Read(p_packet.Body());
 
-		Service::QueryParser queryParser;
-		queryParser.Parse(remoteQuery.m_queryString, "|");
-		ByteArray vector;
-		size_t vectorSize;
-		SizeType vectorDimension = 0;
-		std::vector<BasicResult> servers;
-		switch (context->GetSettings()->m_valueType)
-		{
-#define DefineVectorValueType(Name, Type) \
-        case VectorValueType::Name: \
-            if (!queryParser.GetVectorElements().empty()) { \
-			    Service::ConvertVectorFromString<Type>(queryParser.GetVectorElements(), vector, vectorDimension); \
-			} else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0) { \
-                vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length())); \
-                Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(), vectorSize); \
-                vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType)); \
-            } \
-            for (int i = 0; i < context->GetCenters()->Count(); i++) { \
-                servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance((Type*)vector.Data(), \
-                    (Type*)context->GetCenters()->GetVector(i), vectorDimension, context->GetSettings()->m_distMethod))); \
-			} \
-            break; \
+        Service::QueryParser queryParser;
+        queryParser.Parse(remoteQuery.m_queryString, "|");
+        ByteArray vector;
+        size_t vectorSize;
+        SizeType vectorDimension = 0;
+        std::vector<BasicResult> servers;
+        switch (context->GetSettings()->m_valueType)
+        {
+#define DefineVectorValueType(Name, Type)                                                                              \
+    case VectorValueType::Name:                                                                                        \
+        if (!queryParser.GetVectorElements().empty())                                                                  \
+        {                                                                                                              \
+            Service::ConvertVectorFromString<Type>(queryParser.GetVectorElements(), vector, vectorDimension);          \
+        }                                                                                                              \
+        else if (queryParser.GetVectorBase64() != nullptr && queryParser.GetVectorBase64Length() != 0)                 \
+        {                                                                                                              \
+            vector = ByteArray::Alloc(Helper::Base64::CapacityForDecode(queryParser.GetVectorBase64Length()));         \
+            Helper::Base64::Decode(queryParser.GetVectorBase64(), queryParser.GetVectorBase64Length(), vector.Data(),  \
+                                   vectorSize);                                                                        \
+            vectorDimension = (SizeType)(vectorSize / GetValueTypeSize(context->GetSettings()->m_valueType));          \
+        }                                                                                                              \
+        for (int i = 0; i < context->GetCenters()->Count(); i++)                                                       \
+        {                                                                                                              \
+            servers.push_back(BasicResult(i, COMMON::DistanceUtils::ComputeDistance(                                   \
+                                                 (Type *)vector.Data(), (Type *)context->GetCenters()->GetVector(i),   \
+                                                 vectorDimension, context->GetSettings()->m_distMethod)));             \
+        }                                                                                                              \
+        break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 
-		default:
-			break;
-		}
-		std::sort(servers.begin(), servers.end(), [](const BasicResult& a, const BasicResult& b) { return a.Dist < b.Dist; });
-		for (int i = 0; i < context->GetSettings()->m_topK; i++) {
-			auto& server = context->GetRemoteServers().at(servers[i].VID);
-			if (RemoteMachineStatus::Connected != server->m_status)
-			{
-				continue;
-			}
-			remoteServers.push_back(server->m_connectionID);
-		}
-	}
-	else {
-		for (const auto& server : context->GetRemoteServers())
-		{
-			if (RemoteMachineStatus::Connected != server->m_status)
-			{
-				continue;
-			}
+        default:
+            break;
+        }
+        std::sort(servers.begin(), servers.end(),
+                  [](const BasicResult &a, const BasicResult &b) { return a.Dist < b.Dist; });
+        for (int i = 0; i < context->GetSettings()->m_topK; i++)
+        {
+            auto &server = context->GetRemoteServers().at(servers[i].VID);
+            if (RemoteMachineStatus::Connected != server->m_status)
+            {
+                continue;
+            }
+            remoteServers.push_back(server->m_connectionID);
+        }
+    }
+    else
+    {
+        for (const auto &server : context->GetRemoteServers())
+        {
+            if (RemoteMachineStatus::Connected != server->m_status)
+            {
+                continue;
+            }
 
-			remoteServers.push_back(server->m_connectionID);
-		}
-	}
+            remoteServers.push_back(server->m_connectionID);
+        }
+    }
     Socket::PacketHeader requestHeader = p_packet.Header();
     if (Socket::c_invalidConnectionID == requestHeader.m_connectionID)
     {
@@ -277,8 +247,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
 
     for (std::uint32_t i = 0; i < remoteServers.size(); ++i)
     {
-        AggregatorCallback callback = [this, executionContext, i](Socket::RemoteSearchResult p_result)
-        {
+        AggregatorCallback callback = [this, executionContext, i](Socket::RemoteSearchResult p_result) {
             executionContext->GetResult(i).reset(new Socket::RemoteSearchResult(std::move(p_result)));
             if (executionContext->IsCompletedAfterFinsh(1))
             {
@@ -286,8 +255,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
             }
         };
 
-        auto timeoutCallback = [](std::shared_ptr<AggregatorCallback> p_callback)
-        {
+        auto timeoutCallback = [](std::shared_ptr<AggregatorCallback> p_callback) {
             if (nullptr != p_callback)
             {
                 Socket::RemoteSearchResult result;
@@ -297,8 +265,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
             }
         };
 
-        auto connectCallback = [callback](bool p_connectSucc)
-        {
+        auto connectCallback = [callback](bool p_connectSucc) {
             if (!p_connectSucc)
             {
                 Socket::RemoteSearchResult result;
@@ -313,9 +280,9 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
         packet.Header().m_processStatus = Socket::PacketProcessStatus::Ok;
         packet.Header().m_bodyLength = p_packet.Header().m_bodyLength;
         packet.Header().m_connectionID = Socket::c_invalidConnectionID;
-        packet.Header().m_resourceID = m_aggregatorCallbackManager.Add(std::make_shared<AggregatorCallback>(std::move(callback)),
-                                                                       context->GetSettings()->m_searchTimeout,
-                                                                       std::move(timeoutCallback));
+        packet.Header().m_resourceID =
+            m_aggregatorCallbackManager.Add(std::make_shared<AggregatorCallback>(std::move(callback)),
+                                            context->GetSettings()->m_searchTimeout, std::move(timeoutCallback));
 
         packet.AllocateBuffer(packet.Header().m_bodyLength);
         packet.Header().WriteBuffer(packet.HeaderBuffer());
@@ -325,9 +292,7 @@ AggregatorService::SearchRequestHanlder(Socket::ConnectionID p_localConnectionID
     }
 }
 
-
-void
-AggregatorService::SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
+void AggregatorService::SearchResponseHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet)
 {
     auto callback = m_aggregatorCallbackManager.GetAndRemove(p_packet.Header().m_resourceID);
     if (nullptr == callback)
@@ -350,17 +315,13 @@ AggregatorService::SearchResponseHanlder(Socket::ConnectionID p_localConnectionI
     }
 }
 
-
-std::shared_ptr<AggregatorContext>
-AggregatorService::GetContext()
+std::shared_ptr<AggregatorContext> AggregatorService::GetContext()
 {
     // Add mutex if necessary.
     return m_aggregatorContext;
 }
 
-
-void
-AggregatorService::AggregateResults(std::shared_ptr<AggregatorExecutionContext> p_exectionContext)
+void AggregatorService::AggregateResults(std::shared_ptr<AggregatorExecutionContext> p_exectionContext)
 {
     if (nullptr == p_exectionContext)
     {
@@ -378,7 +339,7 @@ AggregatorService::AggregateResults(std::shared_ptr<AggregatorExecutionContext> 
     std::size_t resultNum = 0;
     for (std::size_t i = 0; i < p_exectionContext->GetServerNumber(); ++i)
     {
-        const auto& result = p_exectionContext->GetResult(i);
+        const auto &result = p_exectionContext->GetResult(i);
         if (nullptr == result)
         {
             continue;
@@ -390,13 +351,13 @@ AggregatorService::AggregateResults(std::shared_ptr<AggregatorExecutionContext> 
     remoteResult.m_allIndexResults.reserve(resultNum);
     for (std::size_t i = 0; i < p_exectionContext->GetServerNumber(); ++i)
     {
-        const auto& result = p_exectionContext->GetResult(i);
+        const auto &result = p_exectionContext->GetResult(i);
         if (nullptr == result)
         {
             continue;
         }
 
-        for (auto& indexRes : result->m_allIndexResults)
+        for (auto &indexRes : result->m_allIndexResults)
         {
             remoteResult.m_allIndexResults.emplace_back(std::move(indexRes));
         }
@@ -407,7 +368,5 @@ AggregatorService::AggregateResults(std::shared_ptr<AggregatorExecutionContext> 
     packet.Header().m_bodyLength = static_cast<std::uint32_t>(remoteResult.Write(packet.Body()) - packet.Body());
     packet.Header().WriteBuffer(packet.HeaderBuffer());
 
-    m_socketServer->SendPacket(p_exectionContext->GetRequestHeader().m_connectionID,
-                               std::move(packet),
-                               nullptr);
+    m_socketServer->SendPacket(p_exectionContext->GetRequestHeader().m_connectionID, std::move(packet), nullptr);
 }

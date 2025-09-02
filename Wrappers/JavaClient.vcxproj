@@ -173,7 +173,6 @@
     <Import Project="..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets" Condition="Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" />
     <Import Project="..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets" Condition="Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" />
     <Import Project="..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets" Condition="Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" />
-    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
@@ -198,6 +197,5 @@
     <Error Condition="!Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets'))" />
     <Error Condition="!Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets'))" />
     <Error Condition="!Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>
 </Project>

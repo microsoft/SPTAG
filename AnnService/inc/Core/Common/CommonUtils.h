@@ -11,8 +11,8 @@
 #include <exception>
 #include <algorithm>
 
+#include <thread>
 #include <time.h>
-#include <omp.h>
 #include <string.h>
 #include <vector>
 #include <set>

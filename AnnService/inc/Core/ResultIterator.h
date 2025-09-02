@@ -16,7 +16,7 @@ typedef SPTAG::QueryResult QueryResult;
 class ResultIterator
 {
 public:
-	ResultIterator(const void* p_index, const void* p_target, bool p_searchDeleted, int p_workspaceBatch);
+	ResultIterator(const void* p_index, const void* p_target, bool p_searchDeleted, int p_workspaceBatch, std::function<bool(const ByteArray&)> p_filterFunc, int p_maxCheck);
 
 	~ResultIterator();
 	
@@ -26,6 +26,8 @@ public:
 	
 	virtual bool GetRelaxedMono();
 	
+	virtual SPTAG::ErrorCode GetErrorCode();
+
 	virtual void Close();
 
 	const void* GetTarget();

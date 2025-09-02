@@ -162,7 +162,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
     <Import Project="..\packages\boost.1.78.0\build\boost.targets" Condition="Exists('..\packages\boost.1.78.0\build\boost.targets')" />
     <Import Project="..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets" Condition="Exists('..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets')" />
     <Import Project="..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets" Condition="Exists('..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets')" />
@@ -185,7 +184,6 @@
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe'))" />
     <Error Condition="!Exists('..\packages\python.$(PYTHON_VERSION).3\build\native\python.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\python.$(PYTHON_VERSION).3\build\native\python.props'))" />
-    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
     <Error Condition="!Exists('..\packages\boost.1.78.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.78.0\build\boost.targets'))" />
     <Error Condition="!Exists('..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_filesystem-vc143.1.78.0\build\boost_filesystem-vc143.targets'))" />
     <Error Condition="!Exists('..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_thread-vc143.1.78.0\build\boost_thread-vc143.targets'))" />

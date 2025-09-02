@@ -2,17 +2,15 @@
 // Licensed under the MIT License.
 
 #include "inc/ClientInterface.h"
+#include "inc/Helper/Base64Encode.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Helper/Concurrent.h"
-#include "inc/Helper/Base64Encode.h"
 #include "inc/Helper/StringConvert.h"
 
 #include <boost/asio.hpp>
 
-
-AnnClient::AnnClient(const char* p_serverAddr, const char* p_serverPort)
-    : m_connectionID(SPTAG::Socket::c_invalidConnectionID),
-      m_timeoutInMilliseconds(9000)
+AnnClient::AnnClient(const char *p_serverAddr, const char *p_serverPort)
+    : m_connectionID(SPTAG::Socket::c_invalidConnectionID), m_timeoutInMilliseconds(9000)
 {
     using namespace SPTAG;
 
@@ -26,8 +24,7 @@ AnnClient::AnnClient(const char* p_serverAddr, const char* p_serverPort)
     m_server = p_serverAddr;
     m_port = p_serverPort;
 
-    auto connectCallback = [this](Socket::ConnectionID p_cid, ErrorCode p_ec)
-    {
+    auto connectCallback = [this](Socket::ConnectionID p_cid, ErrorCode p_ec) {
         m_connectionID = p_cid;
 
         if (ErrorCode::Socket_FailedResolveEndPoint == p_ec)
@@ -45,8 +42,7 @@ AnnClient::AnnClient(const char* p_serverAddr, const char* p_serverPort)
 
     m_socketClient->AsyncConnectToServer(m_server, m_port, connectCallback);
 
-    m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid)
-    {
+    m_socketClient->SetEventOnConnectionClose([this](Socket::ConnectionID p_cid) {
         ErrorCode errCode;
         m_connectionID = Socket::c_invalidConnectionID;
         while (Socket::c_invalidConnectionID == m_connectionID)
@@ -57,21 +53,16 @@ AnnClient::AnnClient(const char* p_serverAddr, const char* p_serverPort)
     });
 }
 
-
 AnnClient::~AnnClient()
 {
 }
 
-
-void
-AnnClient::SetTimeoutMilliseconds(int p_timeout)
+void AnnClient::SetTimeoutMilliseconds(int p_timeout)
 {
     m_timeoutInMilliseconds = p_timeout;
 }
 
-
-void
-AnnClient::SetSearchParam(const char* p_name, const char* p_value)
+void AnnClient::SetSearchParam(const char *p_name, const char *p_value)
 {
     std::lock_guard<std::mutex> guard(m_paramMutex);
 
@@ -92,17 +83,14 @@ AnnClient::SetSearchParam(const char* p_name, const char* p_value)
     m_params[name] = p_value;
 }
 
-
-void
-AnnClient::ClearSearchParam()
+void AnnClient::ClearSearchParam()
 {
     std::lock_guard<std::mutex> guard(m_paramMutex);
     m_params.clear();
 }
 
-
-std::shared_ptr<RemoteSearchResult>
-AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bool p_withMetaData)
+std::shared_ptr<RemoteSearchResult> AnnClient::Search(ByteArray p_data, int p_resultNum, const char *p_valueType,
+                                                      bool p_withMetaData)
 {
     using namespace SPTAG;
 
@@ -116,8 +104,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
 
         auto signal = std::make_shared<Helper::Concurrent::WaitSignal>(1);
 
-        auto callback = [&ret, signal](RemoteSearchResult p_result)
-        {
+        auto callback = [&ret, signal](RemoteSearchResult p_result) {
             if (RemoteSearchResult::ResultStatus::Success == p_result.m_status)
             {
                 ret = std::move(p_result);
@@ -126,8 +113,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
             signal->FinishOne();
         };
 
-        auto timeoutCallback = [this](std::shared_ptr<Callback> p_callback)
-        {
+        auto timeoutCallback = [this](std::shared_ptr<Callback> p_callback) {
             if (nullptr != p_callback)
             {
                 RemoteSearchResult result;
@@ -137,8 +123,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
             }
         };
 
-        auto connectCallback = [callback, this](bool p_connectSucc)
-        {
+        auto connectCallback = [callback, this](bool p_connectSucc) {
             if (!p_connectSucc)
             {
                 RemoteSearchResult result;
@@ -153,8 +138,7 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
         packet.Header().m_packetType = Socket::PacketType::SearchRequest;
         packet.Header().m_processStatus = Socket::PacketProcessStatus::Ok;
         packet.Header().m_resourceID = m_callbackManager.Add(std::make_shared<Callback>(std::move(callback)),
-            m_timeoutInMilliseconds,
-            std::move(timeoutCallback));
+                                                             m_timeoutInMilliseconds, std::move(timeoutCallback));
 
         Socket::RemoteQuery query;
         query.m_queryString = CreateSearchQuery(p_data, p_resultNum, p_withMetaData, valueType);
@@ -168,39 +152,30 @@ AnnClient::Search(ByteArray p_data, int p_resultNum, const char* p_valueType, bo
 
         signal->Wait();
     }
-    else {
+    else
+    {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error connection or data type!");
     }
     return std::make_shared<RemoteSearchResult>(ret);
 }
 
-
-bool
-AnnClient::IsConnected() const
+bool AnnClient::IsConnected() const
 {
     return m_connectionID != SPTAG::Socket::c_invalidConnectionID;
 }
 
-
-SPTAG::Socket::PacketHandlerMapPtr
-AnnClient::GetHandlerMap()
+SPTAG::Socket::PacketHandlerMapPtr AnnClient::GetHandlerMap()
 {
     using namespace SPTAG;
 
     Socket::PacketHandlerMapPtr handlerMap(new Socket::PacketHandlerMap);
-    handlerMap->emplace(Socket::PacketType::SearchResponse,
-                        std::bind(&AnnClient::SearchResponseHanlder,
-                                  this,
-                                  std::placeholders::_1,
-                                  std::placeholders::_2));
+    handlerMap->emplace(Socket::PacketType::SearchResponse, std::bind(&AnnClient::SearchResponseHanlder, this,
+                                                                      std::placeholders::_1, std::placeholders::_2));
 
     return handlerMap;
 }
 
-
-void
-AnnClient::SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID,
-                                 SPTAG::Socket::Packet p_packet)
+void AnnClient::SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID, SPTAG::Socket::Packet p_packet)
 {
     using namespace SPTAG;
 
@@ -225,12 +200,8 @@ AnnClient::SearchResponseHanlder(SPTAG::Socket::ConnectionID p_localConnectionID
     }
 }
 
-
-std::string
-AnnClient::CreateSearchQuery(const ByteArray& p_data,
-                             int p_resultNum,
-                             bool p_extractMetadata,
-                             SPTAG::VectorValueType p_valueType)
+std::string AnnClient::CreateSearchQuery(const ByteArray &p_data, int p_resultNum, bool p_extractMetadata,
+                                         SPTAG::VectorValueType p_valueType)
 {
     std::stringstream out;
 
@@ -244,7 +215,7 @@ AnnClient::CreateSearchQuery(const ByteArray& p_data,
 
     {
         std::lock_guard<std::mutex> guard(m_paramMutex);
-        for (const auto& param : m_params)
+        for (const auto &param : m_params)
         {
             out << " $" << param.first << ":" << param.second;
         }
@@ -252,4 +223,3 @@ AnnClient::CreateSearchQuery(const ByteArray& p_data,
 
     return out.str();
 }
-

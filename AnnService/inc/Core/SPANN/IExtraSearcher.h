@@ -161,7 +161,7 @@ namespace SPTAG {
         {
             ExtraWorkSpace() {}
 
-            ~ExtraWorkSpace() { g_freeIds.push(m_spaceID); }
+            ~ExtraWorkSpace() {}
 
             ExtraWorkSpace(ExtraWorkSpace& other) {
                 Initialize(other.m_deduper.MaxCheck(), other.m_deduper.HashTableExponent(), (int)other.m_pageBuffers.size(), (int)(other.m_pageBuffers[0].GetPageSize()), other.m_blockIO, other.m_enableDataCompression);
@@ -169,9 +169,6 @@ namespace SPTAG {
 
             void Initialize(int p_maxCheck, int p_hashExp, int p_internalResultNum, int p_maxPages, bool p_blockIO, bool enableDataCompression) {
                 m_deduper.Init(p_maxCheck, p_hashExp);
-                if (!g_freeIds.try_pop(m_spaceID)) {
-                    m_spaceID = g_spaceCount.fetch_add(1);
-                }
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
             }
@@ -204,7 +201,6 @@ namespace SPTAG {
                                 auto& req = m_diskRequests[rid];
 
                                 req.m_buffer = (char*)(m_pageBuffers[pi].GetBuffer() + ((std::uint64_t)pg << PageSizeEx));
-                                req.m_status = m_spaceID;
                                 req.m_extension = &m_processIocp;
 #ifdef _MSC_VER
                                 memset(&(req.myres.m_col), 0, sizeof(OVERLAPPED));
@@ -224,7 +220,6 @@ namespace SPTAG {
                             auto& req = m_diskRequests[pi];
 
                             req.m_buffer = (char*)(m_pageBuffers[pi].GetBuffer());
-                            req.m_status = m_spaceID;
                             req.m_extension = &m_processIocp;
 #ifdef _MSC_VER
                             memset(&(req.myres.m_col), 0, sizeof(OVERLAPPED));
@@ -244,12 +239,6 @@ namespace SPTAG {
                 }
             }
 
-            static void Reset() { 
-                g_spaceCount = 0;
-                int freeId = 0;
-                while (g_freeIds.try_pop(freeId));  
-            }
-
             std::vector<int> m_postingIDs;
 
             COMMON::OptHashPosVector m_deduper;
@@ -266,8 +255,6 @@ namespace SPTAG {
 
             std::vector<Helper::AsyncReadRequest> m_diskRequests;
 
-            int m_spaceID = 0;
-
             int m_ri = 0;
 
             int m_pi = 0;
@@ -280,9 +267,7 @@ namespace SPTAG {
 
             int m_loadedPostingNum = 0;
 
-            static std::atomic_int g_spaceCount;
-            
-            static Helper::Concurrent::ConcurrentQueue<int> g_freeIds;
+            std::function<bool(const ByteArray&)> m_filterFunc;
         };
 
         class IExtraSearcher
@@ -295,23 +280,24 @@ namespace SPTAG {
             ~IExtraSearcher()
             {
             }
+            virtual bool Available() = 0;
 
             virtual bool LoadIndex(Options& p_options, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& m_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) = 0;
 
-            virtual void SearchIndex(ExtraWorkSpace* p_exWorkSpace,
+            virtual ErrorCode SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex> p_index,
                 SearchStats* p_stats, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) = 0;
 
-            virtual bool SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
+            virtual ErrorCode SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults,
-                std::shared_ptr<VectorIndex> p_index) = 0;
+                std::shared_ptr<VectorIndex> p_index, const VectorIndex* p_spann) = 0;
 
-            virtual void SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) = 0;
+            virtual ErrorCode SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) = 0;
 
-            virtual bool SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
+            virtual ErrorCode SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults,
-                std::shared_ptr<VectorIndex>& p_index) = 0;
+                std::shared_ptr<VectorIndex>& p_index, const VectorIndex* p_spann) = 0;
 
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
@@ -321,8 +307,12 @@ namespace SPTAG {
 
             virtual ErrorCode GetPostingDebug(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorIndex> p_index, SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs) = 0;
             
-            virtual void RefineIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader,
-                std::shared_ptr<VectorIndex> p_index) { return; }
+            virtual ErrorCode RefineIndex(std::shared_ptr<VectorIndex> p_index, bool p_prereassign = true,
+                                          std::vector<SizeType> *p_headmapping = nullptr,
+                                          std::vector<SizeType> *p_mapping = nullptr)
+            {
+                return ErrorCode::Undefined;
+            }
             virtual ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
                 std::shared_ptr<VectorIndex> p_index, SizeType p_begin) { return ErrorCode::Undefined; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
@@ -333,13 +323,18 @@ namespace SPTAG {
             virtual void ForceCompaction() { return; }
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
+            virtual ErrorCode CheckPosting(SizeType postingiD) = 0;
             virtual SizeType SearchVector(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
                 std::shared_ptr<VectorIndex> p_index, int testNum = 64, SizeType VID = -1) { return -1; }
             virtual void ForceGC(ExtraWorkSpace* p_exWorkSpace, VectorIndex* p_index) { return; }
 
-            virtual void GetWritePosting(ExtraWorkSpace* p_exWorkSpace, SizeType pid, std::string& posting, bool write = false) { return; }
+            virtual ErrorCode GetWritePosting(ExtraWorkSpace *p_exWorkSpace, SizeType pid, std::string &posting,
+                                              bool write = false)
+            {
+                return ErrorCode::Undefined;
+            }
 
-            virtual void Checkpoint(std::string prefix) { return; }
+            virtual ErrorCode Checkpoint(std::string prefix) { return ErrorCode::Success; }
         };
     } // SPANN
 } // SPTAG

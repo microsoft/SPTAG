@@ -44,7 +44,7 @@ public:
 
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
-    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false) const = 0;
+    virtual std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const = 0;
 
     virtual ErrorCode SearchIndexIterativeNext(QueryResult& p_query, COMMON::WorkSpace* workSpace, int p_batch, int& resultCount, bool p_isFirst, bool p_searchDeleted) const = 0;
 
@@ -52,7 +52,7 @@ public:
 
     virtual bool SearchIndexIterativeFromNeareast(QueryResult& p_query, COMMON::WorkSpace* p_space, bool p_isFirst, bool p_searchDeleted = false) const = 0;
 
-    virtual std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch) const = 0;
+    virtual std::unique_ptr<COMMON::WorkSpace> RentWorkSpace(int batch, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const = 0;
 
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
 
@@ -168,7 +168,7 @@ public:
 
     static std::uint64_t EstimatedMemoryUsage(std::uint64_t p_vectorCount, DimensionType p_dimension, VectorValueType p_valuetype, SizeType p_vectorsInBlock, SizeType p_maxmeta, IndexAlgoType p_algo, int p_treeNumber, int p_neighborhoodSize);
 
-    static std::shared_ptr<VectorIndex> Clone(std::string p_original, std::string p_clone);
+    virtual std::shared_ptr<VectorIndex> Clone(std::string p_clone);
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const = 0;
 
@@ -186,7 +186,7 @@ public:
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
-    virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort) = 0;
+    virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort, std::vector<SizeType>* p_mapping) = 0;
 
     virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;
 
@@ -198,7 +198,12 @@ public:
 
     void BuildMetaMapping(bool p_checkDeleted = true);
 
-private:
+    virtual ErrorCode Check()
+    {
+        return ErrorCode::Undefined;
+    }
+
+  private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
     ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut);

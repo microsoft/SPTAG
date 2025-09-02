@@ -64,60 +64,88 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     SizeType numCentroids = 256;
     if (raw_vectors->Dimension() % options->m_quantizedDim != 0) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only n_codebooks that divide dimension are supported.\n");
-        exit(1);
+        return nullptr;
     }
     DimensionType subdim = raw_vectors->Dimension() / options->m_quantizedDim;
     auto codebooks = std::make_unique<T[]>(numCentroids * raw_vectors->Dimension());
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Training Quantizer Codebooks.\n");
-#pragma omp parallel for
-    for (int codebookIdx = 0; codebookIdx < options->m_quantizedDim; codebookIdx++) {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
-        auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum, DistCalcMethod::L2, nullptr);
-        auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
-
-        for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
-            auto raw_addr = reinterpret_cast<T*>(raw_vectors->GetVector(vectorIdx)) + (codebookIdx * subdim);
-            auto dset_addr = dset[vectorIdx];
-            for (int k = 0; k < subdim; k++) {
-                dset_addr[k] = raw_addr[k];
-            }
-        }
-
-        std::vector<SizeType> localindices;
-        localindices.resize(dset.R());
-        for (SizeType il = 0; il < localindices.size(); il++) localindices[il] = il;
-
-        //auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs, options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
-
-        std::vector<SizeType> reverselocalindex;
-        reverselocalindex.resize(dset.R());
-        for (SizeType il = 0; il < reverselocalindex.size(); il++)
-        {
-            reverselocalindex[localindices[il]] = il;
-        }
-
-        for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++) {
-            auto localidx = reverselocalindex[vectorIdx];
-            auto quan_addr = reinterpret_cast<uint8_t*>(quantized_vectors->GetVector(vectorIdx));
-            quan_addr[codebookIdx] = kargs.label[localidx];
-
-        }
-
-        for (int j = 0; j < numCentroids; j++) {
-            std::cout << kargs.counts[j] << '\t';
-        }
-        std::cout << std::endl;
-
-        T* cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
-        for (int i = 0; i < numCentroids; i++)
-        {
-            for (int j = 0; j < subdim; j++)
+    std::vector<std::thread> mythreads;
+    mythreads.reserve(options->m_threadNum);
+    std::atomic_size_t sent(0);
+    for (int tid = 0; tid < options->m_threadNum; tid++)
+    {
+        mythreads.emplace_back([&, tid]() {
+            size_t codebookIdx = 0;
+            while (true)
             {
-                cb[i * subdim + j] = kargs.centers[i * subdim + j];
-            }
-        }
-    }
+                codebookIdx = sent.fetch_add(1);
+                if (codebookIdx < options->m_quantizedDim)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Training Codebook %d.\n", codebookIdx);
+                    auto kargs = COMMON::KmeansArgs<T>(numCentroids, subdim, raw_vectors->Count(), options->m_threadNum,
+                                                       DistCalcMethod::L2, nullptr);
+                    auto dset = COMMON::Dataset<T>(raw_vectors->Count(), subdim, blockRows, raw_vectors->Count());
 
+                    for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++)
+                    {
+                        auto raw_addr =
+                            reinterpret_cast<T *>(raw_vectors->GetVector(vectorIdx)) + (codebookIdx * subdim);
+                        auto dset_addr = dset[vectorIdx];
+                        for (int k = 0; k < subdim; k++)
+                        {
+                            dset_addr[k] = raw_addr[k];
+                        }
+                    }
+
+                    std::vector<SizeType> localindices;
+                    localindices.resize(dset.R());
+                    for (SizeType il = 0; il < localindices.size(); il++)
+                        localindices[il] = il;
+
+                    // auto nclusters = COMMON::KmeansClustering<T>(dset, localindices, 0, dset.R(), kargs,
+                    // options->m_trainingSamples, options->m_KmeansLambda, options->m_debug, nullptr);
+
+                    std::vector<SizeType> reverselocalindex;
+                    reverselocalindex.resize(dset.R());
+                    for (SizeType il = 0; il < reverselocalindex.size(); il++)
+                    {
+                        reverselocalindex[localindices[il]] = il;
+                    }
+
+                    for (int vectorIdx = 0; vectorIdx < raw_vectors->Count(); vectorIdx++)
+                    {
+                        auto localidx = reverselocalindex[vectorIdx];
+                        auto quan_addr = reinterpret_cast<uint8_t *>(quantized_vectors->GetVector(vectorIdx));
+                        quan_addr[codebookIdx] = kargs.label[localidx];
+                    }
+
+                    for (int j = 0; j < numCentroids; j++)
+                    {
+                        std::cout << kargs.counts[j] << '\t';
+                    }
+                    std::cout << std::endl;
+
+                    T *cb = codebooks.get() + (numCentroids * subdim * codebookIdx);
+                    for (int i = 0; i < numCentroids; i++)
+                    {
+                        for (int j = 0; j < subdim; j++)
+                        {
+                            cb[i * subdim + j] = kargs.centers[i * subdim + j];
+                        }
+                    }
+                }
+                else
+                {
+                    return;
+                }
+            }
+        });
+    }
+    for (auto &t : mythreads)
+    {
+        t.join();
+    }
+    mythreads.clear();
     return codebooks;
 }

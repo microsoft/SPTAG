@@ -51,6 +51,7 @@
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -95,9 +96,14 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_WINDLL;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp17</LanguageStandard>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp17</LanguageStandard>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Level3</WarningLevel>
+      <ControlFlowGuard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Guard</ControlFlowGuard>
     </ClCompile>
     <Link>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/guard:cf %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <Link>
+      <CETCompat Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</CETCompat>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -130,7 +136,6 @@
     <Import Project="..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets" Condition="Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" />
     <Import Project="..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets" Condition="Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" />
     <Import Project="..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets" Condition="Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" />
-    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
   </ImportGroup>
   <Target Name="BeforeBuild" BeforeTargets="PrepareForBuild">
     <MakeDir Directories="$(IntDir)" />
@@ -155,6 +160,5 @@
     <Error Condition="!Exists('..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_system-vc143.1.78.0\build\boost_system-vc143.targets'))" />
     <Error Condition="!Exists('..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_serialization-vc143.1.78.0\build\boost_serialization-vc143.targets'))" />
     <Error Condition="!Exists('..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost_wserialization-vc143.1.78.0\build\boost_wserialization-vc143.targets'))" />
-    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>
 </Project>

@@ -869,10 +869,11 @@ namespace SPTAG {
                 auto valueType = COMMON::DistanceUtils::Quantizer ? SPTAG::VectorValueType::UInt8 : opts.m_valueType;
                 std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(valueType, opts.m_dim, opts.m_vectorType, opts.m_vectorDelimiter));
                 auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
-                if (ErrorCode::Success != vectorReader->LoadFile(opts.m_vectorPath))
+                ErrorCode ret;
+                if (ErrorCode::Success != (ret = vectorReader->LoadFile(opts.m_vectorPath)))
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read vector file.\n");
-                    exit(1);
+                    return ret;
                 }
                 auto vectorSet = vectorReader->GetVectorSet();
                 if (opts.m_distCalcMethod == DistCalcMethod::Cosine) vectorSet->Normalize(opts.m_iSelectHeadNumberOfThreads);
@@ -968,29 +969,29 @@ namespace SPTAG {
                         !output->Initialize(opts.m_headVectorFile.c_str(), std::ios::binary | std::ios::out) ||
                         !outputIDs->Initialize(opts.m_headIDFile.c_str(), std::ios::binary | std::ios::out)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n", opts.m_headVectorFile.c_str(), opts.m_headIDFile.c_str());
-                        exit(1);
+                        return ErrorCode::FailedCreateFile;
                     }
 
                     SizeType val = static_cast<SizeType>(selected.size());
                     if (output->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                        exit(1);
+                        return ErrorCode::DiskIOFail;
                     }
                     DimensionType dt = vectorSet->Dimension();
                     if (output->WriteBinary(sizeof(dt), reinterpret_cast<char*>(&dt)) != sizeof(dt)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                        exit(1);
+                        return ErrorCode::DiskIOFail;
                     }
                     for (auto& ele : selected)
                     {
                         uint64_t vid = static_cast<uint64_t>(ele);
                         if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char*>(&vid)) != sizeof(vid)) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                            exit(1);
+                            return ErrorCode::DiskIOFail;
                         }
                         if (output->WriteBinary(vectorSet->PerVectorDataSize(), (char*)(vectorSet->GetVector((SizeType)vid))) != vectorSet->PerVectorDataSize()) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                            exit(1);
+                            return ErrorCode::DiskIOFail;
                         }
                     }
                 }

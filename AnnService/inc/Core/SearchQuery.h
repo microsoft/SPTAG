@@ -23,7 +23,8 @@ public:
           m_resultNum(0),
           m_withMeta(false),
           m_quantizedTarget(nullptr),
-          m_quantizedSize(0)
+          m_quantizedSize(0),
+          m_scanned(0)
     {
     }
 
@@ -43,7 +44,8 @@ public:
           m_resultNum(p_resultNum),
           m_withMeta(p_withMeta),
           m_quantizedTarget((void*)p_target),
-          m_quantizedSize(0)
+          m_quantizedSize(0), 
+          m_scanned(0)
     {
         m_results.Set(p_results, p_resultNum, false);
     }
@@ -100,6 +102,7 @@ public:
         m_withMeta = p_withMeta;
         m_quantizedTarget = (void*)p_target;
         m_quantizedSize = 0;
+        m_scanned = 0;
 
         m_results = Array<BasicResult>::Alloc(p_resultNum);
     }
@@ -214,6 +217,15 @@ public:
         }
     }
 
+    inline void SetScanned(int p_scanned)
+    {
+        m_scanned = p_scanned;
+    }
+
+    inline int GetScanned()
+    {
+        return m_scanned;
+    }
 
     iterator begin()
     {
@@ -251,6 +263,8 @@ protected:
     bool m_withMeta;
 
     Array<BasicResult> m_results;
+
+    int m_scanned;
 };
 } // namespace SPTAG
 

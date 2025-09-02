@@ -158,6 +158,8 @@ namespace SPTAG
             virtual std::uint64_t TellP() = 0;
 
             virtual void ShutDown() = 0; 
+
+            virtual bool Available() = 0;
         };
 
         class SimpleFileIO : public DiskIO
@@ -166,6 +168,11 @@ namespace SPTAG
             SimpleFileIO(DiskIOScenario scenario = DiskIOScenario::DIS_UserRead) {}
 
             virtual ~SimpleFileIO() { ShutDown(); }
+
+            virtual bool Available()
+            {
+                return (m_handle != nullptr) && m_handle->is_open();
+            }
 
             virtual bool Initialize(const char* filePath, int openMode,
                 // Max read/write buffer size.
@@ -271,6 +278,11 @@ namespace SPTAG
             virtual ~SimpleBufferIO()
             {
                 ShutDown();
+            }
+
+            virtual bool Available()
+            {
+                return m_handle != nullptr;
             }
 
             virtual bool Initialize(const char* filePath, int openMode,

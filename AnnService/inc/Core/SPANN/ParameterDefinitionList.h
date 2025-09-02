@@ -99,11 +99,13 @@ DefineSSDParameter(m_spdkBatchSize, int, 64, "SpdkBatchSize")
 DefineSSDParameter(m_KVFile, std::string, std::string("rocksdb"), "KVFile")
 DefineSSDParameter(m_ssdMappingFile, std::string, std::string("ssdmapping"), "SsdMappingFile")
 DefineSSDParameter(m_ssdInfoFile, std::string, std::string("ssdinfo"), "SsdInfoFile")
+DefineSSDParameter(m_checksumFile, std::string, std::string("checksum"), "ChecksumFile")
 DefineSSDParameter(m_useDirectIO, bool, false, "UseDirectIO")
 DefineSSDParameter(m_preReassign, bool, false, "PreReassign")
 DefineSSDParameter(m_preReassignRatio, float, 0.7f, "PreReassignRatio")
 DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
+DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
@@ -198,6 +200,8 @@ DefineSSDParameter(m_maxFileSize, int, 300, "MaxFileSizeGB")
 DefineSSDParameter(m_startFileSize, int, 10, "StartFileSizeGB")
 DefineSSDParameter(m_growthFileSize, int, 10, "GrowthFileSizeGB")
 DefineSSDParameter(m_growThreshold, float, 0.05, "GrowthThreshold")
+DefineSSDParameter(m_fDeletePercentageForRefine, float, 0.4F, "DeletePercentageForRefine")
+DefineSSDParameter(m_oneClusterCutMax, bool, false, "OneClusterCutMax")
 
 // Iterative
 DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch")

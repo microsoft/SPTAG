@@ -51,11 +51,10 @@
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-    <Import Project="..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets" Condition="Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" />
-  </ImportGroup>
+  <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared">
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -95,9 +94,14 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_WINDLL;_SCL_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpp17</LanguageStandard>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpp17</LanguageStandard>
+      <WarningLevel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Level3</WarningLevel>
+      <ControlFlowGuard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Guard</ControlFlowGuard>
     </ClCompile>
     <Link>
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/guard:cf %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <Link>
+      <CETCompat Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</CETCompat>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -127,12 +131,5 @@
   </ItemGroup>
   <Target Name="CopyFiles" AfterTargets="BeforeBuild">
     <Copy SourceFiles="@(MySourceFiles)" DestinationFolder="$(Outdir)" />
-  </Target>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\swigwintools.4.0.0\tools\swigwin-4.0.0\swig.exe'))" />
-    <Error Condition="!Exists('..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Zstandard.dyn.x64.1.4.0\build\native\Zstandard.dyn.x64.targets'))" />
   </Target>
 </Project>

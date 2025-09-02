@@ -1,28 +1,28 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-#include "inc/Helper/VectorSetReader.h"
-#include "inc/Helper/SimpleIniReader.h"
-#include "inc/Helper/CommonHelper.h"
-#include "inc/Helper/StringConvert.h"
-#include "inc/Helper/AsyncFileReader.h"
 #include "inc/Core/Common/CommonUtils.h"
-#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/Common/TruthSet.h"
 #include "inc/Core/VectorIndex.h"
+#include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/SimpleIniReader.h"
+#include "inc/Helper/StringConvert.h"
+#include "inc/Helper/VectorSetReader.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <ctime>
 #include <iomanip>
 #include <set>
-#include <atomic>
-#include <ctime>
 #include <thread>
-#include <chrono>
 
 using namespace SPTAG;
 
 class SearcherOptions : public Helper::ReaderOptions
 {
-public:
+  public:
     SearcherOptions() : Helper::ReaderOptions(VectorValueType::Float, 0, VectorFileType::TXT, "|", 32)
     {
         AddRequiredOption(m_queryFile, "-i", "--input", "Input raw data.");
@@ -42,7 +42,9 @@ public:
         AddOptionalOption(m_outputformat, "-of", "--ouputformat", "0: TXT 1: BINARY.");
     }
 
-    ~SearcherOptions() {}
+    ~SearcherOptions()
+    {
+    }
 
     std::string m_queryFile;
 
@@ -75,8 +77,7 @@ public:
     int m_outputformat = 0;
 };
 
-template <typename T>
-int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
+template <typename T> int Process(std::shared_ptr<SearcherOptions> options, VectorIndex &index)
 {
     std::ofstream log("Recall-result.out", std::ios::app);
     if (!log.is_open())
@@ -94,7 +95,8 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     auto queryVectors = vectorReader->GetVectorSet(0, options->m_debugQuery);
     auto queryMetas = vectorReader->GetMetadataSet();
 
-    std::shared_ptr<Helper::ReaderOptions> dataOptions(new Helper::ReaderOptions(queryVectors->GetValueType(), queryVectors->Dimension(), options->m_dataFileType));
+    std::shared_ptr<Helper::ReaderOptions> dataOptions(
+        new Helper::ReaderOptions(queryVectors->GetValueType(), queryVectors->Dimension(), options->m_dataFileType));
     auto dataReader = Helper::VectorSetReader::CreateInstance(dataOptions);
     std::shared_ptr<VectorSet> dataVectors;
     if (options->m_dataFile != "")
@@ -111,24 +113,32 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     int truthDim = 0;
     if (options->m_truthFile != "")
     {
-        if (options->m_genTruth) {
-            if (dataVectors == nullptr) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please speicify data vector file by setting -df option.\n");
+        if (options->m_genTruth)
+        {
+            if (dataVectors == nullptr)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load data vectors to generate groundtruth! Please "
+                                                         "speicify data vector file by setting -df option.\n");
                 exit(1);
             }
-            COMMON::TruthSet::GenerateTruth<T>(queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
-                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT, index.m_pQuantizer);
+            COMMON::TruthSet::GenerateTruth<T>(
+                queryVectors, dataVectors, options->m_truthFile, index.GetDistCalcMethod(), options->m_truthK,
+                (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT : TruthFileType::TXT,
+                index.m_pQuantizer);
         }
 
         ftruth = SPTAG::f_createIO();
-        if (ftruth == nullptr || !ftruth->Initialize(options->m_truthFile.c_str(), std::ios::in | std::ios::binary)) {
+        if (ftruth == nullptr || !ftruth->Initialize(options->m_truthFile.c_str(), std::ios::in | std::ios::binary))
+        {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for read!\n", options->m_truthFile.c_str());
             exit(1);
         }
-        if (options->m_truthFile.find("bin") != std::string::npos) {
+        if (options->m_truthFile.find("bin") != std::string::npos)
+        {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load binary truth...\n");
         }
-        else {
+        else
+        {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load txt truth...\n");
         }
     }
@@ -137,20 +147,25 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     if (options->m_resultFile != "")
     {
         fp = SPTAG::f_createIO();
-        if (fp == nullptr || !fp->Initialize(options->m_resultFile.c_str(), std::ios::out | std::ios::binary)) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n", options->m_resultFile.c_str());
+        if (fp == nullptr || !fp->Initialize(options->m_resultFile.c_str(), std::ios::out | std::ios::binary))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ERROR: Cannot open %s for write!\n",
+                         options->m_resultFile.c_str());
         }
 
-        if (options->m_outputformat == 1) {
+        if (options->m_outputformat == 1)
+        {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using output format binary...");
 
             int32_t i32Val = queryVectors->Count();
-            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char *>(&i32Val)) != sizeof(i32Val))
+            {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                 exit(1);
             }
             i32Val = options->m_K;
-            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+            if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char *>(&i32Val)) != sizeof(i32Val))
+            {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                 exit(1);
             }
@@ -158,42 +173,55 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
     }
 
     std::vector<std::string> maxCheck = Helper::StrUtils::SplitString(options->m_maxCheck, "#");
-    if (options->m_truthK < 0) options->m_truthK = options->m_K;
+    if (options->m_truthK < 0)
+        options->m_truthK = options->m_K;
 
     std::vector<std::set<SizeType>> truth(options->m_batch);
     int internalResultNum = options->m_K;
-    if (index.GetIndexAlgoType() == IndexAlgoType::SPANN) {
+    if (index.GetIndexAlgoType() == IndexAlgoType::SPANN)
+    {
         int SPANNInternalResultNum;
-        if (SPTAG::Helper::Convert::ConvertStringTo<int>(index.GetParameter("SearchInternalResultNum", "BuildSSDIndex").c_str(), SPANNInternalResultNum))
+        if (SPTAG::Helper::Convert::ConvertStringTo<int>(
+                index.GetParameter("SearchInternalResultNum", "BuildSSDIndex").c_str(), SPANNInternalResultNum))
             internalResultNum = max(internalResultNum, SPANNInternalResultNum);
     }
     std::vector<QueryResult> results(options->m_batch, QueryResult(NULL, internalResultNum, options->m_withMeta != 0));
     std::vector<float> latencies(options->m_batch, 0);
     int baseSquare = SPTAG::COMMON::Utils::GetBase<T>() * SPTAG::COMMON::Utils::GetBase<T>();
 
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
-    std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0), totalRecall(maxCheck.size(), 0.0), totalLatency(maxCheck.size(), 0.0);
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "[query]\t\t[maxcheck]\t[avg] \t[99%] \t[95%] \t[recall] \t[qps] \t[mem]\n");
+    std::vector<float> totalAvg(maxCheck.size(), 0.0), total99(maxCheck.size(), 0.0), total95(maxCheck.size(), 0.0),
+        totalRecall(maxCheck.size(), 0.0), totalLatency(maxCheck.size(), 0.0);
     for (int startQuery = 0; startQuery < queryVectors->Count(); startQuery += options->m_batch)
     {
         int numQuerys = min(options->m_batch, queryVectors->Count() - startQuery);
-        for (SizeType i = 0; i < numQuerys; i++) results[i].SetTarget(queryVectors->GetVector(startQuery + i));
-        if (ftruth != nullptr) COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK, (options->m_truthFile.find("bin") != std::string::npos)? TruthFileType::DEFAULT : TruthFileType::TXT);
-
+        for (SizeType i = 0; i < numQuerys; i++)
+            results[i].SetTarget(queryVectors->GetVector(startQuery + i));
+        if (ftruth != nullptr)
+            COMMON::TruthSet::LoadTruth(ftruth, truth, numQuerys, truthDim, options->m_truthK,
+                                        (options->m_truthFile.find("bin") != std::string::npos) ? TruthFileType::DEFAULT
+                                                                                                : TruthFileType::TXT);
 
         for (int mc = 0; mc < maxCheck.size(); mc++)
         {
             index.SetParameter("MaxCheck", maxCheck[mc].c_str());
 
-            for (SizeType i = 0; i < numQuerys; i++) results[i].Reset();
+            for (SizeType i = 0; i < numQuerys; i++)
+                results[i].Reset();
 
             std::atomic_size_t queriesSent(0);
             std::vector<std::thread> threads;
             threads.reserve(options->m_threadNum);
             auto batchstart = std::chrono::high_resolution_clock::now();
 
-            for (std::uint32_t i = 0; i < options->m_threadNum; i++) { 
+            for (std::uint32_t i = 0; i < options->m_threadNum; i++)
+            {
                 threads.emplace_back([&, i] {
-                    NumaStrategy ns = (index.GetIndexAlgoType() == IndexAlgoType::SPANN)? NumaStrategy::SCATTER: NumaStrategy::LOCAL; // Only for SPANN, we need to avoid IO threads overlap with search threads.
+                    NumaStrategy ns = (index.GetIndexAlgoType() == IndexAlgoType::SPANN)
+                                          ? NumaStrategy::SCATTER
+                                          : NumaStrategy::LOCAL; // Only for SPANN, we need to avoid IO threads overlap
+                                                                 // with search threads.
                     Helper::SetThreadAffinity(i, threads[i], ns, OrderStrategy::ASC);
 
                     size_t qid = 0;
@@ -205,7 +233,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                             auto t1 = std::chrono::high_resolution_clock::now();
                             index.SearchIndex(results[qid]);
                             auto t2 = std::chrono::high_resolution_clock::now();
-                            latencies[qid] = (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000000.0);
+                            latencies[qid] =
+                                (float)(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() /
+                                        1000000.0);
                         }
                         else
                         {
@@ -214,20 +244,28 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     }
                 });
             }
-            for (auto& thread : threads) { thread.join(); }
+            for (auto &thread : threads)
+            {
+                thread.join();
+            }
 
             auto batchend = std::chrono::high_resolution_clock::now();
-            float batchLatency = (float)(std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() / 1000000.0);
+            float batchLatency =
+                (float)(std::chrono::duration_cast<std::chrono::microseconds>(batchend - batchstart).count() /
+                        1000000.0);
 
             float timeMean = 0, timeMin = MaxDist, timeMax = 0, timeStd = 0;
             for (int qid = 0; qid < numQuerys; qid++)
             {
                 timeMean += latencies[qid];
-                if (latencies[qid] > timeMax) timeMax = latencies[qid];
-                if (latencies[qid] < timeMin) timeMin = latencies[qid];
+                if (latencies[qid] > timeMax)
+                    timeMax = latencies[qid];
+                if (latencies[qid] < timeMin)
+                    timeMin = latencies[qid];
             }
             timeMean /= numQuerys;
-            for (int qid = 0; qid < numQuerys; qid++) timeStd += ((float)latencies[qid] - timeMean) * ((float)latencies[qid] - timeMean);
+            for (int qid = 0; qid < numQuerys; qid++)
+                timeStd += ((float)latencies[qid] - timeMean) * ((float)latencies[qid] - timeMean);
             timeStd = std::sqrt(timeStd / numQuerys);
             log << timeMean << " " << timeStd << " " << timeMin << " " << timeMax << " ";
 
@@ -238,7 +276,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             float recall = 0;
             if (ftruth != nullptr)
             {
-                recall = COMMON::TruthSet::CalculateRecall<T>(&index, results, truth, options->m_K, options->m_truthK, queryVectors, dataVectors, numQuerys, &log, options->m_debugQuery > 0);
+                recall = COMMON::TruthSet::CalculateRecall<T>(&index, results, truth, options->m_K, options->m_truthK,
+                                                              queryVectors, dataVectors, numQuerys, &log,
+                                                              options->m_debugQuery > 0);
             }
 
 #ifndef _MSC_VER
@@ -250,7 +290,9 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
             GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
             unsigned long long peakWSS = pmc.PeakWorkingSetSize / 1000000000;
 #endif
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery, (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall, (numQuerys / batchLatency), peakWSS);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t\t%.4f\t\t%lluGB\n", startQuery,
+                         (startQuery + numQuerys), maxCheck[mc].c_str(), timeMean, l99, l95, recall,
+                         (numQuerys / batchLatency), peakWSS);
             totalAvg[mc] += timeMean * numQuerys;
             total95[mc] += l95 * numQuerys;
             total99[mc] += l99 * numQuerys;
@@ -260,19 +302,24 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
 
         if (fp != nullptr)
         {
-            if (options->m_outputformat == 0) {
+            if (options->m_outputformat == 0)
+            {
                 for (SizeType i = 0; i < numQuerys; i++)
                 {
-                    if (queryMetas != nullptr) {
+                    if (queryMetas != nullptr)
+                    {
                         ByteArray qmeta = queryMetas->GetMetadata(startQuery + i);
-                        if (fp->WriteBinary(qmeta.Length(), (const char*)qmeta.Data()) != qmeta.Length()) {
+                        if (fp->WriteBinary(qmeta.Length(), (const char *)qmeta.Data()) != qmeta.Length())
+                        {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write qmeta %d bytes!\n", qmeta.Length());
                             exit(1);
                         }
                     }
-                    else {
+                    else
+                    {
                         std::string qid = std::to_string(i);
-                        if (fp->WriteBinary(qid.length(), qid.c_str()) != qid.length()) {
+                        if (fp->WriteBinary(qid.length(), qid.c_str()) != qid.length())
+                        {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write qid %d bytes!\n", qid.length());
                             exit(1);
                         }
@@ -281,26 +328,32 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     for (int j = 0; j < options->m_K; j++)
                     {
                         std::string sd = std::to_string(results[i].GetResult(j)->Dist / baseSquare);
-                        if (fp->WriteBinary(sd.length(), sd.c_str()) != sd.length()) {
+                        if (fp->WriteBinary(sd.length(), sd.c_str()) != sd.length())
+                        {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write dist %d bytes!\n", sd.length());
                             exit(1);
                         }
                         fp->WriteString("@");
-                        if (results[i].GetResult(j)->VID < 0) {
+                        if (results[i].GetResult(j)->VID < 0)
+                        {
                             fp->WriteString("NULL|");
                             continue;
                         }
 
-                        if (!options->m_withMeta) {
+                        if (!options->m_withMeta)
+                        {
                             std::string vid = std::to_string(results[i].GetResult(j)->VID);
-                            if (fp->WriteBinary(vid.length(), vid.c_str()) != vid.length()) {
+                            if (fp->WriteBinary(vid.length(), vid.c_str()) != vid.length())
+                            {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write vid %d bytes!\n", sd.length());
                                 exit(1);
                             }
                         }
-                        else {
+                        else
+                        {
                             ByteArray vm = index.GetMetadata(results[i].GetResult(j)->VID);
-                            if (fp->WriteBinary(vm.Length(), (const char*)vm.Data()) != vm.Length()) {
+                            if (fp->WriteBinary(vm.Length(), (const char *)vm.Data()) != vm.Length())
+                            {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot write vmeta %d bytes!\n", vm.Length());
                                 exit(1);
                             }
@@ -310,19 +363,22 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
                     fp->WriteString("\n");
                 }
             }
-            else {
+            else
+            {
                 for (SizeType i = 0; i < numQuerys; ++i)
                 {
                     for (int j = 0; j < options->m_K; ++j)
                     {
                         SizeType i32Val = results[i].GetResult(j)->VID;
-                        if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
+                        if (fp->WriteBinary(sizeof(i32Val), reinterpret_cast<char *>(&i32Val)) != sizeof(i32Val))
+                        {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                             exit(1);
                         }
 
                         float fVal = results[i].GetResult(j)->Dist;
-                        if (fp->WriteBinary(sizeof(fVal), reinterpret_cast<char*>(&fVal)) != sizeof(fVal)) {
+                        if (fp->WriteBinary(sizeof(fVal), reinterpret_cast<char *>(&fVal)) != sizeof(fVal))
+                        {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to write result file!\n");
                             exit(1);
                         }
@@ -332,16 +388,20 @@ int Process(std::shared_ptr<SearcherOptions> options, VectorIndex& index)
         }
     }
     for (int mc = 0; mc < maxCheck.size(); mc++)
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(), maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()), (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()), (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%d-%d\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n", 0, queryVectors->Count(),
+                     maxCheck[mc].c_str(), (totalAvg[mc] / queryVectors->Count()),
+                     (total99[mc] / queryVectors->Count()), (total95[mc] / queryVectors->Count()),
+                     (totalRecall[mc] / queryVectors->Count()), (queryVectors->Count() / totalLatency[mc]));
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Output results finish!\n");
 
-    if (fp != nullptr) fp->ShutDown();
+    if (fp != nullptr)
+        fp->ShutDown();
     log.close();
     return 0;
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
     std::shared_ptr<SearcherOptions> options(new SearcherOptions);
     if (!options->Parse(argc - 1, argv + 1))
@@ -363,26 +423,31 @@ int main(int argc, char** argv)
     {
         std::string param(argv[i]);
         size_t idx = param.find("=");
-        if (idx == std::string::npos) continue;
+        if (idx == std::string::npos)
+            continue;
 
         std::string paramName = param.substr(0, idx);
         std::string paramVal = param.substr(idx + 1);
         std::string sectionName;
         idx = paramName.find(".");
-        if (idx != std::string::npos) {
+        if (idx != std::string::npos)
+        {
             sectionName = paramName.substr(0, idx);
             paramName = paramName.substr(idx + 1);
         }
         iniReader.SetParameter(sectionName, paramName, paramVal);
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(), paramVal.c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Set [%s]%s = %s\n", sectionName.c_str(), paramName.c_str(),
+                     paramVal.c_str());
     }
 
-    std::string sections[] = { "Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index" };
-    for (int i = 0; i < 5; i++) {
-        if (!iniReader.DoesParameterExist(sections[i], "NumberOfThreads")) {
+    std::string sections[] = {"Base", "SelectHead", "BuildHead", "BuildSSDIndex", "Index"};
+    for (int i = 0; i < 5; i++)
+    {
+        if (!iniReader.DoesParameterExist(sections[i], "NumberOfThreads"))
+        {
             iniReader.SetParameter(sections[i], "NumberOfThreads", std::to_string(options->m_threadNum));
         }
-        for (const auto& iter : iniReader.GetParameters(sections[i]))
+        for (const auto &iter : iniReader.GetParameters(sections[i]))
         {
             vecIndex->SetParameter(iter.first.c_str(), iter.second.c_str(), sections[i]);
         }
@@ -392,15 +457,16 @@ int main(int argc, char** argv)
 
     switch (options->m_inputValueType)
     {
-#define DefineVectorValueType(Name, Type) \
-    case VectorValueType::Name: \
-        Process<Type>(options, *(vecIndex.get())); \
-        break; \
+#define DefineVectorValueType(Name, Type)                                                                              \
+    case VectorValueType::Name:                                                                                        \
+        Process<Type>(options, *(vecIndex.get()));                                                                     \
+        break;
 
 #include "inc/Core/DefinitionList.h"
 #undef DefineVectorValueType
 
-    default: break;
+    default:
+        break;
     }
     return 0;
 }
