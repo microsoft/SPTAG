@@ -43,7 +43,8 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
                 std::shared_ptr<SPTAG::MetadataSet> &meta, const std::string out)
 {
 
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -232,10 +233,12 @@ template <typename T> void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::s
     }
 }
 
-namespace MultiIndexExperimentTest {
+namespace MultiIndexExperimentTest
+{
 
-TEST(MultiIndexExperiment, BKTTest) {
+TEST(MultiIndexExperiment, BKTTest)
+{
     TestMultiIndexScanN<float>(SPTAG::IndexAlgoType::BKT, "InnerProduct", 2);
 }
 
-}
+} // namespace MultiIndexExperimentTest

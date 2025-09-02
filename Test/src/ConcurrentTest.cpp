@@ -15,7 +15,8 @@ void ConcurrentAddSearchSave(SPTAG::IndexAlgoType algo, std::string distCalcMeth
                              std::shared_ptr<SPTAG::VectorSet> &vec, std::shared_ptr<SPTAG::MetadataSet> &meta,
                              const std::string out)
 {
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -132,14 +133,17 @@ template <typename T> void CTest(SPTAG::IndexAlgoType algo, std::string distCalc
     ConcurrentAddSearchSave<T>(algo, distCalcMethod, vecset, metaset, "testindices");
 }
 
-namespace ConcurrentTest {
+namespace ConcurrentTest
+{
 
-TEST(ConcurrentTest, BKTTest) {
+TEST(ConcurrentTest, BKTTest)
+{
     CTest<float>(SPTAG::IndexAlgoType::BKT, "L2");
 }
 
-TEST(ConcurrentTest, KDTTest) {
+TEST(ConcurrentTest, KDTTest)
+{
     CTest<float>(SPTAG::IndexAlgoType::KDT, "L2");
 }
 
-}
+} // namespace ConcurrentTest

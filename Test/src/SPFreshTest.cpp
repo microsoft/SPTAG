@@ -489,7 +489,7 @@ TEST(SPFreshTest, TestClone)
     ASSERT_EQ(originalIndex->SaveIndex("original_index"), ErrorCode::Success);
     originalIndex = nullptr;
 
-    auto clonedIndex = VectorIndex::Clone("original_index", "cloned_index");
+    auto clonedIndex = originalIndex->Clone("cloned_index");
     ASSERT_NE(clonedIndex, nullptr);
     ASSERT_EQ(clonedIndex->SaveIndex("cloned_index"), ErrorCode::Success);
     clonedIndex = nullptr;
@@ -806,7 +806,7 @@ TEST(SPFreshTest, IndexShadowCloneLifecycleKeepLast)
         }
 
         // Clone to shadow
-        ASSERT_NE(loaded->Clone(shadowIndexName) != nullptr);
+        ASSERT_NE(loaded->Clone(shadowIndexName), nullptr);
         loaded.reset();
 
         std::shared_ptr<VectorIndex> shadowLoaded;

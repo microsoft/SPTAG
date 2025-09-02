@@ -18,7 +18,8 @@ void BuildIndex(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
                 std::shared_ptr<MetadataSet> &meta, const std::string out)
 {
 
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     ASSERT_NE(nullptr, vecIndex);
 
     if (algo != IndexAlgoType::SPANN)
@@ -54,8 +55,7 @@ void BuildIndex(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
     ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
-template <typename T>
-void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::string *truthmeta)
+template <typename T> void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::string *truthmeta)
 {
     std::shared_ptr<VectorIndex> vecIndex;
 
@@ -70,14 +70,18 @@ void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::str
     {
         auto results = resultIterator->Next(batch);
         int resultCount = results->GetResultNum();
-        if (resultCount <= 0) break;
-    ASSERT_EQ(resultCount, batch);
-        for (int j = 0; j < resultCount; j++) {
-            
-            EXPECT_EQ(std::string((char*)((results->GetMetadata(j)).Data()), (results->GetMetadata(j)).Length()), truthmeta[ri]);
+        if (resultCount <= 0)
+            break;
+        ASSERT_EQ(resultCount, batch);
+        for (int j = 0; j < resultCount; j++)
+        {
+
+            EXPECT_EQ(std::string((char *)((results->GetMetadata(j)).Data()), (results->GetMetadata(j)).Length()),
+                      truthmeta[ri]);
             EXPECT_TRUE(results->GetResult(j)->RelaxedMono == true);
-            std::cout << "Result[" << ri << "] VID:" << results->GetResult(j)->VID << " Dist:" << results->GetResult(j)->Dist << " RelaxedMono:"
-                << results->GetResult(j)->RelaxedMono << std::endl;
+            std::cout << "Result[" << ri << "] VID:" << results->GetResult(j)->VID
+                      << " Dist:" << results->GetResult(j)->Dist
+                      << " RelaxedMono:" << results->GetResult(j)->RelaxedMono << std::endl;
             ri++;
         }
     }
@@ -129,7 +133,8 @@ template <typename T> void TestIterativeScan(IndexAlgoType algo, std::string dis
     SearchIterativeBatch<T>("testindices", query.data(), q, truthmeta1);
 }
 
-namespace IterativeScanTest {
+namespace IterativeScanTest
+{
 
 template <typename T>
 float EvaluateRecall(const std::vector<QueryResult> &res, std::shared_ptr<VectorIndex> &vecIndex,
@@ -203,12 +208,14 @@ template <typename T> void TestIterativeScanRandom(IndexAlgoType algo, std::stri
         {
             auto results = resultIterator->Next(batch);
             int resultCount = results->GetResultNum();
-            if (resultCount <= 0) break;
+            if (resultCount <= 0)
+                break;
             EXPECT_EQ(resultCount, batch);
             for (int j = 0; j < resultCount; j++)
             {
                 relaxMono = results->GetResult(j)->RelaxedMono;
-                ((COMMON::QueryResultSet<T> *)(&resiter[i]))->AddPoint(results->GetResult(j)->VID, results->GetResult(j)->Dist);
+                ((COMMON::QueryResultSet<T> *)(&resiter[i]))
+                    ->AddPoint(results->GetResult(j)->VID, results->GetResult(j)->Dist);
             }
             ri += resultCount;
             iterscanned = results->GetScanned();
@@ -236,4 +243,4 @@ TEST(IterativeScanTest, SPANNRandomTest)
     TestIterativeScanRandom<int8_t>(IndexAlgoType::SPANN, "L2");
 }
 
-}
+} // namespace IterativeScanTest

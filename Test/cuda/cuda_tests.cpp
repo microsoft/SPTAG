@@ -1,22 +1,21 @@
-//#include "test_kernels.cu"
+// #include "test_kernels.cu"
 
-#include <cstdlib>
 #include <chrono>
 #include <cstdlib>
 
-#include <iostream>
 #include "inc/Test.h"
 #include <boost/filesystem.hpp>
 #include <iostream>
 
 int GPUBuildKNNTest();
 
-TEST(GPUTest, RandomTests) {
-  EXPECT_EQ(1, 1);
+TEST(GPUTest, RandomTests)
+{
+    EXPECT_EQ(1, 1);
 
-  int errors = GPUBuildKNNTest();
-  printf("outside\n");
-  EXPECT_EQ(errors, 0);
+    int errors = GPUBuildKNNTest();
+    printf("outside\n");
+    EXPECT_EQ(errors, 0);
 }
 
 /*

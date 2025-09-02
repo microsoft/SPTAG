@@ -39,12 +39,17 @@ template <typename T> void test(int high)
     SPTAG::DimensionType dimension = random<SPTAG::DimensionType>(256, 2);
     T *X = new T[dimension], *Y = new T[dimension];
     ASSERT_TRUE(X != nullptr && Y != nullptr);
-    for (SPTAG::DimensionType i = 0; i < dimension; i++) {
+    for (SPTAG::DimensionType i = 0; i < dimension; i++)
+    {
         X[i] = random<T>(high, -high);
         Y[i] = random<T>(high, -high);
     }
-    EXPECT_NEAR(ComputeL2Distance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2), 1e-5 * ComputeL2Distance(X, Y, dimension));
-    EXPECT_NEAR(high * high - ComputeCosineDistance(X, Y, dimension), SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine), 1e-5 * (std::abs(high * high - ComputeCosineDistance(X, Y, dimension))));
+    EXPECT_NEAR(ComputeL2Distance(X, Y, dimension),
+                SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::L2),
+                1e-5 * ComputeL2Distance(X, Y, dimension));
+    EXPECT_NEAR(high * high - ComputeCosineDistance(X, Y, dimension),
+                SPTAG::COMMON::DistanceUtils::ComputeDistance(X, Y, dimension, SPTAG::DistCalcMethod::Cosine),
+                1e-5 * (std::abs(high * high - ComputeCosineDistance(X, Y, dimension))));
 
     delete[] X;
     delete[] Y;
@@ -104,15 +109,18 @@ void test_dist_calc_performance(int high, SPTAG::DimensionType dimension = 256, 
     delete[] Y;
 }
 
-namespace DistanceTest {
+namespace DistanceTest
+{
 
-TEST(DistanceTest, TestDistanceComputation) {
+TEST(DistanceTest, TestDistanceComputation)
+{
     test<float>(1);
     test<std::int8_t>(127);
     test<std::int16_t>(32767);
 }
 
-TEST(DistanceTest, TestDistanceComputationPerformance) {
+TEST(DistanceTest, TestDistanceComputationPerformance)
+{
     std::vector<SPTAG::DimensionType> dimensions{128, 256, 512, 1024};
     std::vector<int> nums_threads{1, 16, 40};
     std::vector<SPTAG::DistCalcMethod> calc_methods{SPTAG::DistCalcMethod::L2, SPTAG::DistCalcMethod::Cosine};
@@ -133,4 +141,4 @@ TEST(DistanceTest, TestDistanceComputationPerformance) {
     }
 }
 
-}
+} // namespace DistanceTest

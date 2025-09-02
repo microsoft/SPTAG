@@ -6,14 +6,14 @@
 
 #include <memory>
 
-namespace CommonHelperTest {
+namespace CommonHelperTest
+{
 
-
-TEST(CommonHelperTest, ToLowerInPlaceTest) {
-    auto runTestCase = [](std::string p_input, const std::string& p_expected)
-    {
+TEST(CommonHelperTest, ToLowerInPlaceTest)
+{
+    auto runTestCase = [](std::string p_input, const std::string &p_expected) {
         SPTAG::Helper::StrUtils::ToLowerInPlace(p_input);
-    EXPECT_EQ(p_input, p_expected);
+        EXPECT_EQ(p_input, p_expected);
     };
 
     runTestCase("abc", "abc");
@@ -23,11 +23,11 @@ TEST(CommonHelperTest, ToLowerInPlaceTest) {
     runTestCase("123!-=aBc", "123!-=abc");
 }
 
-
-TEST(CommonHelperTest, SplitStringTest) {
+TEST(CommonHelperTest, SplitStringTest)
+{
     std::string input("seg1 seg2 seg3  seg4");
 
-    const auto& segs = SPTAG::Helper::StrUtils::SplitString(input, " ");
+    const auto &segs = SPTAG::Helper::StrUtils::SplitString(input, " ");
     EXPECT_EQ(segs.size(), 4u);
     EXPECT_EQ(segs[0], "seg1");
     EXPECT_EQ(segs[1], "seg2");
@@ -35,8 +35,8 @@ TEST(CommonHelperTest, SplitStringTest) {
     EXPECT_EQ(segs[3], "seg4");
 }
 
-
-TEST(CommonHelperTest, FindTrimmedSegmentTest) {
+TEST(CommonHelperTest, FindTrimmedSegmentTest)
+{
     using namespace SPTAG::Helper::StrUtils;
     std::string input("\t Space   End    \r\n\t");
 
@@ -47,8 +47,8 @@ TEST(CommonHelperTest, FindTrimmedSegmentTest) {
     EXPECT_EQ(pos.second, input.c_str() + 13);
 }
 
-
-TEST(CommonHelperTest, StartsWithTest) {
+TEST(CommonHelperTest, StartsWithTest)
+{
     using namespace SPTAG::Helper::StrUtils;
 
     EXPECT_TRUE(StartsWith("Abcd", "A"));
@@ -64,8 +64,8 @@ TEST(CommonHelperTest, StartsWithTest) {
     EXPECT_FALSE(StartsWith("Abcd", "Abcde"));
 }
 
-
-TEST(CommonHelperTest, StrEqualIgnoreCaseTest) {
+TEST(CommonHelperTest, StrEqualIgnoreCaseTest)
+{
     using namespace SPTAG::Helper::StrUtils;
 
     EXPECT_TRUE(StrEqualIgnoreCase("Abcd", "Abcd"));
@@ -79,4 +79,4 @@ TEST(CommonHelperTest, StrEqualIgnoreCaseTest) {
     EXPECT_FALSE(StrEqualIgnoreCase("000", "OOO"));
 }
 
-}
+} // namespace CommonHelperTest

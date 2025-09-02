@@ -273,14 +273,17 @@ template <typename T> void PTest(IndexAlgoType algo, std::string distCalcMethod)
     Search<T>(vecIndex, queryset, 10, truth);
 }
 
-namespace PerfTest {
+namespace PerfTest
+{
 
-TEST(PerfTest, BKTTest) {
+TEST(PerfTest, BKTTest)
+{
     PTest<std::int8_t>(IndexAlgoType::BKT, "Cosine");
 }
 
-TEST(PerfTest, KDTTest) {
+TEST(PerfTest, KDTTest)
+{
     PTest<std::int8_t>(IndexAlgoType::KDT, "Cosine");
 }
 
-}
+} // namespace PerfTest

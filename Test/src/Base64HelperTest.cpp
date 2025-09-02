@@ -6,9 +6,11 @@
 
 #include <memory>
 
-namespace Base64Test {
+namespace Base64Test
+{
 
-TEST(Base64Test, Base64EncDec) {
+TEST(Base64Test, Base64EncDec)
+{
     using namespace SPTAG::Helper::Base64;
 
     const size_t bufferSize = 1 << 10;
@@ -24,19 +26,19 @@ TEST(Base64Test, Base64EncDec) {
         }
 
         size_t encBufLen = CapacityForEncode(inputSize);
-    EXPECT_LT(encBufLen, bufferSize);
+        EXPECT_LT(encBufLen, bufferSize);
 
         size_t encOutLen = 0;
-    EXPECT_TRUE(Encode(rawBuffer.get(), inputSize, encBuffer.get(), encOutLen));
-    EXPECT_GE(encBufLen, encOutLen);
+        EXPECT_TRUE(Encode(rawBuffer.get(), inputSize, encBuffer.get(), encOutLen));
+        EXPECT_GE(encBufLen, encOutLen);
 
         size_t decBufLen = CapacityForDecode(encOutLen);
-    EXPECT_LT(decBufLen, bufferSize);
+        EXPECT_LT(decBufLen, bufferSize);
 
         size_t decOutLen = 0;
-    EXPECT_TRUE(Decode(encBuffer.get(), encOutLen, rawBuffer.get(), decOutLen));
-    EXPECT_GE(decBufLen, decOutLen);
+        EXPECT_TRUE(Decode(encBuffer.get(), encOutLen, rawBuffer.get(), decOutLen));
+        EXPECT_GE(decBufLen, decOutLen);
     }
 }
 
-}
+} // namespace Base64Test

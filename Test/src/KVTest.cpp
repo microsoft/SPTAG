@@ -130,21 +130,28 @@ void RunTest(std::string path, std::string type, bool debug = false)
     // }
 }
 
-namespace KVTest {
+namespace KVTest
+{
 
-TEST(KVTest, RocksDBTest) {
-    if(!direxists("tmp_rocksdb")) mkdir("tmp_rocksdb");
+TEST(KVTest, RocksDBTest)
+{
+    if (!direxists("tmp_rocksdb"))
+        mkdir("tmp_rocksdb");
     RunTest(std::string("tmp_rocksdb") + FolderSep + "test", "RocksDB", false);
 }
 
-TEST(KVTest, SPDKTest) {
-    if(!direxists("tmp_spdk")) mkdir("tmp_spdk");
+TEST(KVTest, SPDKTest)
+{
+    if (!direxists("tmp_spdk"))
+        mkdir("tmp_spdk");
     RunTest(std::string("tmp_spdk") + FolderSep + "test", "SPDK", false);
 }
 
-TEST(KVTest, FileTest) {
-    if(!direxists("tmp_file")) mkdir("tmp_file");
+TEST(KVTest, FileTest)
+{
+    if (!direxists("tmp_file"))
+        mkdir("tmp_file");
     RunTest(std::string("tmp_file") + FolderSep + "test", "File", false);
 }
 
-}
+} // namespace KVTest

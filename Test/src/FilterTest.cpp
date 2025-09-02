@@ -14,7 +14,8 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
                           std::shared_ptr<SPTAG::MetadataSet> &meta, const std::string out)
 {
 
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -103,10 +104,12 @@ template <typename T> void FTest(SPTAG::IndexAlgoType algo, std::string distCalc
     SearchWithFilter<T>("testindices", query.data(), q, k);
 }
 
-namespace FilterTest {
+namespace FilterTest
+{
 
-TEST(FilterTest, BKTTest) {
+TEST(FilterTest, BKTTest)
+{
     FTest<float>(SPTAG::IndexAlgoType::BKT, "L2");
 }
 
-}
+} // namespace FilterTest

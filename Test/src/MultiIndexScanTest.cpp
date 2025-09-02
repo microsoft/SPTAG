@@ -20,7 +20,8 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
                 std::shared_ptr<SPTAG::MetadataSet> &meta, const std::string out)
 {
 
-    std::shared_ptr<SPTAG::VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -44,8 +45,8 @@ void MultiIndexSearch(unsigned int n, std::vector<std::vector<T>> &queries, int 
     for (unsigned int i = 0; i < n; i++)
     {
         std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
-    ASSERT_NE(nullptr, vecIndex);
+        ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
+        ASSERT_NE(nullptr, vecIndex);
         vecIndices.push_back(vecIndex);
         p_targets.push_back(queries[i].data());
     }
@@ -124,10 +125,12 @@ template <typename T> void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::s
     MultiIndexSearch<T>(n, queries, k, false, 10);
 }
 
-namespace MultiIndexScanTest {
+namespace MultiIndexScanTest
+{
 
-TEST(MultiIndexScanTest, BKTTest) {
+TEST(MultiIndexScanTest, BKTTest)
+{
     TestMultiIndexScanN<float>(SPTAG::IndexAlgoType::BKT, "L2", 2);
 }
 
-}
+} // namespace MultiIndexScanTest

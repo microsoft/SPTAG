@@ -6,9 +6,11 @@
 
 #include <fstream>
 
-namespace IniReaderTest {
+namespace IniReaderTest
+{
 
-TEST(IniReaderTest, IniReaderLoadTest) {
+TEST(IniReaderTest, IniReaderLoadTest)
+{
     std::ofstream tmpIni("temp.ini");
     tmpIni << "[Common]" << std::endl;
     tmpIni << "; Comment " << std::endl;
@@ -35,4 +37,4 @@ TEST(IniReaderTest, IniReaderLoadTest) {
     EXPECT_EQ(std::string("1"), reader.GetParameter<std::string>("Common", "Param1", std::string()));
     EXPECT_EQ(std::string(), reader.GetParameter<std::string>("Common", "ParamNotExist", std::string()));
 }
-}
+} // namespace IniReaderTest
