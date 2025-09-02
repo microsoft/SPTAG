@@ -446,7 +446,7 @@ template <typename R> void ReconstructTest(IndexAlgoType algo, DistCalcMethod di
 namespace ReconstructIndexSimilarityTest
 {
 
-TEST(ReconstructIndexSimilarityTest, DISABLE_BKTReconstructTest)
+TEST(ReconstructIndexSimilarityTest, BKTReconstructTest)
 {
     ReconstructTest<float>(IndexAlgoType::BKT, DistCalcMethod::L2);
 }
