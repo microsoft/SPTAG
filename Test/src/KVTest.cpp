@@ -44,7 +44,7 @@ void Search(std::shared_ptr<Helper::KeyValueIO> db, int internalResultNum, int t
 
 }
 
-void Test(std::string path, std::string type, bool debug = false)
+void RunTest(std::string path, std::string type, bool debug = false)
 {
     int internalResultNum = 64;
     int totalNum = 1024;
@@ -112,25 +112,22 @@ void Test(std::string path, std::string type, bool debug = false)
     // }
 }
 
-BOOST_AUTO_TEST_SUITE(KVTest)
+namespace KVTest {
 
-BOOST_AUTO_TEST_CASE(RocksDBTest)
-{
+TEST(KVTest, RocksDBTest) {
     if(!direxists("tmp_rocksdb")) mkdir("tmp_rocksdb");
-    Test(std::string("tmp_rocksdb") + FolderSep + "test", "RocksDB", false);
+    RunTest(std::string("tmp_rocksdb") + FolderSep + "test", "RocksDB", false);
 }
 
-BOOST_AUTO_TEST_CASE(SPDKTest)
-{
+TEST(KVTest, SPDKTest) {
     if(!direxists("tmp_spdk")) mkdir("tmp_spdk");
-    Test(std::string("tmp_spdk") + FolderSep + "test", "SPDK", false);
+    RunTest(std::string("tmp_spdk") + FolderSep + "test", "SPDK", false);
 }
 
-BOOST_AUTO_TEST_CASE(FileTest)
-{
+TEST(KVTest, FileTest) {
     if(!direxists("tmp_file")) mkdir("tmp_file");
-    Test(std::string("tmp_file") + FolderSep + "test", "File", false);
+    RunTest(std::string("tmp_file") + FolderSep + "test", "File", false);
 }
 
 
-BOOST_AUTO_TEST_SUITE_END()
+}

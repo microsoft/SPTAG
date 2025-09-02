@@ -6,10 +6,9 @@
 
 #include <fstream>
 
-BOOST_AUTO_TEST_SUITE(IniReaderTest)
+namespace IniReaderTest {
 
-BOOST_AUTO_TEST_CASE(IniReaderLoadTest)
-{
+TEST(IniReaderTest, IniReaderLoadTest) {
     std::ofstream tmpIni("temp.ini");
     tmpIni << "[Common]" << std::endl;
     tmpIni << "; Comment " << std::endl;
@@ -19,22 +18,21 @@ BOOST_AUTO_TEST_CASE(IniReaderLoadTest)
     tmpIni.close();
 
     SPTAG::Helper::IniReader reader;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == reader.LoadIniFile("temp.ini"));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, reader.LoadIniFile("temp.ini"));
 
-    BOOST_CHECK(reader.DoesSectionExist("Common"));
-    BOOST_CHECK(reader.DoesParameterExist("Common", "Param1"));
-    BOOST_CHECK(reader.DoesParameterExist("Common", "Param2"));
+    EXPECT_TRUE(reader.DoesSectionExist("Common"));
+    EXPECT_TRUE(reader.DoesParameterExist("Common", "Param1"));
+    EXPECT_TRUE(reader.DoesParameterExist("Common", "Param2"));
 
-    BOOST_CHECK(!reader.DoesSectionExist("NotExist"));
-    BOOST_CHECK(!reader.DoesParameterExist("NotExist", "Param1"));
-    BOOST_CHECK(!reader.DoesParameterExist("Common", "ParamNotExist"));
+    EXPECT_FALSE(reader.DoesSectionExist("NotExist"));
+    EXPECT_FALSE(reader.DoesParameterExist("NotExist", "Param1"));
+    EXPECT_FALSE(reader.DoesParameterExist("Common", "ParamNotExist"));
 
-    BOOST_CHECK(1 == reader.GetParameter<int>("Common", "Param1", 0));
-    BOOST_CHECK(0 == reader.GetParameter<int>("Common", "ParamNotExist", 0));
+    EXPECT_EQ(1, reader.GetParameter<int>("Common", "Param1", 0));
+    EXPECT_EQ(0, reader.GetParameter<int>("Common", "ParamNotExist", 0));
 
-    BOOST_CHECK(std::string("Exp=2") == reader.GetParameter<std::string>("Common", "Param2", std::string()));
-    BOOST_CHECK(std::string("1") == reader.GetParameter<std::string>("Common", "Param1", std::string()));
-    BOOST_CHECK(std::string() == reader.GetParameter<std::string>("Common", "ParamNotExist", std::string()));
+    EXPECT_EQ(std::string("Exp=2"), reader.GetParameter<std::string>("Common", "Param2", std::string()));
+    EXPECT_EQ(std::string("1"), reader.GetParameter<std::string>("Common", "Param1", std::string()));
+    EXPECT_EQ(std::string(), reader.GetParameter<std::string>("Common", "ParamNotExist", std::string()));
 }
-
-BOOST_AUTO_TEST_SUITE_END()
+}

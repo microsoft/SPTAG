@@ -6,10 +6,9 @@
 
 #include <memory>
 
-BOOST_AUTO_TEST_SUITE(Base64Test)
+namespace Base64Test {
 
-BOOST_AUTO_TEST_CASE(Base64EncDec)
-{
+TEST(Base64Test, Base64EncDec) {
     using namespace SPTAG::Helper::Base64;
 
     const size_t bufferSize = 1 << 10;
@@ -25,19 +24,19 @@ BOOST_AUTO_TEST_CASE(Base64EncDec)
         }
 
         size_t encBufLen = CapacityForEncode(inputSize);
-        BOOST_CHECK(encBufLen < bufferSize);
+    EXPECT_LT(encBufLen, bufferSize);
 
         size_t encOutLen = 0;
-        BOOST_CHECK(Encode(rawBuffer.get(), inputSize, encBuffer.get(), encOutLen));
-        BOOST_CHECK(encBufLen >= encOutLen);
+    EXPECT_TRUE(Encode(rawBuffer.get(), inputSize, encBuffer.get(), encOutLen));
+    EXPECT_GE(encBufLen, encOutLen);
 
         size_t decBufLen = CapacityForDecode(encOutLen);
-        BOOST_CHECK(decBufLen < bufferSize);
+    EXPECT_LT(decBufLen, bufferSize);
 
         size_t decOutLen = 0;
-        BOOST_CHECK(Decode(encBuffer.get(), encOutLen, rawBuffer.get(), decOutLen));
-        BOOST_CHECK(decBufLen >= decOutLen);
+    EXPECT_TRUE(Decode(encBuffer.get(), encOutLen, rawBuffer.get(), decOutLen));
+    EXPECT_GE(decBufLen, decOutLen);
     }
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+}

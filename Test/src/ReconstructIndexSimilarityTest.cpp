@@ -67,7 +67,7 @@ std::shared_ptr<VectorIndex> PerfBuild(IndexAlgoType algo, std::string distCalcM
 {
     std::shared_ptr<VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
     vecIndex->SetQuantizer(quantizer);
-    BOOST_CHECK(nullptr != vecIndex);
+    EXPECT_NE(nullptr, vecIndex);
 
     if (algo != SPTAG::IndexAlgoType::SPANN) {
         if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
@@ -103,8 +103,8 @@ std::shared_ptr<VectorIndex> PerfBuild(IndexAlgoType algo, std::string distCalcM
         vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
     }
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    EXPECT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+    EXPECT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     //Search<T>(vecIndex, queryset, k, truth);
     return vecIndex;
 }
@@ -191,10 +191,10 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
     if (fileexists(CODEBOOK_FILE.c_str()) && fileexists("quantest_quan_vector.bin") && fileexists("quantest_rec_vector.bin")) {
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
         }
-        quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+    quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(ptr);
+    ASSERT_TRUE(quantizer != nullptr);
 
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
@@ -267,16 +267,16 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
         quantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, std::move(codebooks));
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to write!";
         }
         quantizer->SaveQuantizer(ptr);
         ptr->ShutDown();
 
         if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
         }
-        quantizer->LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+    quantizer->LoadIQuantizer(ptr);
+    ASSERT_TRUE(quantizer != nullptr);
 
         rec_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * n * m), GetEnumValueType<R>(), m, n));
         quan_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(std::uint8_t) * n * M), GetEnumValueType<std::uint8_t>(), M, n));
@@ -326,27 +326,18 @@ void ReconstructTest(IndexAlgoType algo, DistCalcMethod distMethod)
 }
 
 
-BOOST_AUTO_TEST_SUITE(ReconstructIndexSimilarityTest)
+namespace ReconstructIndexSimilarityTest {
 
-BOOST_AUTO_TEST_CASE(BKTReconstructTest)
-{
-
+TEST(ReconstructIndexSimilarityTest, BKTReconstructTest) {
     ReconstructTest<float>(IndexAlgoType::BKT, DistCalcMethod::L2);
-
 }
 
-BOOST_AUTO_TEST_CASE(KDTReconstructTest)
-{
-
+TEST(ReconstructIndexSimilarityTest, KDTReconstructTest) {
     ReconstructTest<float>(IndexAlgoType::KDT, DistCalcMethod::L2);
-
 }
 
-BOOST_AUTO_TEST_CASE(SPANNReconstructTest)
-{
-
+TEST(ReconstructIndexSimilarityTest, SPANNReconstructTest) {
     ReconstructTest<float>(IndexAlgoType::SPANN, DistCalcMethod::L2);
-
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+}

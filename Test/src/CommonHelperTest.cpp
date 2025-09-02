@@ -6,15 +6,14 @@
 
 #include <memory>
 
-BOOST_AUTO_TEST_SUITE(CommonHelperTest)
+namespace CommonHelperTest {
 
 
-BOOST_AUTO_TEST_CASE(ToLowerInPlaceTest)
-{
+TEST(CommonHelperTest, ToLowerInPlaceTest) {
     auto runTestCase = [](std::string p_input, const std::string& p_expected)
     {
         SPTAG::Helper::StrUtils::ToLowerInPlace(p_input);
-        BOOST_CHECK(p_input == p_expected);
+    EXPECT_EQ(p_input, p_expected);
     };
 
     runTestCase("abc", "abc");
@@ -25,21 +24,19 @@ BOOST_AUTO_TEST_CASE(ToLowerInPlaceTest)
 }
 
 
-BOOST_AUTO_TEST_CASE(SplitStringTest)
-{
+TEST(CommonHelperTest, SplitStringTest) {
     std::string input("seg1 seg2 seg3  seg4");
 
     const auto& segs = SPTAG::Helper::StrUtils::SplitString(input, " ");
-    BOOST_CHECK(segs.size() == 4);
-    BOOST_CHECK(segs[0] == "seg1");
-    BOOST_CHECK(segs[1] == "seg2");
-    BOOST_CHECK(segs[2] == "seg3");
-    BOOST_CHECK(segs[3] == "seg4");
+    EXPECT_EQ(segs.size(), 4u);
+    EXPECT_EQ(segs[0], "seg1");
+    EXPECT_EQ(segs[1], "seg2");
+    EXPECT_EQ(segs[2], "seg3");
+    EXPECT_EQ(segs[3], "seg4");
 }
 
 
-BOOST_AUTO_TEST_CASE(FindTrimmedSegmentTest)
-{
+TEST(CommonHelperTest, FindTrimmedSegmentTest) {
     using namespace SPTAG::Helper::StrUtils;
     std::string input("\t Space   End    \r\n\t");
 
@@ -50,44 +47,40 @@ BOOST_AUTO_TEST_CASE(FindTrimmedSegmentTest)
         return std::isspace(p_val) > 0;
     });
 
-    BOOST_CHECK(pos.first == input.c_str() + 2);
-    BOOST_CHECK(pos.second == input.c_str() + 13);
+    EXPECT_EQ(pos.first, input.c_str() + 2);
+    EXPECT_EQ(pos.second, input.c_str() + 13);
 }
 
 
-BOOST_AUTO_TEST_CASE(StartsWithTest)
-{
+TEST(CommonHelperTest, StartsWithTest) {
     using namespace SPTAG::Helper::StrUtils;
 
-    BOOST_CHECK(StartsWith("Abcd", "A"));
-    BOOST_CHECK(StartsWith("Abcd", "Ab"));
-    BOOST_CHECK(StartsWith("Abcd", "Abc"));
-    BOOST_CHECK(StartsWith("Abcd", "Abcd"));
+    EXPECT_TRUE(StartsWith("Abcd", "A"));
+    EXPECT_TRUE(StartsWith("Abcd", "Ab"));
+    EXPECT_TRUE(StartsWith("Abcd", "Abc"));
+    EXPECT_TRUE(StartsWith("Abcd", "Abcd"));
 
-    BOOST_CHECK(!StartsWith("Abcd", "a"));
-    BOOST_CHECK(!StartsWith("Abcd", "F"));
-    BOOST_CHECK(!StartsWith("Abcd", "AF"));
-    BOOST_CHECK(!StartsWith("Abcd", "AbF"));
-    BOOST_CHECK(!StartsWith("Abcd", "AbcF"));
-    BOOST_CHECK(!StartsWith("Abcd", "Abcde"));
+    EXPECT_FALSE(StartsWith("Abcd", "a"));
+    EXPECT_FALSE(StartsWith("Abcd", "F"));
+    EXPECT_FALSE(StartsWith("Abcd", "AF"));
+    EXPECT_FALSE(StartsWith("Abcd", "AbF"));
+    EXPECT_FALSE(StartsWith("Abcd", "AbcF"));
+    EXPECT_FALSE(StartsWith("Abcd", "Abcde"));
 }
 
 
-BOOST_AUTO_TEST_CASE(StrEqualIgnoreCaseTest)
-{
+TEST(CommonHelperTest, StrEqualIgnoreCaseTest) {
     using namespace SPTAG::Helper::StrUtils;
 
-    BOOST_CHECK(StrEqualIgnoreCase("Abcd", "Abcd"));
-    BOOST_CHECK(StrEqualIgnoreCase("Abcd", "abcd"));
-    BOOST_CHECK(StrEqualIgnoreCase("Abcd", "abCD"));
-    BOOST_CHECK(StrEqualIgnoreCase("Abcd-123", "abcd-123"));
-    BOOST_CHECK(StrEqualIgnoreCase(" ZZZ", " zzz"));
+    EXPECT_TRUE(StrEqualIgnoreCase("Abcd", "Abcd"));
+    EXPECT_TRUE(StrEqualIgnoreCase("Abcd", "abcd"));
+    EXPECT_TRUE(StrEqualIgnoreCase("Abcd", "abCD"));
+    EXPECT_TRUE(StrEqualIgnoreCase("Abcd-123", "abcd-123"));
+    EXPECT_TRUE(StrEqualIgnoreCase(" ZZZ", " zzz"));
 
-    BOOST_CHECK(!StrEqualIgnoreCase("abcd", "abcd1"));
-    BOOST_CHECK(!StrEqualIgnoreCase("Abcd", " abcd"));
-    BOOST_CHECK(!StrEqualIgnoreCase("000", "OOO"));
+    EXPECT_FALSE(StrEqualIgnoreCase("abcd", "abcd1"));
+    EXPECT_FALSE(StrEqualIgnoreCase("Abcd", " abcd"));
+    EXPECT_FALSE(StrEqualIgnoreCase("000", "OOO"));
 }
 
-
-
-BOOST_AUTO_TEST_SUITE_END()
+}

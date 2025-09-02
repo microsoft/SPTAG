@@ -29,7 +29,7 @@ void GenerateVectors(std::string fileName, SPTAG::SizeType rows, SPTAG::Dimensio
 	if (!of.is_open())
 	{
 		fprintf(stderr, "%s can't be opened.\n", fileName.c_str());
-		BOOST_CHECK(false);
+	GTEST_FAIL() << fileName << " can't be opened.";
 		return;
 	}
 
@@ -136,7 +136,7 @@ void TestHead(std::string configName, std::string OutputIDFile, std::string Outp
 	if (!config.is_open())
 	{
 		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
-		BOOST_CHECK(false);
+	GTEST_FAIL() << configName << " can't be opened.";
 		return;
 	}
 
@@ -180,7 +180,7 @@ void TestBuildHead(
 	if (!config.is_open())
 	{
 		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
-		BOOST_CHECK(false);
+			GTEST_FAIL() << configName << " can't be opened.";
 		return;
 	}
 
@@ -188,7 +188,7 @@ void TestBuildHead(
 		if (p_builderFile.empty())
 		{
 			fprintf(stderr, "no builder file for head index build.\n");
-			BOOST_CHECK(false);
+		GTEST_FAIL() << p_builderFile << " can't be opened.";
 			return;
 		}
 
@@ -201,7 +201,7 @@ void TestBuildHead(
 			if (!bf.is_open())
 			{
 				fprintf(stderr, "%s can't be opened.\n", p_builderFile.c_str());
-				BOOST_CHECK(false);
+				GTEST_FAIL() << p_builderFile << " can't be opened.";
 				return;
 			}
 			bf.close();
@@ -232,7 +232,7 @@ void TestBuildSSDIndex(std::string configName,
 	if (!config.is_open())
 	{
 		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
-		BOOST_CHECK(false);
+				GTEST_FAIL() << configName << " can't be opened.";
 		return;
 	}
 
@@ -247,7 +247,7 @@ void TestBuildSSDIndex(std::string configName,
 			if (!bf.is_open())
 			{
 				fprintf(stderr, "%s can't be opened.\n", p_headConfig.c_str());
-				BOOST_CHECK(false);
+				GTEST_FAIL() << p_headConfig << " can't be opened.";
 				return;
 			}
 			bf << "[Index]" << std::endl;
@@ -294,7 +294,7 @@ void TestSearchSSDIndex(
 	if (!config.is_open())
 	{
 		fprintf(stderr, "%s can't be opened.\n", configName.c_str());
-		BOOST_CHECK(false);
+		GTEST_FAIL() << configName << " can't be opened.";
 		return;
 	}
 
@@ -309,7 +309,7 @@ void TestSearchSSDIndex(
 			if (!bf.is_open())
 			{
 				fprintf(stderr, "%s can't be opened.\n", p_headConfig.c_str());
-				BOOST_CHECK(false);
+				GTEST_FAIL() << p_headConfig << " can't be opened.";
 				return;
 			}
 			bf << "[Index]" << std::endl;
@@ -394,7 +394,7 @@ void RunFromMap() {
 		);
 }
 
-BOOST_AUTO_TEST_SUITE(SSDServingTest)
+namespace SSDServingTestSuite {
 
 // #define RAW_VECTOR_NUM 1000
 #define VECTOR_NUM 1000
@@ -429,7 +429,7 @@ BOOST_AUTO_TEST_SUITE(SSDServingTest)
 #define SEARCH_SSD_RESULT(VT, DM, ALGO, FT, TFT) SSDTEST_DIRECTORY "test_search_ssd_"#VT"_"#DM"_"#ALGO"_"#FT"_"#TFT".result"
 
 #define GVQ(VT, FT) \
-BOOST_AUTO_TEST_CASE(GenerateVectorsQueries##VT##FT) { \
+TEST(SSDServingTest, GenerateVectorsQueries##VT##FT) { \
 boost::filesystem::create_directory(SSDTEST_DIRECTORY_NAME); \
 GenVec(VECTORS(VT, FT), SPTAG::VectorValueType::VT, SPTAG::VectorFileType::FT, VECTOR_NUM, VECTOR_DIM); \
 GenVec(QUERIES(VT, FT), SPTAG::VectorValueType::VT, SPTAG::VectorFileType::FT, QUERY_NUM, VECTOR_DIM); \
@@ -447,7 +447,7 @@ GVQ(Int8, XVEC)
 #undef GVQ
 
 #define WTEV(VT, DM, FT) \
-BOOST_AUTO_TEST_CASE(TestHead##VT##DM##FT) { \
+TEST(SSDServingTest, TestHead##VT##DM##FT) { \
 	std::string configName = SELECT_HEAD_CONFIG(VT, DM, FT); \
 	std::string OutputIDFile = HEAD_IDS(VT, DM, FT); \
 	std::string OutputVectorFile = HEAD_VECTORS(VT, DM, FT); \
@@ -516,7 +516,7 @@ WTEV(Int8, Cosine, XVEC)
 #undef WTEV
 
 #define BDHD(VT, DM, ALGO, FT) \
-BOOST_AUTO_TEST_CASE(TestBuildHead##VT##DM##ALGO##FT) { \
+TEST(SSDServingTest, TestBuildHead##VT##DM##ALGO##FT) { \
 	std::string configName = BUILD_HEAD_CONFIG(VT, DM, ALGO); \
 	std::string builderFile = BUILD_HEAD_BUILDER_CONFIG(VT, DM, ALGO); \
 	std::string base_config = CreateBaseConfig(SPTAG::VectorValueType::VT, SPTAG::DistCalcMethod::DM, SPTAG::IndexAlgoType::ALGO, VECTOR_DIM, \
@@ -607,7 +607,7 @@ BDHD(Int16, Cosine, KDT, XVEC)
 #undef BDHD
 
 #define BDSSD(VT, DM, ALGO, FT) \
-BOOST_AUTO_TEST_CASE(TestBuildSSDIndex##VT##DM##ALGO##FT) { \
+TEST(SSDServingTest, TestBuildSSDIndex##VT##DM##ALGO##FT) { \
 	std::string configName = BUILD_SSD_CONFIG(VT, DM, ALGO); \
 	std::string base_config = CreateBaseConfig(SPTAG::VectorValueType::VT, SPTAG::DistCalcMethod::DM, SPTAG::IndexAlgoType::ALGO, VECTOR_DIM, \
 		VECTORS(VT, FT), SPTAG::VectorFileType::FT, VECTOR_NUM, "", \
@@ -698,7 +698,7 @@ BDSSD(Int16, Cosine, KDT, XVEC)
 
 
 #define SCSSD(VT, DM, ALGO, FT, TFT) \
-BOOST_AUTO_TEST_CASE(TestSearchSSDIndex##VT##DM##ALGO##FT##TFT) { \
+TEST(SSDServingTest, TestSearchSSDIndex##VT##DM##ALGO##FT##TFT) { \
 	std::string configName = SEARCH_SSD_CONFIG(VT, DM, ALGO); \
 	std::string base_config = CreateBaseConfig(SPTAG::VectorValueType::VT, SPTAG::DistCalcMethod::DM, SPTAG::IndexAlgoType::ALGO, VECTOR_DIM, \
 		VECTORS(VT, FT), SPTAG::VectorFileType::FT, VECTOR_NUM, "", \
@@ -795,8 +795,8 @@ SCSSD(Int16, Cosine, KDT, XVEC, XVEC)
 #undef TDEFAULT
 #undef TXVEC
 
-BOOST_AUTO_TEST_CASE(RUN_FROM_MAP) {
+TEST(SSDServingTest, RUN_FROM_MAP) {
 	RunFromMap();
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+}

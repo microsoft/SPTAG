@@ -53,7 +53,7 @@ template <typename T>
 void PerfAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out)
 {
     std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -78,9 +78,9 @@ void PerfAdd(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<Vec
 
     Search<T>(vecIndex, queryset, k, truth);
 
-    BOOST_CHECK(ErrorCode::Success == vecIndex->SaveIndex(out));
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(out, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(ErrorCode::Success, vecIndex->SaveIndex(out));
+    ASSERT_EQ(ErrorCode::Success, VectorIndex::LoadIndex(out, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
     Search<T>(vecIndex, queryset, k, truth);
 }
 
@@ -88,7 +88,7 @@ template<typename T>
 void PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out)
 {
     std::shared_ptr<VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -97,8 +97,8 @@ void PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<V
     vecIndex->SetParameter("MaxCheck", "4096");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "8192");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     Search<T>(vecIndex, queryset, k, truth);
 }
 
@@ -211,21 +211,19 @@ void PTest(IndexAlgoType algo, std::string distCalcMethod)
     PerfAdd<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     PerfBuild<T>(algo, distCalcMethod, vecset, metaset, queryset, 10, truth, "testindices");
     std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(ErrorCode::Success, VectorIndex::LoadIndex("testindices", vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
     Search<T>(vecIndex, queryset, 10, truth);
 }
 
-BOOST_AUTO_TEST_SUITE(PerfTest)
+namespace PerfTest {
 
-BOOST_AUTO_TEST_CASE(BKTTest)
-{
+TEST(PerfTest, BKTTest) {
     PTest<std::int8_t>(IndexAlgoType::BKT, "Cosine");
 }
 
-BOOST_AUTO_TEST_CASE(KDTTest)
-{
+TEST(PerfTest, KDTTest) {
     PTest<std::int8_t>(IndexAlgoType::KDT, "Cosine");
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+}

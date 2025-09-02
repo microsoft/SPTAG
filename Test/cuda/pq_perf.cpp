@@ -3,10 +3,8 @@
 
 //#include "../inc/Test.h"
 
-#define BOOST_TEST_MODULE GPU
-
 #include <iostream>
-#include <boost/test/included/unit_test.hpp>
+#include "inc/Test.h"
 #include <boost/filesystem.hpp>
 #include <limits>
 
@@ -79,8 +77,8 @@ template<typename T>
 std::shared_ptr<VectorIndex> PerfBuild(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet>& vec, std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k, std::shared_ptr<VectorSet>& truth, std::string out, std::shared_ptr<COMMON::IQuantizer> quantizer)
 {
     std::shared_ptr<VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    vecIndex->SetQuantizer(quantizer);
-    BOOST_CHECK(nullptr != vecIndex);
+  vecIndex->SetQuantizer(quantizer);
+  ASSERT_NE(nullptr, vecIndex);
 
     if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -89,8 +87,8 @@ std::shared_ptr<VectorIndex> PerfBuild(IndexAlgoType algo, std::string distCalcM
     vecIndex->SetParameter("MaxCheck", "4096");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "8192");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+  ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+  ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     //Search<T>(vecIndex, queryset, k, truth);
     return vecIndex;
 }
@@ -177,11 +175,11 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
 
     if (fileexists(CODEBOOK_FILE.c_str()) && fileexists("quantest_quan_vector.bin") && fileexists("quantest_rec_vector.bin")) {
         auto ptr = SPTAG::f_createIO();
-        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
-        }
-        quantizer->LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+    if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+      GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
+    }
+  quantizer->LoadIQuantizer(ptr);
+  ASSERT_TRUE(quantizer != nullptr);
 
         std::shared_ptr<Helper::ReaderOptions> options(new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
         auto vectorReader = Helper::VectorSetReader::CreateInstance(options);
@@ -255,17 +253,17 @@ void GenerateReconstructData(std::shared_ptr<VectorSet>& real_vecset, std::share
 
 printf("After built, pq type:%d\n", (int)quantizer->GetQuantizerType());
         auto ptr = SPTAG::f_createIO();
-        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
-        }
+    if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
+      GTEST_FAIL() << "Cannot open CODEBOOK_FILE to write!";
+    }
 //        quantizer->SaveQuantizer(ptr);
         ptr->ShutDown();
 
-        if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
-        }
-        quantizer->LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+    if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in)) {
+      GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
+    }
+  quantizer->LoadIQuantizer(ptr);
+  ASSERT_TRUE(quantizer != nullptr);
 
         rec_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * n * m), GetEnumValueType<R>(), m, n));
         quan_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(std::uint8_t) * n * M), GetEnumValueType<std::uint8_t>(), M, n));
@@ -579,9 +577,9 @@ void DistancePerfRandomized(IndexAlgoType algo, DistCalcMethod distMethod)
 }    
 
 
-BOOST_AUTO_TEST_SUITE(GPUPQPerfTest)
+namespace GPUPQPerfTestSuite {
 
-BOOST_AUTO_TEST_CASE(GPUPQCosineTest)
+TEST(GPUPQPerfTest, GPUPQCosineTest)
 {
 
     DistancePerfSuite<float>(IndexAlgoType::BKT, DistCalcMethod::L2);
@@ -590,4 +588,4 @@ BOOST_AUTO_TEST_CASE(GPUPQCosineTest)
 
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+}
