@@ -44,6 +44,9 @@ public:
     void HandleBatchAsync(const http::request<http::string_body>& p_request,
                          std::function<void(http::response<http::string_body>)> p_callback);
     
+    void HandleUpdateAsync(const http::request<http::string_body>& p_request,
+                          std::function<void(http::response<http::string_body>)> p_callback);
+    
     // Health check and metrics
     http::response<http::string_body> HandleHealthCheck(const http::request<http::string_body>& p_request);
     http::response<http::string_body> HandleMetrics(const http::request<http::string_body>& p_request);
@@ -60,6 +63,10 @@ private:
     // Parse delete request
     bool ParseDeleteBody(const std::string& p_body, Socket::RemoteDeleteQuery& p_query,
                         std::string& p_error);
+    
+    // Parse update request
+    bool ParseUpdateBody(const std::string& p_body, Socket::RemoteDeleteQuery& p_deleteQuery,
+                        Socket::RemoteInsertQuery& p_insertQuery, std::string& p_error);
     
     // Convert HTTP request to internal query format
     Socket::RemoteQuery ParseSearchRequest(const std::string& p_body);
@@ -84,3 +91,4 @@ private:
 } // namespace SPTAG
 
 #endif // _SPTAG_HTTP_REQUESTHANDLER_H_
+

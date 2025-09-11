@@ -244,6 +244,17 @@ void Server::RegisterDefaultRoutes()
                 });
         });
     
+    // Update endpoint
+    RegisterRoute("POST", "/v1/update",
+        [this](HTTPConnectionID id, 
+               http::request<http::string_body>&& req,
+               std::shared_ptr<Connection> conn) {
+            m_requestHandler->HandleUpdateAsync(std::move(req),
+                [conn](http::response<http::string_body> resp) {
+                    conn->SendResponse(std::move(resp));
+                });
+        });
+    
     // Batch operations
     RegisterRoute("POST", "/v1/batch",
         [this](HTTPConnectionID id, 

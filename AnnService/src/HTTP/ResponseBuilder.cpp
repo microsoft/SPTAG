@@ -18,7 +18,8 @@ ResponseBuilder::~ResponseBuilder()
 
 std::string ResponseBuilder::BuildSearchResponse(const std::vector<Socket::IndexSearchResult>& p_results,
                                                 bool p_success,
-                                                const std::string& p_error)
+                                                const std::string& p_error,
+                                                int64_t p_timingMs)
 {
     std::stringstream ss;
     ss << "{";
@@ -51,6 +52,10 @@ std::string ResponseBuilder::BuildSearchResponse(const std::vector<Socket::Index
         }
         
         ss << "]"; // results
+        
+        if (p_timingMs >= 0) {
+            ss << ",\"timing_ms\":" << p_timingMs;
+        }
     } else {
         ss << "\"status\":\"error\",";
         ss << "\"error\":\"" << EscapeJson(p_error) << "\"";
@@ -62,7 +67,8 @@ std::string ResponseBuilder::BuildSearchResponse(const std::vector<Socket::Index
 
 std::string ResponseBuilder::BuildInsertResponse(const Socket::RemoteInsertDeleteResult& p_result,
                                                 bool p_success,
-                                                const std::string& p_error)
+                                                const std::string& p_error,
+                                                int64_t p_timingMs)
 {
     std::stringstream ss;
     ss << "{";
@@ -71,6 +77,16 @@ std::string ResponseBuilder::BuildInsertResponse(const Socket::RemoteInsertDelet
         ss << "\"status\":\"success\",";
         ss << "\"inserted\":" << p_result.m_processedCount << ",";
         
+        // Include inserted vector IDs if available
+        if (!p_result.m_newVectorIds.empty()) {
+            ss << "\"inserted_ids\":[";
+            for (size_t i = 0; i < p_result.m_newVectorIds.size(); ++i) {
+                if (i > 0) ss << ",";
+                ss << p_result.m_newVectorIds[i];
+            }
+            ss << "],";
+        }
+        
         if (p_result.m_status == Socket::RemoteInsertDeleteResult::ResultStatus::Success) {
             ss << "\"result\":\"completed\"";
         } else {
@@ -78,6 +94,10 @@ std::string ResponseBuilder::BuildInsertResponse(const Socket::RemoteInsertDelet
             ss << "\"errors\":[";
             // Add error details if available
             ss << "]";
+        }
+        
+        if (p_timingMs >= 0) {
+            ss << ",\"timing_ms\":" << p_timingMs;
         }
     } else {
         ss << "\"status\":\"error\",";
@@ -90,7 +110,8 @@ std::string ResponseBuilder::BuildInsertResponse(const Socket::RemoteInsertDelet
 
 std::string ResponseBuilder::BuildDeleteResponse(const Socket::RemoteInsertDeleteResult& p_result,
                                                 bool p_success,
-                                                const std::string& p_error)
+                                                const std::string& p_error,
+                                                int64_t p_timingMs)
 {
     std::stringstream ss;
     ss << "{";
@@ -99,6 +120,16 @@ std::string ResponseBuilder::BuildDeleteResponse(const Socket::RemoteInsertDelet
         ss << "\"status\":\"success\",";
         ss << "\"deleted\":" << p_result.m_processedCount << ",";
         
+        // Include deleted vector IDs if available
+        if (!p_result.m_newVectorIds.empty()) {
+            ss << "\"deleted_ids\":[";
+            for (size_t i = 0; i < p_result.m_newVectorIds.size(); ++i) {
+                if (i > 0) ss << ",";
+                ss << p_result.m_newVectorIds[i];
+            }
+            ss << "],";
+        }
+        
         if (p_result.m_status == Socket::RemoteInsertDeleteResult::ResultStatus::Success) {
             ss << "\"result\":\"completed\"";
         } else {
@@ -106,6 +137,10 @@ std::string ResponseBuilder::BuildDeleteResponse(const Socket::RemoteInsertDelet
             ss << "\"errors\":[";
             // Add error details if available
             ss << "]";
+        }
+        
+        if (p_timingMs >= 0) {
+            ss << ",\"timing_ms\":" << p_timingMs;
         }
     } else {
         ss << "\"status\":\"error\",";

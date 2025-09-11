@@ -35,7 +35,8 @@ COPY AnnService ./AnnService/
 COPY Test ./Test/
 COPY Wrappers ./Wrappers/
 COPY GPUSupport ./GPUSupport/
-COPY ThirdParty ./ThirdParty/
+COPY base ./base/
+COPY build_murren_linux.ini ./
 
 # Build with C++17 support for filesystem and proper Boost configuration
 RUN mkdir build && cd build && \
@@ -48,6 +49,9 @@ RUN mkdir build && cd build && \
     make -j$(nproc) && \
     cd ..
 
+RUN mkdir -p /app/base_index && \
+    ./Release/indexbuilder -a SPANN -c build_murren_linux.ini -d 256 -v Int8 -f TXT -o /app/base_index -i /app/base/base_vector.tsv -t 16 -m true
+
 # Create directories for runtime data and config
 RUN mkdir -p /app/data /app/config /app/logs
 
@@ -58,11 +62,11 @@ COPY AnnService.docker.ini /app/config/AnnService.ini
 WORKDIR /app/Release
 
 # Expose both TCP socket port and HTTP port
-EXPOSE 8000 8080
+EXPOSE 8888
 
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8888/health || exit 1
 
 # For HTTP/Socket mode:
 CMD ["./server", "-m", "http", "-c", "/app/config/AnnService.ini"]

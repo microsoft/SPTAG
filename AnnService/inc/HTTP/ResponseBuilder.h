@@ -25,17 +25,20 @@ public:
     // Build JSON response from search results
     std::string BuildSearchResponse(const std::vector<Socket::IndexSearchResult>& p_results,
                                    bool p_success = true,
-                                   const std::string& p_error = "");
+                                   const std::string& p_error = "",
+                                   int64_t p_timingMs = -1);
     
     // Build JSON response from insert results
     std::string BuildInsertResponse(const Socket::RemoteInsertDeleteResult& p_result,
                                    bool p_success = true,
-                                   const std::string& p_error = "");
+                                   const std::string& p_error = "",
+                                   int64_t p_timingMs = -1);
     
     // Build JSON response from delete results
     std::string BuildDeleteResponse(const Socket::RemoteInsertDeleteResult& p_result,
                                    bool p_success = true,
-                                   const std::string& p_error = "");
+                                   const std::string& p_error = "",
+                                   int64_t p_timingMs = -1);
     
     // Build batch response
     std::string BuildBatchResponse(const std::vector<std::string>& p_results,
