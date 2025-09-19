@@ -68,34 +68,75 @@ class DataReader:
         data = data / square.reshape([-1, 1])
         return data
 
-    def readbatch(self):
-        numQuerys = self.query.shape[0]
-        i = 0
-        if self.isbinary:
-            while i < numQuerys:
-                vec = self.fin.read((np.dtype(self.type).itemsize)*self.featuredim)
-                if len(vec) == 0: break
-                if len(vec) != (np.dtype(self.type).itemsize)*self.featuredim:
-                    print ("%d vector cannot be read correctly: require %d bytes but only read %d bytes" % (i, (np.dtype(self.type).itemsize)*self.featuredim, len(vec)))
+   import numpy as np
+
+def readbatch(self):
+    """
+    Reads a batch of queries from a file, handling both binary and text formats.
+    Optimized for clarity and performance by reducing redundant calculations and using vectorized operations.
+    """
+    num_queries = self.query.shape[0]
+    num_read_queries = 0
+
+    if self.isbinary:
+        # Pre-calculate the item size to avoid redundant calls.
+        item_size = np.dtype(self.type).itemsize
+        bytes_to_read = item_size * self.featuredim
+
+        while num_read_queries < num_queries:
+            vec = self.fin.read(bytes_to_read)
+            if not vec:
+                break
+            
+            if len(vec) != bytes_to_read:
+                print(f"Vector {num_read_queries} cannot be read correctly: require {bytes_to_read} bytes but only read {len(vec)} bytes")
+                # Continue loop only if it makes sense for the application logic.
+                # Otherwise, consider breaking.
+                continue
+            
+            # Use np.frombuffer for efficient, zero-copy conversion.
+            # Avoid the expensive .astype() if possible by ensuring `self.mytype` is the same as `self.type`.
+            self.query[num_read_queries] = np.frombuffer(vec, dtype=self.type)
+            num_read_queries += 1
+    else:
+        # Use a generator to read lines efficiently.
+        # This approach is generally faster than readline() in a while loop.
+        lines = (self.fin.readline() for _ in range(num_queries))
+
+        for line in lines:
+            if not line:
+                break
+            
+            try:
+                # Find the last tab to get the data string.
+                # A single rfind is faster than creating an array of strings with split('\t').
+                data_start_index = line.rfind('\t') + 1
+                items_str = line[data_start_index:].strip()
+
+                # Parse the items string and convert to float array.
+                items = np.array(items_str.split('|'), dtype=float)
+                
+                if items.size < self.featuredim:
+                    # Skip incomplete rows.
                     continue
-                self.query[i] = np.frombuffer(vec, dtype=self.type).astype(self.mytype)
-                i += 1
-        else:
-             while i < numQuerys:
-                 line = self.fin.readline()
-                 if len(line) == 0: break
 
-                 index = line.rfind("\t")
-                 if index < 0: continue
+                # Use vectorized assignment to copy the parsed data.
+                self.query[num_read_queries, :self.featuredim] = items[:self.featuredim]
+                num_read_queries += 1
+            except (ValueError, IndexError) as e:
+                # Handle potential parsing errors gracefully.
+                print(f"Error parsing line {num_read_queries}: {e}")
+                continue
 
-                 items = line[index+1:].split("|")
-                 if len(items) < self.featuredim: continue
-
-                 for j in range(self.featuredim): self.query[i, j] = float(items[j])
-                 i += 1
-        print ('Load batch query size:%r' % (i))
-        if self.normalize != 0: return i, self.norm(self.query[0:i])
-        return i, self.query[0:i]
+    print(f'Loaded batch with {num_read_queries} queries.')
+    
+    # Use slice-based operations to avoid creating a new array.
+    query_slice = self.query[:num_read_queries]
+    
+    if self.normalize:
+        return num_read_queries, self.norm(query_slice)
+    
+    return num_read_queries, query_slice
             
     def readallbatches(self):
         numQuerys = self.query.shape[0]
