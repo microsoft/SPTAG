@@ -1,12 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-//#include "../inc/Test.h"
+// #include "../inc/Test.h"
 
-#define BOOST_TEST_MODULE GPU
-
+#include "inc/Test.h"
 #include <boost/filesystem.hpp>
-#include <boost/test/included/unit_test.hpp>
 #include <iostream>
 #include <limits>
 
@@ -82,8 +80,8 @@ std::shared_ptr<MetadataSet>& meta, std::shared_ptr<VectorSet>& queryset, int k,
 std::string out, std::shared_ptr<COMMON::IQuantizer> quantizer)
 {
     std::shared_ptr<VectorIndex> vecIndex = SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    vecIndex->SetQuantizer(quantizer);
-    BOOST_CHECK(nullptr != vecIndex);
+  vecIndex->SetQuantizer(quantizer);
+  ASSERT_NE(nullptr, vecIndex);
 
     if (algo == IndexAlgoType::KDT) vecIndex->SetParameter("KDTNumber", "2");
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
@@ -92,8 +90,8 @@ std::string out, std::shared_ptr<COMMON::IQuantizer> quantizer)
     vecIndex->SetParameter("MaxCheck", "4096");
     vecIndex->SetParameter("MaxCheckForRefineGraph", "8192");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+  ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+  ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     //Search<T>(vecIndex, queryset, k, truth);
     return vecIndex;
 }
@@ -199,10 +197,10 @@ void GenerateReconstructData(std::shared_ptr<VectorSet> &real_vecset, std::share
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in))
         {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
         }
         quantizer->LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+        ASSERT_TRUE(quantizer != nullptr);
 
         std::shared_ptr<Helper::ReaderOptions> options(
             new Helper::ReaderOptions(GetEnumValueType<R>(), m, VectorFileType::DEFAULT));
@@ -293,17 +291,17 @@ void GenerateReconstructData(std::shared_ptr<VectorSet> &real_vecset, std::share
         auto ptr = SPTAG::f_createIO();
         if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out))
         {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to write!";
         }
         //        quantizer->SaveQuantizer(ptr);
         ptr->ShutDown();
 
         if (!ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::in))
         {
-            BOOST_ASSERT("Canot Open CODEBOOK_FILE to read!" == "Error");
+            GTEST_FAIL() << "Cannot open CODEBOOK_FILE to read!";
         }
         quantizer->LoadIQuantizer(ptr);
-        BOOST_ASSERT(quantizer);
+        ASSERT_TRUE(quantizer != nullptr);
 
         rec_vecset.reset(new BasicVectorSet(ByteArray::Alloc(sizeof(R) * n * m), GetEnumValueType<R>(), m, n));
         quan_vecset.reset(
@@ -659,9 +657,10 @@ template <typename R> void DistancePerfRandomized(IndexAlgoType algo, DistCalcMe
     SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "GPU time - baseline:%0.3lf, PQ:%0.3lf\n", GPU_baseline_t, GPU_PQ_t);
 }
 
-BOOST_AUTO_TEST_SUITE(GPUPQPerfTest)
+namespace GPUPQPerfTestSuite
+{
 
-BOOST_AUTO_TEST_CASE(GPUPQCosineTest)
+TEST(GPUPQPerfTest, GPUPQCosineTest)
 {
 
     DistancePerfSuite<float>(IndexAlgoType::BKT, DistCalcMethod::L2);
@@ -669,4 +668,4 @@ BOOST_AUTO_TEST_CASE(GPUPQCosineTest)
     DistancePerfRandomized<float>(IndexAlgoType::BKT, DistCalcMethod::L2);
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace GPUPQPerfTestSuite

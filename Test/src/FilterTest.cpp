@@ -16,21 +16,21 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
 
     std::shared_ptr<SPTAG::VectorIndex> vecIndex =
         SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
 template <typename T> void SearchWithFilter(const std::string folder, T *vec, SPTAG::SizeType n, int k)
 {
     std::cout << "start search with filter" << std::endl;
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
     std::string value = "2";
     std::function<bool(const SPTAG::ByteArray &)> filterFunction = [value](const SPTAG::ByteArray &meta) -> bool {
         std::string metaValue((char *)meta.Data(), meta.Length());
@@ -51,7 +51,7 @@ template <typename T> void SearchWithFilter(const std::string folder, T *vec, SP
         std::cout << std::endl;
         for (int j = 0; j < k; j++)
         {
-            BOOST_CHECK(resmeta.find("2") == resmeta.end());
+            EXPECT_EQ(resmeta.end(), resmeta.find("2"));
         }
         vec += vecIndex->GetFeatureDim();
     }
@@ -104,11 +104,12 @@ template <typename T> void FTest(SPTAG::IndexAlgoType algo, std::string distCalc
     SearchWithFilter<T>("testindices", query.data(), q, k);
 }
 
-BOOST_AUTO_TEST_SUITE(FilterTest)
+namespace FilterTest
+{
 
-BOOST_AUTO_TEST_CASE(BKTTest)
+TEST(FilterTest, BKTTest)
 {
     FTest<float>(SPTAG::IndexAlgoType::BKT, "L2");
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace FilterTest

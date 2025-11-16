@@ -24,7 +24,7 @@ template <typename T> void test(int high)
 {
     SPTAG::DimensionType dimension = random<SPTAG::DimensionType>(256, 2);
     T *X = new T[dimension], *Y = new T[dimension];
-    BOOST_ASSERT(X != nullptr && Y != nullptr);
+    ASSERT_TRUE(X != nullptr && Y != nullptr);
     for (SPTAG::DimensionType i = 0; i < dimension; i++)
     {
         X[i] = random<T>(high, -high);
@@ -39,7 +39,7 @@ template <typename T> void test(int high)
     SPTAG::COMMON::SIMDUtils::ComputeSum(X_copy, Y, dimension);
     for (SPTAG::DimensionType i = 0; i < dimension; i++)
     {
-        BOOST_CHECK_CLOSE_FRACTION(double(X[i]), double(X_copy[i]), 1e-5);
+        EXPECT_NEAR(double(X[i]), double(X_copy[i]), 1e-5 * X[i]);
     }
 
     delete[] X;
@@ -47,13 +47,14 @@ template <typename T> void test(int high)
     delete[] X_copy;
 }
 
-BOOST_AUTO_TEST_SUITE(SIMDTest)
+namespace SIMDTest
+{
 
-BOOST_AUTO_TEST_CASE(TestDistanceComputation)
+TEST(SIMDTest, TestDistanceComputation)
 {
     test<float>(1);
     test<std::int8_t>(127);
     test<std::int16_t>(32767);
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace SIMDTest

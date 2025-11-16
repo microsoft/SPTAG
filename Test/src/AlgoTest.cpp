@@ -16,7 +16,7 @@ void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_pt
 
     std::shared_ptr<SPTAG::VectorIndex> vecIndex =
         SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     if (algo != SPTAG::IndexAlgoType::SPANN)
     {
@@ -45,8 +45,8 @@ void Build(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shared_pt
         vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
     }
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
 template <typename T>
@@ -56,7 +56,7 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
 
     std::shared_ptr<SPTAG::VectorIndex> vecIndex =
         SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     if (algo != SPTAG::IndexAlgoType::SPANN)
     {
@@ -85,15 +85,15 @@ void BuildWithMetaMapping(SPTAG::IndexAlgoType algo, std::string distCalcMethod,
         vecIndex->SetParameter("SearchInternalResultNum", "64", "BuildSSDIndex");
     }
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta, true));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta, true));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
 template <typename T> void Search(const std::string folder, T *vec, SPTAG::SizeType n, int k, std::string *truthmeta)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
 
     for (SPTAG::SizeType i = 0; i < n; i++)
     {
@@ -109,7 +109,7 @@ template <typename T> void Search(const std::string folder, T *vec, SPTAG::SizeT
         std::cout << std::endl;
         for (int j = 0; j < k; j++)
         {
-            BOOST_CHECK(resmeta.find(truthmeta[i * k + j]) != resmeta.end());
+            EXPECT_NE(resmeta.end(), resmeta.find(truthmeta[i * k + j]));
         }
         vec += vecIndex->GetFeatureDim();
     }
@@ -121,11 +121,11 @@ void Add(const std::string folder, std::shared_ptr<SPTAG::VectorSet> &vec, std::
          const std::string out)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->AddIndex(vec, meta));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->AddIndex(vec, meta));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     vecIndex.reset();
 }
 
@@ -135,7 +135,7 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex =
         SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
@@ -158,21 +158,21 @@ void AddOneByOne(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::sha
 
     Sleep(10000);
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
 template <typename T> void Delete(const std::string folder, T *vec, SPTAG::SizeType n, const std::string out)
 {
     std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-    BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->DeleteIndex((const void *)vec, n));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->DeleteIndex((const void *)vec, n));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
     vecIndex.reset();
 }
 
-template <typename T> void Test(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
+template <typename T> void RunTest(SPTAG::IndexAlgoType algo, std::string distCalcMethod)
 {
     SPTAG::SizeType n = 2000, q = 3;
     SPTAG::DimensionType m = 10;
@@ -244,21 +244,22 @@ template <typename T> void Test(SPTAG::IndexAlgoType algo, std::string distCalcM
     }
 }
 
-BOOST_AUTO_TEST_SUITE(AlgoTest)
-
-BOOST_AUTO_TEST_CASE(KDTTest)
+namespace AlgoTest
 {
-    Test<float>(SPTAG::IndexAlgoType::KDT, "L2");
+
+TEST(AlgoTest, KDTTest)
+{
+    RunTest<float>(SPTAG::IndexAlgoType::KDT, "L2");
 }
 
-BOOST_AUTO_TEST_CASE(BKTTest)
+TEST(AlgoTest, BKTTest)
 {
-    Test<float>(SPTAG::IndexAlgoType::BKT, "L2");
+    RunTest<float>(SPTAG::IndexAlgoType::BKT, "L2");
 }
 
-BOOST_AUTO_TEST_CASE(SPANNTest)
+TEST(AlgoTest, SPANNTest)
 {
-    Test<float>(SPTAG::IndexAlgoType::SPANN, "L2");
+    RunTest<float>(SPTAG::IndexAlgoType::SPANN, "L2");
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace AlgoTest

@@ -17,14 +17,16 @@ template <typename T>
 void BuildIndex(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<VectorSet> &vec,
                 std::shared_ptr<MetadataSet> &meta, const std::string out)
 {
-    std::shared_ptr<VectorIndex> vecIndex =
-        VectorIndex::CreateInstance(algo, GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+
+    std::shared_ptr<SPTAG::VectorIndex> vecIndex =
+        SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
+    ASSERT_NE(nullptr, vecIndex);
 
     if (algo != IndexAlgoType::SPANN)
     {
         vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
         vecIndex->SetParameter("NumberOfThreads", "16");
+        vecIndex->SetParameter("MaxCheck", "5");
     }
     else
     {
@@ -49,19 +51,16 @@ void BuildIndex(IndexAlgoType algo, std::string distCalcMethod, std::shared_ptr<
         vecIndex->SetParameter("MaxCheck", "8192", "BuildSSDIndex");
     }
 
-    BOOST_CHECK(ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
-    BOOST_CHECK(ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
-template <typename T>
-void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::string *truthmeta)
+template <typename T> void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::string *truthmeta)
 {
     std::shared_ptr<VectorIndex> vecIndex;
 
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex(folder, vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
-    vecIndex->SetParameter("MaxCheck", "5", "BuildSSDIndex");
-    vecIndex->UpdateIndex();
+    ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(folder, vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
 
     std::shared_ptr<ResultIterator> resultIterator = vecIndex->GetIterator(vec);
     // std::cout << "relaxedMono:" << resultIterator->GetRelaxedMono() << std::endl;
@@ -73,13 +72,13 @@ void SearchIterativeBatch(const std::string folder, T *vec, SizeType n, std::str
         int resultCount = results->GetResultNum();
         if (resultCount <= 0)
             break;
-        BOOST_CHECK(resultCount == batch);
+        ASSERT_EQ(resultCount, batch);
         for (int j = 0; j < resultCount; j++)
         {
 
-            BOOST_CHECK(std::string((char *)((results->GetMetadata(j)).Data()), (results->GetMetadata(j)).Length()) ==
-                        truthmeta[ri]);
-            BOOST_CHECK(results->GetResult(j)->RelaxedMono == true);
+            EXPECT_EQ(std::string((char *)((results->GetMetadata(j)).Data()), (results->GetMetadata(j)).Length()),
+                      truthmeta[ri]);
+            EXPECT_TRUE(results->GetResult(j)->RelaxedMono == true);
             std::cout << "Result[" << ri << "] VID:" << results->GetResult(j)->VID
                       << " Dist:" << results->GetResult(j)->Dist
                       << " RelaxedMono:" << results->GetResult(j)->RelaxedMono << std::endl;
@@ -134,6 +133,9 @@ template <typename T> void TestIterativeScan(IndexAlgoType algo, std::string dis
     SearchIterativeBatch<T>("testindices", query.data(), q, truthmeta1);
 }
 
+namespace IterativeScanTest
+{
+
 template <typename T>
 float EvaluateRecall(const std::vector<QueryResult> &res, std::shared_ptr<VectorIndex> &vecIndex,
                      std::shared_ptr<VectorSet> &queryset, std::shared_ptr<VectorSet> &truth,
@@ -186,8 +188,8 @@ template <typename T> void TestIterativeScanRandom(IndexAlgoType algo, std::stri
 
     BuildIndex<T>(algo, distCalcMethod, vecset, metaset, "testindices");
     std::shared_ptr<VectorIndex> vecIndex;
-    BOOST_CHECK(ErrorCode::Success == VectorIndex::LoadIndex("testindices", vecIndex));
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_EQ(ErrorCode::Success, VectorIndex::LoadIndex("testindices", vecIndex));
+    ASSERT_NE(nullptr, vecIndex);
 
     std::vector<QueryResult> res(queryset->Count(), QueryResult(nullptr, k, true));
     std::vector<QueryResult> resiter(queryset->Count(), QueryResult(nullptr, k, true));
@@ -206,12 +208,14 @@ template <typename T> void TestIterativeScanRandom(IndexAlgoType algo, std::stri
         {
             auto results = resultIterator->Next(batch);
             int resultCount = results->GetResultNum();
-            if (resultCount <= 0) break;
-            BOOST_CHECK(resultCount == batch);
+            if (resultCount <= 0)
+                break;
+            EXPECT_EQ(resultCount, batch);
             for (int j = 0; j < resultCount; j++)
             {
                 relaxMono = results->GetResult(j)->RelaxedMono;
-                ((COMMON::QueryResultSet<T> *)(&resiter[i]))->AddPoint(results->GetResult(j)->VID, results->GetResult(j)->Dist);
+                ((COMMON::QueryResultSet<T> *)(&resiter[i]))
+                    ->AddPoint(results->GetResult(j)->VID, results->GetResult(j)->Dist);
             }
             ri += resultCount;
             iterscanned = results->GetScanned();
@@ -224,21 +228,19 @@ template <typename T> void TestIterativeScanRandom(IndexAlgoType algo, std::stri
               << " Iterator Recall:" << EvaluateRecall<T>(resiter, vecIndex, queryset, truth, vecset, k) << std::endl;
 }
 
-BOOST_AUTO_TEST_SUITE(IterativeScanTest)
-
-BOOST_AUTO_TEST_CASE(BKTTest)
+TEST(IterativeScanTest, BKTTest)
 {
     TestIterativeScan<float>(IndexAlgoType::BKT, "L2");
 }
 
-BOOST_AUTO_TEST_CASE(BKTRandomTest)
+TEST(IterativeScanTest, BKTRandomTest)
 {
     TestIterativeScanRandom<int8_t>(IndexAlgoType::BKT, "L2");
 }
 
-BOOST_AUTO_TEST_CASE(SPANNRandomTest)
+TEST(IterativeScanTest, SPANNRandomTest)
 {
     TestIterativeScanRandom<int8_t>(IndexAlgoType::SPANN, "L2");
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace IterativeScanTest

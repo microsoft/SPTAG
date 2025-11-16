@@ -22,13 +22,13 @@ void BuildIndex(SPTAG::IndexAlgoType algo, std::string distCalcMethod, std::shar
 
     std::shared_ptr<SPTAG::VectorIndex> vecIndex =
         SPTAG::VectorIndex::CreateInstance(algo, SPTAG::GetEnumValueType<T>());
-    BOOST_CHECK(nullptr != vecIndex);
+    ASSERT_NE(nullptr, vecIndex);
 
     vecIndex->SetParameter("DistCalcMethod", distCalcMethod);
     vecIndex->SetParameter("NumberOfThreads", "16");
 
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->BuildIndex(vec, meta));
-    BOOST_CHECK(SPTAG::ErrorCode::Success == vecIndex->SaveIndex(out));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->BuildIndex(vec, meta));
+    ASSERT_EQ(SPTAG::ErrorCode::Success, vecIndex->SaveIndex(out));
 }
 
 float rankFunc(std::vector<float> in)
@@ -45,8 +45,8 @@ void MultiIndexSearch(unsigned int n, std::vector<std::vector<T>> &queries, int 
     for (unsigned int i = 0; i < n; i++)
     {
         std::shared_ptr<SPTAG::VectorIndex> vecIndex;
-        BOOST_CHECK(SPTAG::ErrorCode::Success == SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
-        BOOST_CHECK(nullptr != vecIndex);
+        ASSERT_EQ(SPTAG::ErrorCode::Success, SPTAG::VectorIndex::LoadIndex(indexName(i).c_str(), vecIndex));
+        ASSERT_NE(nullptr, vecIndex);
         vecIndices.push_back(vecIndex);
         p_targets.push_back(queries[i].data());
     }
@@ -125,11 +125,12 @@ template <typename T> void TestMultiIndexScanN(SPTAG::IndexAlgoType algo, std::s
     MultiIndexSearch<T>(n, queries, k, false, 10);
 }
 
-BOOST_AUTO_TEST_SUITE(MultiIndexScanTest)
+namespace MultiIndexScanTest
+{
 
-BOOST_AUTO_TEST_CASE(BKTTest)
+TEST(MultiIndexScanTest, BKTTest)
 {
     TestMultiIndexScanN<float>(SPTAG::IndexAlgoType::BKT, "L2", 2);
 }
 
-BOOST_AUTO_TEST_SUITE_END()
+} // namespace MultiIndexScanTest
