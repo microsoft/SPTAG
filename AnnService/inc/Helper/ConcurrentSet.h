@@ -83,6 +83,8 @@ namespace SPTAG
                 typedef typename std::unordered_map<K, V>::iterator iterator;
 
             public:
+                using value_type = std::pair<const K, V>;
+
                 ConcurrentMap(int capacity = 8) { m_lock.reset(new std::shared_timed_mutex); m_data.reserve(capacity); }
 
                 ~ConcurrentMap() {}
@@ -126,7 +128,20 @@ namespace SPTAG
             template <typename T>
             class ConcurrentQueue
             {
+            private:
+                // Custom queue class that exposes the underlying container
+                template<typename U>
+                class AccessibleQueue : public std::queue<U>
+                {
+                public:
+                    using std::queue<U>::c;  // Make the protected member public
+                };
+
             public:
+                using value_type = T;
+                using Container = typename std::queue<T>::container_type;
+                using iterator = typename Container::iterator;
+                using const_iterator = typename Container::const_iterator;
 
                 ConcurrentQueue() {}
 
@@ -149,8 +164,51 @@ namespace SPTAG
                     return true;
                 }
 
+                bool empty() const
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    return m_queue.empty();
+                }
+
+                size_t size() const
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    return m_queue.size();
+                }
+
+                size_t unsafe_size() const
+                {
+                    return m_queue.size();
+                }
+
+                // Note: These unsafe iterators provide access to the underlying container
+                // but should only be used when external synchronization is provided
+                iterator unsafe_begin()
+                {
+                    AccessibleQueue<T>* accessible = reinterpret_cast<AccessibleQueue<T>*>(&m_queue);
+                    return accessible->c.begin();
+                }
+
+                iterator unsafe_end()
+                {
+                    AccessibleQueue<T>* accessible = reinterpret_cast<AccessibleQueue<T>*>(&m_queue);
+                    return accessible->c.end();
+                }
+
+                const_iterator unsafe_begin() const
+                {
+                    const AccessibleQueue<T>* accessible = reinterpret_cast<const AccessibleQueue<T>*>(&m_queue);
+                    return accessible->c.begin();
+                }
+
+                const_iterator unsafe_end() const
+                {
+                    const AccessibleQueue<T>* accessible = reinterpret_cast<const AccessibleQueue<T>*>(&m_queue);
+                    return accessible->c.end();
+                }
+
             protected:
-                std::mutex m_lock;
+                mutable std::mutex m_lock;
                 std::queue<T> m_queue;
             };
 

@@ -40,21 +40,18 @@ echo "go to SPFresh Directory"
 fi
 
 cd Release
-dataset="sift"
-datatype='UInt8'
-dim=128
-basefile="base.1B.u8bin"
-queryfile="query.public.10K.u8bin"
-
-storage=FILEIO
-ssdpath=/mnt_ssd/data2/cheqi/tmp/
-checkpointpath=/mnt_ssd/data1/cheqi/tmp/
-testscale="1m"
-updateto="2m"
-testscale_number=1000000
-updateto_number=2000000
-query_number=10000
+dataset="murren"
+testscale="500k"
+updateto="1m"
+datatype='Int8'
+dim=256
+testscale_number=500000
+updateto_number=1000000
+query_number=26992
 batch_size=10000
+double_batch_size=20000
+basefile="murren_1m.i8bin"
+queryfile="murren_queries.i8bin"
 
 if [ "$1" == "create_dataset" ]; then
 mkdir -p ${dataset}1b
@@ -68,8 +65,21 @@ if [ "$dataset" == "sift" ]; then
     if [ ! -f "$queryfile" ]; then
         wget https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/bigann/$queryfile
     fi
+elif [ "$dataset" == "murren" ]; then
+    echo "Setting up murren dataset..."
+    
+    # Copy your dataset files to the working directory
+    if [ ! -f "$basefile" ]; then
+        echo "Copying base dataset: $basefile"
+        cp /mnt/spfreshrecent/converted_data/murren_1m.i8bin $basefile
+    fi
+    if [ ! -f "$queryfile" ]; then
+        echo "Copying query dataset: $queryfile"
+        cp /mnt/spfreshrecent/converted_data/murren_queries.i8bin $queryfile
+    fi
+    echo "Murren dataset setup complete."
 else
-    #TODO: download spacev dataset
+    #TODO: download spacev dataset or other datasets
     echo "not support $dataset..."
 fi
 
@@ -172,7 +182,7 @@ GenerateTruth=true
 [SearchSSDIndex]
 ResultNum=100
 NumberOfThreads=16" > genTruth.ini
-for i in {0..99}
+for i in {0..49}
 do
     echo "start batch $i..."
     $toolpath/usefultool --GenTrace true --vectortype $datatype --VectorPath $dataset.$updateto.bin --filetype DEFAULT --UpdateSize $batch_size --BaseNum $testscale_number --ReserveNum $testscale_number --CurrentListFileName ${dataset}${testscale}_update_current --ReserveListFileName ${dataset}${testscale}_update_reserve --TraceFileName ${dataset}${testscale}_update_trace --NewDataSetFileName ${dataset}${testscale}_update_set -d $dim --Batch $i -f DEFAULT
@@ -190,8 +200,6 @@ cd ..
 fi
 
 if [ "$1" == "build_index" ]; then
-sudo rm -rf $ssdpath/*
-
 echo "[Base]
 ValueType=$datatype
 DistCalcMethod=L2
@@ -209,7 +217,7 @@ WarmupPath=
 WarmupType=DEFAULT
 WarmupSize=$query_number
 WarmupDelimiter=
-TruthPath=${dataset}1b/${dataset}${testscale}_truth
+TruthPath=${dataset}1b/
 TruthType=DEFAULT
 GenerateTruth=false
 HeadVectorIDs=head_vectors_ID_$datatype\_L2_base_DEFUALT.bin
@@ -218,7 +226,7 @@ IndexDirectory=store_${dataset}${testscale}/
 HeadIndexFolder=head_index
 
 [SelectHead]
-isExecute=false
+isExecute=true
 TreeNumber=1
 BKTKmeansK=32
 BKTLeafSize=8
@@ -237,59 +245,19 @@ RecursiveCheckSmallCluster=true
 PrintSizeCount=true
 
 [BuildHead]
-isExecute=false
+isExecute=true
 NumberOfThreads=16
+RefineIterations=3
 
 [BuildSSDIndex]
 isExecute=true
 BuildSsdIndex=true
-InternalResultNum=64
+InternalResultNum=128
 NumberOfThreads=16
 ReplicaCount=8
 PostingPageLimit=4
 OutputEmptyReplicaID=1
-TmpDir=store_${dataset}${testscale}/tmpdir
-Storage=${storage}
-SpdkBatchSize=64
-ExcludeHead=false
-UseDirectIO=false
-ResultNum=10
-SearchInternalResultNum=64
-SearchThreadNum=2
-SearchTimes=1
-Update=true
-SteadyState=true
-Days=100
-InsertThreadNum=1
-AppendThreadNum=1
-ReassignThreadNum=0
-TruthFilePrefix=${dataset}1b/
-FullVectorPath=${dataset}1b/$dataset.$updateto.bin
-DisableReassign=false
-ReassignK=64
-LatencyLimit=50.0
-CalTruth=true
-SearchPostingPageLimit=4
-MaxDistRatio=1000000
-SearchDuringUpdate=true
-MergeThreshold=10
-UpdateFilePrefix=${dataset}1b/${dataset}${testscale}_update_trace
-DeleteQPS=800
-ShowUpdateProgress=false
-Sampling=4
-BufferLength=6
-InPlace=true
-LoadAllVectors=true
-PersistentBufferPath=${checkpointpath}/bf
-SsdInfoFile=${ssdpath}/postingSizeRecords
-SpdkMappingPath=${ssdpath}/spdkmapping
-EndVectorNum=2000000
-
-[SearchSSDIndex]
-isExecute=true
-BuildSsdIndex=false
-SearchThreadNum=2
-" > build_SPANN_store_${dataset}${testscale}.ini
+TmpDir=store_${dataset}${testscale}/tmpdir" > build_SPANN_store_${dataset}${testscale}.ini
 ./ssdserving build_SPANN_store_${dataset}${testscale}.ini
 echo "[Index]
 IndexAlgoType=SPANN
@@ -374,7 +342,7 @@ NumberOfThreads=16
 DistCalcMethod=L2
 DeletePercentageForRefine=0.400000
 AddCountForRebuild=1000
-MaxCheck=4096
+MaxCheck=8192
 ThresholdOfNumberOfContinuousNoBetterPropagation=3
 NumberOfInitialDynamicPivots=50
 NumberOfOtherDynamicPivots=4
@@ -392,10 +360,9 @@ ReplicaCount=8
 PostingPageLimit=4
 OutputEmptyReplicaID=1
 TmpDir=store_${dataset}${testscale}/tmpdir
-Storage=FILEIO
-SpdkBatchSize=64
+UseSPDK=true
 ExcludeHead=false
-UseDirectIO=false
+UseDirectIO=true
 ResultNum=10
 SearchInternalResultNum=64
 SearchThreadNum=2
@@ -406,11 +373,11 @@ Days=100
 InsertThreadNum=1
 AppendThreadNum=1
 ReassignThreadNum=0
-TruthFilePrefix=${dataset}1b/${dataset}${testscale}_update_truth_after
+TruthFilePrefix=${dataset}1b/
 FullVectorPath=${dataset}1b/$dataset.$updateto.bin
 DisableReassign=false
 ReassignK=64
-LatencyLimit=50.0
+LatencyLimit=20.0
 CalTruth=true
 SearchPostingPageLimit=4
 MaxDistRatio=1000000
@@ -422,36 +389,24 @@ ShowUpdateProgress=false
 Sampling=4
 BufferLength=6
 InPlace=true
-LoadAllVectors=true
-PersistentBufferPath=${checkpointpath}/bf
-SsdInfoFile=${ssdpath}/postingSizeRecords
-SpdkMappingPath=${ssdpath}/spdkmapping
 SearchResult=${dataset}1b/result_spfresh_balance
-EndVectorNum=2000000" > store_${dataset}${testscale}/indexloader.ini
+EndVectorNum=$updateto_number" > store_${dataset}${testscale}/indexloader.ini
 fi
 
 if [ "$1" == "run_update" ]; then
-rm -rf ${dataset}1b/result_spfresh_balance*
-#SPDK version
-if [ "$storage" == "SPDKIO" ]; then
-    echo "Run SPDKIO..."
-    PCI_ALLOWED="1462:00:00.0" SPFRESH_SPDK_USE_SSD_IMPL=1 SPFRESH_SPDK_CONF=../bdev.json SPFRESH_SPDK_BDEV=Nvme0n1 sudo -E ./spfresh store_${dataset}${testscale} |tee log_spfresh.log
-else
-   echo "RUN FILEIO..."
-   PCI_ALLOWED="1462:00:00.0" SPFRESH_SPDK_USE_SSD_IMPL=1 SPFRESH_SPDK_CONF=../bdev.json SPFRESH_SPDK_BDEV=Nvme0n1 SPFRESH_FILE_IO_USE_CACHE=False SPFRESH_FILE_IO_THREAD_NUM=16 SPFRESH_FILE_IO_USE_LOCK=False SPFRESH_FILE_IO_LOCK_SIZE=262144 sudo -E ./spfresh store_${dataset}${testscale} |tee log_spfresh.log
-fi
+PCI_ALLOWED="4c6a:00:00.0" SPFRESH_SPDK_USE_SSD_IMPL=1 SPFRESH_SPDK_CONF=../bdev.json SPFRESH_SPDK_BDEV=Nvme0n1 sudo -E ./spfresh store_${dataset}${testscale} |tee log_spfresh.log
 fi
 
 if [ "$1" == "plot_result" ]; then
 cp ../Script_AE/Figure6/process_spfresh.py .
 python3 process_spfresh.py log_spfresh.log overall_performance_${dataset}_spfresh_result.csv
 
-mkdir -p spfresh_result
-cp -rf ${dataset}1b/result_spfresh_balance* spfresh_result
+mkdir -p spfresh_${dataset}_result
+cp -rf ${dataset}1b/result_spfresh_balance* spfresh_${dataset}_result
 
-resultnamePrefix=/spfresh_result/
+resultnamePrefix=/spfresh_${dataset}_result/
 i=-1
-for FILE in `ls -v1 ./spfresh_result/`
+for FILE in `ls -v1 ./spfresh_${dataset}_result/`
 do
     if [ $i -eq -1 ];
     then
@@ -461,8 +416,8 @@ do
     fi
     let "i=i+1"
 done
-cp ../Script_AE/Figure6/OverallPerformance_merge_result.py .
-cp ../Script_AE/Figure6/overall_performance_spacev_new.p .
-python3 OverallPerformance_merge_result.py log_spfresh_ log_spfresh_ log_spfresh_ overall_performance_${dataset}_spfresh_result.csv overall_performance_${dataset}_spfresh_result.csv overall_performance_${dataset}_spfresh_result.csv
-gnuplot overall_performance_spacev_new.p
+cp ../Script_AE/Figure6/OverallPerformance_merge_result_spfresh_only.py .
+cp ../Script_AE/Figure6/overall_performance_murren.p .
+python3 OverallPerformance_merge_result_spfresh_only.py log_spfresh_ overall_performance_${dataset}_spfresh_result.csv
+gnuplot overall_performance_murren.p
 fi

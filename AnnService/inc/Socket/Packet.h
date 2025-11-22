@@ -27,13 +27,21 @@ enum class PacketType : std::uint8_t
 
     SearchRequest = 0x03,
 
+    InsertRequest = 0x04,
+
+    DeleteRequest = 0x05,
+
     ResponseMask = 0x80,
 
     HeartbeatResponse = ResponseMask | HeartbeatRequest,
 
     RegisterResponse = ResponseMask | RegisterRequest,
 
-    SearchResponse = ResponseMask | SearchRequest
+    SearchResponse = ResponseMask | SearchRequest,
+
+    InsertResponse = ResponseMask | InsertRequest,
+
+    DeleteResponse = ResponseMask | DeleteRequest
 };
 
 

@@ -28,6 +28,32 @@ struct ServiceSettings
     SizeType m_threadNum;
 
     SizeType m_socketThreadNum;
+    
+    // HTTP Configuration
+    std::string m_httpListenAddr;
+
+    std::string m_httpListenPort;
+
+    SizeType m_httpThreadNum;
+
+    SizeType m_maxHttpConnections;
+
+    bool m_enableHTTP;
+
+    bool m_enableWebSocket;
+
+    bool m_enableSocket;
+    
+    // HTTP Performance Tuning
+    SizeType m_httpBufferSize;
+
+    SizeType m_httpTimeout;
+
+    SizeType m_httpKeepAlive;
+
+    bool m_httpPipelining;
+    
+    bool m_httpCompression;
 };
 
 

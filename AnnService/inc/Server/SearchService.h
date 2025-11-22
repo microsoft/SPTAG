@@ -6,6 +6,7 @@
 
 #include "ServiceContext.h"
 #include "../Socket/Server.h"
+#include "../HTTP/Server.h"
 
 #include <boost/asio.hpp>
 
@@ -20,6 +21,8 @@ namespace Service
 {
 
 class SearchExecutionContext;
+class InsertExecutionContext;
+class DeleteExecutionContext;
 
 class SearchService
 {
@@ -36,10 +39,24 @@ private:
     void RunSocketMode();
 
     void RunInteractiveMode();
+    
+    void RunHTTPMode();
+    
+    void StartHTTPServer();
 
     void SearchHanlder(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
 
     void SearchHanlderCallback(std::shared_ptr<SearchExecutionContext> p_exeContext,
+                               Socket::Packet p_srcPacket);
+
+    void InsertHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void InsertHandlerCallback(std::shared_ptr<InsertExecutionContext> p_exeContext,
+                               Socket::Packet p_srcPacket);
+
+    void DeleteHandler(Socket::ConnectionID p_localConnectionID, Socket::Packet p_packet);
+
+    void DeleteHandlerCallback(std::shared_ptr<DeleteExecutionContext> p_exeContext,
                                Socket::Packet p_srcPacket);
 
 private:
@@ -47,12 +64,16 @@ private:
     {
         Interactive,
 
-        Socket
+        Socket,
+        
+        HTTP
     };
 
     std::shared_ptr<ServiceContext> m_serviceContext;
 
     std::shared_ptr<Socket::Server> m_socketServer;
+    
+    std::shared_ptr<HTTP::Server> m_httpServer;
 
     bool m_initialized;
 
