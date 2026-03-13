@@ -408,7 +408,7 @@ namespace SPTAG::SPANN {
                                 Serialize((char*)postingP + vectorCount * m_vectorInfoSize, globalID, m_versionMap.GetVersion(globalID), vecStr->data());
                                 vectorCount++;
                             }
-                            if (vectorCount <= m_mergeThreshold) mergelist.emplace(globalID, vecStr);
+                            if (vectorCount <= m_mergeThreshold) mergelist.insert(Helper::Concurrent::ConcurrentMap<SizeType, std::shared_ptr<std::string>>::value_type(globalID, vecStr));
 
                             postingList.resize(vectorCount * m_vectorInfoSize);
                             if ((ret = db->Put(globalID, postingList, MaxTimeout,

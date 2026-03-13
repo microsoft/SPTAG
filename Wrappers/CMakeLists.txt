@@ -3,6 +3,7 @@
 
 
 find_package(Python3 COMPONENTS Development)
+find_program(SWIG_EXECUTABLE NAMES swig swig.exe)
 
 find_package(CUDA)
 
@@ -34,6 +35,10 @@ else()
 endif()
 
 if (Python_FOUND)
+    if (NOT SWIG_EXECUTABLE)
+        message(FATAL_ERROR "SWIG executable not found. Add swig.exe to PATH or install to C:/Sptag/swig-4.4.1/build/Release.")
+    endif()
+
     message (STATUS "Found Python.")
     message (STATUS "Include Path: ${Python_INCLUDE_DIRS}")
     message (STATUS "Library Path: ${Python_LIBRARIES}")

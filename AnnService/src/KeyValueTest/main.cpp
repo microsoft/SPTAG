@@ -1,5 +1,12 @@
-#include <bits/stdc++.h>
 #include <iostream>
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <mutex>
+#include <set>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "inc/Core/Common.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
@@ -119,7 +126,7 @@ MultiThreadTest:
     for (int iter = 0; iter < iter_num; iter++)
     {
         std::vector<std::thread> threads;
-        std::vector<int> thread_keys[thread_num];
+        std::vector<std::vector<int>> thread_keys(thread_num);
         std::vector<bool> errors(thread_num);
         // 随机生成一些数据
         for (int i = 0; i < kv_num; i++)
@@ -226,7 +233,7 @@ MultiGetTest:
     for (int iter = 0; iter < iter_num; iter++)
     {
         std::vector<std::thread> threads;
-        std::vector<SizeType> thread_keys[thread_num];
+        std::vector<std::vector<SizeType>> thread_keys(thread_num);
         std::vector<bool> errors(thread_num);
         // 随机生成一些数据
         for (int i = 0; i < kv_num; i++)
@@ -255,7 +262,7 @@ MultiGetTest:
                 {
                     readValues.clear();
                     keys.clear();
-                    for (int j = k; j < std::min(k + 256, num); j++)
+                    for (int j = k; j < (std::min)(k + 256, num); j++)
                     {
                         keys.push_back(thread_keys[i][j]);
                     }
@@ -321,7 +328,7 @@ MixReadWriteTest:
     for (int batch = 0; batch < batch_num; batch++)
     {
         std::vector<std::thread> threads;
-        std::vector<int> thread_keys[thread_num];
+        std::vector<std::vector<int>> thread_keys(thread_num);
         std::vector<bool> errors(thread_num, false);
         for (int i = 0; i < kv_num; i++)
         {
