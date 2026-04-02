@@ -22,8 +22,14 @@
         {
             PyList_SetItem(dstVecIDs, i, PyInt_FromLong(res.VID));
             PyList_SetItem(dstVecDists, i, PyFloat_FromDouble(res.Dist));
-            if (res.RelaxedMono) PyList_SetItem(dstRelaxMono, i, Py_True);
-            else PyList_SetItem(dstRelaxMono, i, Py_False);
+            if (res.RelaxedMono) {
+                Py_INCREF(Py_True);
+                PyList_SetItem(dstRelaxMono, i, Py_True);
+            }
+            else {
+                Py_INCREF(Py_False);
+                PyList_SetItem(dstRelaxMono, i, Py_False);
+            }
             i++;
         }
     
@@ -58,8 +64,14 @@
             {
                 PyList_Append(dstVecIDs, PyInt_FromLong(res.VID));
                 PyList_Append(dstVecDists, PyFloat_FromDouble(res.Dist));
-                if (res.RelaxedMono) PyList_Append(dstRelaxMono, Py_True);
-                else PyList_Append(dstRelaxMono, Py_False);
+                if (res.RelaxedMono) {
+                    Py_INCREF(Py_True);
+                    PyList_Append(dstRelaxMono, Py_True);
+                }
+                else {
+                    Py_INCREF(Py_False);
+                    PyList_Append(dstRelaxMono, Py_False);
+                }
             }
 
             if (indexRes.m_results.WithMeta()) 

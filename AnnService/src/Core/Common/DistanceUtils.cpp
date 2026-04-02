@@ -446,21 +446,35 @@ float DistanceUtils::ComputeL2Distance_SSE(const std::uint8_t *pX, const std::ui
     }
     float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
 
-    while (pX < pEnd4)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+
+    float c1;
+    uint8_t a, b;
+    while (pX < pEnd4) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+	
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+	
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
-    while (pX < pEnd1)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+    while (pX < pEnd1) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
     return diff;
 }
@@ -484,21 +498,34 @@ float DistanceUtils::ComputeL2Distance_AVX(const std::uint8_t *pX, const std::ui
     }
     float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
 
-    while (pX < pEnd4)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+    float c1;
+    uint8_t a, b;
+    while (pX < pEnd4) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
-    while (pX < pEnd1)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+    while (pX < pEnd1) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
     return diff;
 }
@@ -533,21 +560,34 @@ float DistanceUtils::ComputeL2Distance_AVX512(const std::uint8_t *pX, const std:
     }
     float diff = DIFF128[0] + DIFF128[1] + DIFF128[2] + DIFF128[3];
 
-    while (pX < pEnd4)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
-        c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+    float c1;
+    uint8_t a, b;
+    while (pX < pEnd4) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+	
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+	
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
+	
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
-    while (pX < pEnd1)
-    {
-        float c1 = ((float)(*pX++) - (float)(*pY++));
-        diff += c1 * c1;
+    while (pX < pEnd1) {
+	    a = (*pX); b = (*pY);
+	    c1 = a + 0.0f - b;
+	    pX++; pY++;
+	    diff += c1 * c1;
     }
     return diff;
 }
