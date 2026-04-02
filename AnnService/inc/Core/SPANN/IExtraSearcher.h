@@ -273,6 +273,9 @@ namespace SPTAG {
 
             std::function<bool(const ByteArray&)> m_filterFunc;
 
+            // Pointer to the SPANN-level metadata (for filter lookup by posting vector ID)
+            const VectorIndex* m_pFilterSource = nullptr;
+
             std::function<void()> m_callback;
         };
 

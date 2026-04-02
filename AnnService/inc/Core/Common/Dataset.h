@@ -250,7 +250,10 @@ namespace SPTAG
             ~Dataset()
             {
                 if (ownData) ALIGN_FREE(data);
-                if (incBlocks != nullptr) {
+                // Only free incBlocks contents if this is the sole owner (use_count == 1)
+                // to avoid double-free when multiple Datasets share the same incBlocks
+                // if (incBlocks != nullptr && incBlocks.use_count() == 1) {
+                if (incBlocks) {
                     for (char* ptr : *incBlocks) ALIGN_FREE(ptr);
                     incBlocks->clear();
                 }

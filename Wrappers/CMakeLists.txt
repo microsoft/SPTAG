@@ -44,14 +44,41 @@ if (Python_FOUND)
         set(PY_SUFFIX .so)
     endif()
 
-    execute_process(COMMAND swig -python -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_pwrap.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/PythonCore.i)
-    execute_process(COMMAND swig -python -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_pwrap.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/PythonClient.i)
+    find_program(SWIG_EXECUTABLE swig)
+    if (NOT SWIG_EXECUTABLE)
+        message(FATAL_ERROR "swig executable not found")
+    endif()
+
+    set(PY_CORE_I ${PROJECT_SOURCE_DIR}/Wrappers/inc/PythonCore.i)
+    set(PY_CLIENT_I ${PROJECT_SOURCE_DIR}/Wrappers/inc/PythonClient.i)
+    set(PY_COMMON_I ${PROJECT_SOURCE_DIR}/Wrappers/inc/PythonCommon.i)
+    set(CORE_PY_WRAP ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_pwrap.cpp)
+    set(CLIENT_PY_WRAP ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_pwrap.cpp)
+
+    add_custom_command(
+        OUTPUT ${CORE_PY_WRAP}
+        COMMAND ${SWIG_EXECUTABLE} -python -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${CORE_PY_WRAP} ${PY_CORE_I}
+        DEPENDS ${PY_CORE_I} ${PY_COMMON_I} ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface.h
+        COMMENT "Generating Python SWIG wrapper: CoreInterface_pwrap.cpp"
+        VERBATIM
+    )
+
+    add_custom_command(
+        OUTPUT ${CLIENT_PY_WRAP}
+        COMMAND ${SWIG_EXECUTABLE} -python -c++ -I${PROJECT_SOURCE_DIR}/Wrappers/inc -o ${CLIENT_PY_WRAP} ${PY_CLIENT_I}
+        DEPENDS ${PY_CLIENT_I} ${PY_COMMON_I} ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface.h
+        COMMENT "Generating Python SWIG wrapper: ClientInterface_pwrap.cpp"
+        VERBATIM
+    )
+
+    add_custom_target(swig_python_wrappers DEPENDS ${CORE_PY_WRAP} ${CLIENT_PY_WRAP})
 
     include_directories(${PYTHON_INCLUDE_PATH} ${PROJECT_SOURCE_DIR}/AnnService ${PROJECT_SOURCE_DIR}/Wrappers)
 
     file(GLOB CORE_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface.h)
     file(GLOB CORE_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/CoreInterface.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/CoreInterface_pwrap.cpp)
     add_library (_SPTAG SHARED ${CORE_SRC_FILES} ${CORE_HDR_FILES})
+    add_dependencies(_SPTAG swig_python_wrappers)
     set_target_properties(_SPTAG PROPERTIES PREFIX "" SUFFIX ${PY_SUFFIX})
     if (CUDA_FOUND)
         target_link_libraries(_SPTAG GPUSPTAGLib ${Python_LIBRARIES})
@@ -63,6 +90,7 @@ if (Python_FOUND)
     file(GLOB CLIENT_HDR_FILES ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Socket/*.h ${PROJECT_SOURCE_DIR}/AnnService/inc/Client/*.h)
     file(GLOB CLIENT_SRC_FILES ${PROJECT_SOURCE_DIR}/Wrappers/src/ClientInterface.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Socket/*.cpp ${PROJECT_SOURCE_DIR}/AnnService/src/Client/*.cpp ${PROJECT_SOURCE_DIR}/Wrappers/inc/ClientInterface_pwrap.cpp)
     add_library (_SPTAGClient SHARED ${CLIENT_SRC_FILES} ${CLIENT_HDR_FILES})
+    add_dependencies(_SPTAGClient swig_python_wrappers)
     set_target_properties(_SPTAGClient PROPERTIES PREFIX "" SUFFIX ${PY_SUFFIX})
     target_link_libraries(_SPTAGClient SPTAGLib ${Python_LIBRARIES} ${Boost_LIBRARIES})
     add_custom_command(TARGET _SPTAGClient POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/Wrappers/inc/SPTAGClient.py ${EXECUTABLE_OUTPUT_PATH})

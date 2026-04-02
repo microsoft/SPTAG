@@ -512,8 +512,73 @@ template <typename T>
 ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bool(const ByteArray &)> filterFunc,
                                           int maxCheck, bool p_searchDeleted) const
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not Support Filter on SPANN Index!\n");
-    return ErrorCode::Fail;
+    if (nullptr == m_extraSearcher)
+        return ErrorCode::EmptyIndex;
+
+    // Result set for posting search: sized to topk only
+    int topk = p_query.GetResultNum();
+    // HeadIndex search needs more candidates
+    int headSearchNum = max(topk, m_options.m_searchInternalResultNum);
+    COMMON::QueryResultSet<T> headResults((const T*)p_query.GetQuantizedTarget(), headSearchNum);
+
+    // Step 1: Search HeadIndex for posting routing
+    m_index->SearchIndex(headResults);
+
+    auto workSpace = m_workSpaceFactory->GetWorkSpace();
+    if (!workSpace)
+    {
+        workSpace.reset(new ExtraWorkSpace());
+        m_extraSearcher->InitWorkSpace(workSpace.get(), false);
+    }
+    else
+    {
+        m_extraSearcher->InitWorkSpace(workSpace.get(), true);
+    }
+
+    workSpace->m_deduper.clear();
+    workSpace->m_postingIDs.clear();
+    workSpace->m_filterFunc = filterFunc;
+    workSpace->m_pFilterSource = this;
+
+    // Collect posting IDs from head search results
+    float limitDist = headResults.GetResult(0)->Dist * m_options.m_maxDistRatio;
+    const int postingOffset = m_options.m_postingOffset;
+    for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
+    {
+        auto res = headResults.GetResult(i);
+        if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist))
+            break;
+        if (m_extraSearcher->CheckValidPosting(res->VID + postingOffset))
+        {
+            workSpace->m_postingIDs.emplace_back(res->VID + postingOffset);
+        }
+    }
+
+    // Reuse headResults but clear it for posting search
+    for (int j = 0; j < headResults.GetResultNum(); ++j)
+    {
+        headResults.SetResult(j, -1, MaxDist);
+    }
+
+    // Search postings with filter
+    m_extraSearcher->SearchIndex(workSpace.get(), headResults, m_index, nullptr);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+    headResults.SortResult();
+
+    // Copy results back to original query
+    for (int j = 0; j < p_query.GetResultNum(); ++j)
+    {
+        if (j < headResults.GetResultNum())
+        {
+            auto src = headResults.GetResult(j);
+            p_query.SetResult(j, src->VID, src->Dist);
+        }
+        else
+        {
+            p_query.SetResult(j, -1, MaxDist);
+        }
+    }
+    return ErrorCode::Success;
 }
 
 template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats) const
@@ -538,15 +603,16 @@ template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, 
     workSpace->m_postingIDs.clear();
 
     float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+    const int postingOffset = m_options.m_postingOffset;
     int i = 0;
     for (; i < m_options.m_searchInternalResultNum; ++i)
     {
         auto res = p_queryResults->GetResult(i);
         if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist))
             break;
-        if (m_extraSearcher->CheckValidPosting(res->VID))
+        if (m_extraSearcher->CheckValidPosting(res->VID + postingOffset))
         {
-            workSpace->m_postingIDs.emplace_back(res->VID);
+            workSpace->m_postingIDs.emplace_back(res->VID + postingOffset);
         }
 
         if (m_vectorTranslateMap.R() != 0)
@@ -601,6 +667,7 @@ ErrorCode Index<T>::SearchDiskIndexIterative(QueryResult &p_headQuery, QueryResu
         extraWorkspace->m_postingIDs.clear();
 
         // float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+        const int postingOffset = m_options.m_postingOffset;
 
         for (int i = 0; i < p__headQueryResults->GetResultNum(); ++i)
         {
@@ -608,9 +675,9 @@ ErrorCode Index<T>::SearchDiskIndexIterative(QueryResult &p_headQuery, QueryResu
             // break or continue
             if (res->VID == -1)
                 break;
-            if (m_extraSearcher->CheckValidPosting(res->VID))
+            if (m_extraSearcher->CheckValidPosting(res->VID + postingOffset))
             {
-                extraWorkspace->m_postingIDs.emplace_back(res->VID);
+                extraWorkspace->m_postingIDs.emplace_back(res->VID + postingOffset);
             }
 
             if (m_vectorTranslateMap.R() != 0)

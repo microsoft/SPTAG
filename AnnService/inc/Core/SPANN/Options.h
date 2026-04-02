@@ -147,6 +147,7 @@ namespace SPTAG {
 
             // Updating
             bool m_disableReassign;
+            int m_postingOffset;
             bool m_searchDuringUpdate;
             int m_reassignK;
             bool m_recovery;

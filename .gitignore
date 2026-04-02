@@ -462,3 +462,14 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Build artifacts
+build/
+sptag/
+sptag.egg-info/
+
+# Temp files
+*.bak
+/tmp/
+__pycache__/
+*.pyc

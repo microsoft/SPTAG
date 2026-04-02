@@ -1897,11 +1897,21 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
+                    // Multi-attribute filter: skip vectors whose metadata doesn't match
+                    if (p_exWorkSpace->m_filterFunc != nullptr) {
+                        const VectorIndex* filterSrc = p_exWorkSpace->m_pFilterSource ? p_exWorkSpace->m_pFilterSource : p_index.get();
+                        if (!p_exWorkSpace->m_filterFunc(filterSrc->GetMetadata(vectorID))) {
+                            listElements--;
+                            continue;
+                        }
+                    }
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
-                if (m_opt->m_asyncMergeInSearch && realNum <= m_mergeThreshold) MergeAsync(p_index.get(), curPostingID); // TODO: Control merge
+                // Async merge requires update-mode thread pools; in read-only serving they are not initialized.
+                if (m_opt->m_update && m_opt->m_asyncMergeInSearch && m_splitThreadPool != nullptr && realNum <= m_mergeThreshold)
+                    MergeAsync(p_index.get(), curPostingID); // TODO: Control merge
 
                 compLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(compEnd - compStart).count());
 
@@ -2541,11 +2551,14 @@ namespace SPTAG::SPANN {
             }
         }
 
-        bool AllFinished() { return m_splitThreadPool->allClear(); } // && m_reassignThreadPool->allClear(); }
+        bool AllFinished() { return m_splitThreadPool ? m_splitThreadPool->allClear() : true; } // && m_reassignThreadPool->allClear(); }
         void ForceCompaction() override { db->ForceCompaction(); }
         void GetDBStats() override { 
             db->GetStat();
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d, running split: %d, running reassign: %d\n", m_splitThreadPool->jobsize(), 0, m_splitThreadPool->runningJobs(), 0);
+            if (m_splitThreadPool)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "remain splitJobs: %d, reassignJobs: %d, running split: %d, running reassign: %d\n", m_splitThreadPool->jobsize(), 0, m_splitThreadPool->runningJobs(), 0);
+            }
         }
 
         int64_t GetNumBlocks() override
