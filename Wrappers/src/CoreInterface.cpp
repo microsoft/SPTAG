@@ -701,8 +701,22 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             return false;
         }
 
-        m_tenantIndices[tenantId] = tenantIndex;
         m_tenantVectorCounts[tenantId] = static_cast<int>(vectorRanges.size());
+
+        // For SPANN: save the index to its work dir right away, then release the
+        // AnnIndex object.  This closes the SSD file descriptor and frees the
+        // HeadIndex memory, preventing fd exhaustion when building many tenants.
+        if (indexType == TenantIndexType::SPANN)
+        {
+            std::string workDir = m_tenantSpannWorkDirs[tenantId];
+            tenantIndex->Save(workDir.c_str());
+            fprintf(stderr, "[INFO] Tenant %d: built & released (%d vectors, dir=%s)\n",
+                tenantId, (int)vectorRanges.size(), workDir.c_str());
+            tenantIndex.reset();
+            continue;
+        }
+
+        m_tenantIndices[tenantId] = tenantIndex;
     }
 
     // For SPANN tenants: compute posting offsets and record head counts
@@ -712,7 +726,8 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         m_tenantHeadCounts.clear();
         m_totalPostingCount = 0;
 
-        for (const auto& kv : m_tenantIndices)
+        // Iterate all tenants (not just loaded ones — released tenants have work dirs)
+        for (const auto& kv : m_tenantVectorCounts)
         {
             int tenantId = kv.first;
             auto typeIt = m_tenantIndexTypes.find(tenantId);
@@ -759,10 +774,10 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         }
 
         fprintf(stderr, "[INFO] Total posting count across %d tenants: %d\n",
-            (int)m_tenantIndices.size(), m_totalPostingCount);
+            (int)m_tenantVectorCounts.size(), m_totalPostingCount);
     }
 
-    return !m_tenantIndices.empty();
+    return !m_tenantVectorCounts.empty();
 }
 
 std::shared_ptr<QueryResult> TenantIndexManager::Search(ByteArray p_queryVector, int p_tenantId, int p_resultNum)
@@ -1000,6 +1015,7 @@ bool TenantIndexManager::SaveUnifiedStorage(const char* p_baseDir)
 {
     std::string baseDir(p_baseDir);
 
+    // Save tenants that are still in memory
     for (const auto& kv : m_tenantIndices)
     {
         int tenantId = kv.first;
@@ -1012,7 +1028,6 @@ bool TenantIndexManager::SaveUnifiedStorage(const char* p_baseDir)
 
         if (indexType == TenantIndexType::SPANN)
         {
-            // Save full SPANN index (config + HeadIndex + SSD posting files)
             if (!kv.second->Save(dstTenantDir.c_str()))
             {
                 fprintf(stderr, "[ERROR] Failed to save SPANN index for tenant %d\n", tenantId);
@@ -1022,7 +1037,6 @@ bool TenantIndexManager::SaveUnifiedStorage(const char* p_baseDir)
         }
         else
         {
-            // BKT / BruteForce: save in-memory index
             std::string indexPath = dstTenantDir + "/index";
             if (!kv.second->Save(indexPath.c_str()))
             {
@@ -1033,8 +1047,38 @@ bool TenantIndexManager::SaveUnifiedStorage(const char* p_baseDir)
         }
     }
 
+    // Copy tenants that were already saved-and-released during build
+    // (they exist in m_tenantSpannWorkDirs but not in m_tenantIndices)
+    for (const auto& kv : m_tenantSpannWorkDirs)
+    {
+        int tenantId = kv.first;
+        if (m_tenantIndices.count(tenantId)) continue;  // Already saved above
+
+        std::string srcDir = kv.second;
+        std::string dstDir = baseDir + "/tenant_" + std::to_string(tenantId);
+
+        if (srcDir == dstDir) {
+            // Already in the right place (saved directly to output dir)
+            fprintf(stderr, "[INFO] Tenant %d: already saved in place\n", tenantId);
+            continue;
+        }
+
+        if (!EnsureDir(dstDir)) return false;
+        if (!CopyDirRecursive(srcDir, dstDir))
+        {
+            fprintf(stderr, "[ERROR] Failed to copy tenant %d from %s to %s\n", tenantId, srcDir.c_str(), dstDir.c_str());
+            return false;
+        }
+        // Update work dir to point to final location
+        m_tenantSpannWorkDirs[tenantId] = dstDir;
+        fprintf(stderr, "[INFO] Tenant %d: copied from build dir\n", tenantId);
+    }
+
+    int totalSaved = (int)m_tenantIndices.size();
+    for (const auto& kv : m_tenantSpannWorkDirs)
+        if (!m_tenantIndices.count(kv.first)) totalSaved++;
     fprintf(stderr, "[INFO] Unified storage saved: %d tenants (%d SPANN)\n",
-        (int)m_tenantIndices.size(),
+        totalSaved,
         (int)std::count_if(m_tenantIndexTypes.begin(), m_tenantIndexTypes.end(),
             [](const auto& kv) { return kv.second == TenantIndexType::SPANN; }));
 
