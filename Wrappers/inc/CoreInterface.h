@@ -205,12 +205,6 @@ private:
     std::list<int> m_lruList;
     std::unordered_map<int, std::list<int>::iterator> m_lruMap;
     uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
-
-    // Cold pool: evicted tenants kept alive to avoid expensive io_destroy.
-    // Soft eviction moves here (~0ms). Hard eviction destroys (~100ms, only when fd exhausted).
-    std::map<int, std::shared_ptr<AnnIndex>> m_coldTenantIndices;
-    std::list<int> m_coldLruList;  // front = oldest cold
-    size_t m_maxColdPoolSize = 25; // max tenants in cold pool (~25 fds)
     
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;

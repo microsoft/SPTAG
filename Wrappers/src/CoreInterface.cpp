@@ -527,6 +527,9 @@ TenantIndexManager::TenantIndexManager(DimensionType p_dimension, const char* p_
     SPTAG::Helper::Convert::ConvertStringTo<SPTAG::IndexAlgoType>(p_algoType, m_algoType);
     SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, m_valueType);
     m_inputVectorSize = SPTAG::GetValueTypeSize(m_valueType) * m_dimension;
+
+    // Initialize shared AIO pool (4 contexts, 64 events each) — created once, never destroyed
+    SPTAG::Helper::SharedAIOPool::Instance().Initialize(4, 64);
 }
 
 TenantIndexManager::~TenantIndexManager()
@@ -1161,7 +1164,7 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     else
         estimatedBytes = 1024 * 1024;
 
-    // Soft-evict LRU hot tenants to cold pool until we have room
+    // Soft-evict LRU hot tenants until we have room
     if (m_headIndexCacheLimitBytes > 0)
     {
         while (m_loadedHeadIndexBytes + estimatedBytes > m_headIndexCacheLimitBytes
@@ -1169,24 +1172,11 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         {
             int evictId = m_lruList.front();
             if (evictId == p_tenantId) break;
-            UnloadTenantLocked(evictId);  // Soft evict → cold pool (~0ms)
+            UnloadTenantLocked(evictId);  // With shared AIO pool: ~1ms (just close fd)
         }
     }
 
-    // Check cold pool: instant restore without disk IO
-    auto coldIt = m_coldTenantIndices.find(p_tenantId);
-    if (coldIt != m_coldTenantIndices.end())
-    {
-        m_tenantIndices[p_tenantId] = std::move(coldIt->second);
-        m_coldTenantIndices.erase(coldIt);
-        m_coldLruList.remove(p_tenantId);
-        m_loadedHeadIndexBytes += estimatedBytes;
-        m_lruList.push_back(p_tenantId);
-        m_lruMap[p_tenantId] = std::prev(m_lruList.end());
-        return true;
-    }
-
-    // Full cold load from disk
+    // Full load from disk
     auto typeIt = m_tenantIndexTypes.find(p_tenantId);
     TenantIndexType indexType = (typeIt != m_tenantIndexTypes.end()) ? typeIt->second : TenantIndexType::SPANN;
     std::string loadPath;
@@ -1252,7 +1242,7 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     auto it = m_tenantIndices.find(p_tenantId);
     if (it == m_tenantIndices.end()) return false;
 
-    // Estimate size being freed from hot cache
+    // Estimate size being freed
     uint64_t freedBytes = 0;
     auto vcIt = m_tenantVectorCounts.find(p_tenantId);
     if (vcIt != m_tenantVectorCounts.end())
@@ -1260,33 +1250,18 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     else
         freedBytes = 1024 * 1024;
 
-    // SOFT EVICTION: move to cold pool instead of destroying.
-    // The AnnIndex object stays alive (fd open, AIO contexts alive).
-    // This avoids expensive io_destroy (~100ms) on every eviction.
-    m_coldTenantIndices[p_tenantId] = std::move(it->second);
+    // With SharedAIOPool: destruction only does close(fd) + free memory (~1ms).
+    // AIO contexts are shared and never destroyed.
+    it->second.reset();
     m_tenantIndices.erase(it);
-    m_coldLruList.push_back(p_tenantId);
 
-    // Hard-evict oldest cold entries if cold pool is full (fd pressure)
-    while (m_coldTenantIndices.size() > m_maxColdPoolSize && !m_coldLruList.empty())
-    {
-        int hardEvictId = m_coldLruList.front();
-        m_coldLruList.pop_front();
-        auto coldIt = m_coldTenantIndices.find(hardEvictId);
-        if (coldIt != m_coldTenantIndices.end())
-        {
-            coldIt->second.reset();  // True destruction: io_destroy + close fd
-            m_coldTenantIndices.erase(coldIt);
-        }
-    }
-
-    // Update hot cache accounting
+    // Update cache accounting
     if (m_loadedHeadIndexBytes >= freedBytes)
         m_loadedHeadIndexBytes -= freedBytes;
     else
         m_loadedHeadIndexBytes = 0;
 
-    // Remove from hot LRU
+    // Remove from LRU
     auto lruIt = m_lruMap.find(p_tenantId);
     if (lruIt != m_lruMap.end())
     {

@@ -565,6 +565,56 @@ namespace SPTAG
 
         using RequestQueue = Helper::Concurrent::ConcurrentQueue<Helper::AsyncReadRequest*>;
 
+        // ================================================================
+        // SharedAIOPool: Global pool of AIO contexts shared across all
+        // tenant FileIO instances. Created once, never destroyed until
+        // program exit. Eliminates expensive io_setup/io_destroy on
+        // tenant load/unload.
+        // ================================================================
+        class SharedAIOPool {
+        public:
+            static SharedAIOPool& Instance() {
+                static SharedAIOPool pool;
+                return pool;
+            }
+
+            bool Initialize(int numContexts, int maxEventsPerContext) {
+                if (m_initialized) return true;
+                m_contexts.resize(numContexts);
+                memset(m_contexts.data(), 0, sizeof(aio_context_t) * numContexts);
+                for (int i = 0; i < numContexts; i++) {
+                    auto ret = syscall(__NR_io_setup, maxEventsPerContext, &(m_contexts[i]));
+                    if (ret < 0) {
+                        SPTAGLIB_LOG(LogLevel::LL_Error, "SharedAIOPool: io_setup failed: %s\n", strerror(errno));
+                        for (int j = 0; j < i; j++) syscall(__NR_io_destroy, m_contexts[j]);
+                        m_contexts.clear();
+                        return false;
+                    }
+                }
+                m_initialized = true;
+                SPTAGLIB_LOG(LogLevel::LL_Info, "SharedAIOPool: initialized %d AIO contexts (max %d events each)\n",
+                             numContexts, maxEventsPerContext);
+                return true;
+            }
+
+            bool IsInitialized() const { return m_initialized; }
+            aio_context_t GetContext(int i) const { return m_contexts[i % m_contexts.size()]; }
+            int NumContexts() const { return (int)m_contexts.size(); }
+
+            ~SharedAIOPool() {
+                for (auto& ctx : m_contexts) {
+                    if (ctx) syscall(__NR_io_destroy, ctx);
+                }
+            }
+
+        private:
+            SharedAIOPool() = default;
+            SharedAIOPool(const SharedAIOPool&) = delete;
+            SharedAIOPool& operator=(const SharedAIOPool&) = delete;
+            std::vector<aio_context_t> m_contexts;
+            bool m_initialized = false;
+        };
+
         class AsyncFileIO : public DiskIO
         {
         public:
@@ -643,27 +693,40 @@ namespace SPTAG
                     return false;
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file %s opened, fd=%d threads=%d maxNumBlocks=%d\n", filePath, m_fileHandle, threadPoolSize, maxNumBlocks);
-                m_iocps.resize(threadPoolSize);
-#ifdef URING
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: using io uring for read!\n");
-                m_uring.resize(threadPoolSize);
-#endif
-                memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
-                for (int i = 0; i < threadPoolSize; i++) {
-                    auto ret = syscall(__NR_io_setup, (int)maxNumBlocks, &(m_iocps[i]));
-                    if (ret < 0) {
-                        SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
-                        return false;
+
+                // Use shared AIO pool if available, otherwise create own contexts
+                if (SharedAIOPool::Instance().IsInitialized()) {
+                    m_useSharedPool = true;
+                    int poolSize = SharedAIOPool::Instance().NumContexts();
+                    m_iocps.resize(poolSize);
+                    for (int i = 0; i < poolSize; i++) {
+                        m_iocps[i] = SharedAIOPool::Instance().GetContext(i);
                     }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO: using SharedAIOPool (%d contexts)\n", poolSize);
+                } else {
+                    m_useSharedPool = false;
+                    m_iocps.resize(threadPoolSize);
 #ifdef URING
-                    ret = io_uring_queue_init((int)maxNumBlocks, &m_uring[i], 0);
-                    if (ret < 0)
-                    {
-                        SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup io_uring: %s\n", strerror(-ret));
-                        return false;
-                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: using io uring for read!\n");
+                    m_uring.resize(threadPoolSize);
 #endif
-                }
+                    memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
+                    for (int i = 0; i < threadPoolSize; i++) {
+                        auto ret = syscall(__NR_io_setup, (int)maxNumBlocks, &(m_iocps[i]));
+                        if (ret < 0) {
+                            SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup aio: %s\n", strerror(errno));
+                            return false;
+                        }
+#ifdef URING
+                        ret = io_uring_queue_init((int)maxNumBlocks, &m_uring[i], 0);
+                        if (ret < 0)
+                        {
+                            SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup io_uring: %s\n", strerror(-ret));
+                            return false;
+                        }
+#endif
+                    }
+                } // end if/else shared pool
                 m_shutdown = false;
 
 #ifndef BATCH_READ
@@ -923,12 +986,16 @@ namespace SPTAG
                 if (m_shutdown) return;
 
                 m_shutdown = true;
-                for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
+                if (!m_useSharedPool) {
+                    // Only destroy AIO contexts if we own them
+                    for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
 #ifdef URING
-                for (int i = 0; i < m_uring.size(); i++) io_uring_queue_exit(&m_uring[i]);
+                    for (int i = 0; i < m_uring.size(); i++) io_uring_queue_exit(&m_uring[i]);
 #endif
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileReader: Destroying fd=%d!%s\n",
+                             m_fileHandle, m_useSharedPool ? " (shared pool, skip io_destroy)" : "");
                 close(m_fileHandle);
-		SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileReader: ShutDown!\n");
 #ifndef BATCH_READ
                 for (auto& th : m_fileIocpThreads)
                 {
@@ -967,6 +1034,8 @@ namespace SPTAG
 #endif
             bool m_shutdown = true;
 
+            bool m_useSharedPool = false;
+
             int m_fileHandle;
 
             uint64_t m_currSize;
@@ -978,6 +1047,7 @@ namespace SPTAG
 #endif
         };
 #endif
+
         bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>>& handlers, AsyncReadRequest* readRequests, int num);
     }
 }
