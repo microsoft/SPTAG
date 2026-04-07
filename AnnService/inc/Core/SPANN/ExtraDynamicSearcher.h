@@ -214,13 +214,8 @@ namespace SPTAG::SPANN {
             m_bufferSizeLimit = p_opt.m_bufferLength * PageSize / m_vectorInfoSize;
 
             if(p_opt.m_storage == Storage::FILEIO) {
-                if (p_opt.m_disableCheckpoint) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO (ReadOnly fast init)\n");
-                    db.reset(new FileIO(p_opt, true));
-                } else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
-                    db.reset(new FileIO(p_opt));
-                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
+                db.reset(new FileIO(p_opt));
             }
             else if (p_opt.m_storage == Storage::SPDKIO) {
 #ifdef SPDK
