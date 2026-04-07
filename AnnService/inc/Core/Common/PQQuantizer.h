@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
+﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 #ifndef _SPTAG_COMMON_PQQUANTIZER_H_
@@ -7,6 +7,7 @@
 #include "CommonUtils.h"
 #include "DistanceUtils.h"
 #include "IQuantizer.h"
+#include "inc/Helper/StringConvert.h"
 #include <iostream>
 #include <fstream>
 #include <limits>
@@ -25,7 +26,7 @@ namespace SPTAG
         public:
             PQQuantizer();
 
-            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks);
+            PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, DistCalcMethod distMethod);
 
             ~PQQuantizer();
 
@@ -84,6 +85,7 @@ namespace SPTAG
             DimensionType m_DimPerSubvector;
             SizeType m_BlockSize;
             bool m_EnableADC;
+            DistCalcMethod m_distMethod;
 
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const;
             void InitializeDistanceTables();
@@ -93,12 +95,13 @@ namespace SPTAG
         };
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer() : m_NumSubvectors(0), m_KsPerSubvector(0), m_DimPerSubvector(0), m_BlockSize(0), m_EnableADC(false)
+        PQQuantizer<T>::PQQuantizer() : m_NumSubvectors(0), m_KsPerSubvector(0), m_DimPerSubvector(0), m_BlockSize(0), m_EnableADC(false), m_distMethod(DistCalcMethod::L2)
         {
         }
 
         template <typename T>
-        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks) : m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks)), m_EnableADC(EnableADC)
+        PQQuantizer<T>::PQQuantizer(DimensionType NumSubvectors, SizeType KsPerSubvector, DimensionType DimPerSubvector, bool EnableADC, std::unique_ptr<T[]>&& Codebooks, DistCalcMethod distMethod) : 
+            m_NumSubvectors(NumSubvectors), m_KsPerSubvector(KsPerSubvector), m_DimPerSubvector(DimPerSubvector), m_BlockSize(KsPerSubvector* KsPerSubvector), m_codebooks(std::move(Codebooks)), m_EnableADC(EnableADC), m_distMethod(distMethod)
         {
             InitializeDistanceTables();
         }
@@ -131,8 +134,20 @@ namespace SPTAG
         float PQQuantizer<T>::CosineDistance(const std::uint8_t* pX, const std::uint8_t* pY) const
             // pX must be query distance table for ADC
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Quantizer does not support CosineDistance!\n");
-            return 0;
+            float out = 0;
+            if (GetEnableADC()) {
+                float* ptr = (float*)pX;
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += ptr[pY[i]];
+                    ptr += m_KsPerSubvector;
+                }
+            }
+            else {
+                for (int i = 0; i < m_NumSubvectors; i++) {
+                    out += m_L2DistanceTables[m_DistIndexCalc(i, pX[i], pY[i])];
+                }
+            }
+            return out;
         }
 
         template <typename T>
@@ -140,7 +155,7 @@ namespace SPTAG
         {
             if (ADC && GetEnableADC())
             {
-                auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
+                auto distCalc = COMMON::DistanceCalcSelector<T>(m_distMethod);
                 float* ADCtable = (float*) vecout;
                 T* subcodebooks = m_codebooks.get();
                 T* subvec = (T*)vec;
@@ -157,7 +172,7 @@ namespace SPTAG
             }
             else 
             {
-                auto distCalc = DistanceCalcSelector<T>(DistCalcMethod::L2);
+                auto distCalc = COMMON::DistanceCalcSelector<T>(DistCalcMethod::L2);
                 T* subvec = (T*)vec;
                 T* subcodebooks = m_codebooks.get();
                 for (int i = 0; i < m_NumSubvectors; i++) {
@@ -220,7 +235,7 @@ namespace SPTAG
         std::uint64_t PQQuantizer<T>::BufferSize() const
         {
             return sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector + 
-                sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + sizeof(VectorValueType) + sizeof(QuantizerType);
+                sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + sizeof(VectorValueType) + sizeof(QuantizerType) + sizeof(DistCalcMethod);
         }
 
         template <typename T>
@@ -234,6 +249,7 @@ namespace SPTAG
             IOBINARY(p_out, WriteBinary, sizeof(SizeType), (char*)&m_KsPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(DimensionType), (char*)&m_DimPerSubvector);
             IOBINARY(p_out, WriteBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
+            IOBINARY(p_out, WriteBinary, sizeof(DistCalcMethod), (char*)&m_distMethod);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
             return ErrorCode::Success;
         }
@@ -252,6 +268,13 @@ namespace SPTAG
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
+            
+            if (p_in->ReadBinary(sizeof(DistCalcMethod), (char*)&m_distMethod) != sizeof(DistCalcMethod)) {
+                m_distMethod = DistCalcMethod::L2;
+            }
+
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dist: %s.\n", Helper::Convert::ConvertToString(m_distMethod).c_str());
+            
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
@@ -275,8 +298,17 @@ namespace SPTAG
             m_codebooks = std::make_unique<T[]>(m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            raw_bytes += sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
-
+            
+            m_distMethod = *(DistCalcMethod*)raw_bytes;
+            raw_bytes += sizeof(DistCalcMethod);
+            if (m_distMethod >= DistCalcMethod::Undefined) {
+                m_distMethod = DistCalcMethod::L2;
+                raw_bytes -= sizeof(DistCalcMethod);
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dist: %s.\n", Helper::Convert::ConvertToString(m_distMethod).c_str());
+            
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);
@@ -334,13 +366,13 @@ namespace SPTAG
         void PQQuantizer<T>::InitializeDistanceTables()
         {
             auto temp_m_L2DistanceTables = std::make_unique<float[]>(m_BlockSize * m_NumSubvectors);
-            auto L2Dist = DistanceCalcSelector<T>(DistCalcMethod::L2);
+            auto distFunc = COMMON::DistanceCalcSelector<T>(m_distMethod);
 
             for (int i = 0; i < m_NumSubvectors; i++) {
                 SizeType baseIdx = i * m_KsPerSubvector * m_DimPerSubvector;
                 for (int j = 0; j < m_KsPerSubvector; j++) {
                     for (int k = 0; k < m_KsPerSubvector; k++) {
-                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = L2Dist(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
+                        temp_m_L2DistanceTables[m_DistIndexCalc(i, j, k)] = distFunc(&m_codebooks[baseIdx + j * m_DimPerSubvector], &m_codebooks[baseIdx + k * m_DimPerSubvector], m_DimPerSubvector);
                     }
                 }
             }

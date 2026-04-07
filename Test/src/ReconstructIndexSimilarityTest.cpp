@@ -376,10 +376,9 @@ void GenerateReconstructData(std::shared_ptr<VectorSet> &real_vecset, std::share
         }
 
         std::cout << "Building Finish!" << std::endl;
-        quantizer = std::make_shared<COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, std::move(codebooks));
-        auto ptr = f_createIO();
-        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out))
-        {
+        quantizer = std::make_shared<SPTAG::COMMON::PQQuantizer<R>>(M, Ks, QuanDim, false, std::move(codebooks), distCalcMethod);
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize(CODEBOOK_FILE.c_str(), std::ios::binary | std::ios::out)) {
             BOOST_ASSERT("Canot Open CODEBOOK_FILE to write!" == "Error");
         }
         quantizer->SaveQuantizer(ptr);

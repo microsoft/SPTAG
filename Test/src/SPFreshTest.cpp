@@ -82,7 +82,7 @@ std::shared_ptr<VectorSet> ConvertToFloatVectorSet(const std::shared_ptr<VectorS
 
 std::shared_ptr<COMMON::IQuantizer> EnsurePQQuantizer(const std::string& quantizerFile,
                                                      const std::shared_ptr<VectorSet>& trainVectors,
-                                                     DimensionType quantizedDim,
+                                                      DimensionType quantizedDim, DistCalcMethod dist,
                                                      int threadNum)
 {
     if (!trainVectors)
@@ -103,7 +103,7 @@ std::shared_ptr<COMMON::IQuantizer> EnsurePQQuantizer(const std::string& quantiz
         return nullptr;
 
     auto options = std::make_shared<QuantizerOptions>(
-        trainVectors->Count(), false, 0.0f, QuantizerType::PQQuantizer, quantizerFile, quantizedDim, "", "");
+        trainVectors->Count(), false, 0.0f, QuantizerType::PQQuantizer, dist, quantizerFile, quantizedDim, "", "");
     options->m_dimension = trainVectors->Dimension();
     options->m_threadNum = threadNum;
     options->m_inputValueType = VectorValueType::Float;
@@ -117,7 +117,7 @@ std::shared_ptr<COMMON::IQuantizer> EnsurePQQuantizer(const std::string& quantiz
         return nullptr;
 
     quantizer = std::make_shared<COMMON::PQQuantizer<float>>(
-        quantizedDim, 256, trainVectors->Dimension() / quantizedDim, false, std::move(codebooks));
+        quantizedDim, 256, trainVectors->Dimension() / quantizedDim, false, std::move(codebooks), dist);
 
     auto fp = SPTAG::f_createIO();
     if (fp != nullptr && fp->Initialize(quantizerFile.c_str(), std::ios::binary | std::ios::out))
@@ -704,7 +704,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
             if (quantizedDim <= 0) quantizedDim = dimension / 2;
             BOOST_REQUIRE(quantizedDim > 0 && (dimension % quantizedDim) == 0);
 
-            quantizer = EnsurePQQuantizer(quantizerFilePath, baseVectorsFloat, (DimensionType)quantizedDim, numThreads);
+            quantizer = EnsurePQQuantizer(quantizerFilePath, baseVectorsFloat, (DimensionType)quantizedDim, distMethod, numThreads);
             BOOST_REQUIRE(quantizer != nullptr);
 
             std::string pquanvecset = "perftest_quanvectors.bin";

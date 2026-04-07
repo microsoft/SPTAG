@@ -55,11 +55,13 @@ namespace SPTAG
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod, const std::shared_ptr<IQuantizer>& quantizer = nullptr) : _K(k), _DK(k), _D(dim), _RD(dim), _TH(threadnum), _M(distMethod), m_pQuantizer(quantizer), reconstructVectors(nullptr) {                            
                 if (m_pQuantizer) {
+		    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "KmeansArgs: Using quantizer!\n");
                     _RD = m_pQuantizer->ReconstructDim();
                     fComputeDistance = m_pQuantizer->DistanceCalcSelector<T>(distMethod);
                     reconstructVectors = (uint8_t*)ALIGN_ALLOC(_TH * m_pQuantizer->ReconstructSize());
                 }
                 else {
+		    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "KmeansArgs: Using none quantizer!\n");
                     fComputeDistance = COMMON::DistanceCalcSelector<T>(distMethod);
                 }
 
@@ -182,7 +184,7 @@ namespace SPTAG
                         currCenters[j] /= args.counts[k];
                     }
                     
-                    if (args._M == DistCalcMethod::Cosine) {
+                    if (args._M != DistCalcMethod::L2) {
                         COMMON::Utils::Normalize(currCenters, args._RD, COMMON::Utils::GetBase<T>());
                     }
                     
