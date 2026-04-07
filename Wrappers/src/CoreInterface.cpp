@@ -1419,6 +1419,8 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
         }
     }
 
+    // DisableCheckpoint=true (from ini/default): ShutDown never writes back.
+    // Updates are persisted via explicit Save() calls, not via ShutDown checkpoint.
     it->second.reset();
     m_tenantIndices.erase(it);
 
