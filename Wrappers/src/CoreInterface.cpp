@@ -8,7 +8,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
-#include <thread>
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include <map>
@@ -719,36 +718,6 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         {
             std::string workDir = m_tenantSpannWorkDirs[tenantId];
             tenantIndex->Save(workDir.c_str());
-
-            // Generate SQ8 compressed HeadIndex vectors for fast two-phase loading.
-            // Reads vectors.bin (float32) → compresses to vectors.sq8.bin (uint8 + min/scale).
-            {
-                std::string vecPath = workDir + "/HeadIndex/vectors.bin";
-                std::string sq8Path = workDir + "/HeadIndex/vectors.sq8.bin";
-                FILE* vf = fopen(vecPath.c_str(), "rb");
-                if (vf) {
-                    int32_t rows = 0, cols = 0;
-                    fread(&rows, sizeof(int32_t), 1, vf);
-                    fread(&cols, sizeof(int32_t), 1, vf);
-                    if (rows > 0 && cols > 0) {
-                        std::vector<float> vecs(rows * cols);
-                        fread(vecs.data(), sizeof(float), rows * cols, vf);
-                        auto sq8 = SPTAG::Cache::SQ8CompressedVectors::Compress(vecs.data(), rows, cols);
-                        // Write: rows | cols | mins[cols] | scales[cols] | data[rows*cols]
-                        FILE* sf = fopen(sq8Path.c_str(), "wb");
-                        if (sf) {
-                            fwrite(&rows, sizeof(int32_t), 1, sf);
-                            fwrite(&cols, sizeof(int32_t), 1, sf);
-                            fwrite(sq8->mins.data(), sizeof(float), cols, sf);
-                            fwrite(sq8->scales.data(), sizeof(float), cols, sf);
-                            fwrite(sq8->data.data(), sizeof(uint8_t), rows * cols, sf);
-                            fclose(sf);
-                        }
-                    }
-                    fclose(vf);
-                }
-            }
-
             fprintf(stderr, "[INFO] Tenant %d: built & released (%d vectors, dir=%s)\n",
                 tenantId, (int)vectorRanges.size(), workDir.c_str());
             tenantIndex.reset();
@@ -1229,88 +1198,7 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         loadPath = pathIt->second;
     }
 
-    // TWO-PHASE LOADING:
-    // Phase 1: Try fast load using SQ8 compressed vectors (from cache or disk file).
-    //          Read graph/tree from disk (~22% of HeadIndex), vectors from SQ8 (~25% size).
-    //          Immediately serve queries with ~SQ8 precision.
-    // Phase 2: Background thread loads full Float32 HeadIndex and hot-swaps.
-
-    bool usedSQ8 = false;
-    bool hasSQ8Source = false;
-    std::shared_ptr<SPTAG::Cache::SQ8CompressedVectors> sq8Data;
-
-    if (indexType == TenantIndexType::SPANN)
-    {
-        // Check SQ8 cache first (from a previous eviction)
-        auto sq8It = m_sq8Cache.find(p_tenantId);
-        if (sq8It != m_sq8Cache.end())
-        {
-            sq8Data = sq8It->second;
-            m_sq8Cache.erase(sq8It);
-            hasSQ8Source = true;
-        }
-        else
-        {
-            // Check for pre-built SQ8 file on disk
-            std::string sq8FilePath = loadPath + "/HeadIndex/vectors.sq8.bin";
-            FILE* sf = fopen(sq8FilePath.c_str(), "rb");
-            if (sf)
-            {
-                int32_t rows = 0, cols = 0;
-                fread(&rows, sizeof(int32_t), 1, sf);
-                fread(&cols, sizeof(int32_t), 1, sf);
-                if (rows > 0 && cols > 0)
-                {
-                    sq8Data = std::make_shared<SPTAG::Cache::SQ8CompressedVectors>();
-                    sq8Data->num_vectors = rows;
-                    sq8Data->dimension = cols;
-                    sq8Data->mins.resize(cols);
-                    sq8Data->scales.resize(cols);
-                    sq8Data->data.resize((size_t)rows * cols);
-                    fread(sq8Data->mins.data(), sizeof(float), cols, sf);
-                    fread(sq8Data->scales.data(), sizeof(float), cols, sf);
-                    fread(sq8Data->data.data(), sizeof(uint8_t), (size_t)rows * cols, sf);
-                    hasSQ8Source = true;
-                }
-                fclose(sf);
-            }
-        }
-    }
-
-    // If SQ8 available: dequantize → write temp vectors.bin → load fast
-    if (hasSQ8Source && sq8Data)
-    {
-        std::string origPath = loadPath + "/HeadIndex/vectors.bin";
-        std::string backupPath = origPath + ".orig";
-        std::string tmpPath = origPath + ".sq8tmp";
-
-        std::vector<float> decompressed = sq8Data->Decompress();
-        FILE* f = fopen(tmpPath.c_str(), "wb");
-        if (f)
-        {
-            int32_t nv = sq8Data->num_vectors;
-            int32_t dm = sq8Data->dimension;
-            fwrite(&nv, sizeof(int32_t), 1, f);
-            fwrite(&dm, sizeof(int32_t), 1, f);
-            fwrite(decompressed.data(), sizeof(float), nv * dm, f);
-            fclose(f);
-            rename(origPath.c_str(), backupPath.c_str());
-            rename(tmpPath.c_str(), origPath.c_str());
-            usedSQ8 = true;
-        }
-    }
-
     AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
-
-    // Restore original vectors.bin
-    if (usedSQ8)
-    {
-        std::string origPath = loadPath + "/HeadIndex/vectors.bin";
-        std::string backupPath = origPath + ".orig";
-        remove(origPath.c_str());
-        rename(backupPath.c_str(), origPath.c_str());
-    }
-
     if (!loadedIndex.ReadyToServe())
     {
         fprintf(stderr, "[ERROR] Failed to load tenant %d from %s\n", p_tenantId, loadPath.c_str());
@@ -1322,32 +1210,6 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     m_loadedHeadIndexBytes += estimatedBytes;
     m_lruList.push_back(p_tenantId);
     m_lruMap[p_tenantId] = std::prev(m_lruList.end());
-
-    // Phase 2: If we loaded SQ8, schedule background upgrade to full Float32.
-    // The SQ8 index is immediately usable (recall ~98%). When the background load
-    // completes, it hot-swaps the index pointer under write lock.
-    if (usedSQ8 && indexType == TenantIndexType::SPANN)
-    {
-        std::string bgLoadPath = loadPath;
-        int bgTenantId = p_tenantId;
-        std::thread([this, bgTenantId, bgLoadPath]() {
-            // Load full precision in background
-            AnnIndex fullIndex = AnnIndex::Load(bgLoadPath.c_str());
-            if (fullIndex.ReadyToServe())
-            {
-                auto fullPtr = std::make_shared<AnnIndex>(fullIndex);
-                // Hot-swap under exclusive lock
-                std::unique_lock<std::shared_mutex> wlock(m_tenantIndicesMutex);
-                auto it = m_tenantIndices.find(bgTenantId);
-                if (it != m_tenantIndices.end())
-                {
-                    it->second = fullPtr;  // Atomic pointer swap
-                    fprintf(stderr, "[INFO] Tenant %d: upgraded SQ8 → Float32\n", bgTenantId);
-                }
-            }
-        }).detach();
-    }
-
     return true;
 }
 
@@ -1396,31 +1258,7 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     // With SharedAIOPool: destruction only does close(fd) + free memory (~1ms).
     // AIO contexts are shared and never destroyed.
 
-    // Before destroying: compress head vectors to SQ8 for fast reload.
-    // Read vectors directly from HeadIndex/vectors.bin (known format: int32 rows, int32 cols, float32 data).
-    auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
-    if (wdIt != m_tenantSpannWorkDirs.end())
-    {
-        std::string vecPath = wdIt->second + "/HeadIndex/vectors.bin";
-        FILE* vf = fopen(vecPath.c_str(), "rb");
-        if (vf)
-        {
-            int32_t rows = 0, cols = 0;
-            fread(&rows, sizeof(int32_t), 1, vf);
-            fread(&cols, sizeof(int32_t), 1, vf);
-            if (rows > 0 && cols > 0 && cols == static_cast<int32_t>(m_dimension))
-            {
-                std::vector<float> vecs(rows * cols);
-                fread(vecs.data(), sizeof(float), rows * cols, vf);
-                auto sq8 = SPTAG::Cache::SQ8CompressedVectors::Compress(vecs.data(), rows, cols);
-                m_sq8Cache[p_tenantId] = sq8;
-            }
-            fclose(vf);
-        }
-    }
-
     // DisableCheckpoint=true (from ini/default): ShutDown never writes back.
-    // Updates are persisted via explicit Save() calls, not via ShutDown checkpoint.
     it->second.reset();
     m_tenantIndices.erase(it);
 
