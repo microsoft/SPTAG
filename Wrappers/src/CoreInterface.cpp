@@ -1130,24 +1130,21 @@ void TenantIndexManager::SetSearchParam(const char* p_name, const char* p_value,
 
 bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
 {
-    // Fast path: shared lock check
+    // Fast path: shared lock check (hot cache)
     {
         std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
         if (m_tenantIndices.count(p_tenantId))
         {
-            // Update LRU (move to back = MRU)
             auto it = m_lruMap.find(p_tenantId);
             if (it != m_lruMap.end())
-            {
                 m_lruList.splice(m_lruList.end(), m_lruList, it->second);
-            }
             return true;
         }
     }
 
-    // Slow path: load from disk under exclusive lock
+    // Slow path: exclusive lock
     std::unique_lock<std::shared_mutex> wlock(m_tenantIndicesMutex);
-    // Double-check after acquiring write lock
+    // Double-check hot cache
     if (m_tenantIndices.count(p_tenantId))
     {
         auto it = m_lruMap.find(p_tenantId);
@@ -1156,10 +1153,42 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         return true;
     }
 
-    // Evict if cache limit is set and would be exceeded
+    // Estimate HeadIndex size
+    uint64_t estimatedBytes = 0;
+    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
+    if (vcIt != m_tenantVectorCounts.end())
+        estimatedBytes = static_cast<uint64_t>(vcIt->second) * 128;
+    else
+        estimatedBytes = 1024 * 1024;
+
+    // Soft-evict LRU hot tenants to cold pool until we have room
+    if (m_headIndexCacheLimitBytes > 0)
+    {
+        while (m_loadedHeadIndexBytes + estimatedBytes > m_headIndexCacheLimitBytes
+               && !m_lruList.empty())
+        {
+            int evictId = m_lruList.front();
+            if (evictId == p_tenantId) break;
+            UnloadTenantLocked(evictId);  // Soft evict → cold pool (~0ms)
+        }
+    }
+
+    // Check cold pool: instant restore without disk IO
+    auto coldIt = m_coldTenantIndices.find(p_tenantId);
+    if (coldIt != m_coldTenantIndices.end())
+    {
+        m_tenantIndices[p_tenantId] = std::move(coldIt->second);
+        m_coldTenantIndices.erase(coldIt);
+        m_coldLruList.remove(p_tenantId);
+        m_loadedHeadIndexBytes += estimatedBytes;
+        m_lruList.push_back(p_tenantId);
+        m_lruMap[p_tenantId] = std::prev(m_lruList.end());
+        return true;
+    }
+
+    // Full cold load from disk
     auto typeIt = m_tenantIndexTypes.find(p_tenantId);
     TenantIndexType indexType = (typeIt != m_tenantIndexTypes.end()) ? typeIt->second : TenantIndexType::SPANN;
-
     std::string loadPath;
     if (indexType == TenantIndexType::SPANN)
     {
@@ -1174,27 +1203,6 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         loadPath = pathIt->second;
     }
 
-    // Estimate HeadIndex size for this tenant (128 bytes per vector)
-    uint64_t estimatedBytes = 0;
-    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
-    if (vcIt != m_tenantVectorCounts.end())
-        estimatedBytes = static_cast<uint64_t>(vcIt->second) * 128;
-    else
-        estimatedBytes = 1024 * 1024;  // 1MB default
-
-    // Evict LRU tenants until we have room
-    if (m_headIndexCacheLimitBytes > 0)
-    {
-        while (m_loadedHeadIndexBytes + estimatedBytes > m_headIndexCacheLimitBytes
-               && !m_lruList.empty())
-        {
-            int evictId = m_lruList.front();
-            // Don't evict the tenant we're about to load
-            if (evictId == p_tenantId) break;
-            UnloadTenantLocked(evictId);
-        }
-    }
-
     AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
     if (!loadedIndex.ReadyToServe())
     {
@@ -1205,11 +1213,8 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     auto indexPtr = std::make_shared<AnnIndex>(loadedIndex);
     m_tenantIndices[p_tenantId] = indexPtr;
     m_loadedHeadIndexBytes += estimatedBytes;
-
-    // Add to LRU (back = MRU)
     m_lruList.push_back(p_tenantId);
     m_lruMap[p_tenantId] = std::prev(m_lruList.end());
-
     return true;
 }
 
@@ -1247,7 +1252,7 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     auto it = m_tenantIndices.find(p_tenantId);
     if (it == m_tenantIndices.end()) return false;
 
-    // Estimate size being freed
+    // Estimate size being freed from hot cache
     uint64_t freedBytes = 0;
     auto vcIt = m_tenantVectorCounts.find(p_tenantId);
     if (vcIt != m_tenantVectorCounts.end())
@@ -1255,20 +1260,33 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     else
         freedBytes = 1024 * 1024;
 
-    // Release the AnnIndex.
-    // The index is read-only after build, so we skip checkpoint on shutdown
-    // by setting the index's search param to signal read-only teardown.
-    // The shared_ptr reset triggers: ~AnnIndex → ~SPANNIndex → ~ExtraDynamicSearcher → ~FileIO → ShutDown
-    it->second.reset();
+    // SOFT EVICTION: move to cold pool instead of destroying.
+    // The AnnIndex object stays alive (fd open, AIO contexts alive).
+    // This avoids expensive io_destroy (~100ms) on every eviction.
+    m_coldTenantIndices[p_tenantId] = std::move(it->second);
     m_tenantIndices.erase(it);
+    m_coldLruList.push_back(p_tenantId);
 
-    // Update cache accounting
+    // Hard-evict oldest cold entries if cold pool is full (fd pressure)
+    while (m_coldTenantIndices.size() > m_maxColdPoolSize && !m_coldLruList.empty())
+    {
+        int hardEvictId = m_coldLruList.front();
+        m_coldLruList.pop_front();
+        auto coldIt = m_coldTenantIndices.find(hardEvictId);
+        if (coldIt != m_coldTenantIndices.end())
+        {
+            coldIt->second.reset();  // True destruction: io_destroy + close fd
+            m_coldTenantIndices.erase(coldIt);
+        }
+    }
+
+    // Update hot cache accounting
     if (m_loadedHeadIndexBytes >= freedBytes)
         m_loadedHeadIndexBytes -= freedBytes;
     else
         m_loadedHeadIndexBytes = 0;
 
-    // Remove from LRU
+    // Remove from hot LRU
     auto lruIt = m_lruMap.find(p_tenantId);
     if (lruIt != m_lruMap.end())
     {
