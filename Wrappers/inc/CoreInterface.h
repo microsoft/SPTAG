@@ -178,13 +178,14 @@ public:
     void SetBuildParam(const char* p_name, const char* p_value, const char* p_section);
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
-    // Set HeadIndex LRU cache size limit (in bytes)
-    void SetHeadIndexCacheLimit(uint64_t p_bytesLimit) { m_headIndexCacheLimitBytes = p_bytesLimit; }
+    // Set HeadIndex LRU cache size limit (in bytes). 0 = unlimited.
+    void SetHeadIndexCacheLimit(uint64_t p_bytesLimit);
 
-    // Get current HeadIndex cache usage
-    uint64_t GetHeadIndexCacheUsage() const {
-        return m_headCache ? m_headCache->Usage() : 0;
-    }
+    // Get current HeadIndex cache usage (bytes)
+    uint64_t GetHeadIndexCacheUsage() const;
+
+    // Unload a single tenant (release HeadIndex memory + close fd)
+    bool UnloadTenant(int p_tenantId);
 
     // Set posting storage backend: "FILEIO" (default) or "ROCKSDBIO"
     void SetStorageBackend(const char* backend) { m_storageBackend = std::string(backend); }
@@ -199,6 +200,11 @@ private:
     // Protected by m_tenantIndicesMutex for concurrent multi-tenant search
     std::map<int, std::shared_ptr<AnnIndex>> m_tenantIndices;
     mutable std::shared_mutex m_tenantIndicesMutex;
+
+    // LRU tracking: most-recently-used tenant IDs (front=LRU, back=MRU)
+    std::list<int> m_lruList;
+    std::unordered_map<int, std::list<int>::iterator> m_lruMap;
+    uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
     
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;
@@ -265,6 +271,9 @@ private:
     void EvictIfNeeded();
 
     bool EnsureTenantLoaded(int p_tenantId);
+
+    // Unload a tenant while holding exclusive lock (called by eviction)
+    bool UnloadTenantLocked(int p_tenantId);
 
     // Shared SPANN search: uses HeadIndex + shared FileIO + PostingOffset
     std::shared_ptr<QueryResult> SearchSharedSPANN(ByteArray p_queryVector, int p_tenantId, int p_resultNum);

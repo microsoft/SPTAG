@@ -43,7 +43,8 @@ namespace SPTAG::SPANN {
             int m_batchSize = 64;
             int m_preIOCompleteCount = 0;
             int64_t m_preIOBytes = 0;
-            bool m_disableCheckpoint = false;
+        public:
+            bool m_disableCheckpoint = true;  // Default: skip checkpoint on shutdown (read-only mode)
 
             std::chrono::high_resolution_clock::time_point m_startTime;
             std::chrono::time_point<std::chrono::high_resolution_clock> m_preTime = std::chrono::high_resolution_clock::now();
@@ -518,6 +519,8 @@ namespace SPTAG::SPANN {
             }
         };
 
+        bool m_disableCheckpoint = true;  // Skip mapping save + checkpoint on shutdown
+
     public:
         FileIO(SPANN::Options& p_opt) {
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
@@ -605,7 +608,7 @@ namespace SPTAG::SPANN {
                     At(cleanKey) = 0xffffffffffffffff;
                 }
             }
-            if (!m_mappingPath.empty()) Save(m_mappingPath);
+            if (!m_disableCheckpoint && !m_mappingPath.empty()) Save(m_mappingPath);
             // TODO: Should we add a lock here?
             for (int i = 0; i < m_pBlockMapping.R(); i++) {
                 if (At(i) != 0xffffffffffffffff) {
@@ -618,6 +621,7 @@ namespace SPTAG::SPANN {
                 uintptr_t ptr = 0xffffffffffffffff;
                 if (m_buffer.try_pop(ptr)) delete[]((AddressType*)ptr);
             }
+            m_pBlockController.m_disableCheckpoint = m_disableCheckpoint;
 	        m_pBlockController.ShutDown();
             if (m_pShardedLRUCache) {
                 delete m_pShardedLRUCache;

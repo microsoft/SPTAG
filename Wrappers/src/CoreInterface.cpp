@@ -660,14 +660,14 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             int tptNumber = 32;
             int refineIter = 2;
             if (tenantVecCount < 10000) {
-                tptNumber = 2;
-                refineIter = 0;
-            } else if (tenantVecCount < 50000) {
-                tptNumber = 4;
-                refineIter = 1;
-            } else if (tenantVecCount < 200000) {
                 tptNumber = 8;
-                refineIter = 1;
+                refineIter = 2;
+            } else if (tenantVecCount < 50000) {
+                tptNumber = 8;
+                refineIter = 2;
+            } else if (tenantVecCount < 200000) {
+                tptNumber = 16;
+                refineIter = 2;
             } else if (tenantVecCount < 500000) {
                 tptNumber = 16;
                 refineIter = 2;
@@ -1133,15 +1133,30 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     // Fast path: shared lock check
     {
         std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
-        if (m_tenantIndices.count(p_tenantId)) return true;
+        if (m_tenantIndices.count(p_tenantId))
+        {
+            // Update LRU (move to back = MRU)
+            auto it = m_lruMap.find(p_tenantId);
+            if (it != m_lruMap.end())
+            {
+                m_lruList.splice(m_lruList.end(), m_lruList, it->second);
+            }
+            return true;
+        }
     }
 
     // Slow path: load from disk under exclusive lock
     std::unique_lock<std::shared_mutex> wlock(m_tenantIndicesMutex);
     // Double-check after acquiring write lock
-    if (m_tenantIndices.count(p_tenantId)) return true;
+    if (m_tenantIndices.count(p_tenantId))
+    {
+        auto it = m_lruMap.find(p_tenantId);
+        if (it != m_lruMap.end())
+            m_lruList.splice(m_lruList.end(), m_lruList, it->second);
+        return true;
+    }
 
-    // Standard load path
+    // Evict if cache limit is set and would be exceeded
     auto typeIt = m_tenantIndexTypes.find(p_tenantId);
     TenantIndexType indexType = (typeIt != m_tenantIndexTypes.end()) ? typeIt->second : TenantIndexType::SPANN;
 
@@ -1159,6 +1174,27 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         loadPath = pathIt->second;
     }
 
+    // Estimate HeadIndex size for this tenant (128 bytes per vector)
+    uint64_t estimatedBytes = 0;
+    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
+    if (vcIt != m_tenantVectorCounts.end())
+        estimatedBytes = static_cast<uint64_t>(vcIt->second) * 128;
+    else
+        estimatedBytes = 1024 * 1024;  // 1MB default
+
+    // Evict LRU tenants until we have room
+    if (m_headIndexCacheLimitBytes > 0)
+    {
+        while (m_loadedHeadIndexBytes + estimatedBytes > m_headIndexCacheLimitBytes
+               && !m_lruList.empty())
+        {
+            int evictId = m_lruList.front();
+            // Don't evict the tenant we're about to load
+            if (evictId == p_tenantId) break;
+            UnloadTenantLocked(evictId);
+        }
+    }
+
     AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
     if (!loadedIndex.ReadyToServe())
     {
@@ -1168,6 +1204,12 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
 
     auto indexPtr = std::make_shared<AnnIndex>(loadedIndex);
     m_tenantIndices[p_tenantId] = indexPtr;
+    m_loadedHeadIndexBytes += estimatedBytes;
+
+    // Add to LRU (back = MRU)
+    m_lruList.push_back(p_tenantId);
+    m_lruMap[p_tenantId] = std::prev(m_lruList.end());
+
     return true;
 }
 
@@ -1178,6 +1220,63 @@ void TenantIndexManager::InitCache()
     cfg.ttl = std::chrono::seconds(600);
     cfg.load_timeout = std::chrono::milliseconds(30000);
     m_headCache = std::make_unique<SPTAG::Cache::HeadIndexCache>(cfg);
+}
+
+void TenantIndexManager::SetHeadIndexCacheLimit(uint64_t p_bytesLimit)
+{
+    m_headIndexCacheLimitBytes = p_bytesLimit;
+    fprintf(stderr, "[INFO] HeadIndex cache limit set to %lu bytes (%.1f MB)\n",
+            (unsigned long)p_bytesLimit, p_bytesLimit / (1024.0 * 1024.0));
+}
+
+uint64_t TenantIndexManager::GetHeadIndexCacheUsage() const
+{
+    std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+    return m_loadedHeadIndexBytes;
+}
+
+bool TenantIndexManager::UnloadTenant(int p_tenantId)
+{
+    std::unique_lock<std::shared_mutex> wlock(m_tenantIndicesMutex);
+    return UnloadTenantLocked(p_tenantId);
+}
+
+bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
+{
+    // Must be called under exclusive lock (m_tenantIndicesMutex)
+    auto it = m_tenantIndices.find(p_tenantId);
+    if (it == m_tenantIndices.end()) return false;
+
+    // Estimate size being freed
+    uint64_t freedBytes = 0;
+    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
+    if (vcIt != m_tenantVectorCounts.end())
+        freedBytes = static_cast<uint64_t>(vcIt->second) * 128;
+    else
+        freedBytes = 1024 * 1024;
+
+    // Release the AnnIndex.
+    // The index is read-only after build, so we skip checkpoint on shutdown
+    // by setting the index's search param to signal read-only teardown.
+    // The shared_ptr reset triggers: ~AnnIndex → ~SPANNIndex → ~ExtraDynamicSearcher → ~FileIO → ShutDown
+    it->second.reset();
+    m_tenantIndices.erase(it);
+
+    // Update cache accounting
+    if (m_loadedHeadIndexBytes >= freedBytes)
+        m_loadedHeadIndexBytes -= freedBytes;
+    else
+        m_loadedHeadIndexBytes = 0;
+
+    // Remove from LRU
+    auto lruIt = m_lruMap.find(p_tenantId);
+    if (lruIt != m_lruMap.end())
+    {
+        m_lruList.erase(lruIt->second);
+        m_lruMap.erase(lruIt);
+    }
+
+    return true;
 }
 
 void TenantIndexManager::TouchLRU(int p_tenantId)
