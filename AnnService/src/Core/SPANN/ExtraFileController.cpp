@@ -52,6 +52,42 @@ bool FileIO::BlockController::Initialize(SPANN::Options &p_opt)
     return true;
 }
 
+bool FileIO::BlockController::InitializeReadOnly(SPANN::Options &p_opt)
+{
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::InitializeReadOnly(%s)\n",
+                 p_opt.m_ssdMappingFile.c_str());
+
+    m_batchSize = p_opt.m_spdkBatchSize;
+    strcpy(m_filePath, (p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile + "_postings").c_str());
+    m_disableCheckpoint = true;  // Always skip checkpoint for read-only
+    m_startTime = std::chrono::high_resolution_clock::now();
+
+    int numblocks = m_batchSize;
+    m_fileHandle = f_createAsyncIO();
+    if (m_fileHandle == nullptr ||
+        !m_fileHandle->Initialize(
+            m_filePath,
+#ifndef _MSC_VER
+            O_RDONLY | O_DIRECT, numblocks, 2, 2,
+            std::max(p_opt.m_ioThreads, 2 * p_opt.m_searchThreadNum),
+            ((std::uint64_t)p_opt.m_startFileSize) << 30  // Need actual size for open check
+#else
+            GENERIC_READ, numblocks, 2, 2,
+            (std::uint16_t)(p_opt.m_ioThreads),
+            ((std::uint64_t)p_opt.m_startFileSize) << 30
+#endif
+            ))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FileIO::BlockController::InitializeReadOnly failed\n");
+        return false;
+    }
+
+    // Skip LoadBlockPool entirely — free block list is only needed for writes.
+    // Query path (ReadBlocks) only needs m_fileHandle + block addresses from the mapping.
+    m_totalAllocatedBlocks.store(0);
+    return true;
+}
+
 bool FileIO::BlockController::NeedsExpansion(int p_size)
 {
     // TODO: Replace RemainBlocks() which internally uses tbb::concurrent_queue::unsafe_size().

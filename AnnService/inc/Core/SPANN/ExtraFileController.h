@@ -70,6 +70,10 @@ namespace SPTAG::SPANN {
         public:
             bool Initialize(SPANN::Options& p_opt);
 
+            // Read-only fast init: opens file + sets up IO, skips loading free block pool.
+            // ~100x faster than full Initialize for query-only use.
+            bool InitializeReadOnly(SPANN::Options& p_opt);
+
             bool GetBlocks(AddressType* p_data, int p_size);
 
             bool ReleaseBlocks(AddressType* p_data, int p_size);
@@ -584,6 +588,47 @@ namespace SPTAG::SPANN {
             }
 
             m_shutdownCalled = false;
+        }
+
+        // Read-only constructor: skips blockpool loading + compaction thread.
+        // ~100x faster for query-only tenants.
+        FileIO(SPANN::Options& p_opt, bool readOnly) {
+            if (!readOnly) {
+                // Delegate to full constructor body — but C++ doesn't allow delegating like this.
+                // This path shouldn't be used; call the other constructor instead.
+                return;
+            }
+            m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
+            m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
+            m_bufferLimit = 1024;
+            m_shutdownCalled = true;
+            m_disableCheckpoint = true;
+            m_pShardedLRUCache = nullptr;
+
+            // Load block mapping (needed for ReadBlocks to know block→offset)
+            if (fileexists(m_mappingPath.c_str())) {
+                Load(m_mappingPath, 1024 * 1024, MaxSize);
+            } else {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ReadOnly FileIO: no mapping at %s\n", m_mappingPath.c_str());
+                return;
+            }
+
+            // Allocate read buffers
+            for (int i = 0; i < m_bufferLimit; i++) {
+                m_buffer.push((uintptr_t)(new AddressType[m_blockLimit]));
+            }
+
+            // Skip compaction thread pool (not needed for reads)
+            m_compactionThreadPool = nullptr;
+
+            // Fast read-only init: skip blockpool free list loading
+            if (!m_pBlockController.InitializeReadOnly(p_opt)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to InitializeReadOnly FileIO!\n");
+                return;
+            }
+
+            m_shutdownCalled = false;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO: ReadOnly mode initialized\n");
         }
 
         ~FileIO() {

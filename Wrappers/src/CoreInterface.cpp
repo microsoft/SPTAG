@@ -3,6 +3,11 @@
 
 #include "inc/CoreInterface.h"
 #include "inc/Helper/StringConvert.h"
+
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include <map>
@@ -1267,6 +1272,35 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     {
         m_lruList.erase(lruIt->second);
         m_lruMap.erase(lruIt);
+    }
+
+    // Drop OS page cache for this tenant's HeadIndex files.
+    // This ensures next load hits real disk IO, not page cache.
+    if (m_dropPageCacheOnEvict)
+    {
+        std::string hiDir;
+        auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
+        if (wdIt != m_tenantSpannWorkDirs.end())
+            hiDir = wdIt->second + "/HeadIndex";
+        if (!hiDir.empty())
+        {
+            DIR* dir = opendir(hiDir.c_str());
+            if (dir) {
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != nullptr) {
+                    if (ent->d_name[0] == '.') continue;
+                    std::string fp = hiDir + "/" + ent->d_name;
+                    int fd = open(fp.c_str(), O_RDONLY);
+                    if (fd >= 0) {
+                        struct stat st;
+                        fstat(fd, &st);
+                        posix_fadvise(fd, 0, st.st_size, POSIX_FADV_DONTNEED);
+                        close(fd);
+                    }
+                }
+                closedir(dir);
+            }
+        }
     }
 
     return true;

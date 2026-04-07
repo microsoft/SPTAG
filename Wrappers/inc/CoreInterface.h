@@ -184,6 +184,9 @@ public:
     // Get current HeadIndex cache usage (bytes)
     uint64_t GetHeadIndexCacheUsage() const;
 
+    // Enable/disable dropping OS page cache on HeadIndex eviction (for benchmarking)
+    void SetDropPageCacheOnEvict(bool enable) { m_dropPageCacheOnEvict = enable; }
+
     // Unload a single tenant (release HeadIndex memory + close fd)
     bool UnloadTenant(int p_tenantId);
 
@@ -259,6 +262,9 @@ private:
 
     // HeadIndex cache limit
     uint64_t m_headIndexCacheLimitBytes;
+
+    // Drop OS page cache for HeadIndex files on eviction (for benchmarking real IO)
+    bool m_dropPageCacheOnEvict = false;
 
     // Unified storage management functions
     bool SaveUnifiedStorage(const char* p_baseDir);
