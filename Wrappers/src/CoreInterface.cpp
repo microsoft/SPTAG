@@ -1198,7 +1198,50 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         loadPath = pathIt->second;
     }
 
+    // Check SQ8 cache: if we have compressed head vectors, dequantize them
+    // to a temp file to avoid reading the large vectors.bin from disk.
+    auto sq8It = m_sq8Cache.find(p_tenantId);
+    bool usedSQ8 = false;
+    std::string tempVectorsPath;
+    if (sq8It != m_sq8Cache.end() && indexType == TenantIndexType::SPANN)
+    {
+        tempVectorsPath = loadPath + "/HeadIndex/vectors.bin.sq8tmp";
+        auto& sq8 = sq8It->second;
+        std::vector<float> decompressed = sq8->Decompress();
+
+        // Write decompressed vectors to temp file
+        FILE* f = fopen(tempVectorsPath.c_str(), "wb");
+        if (f)
+        {
+            // vectors.bin format: 4-byte num_vectors, 4-byte dimension, then float data
+            int32_t nv = sq8->num_vectors;
+            int32_t dm = sq8->dimension;
+            fwrite(&nv, sizeof(int32_t), 1, f);
+            fwrite(&dm, sizeof(int32_t), 1, f);
+            fwrite(decompressed.data(), sizeof(float), nv * dm, f);
+            fclose(f);
+
+            // Rename: original vectors.bin → vectors.bin.orig, temp → vectors.bin
+            std::string origPath = loadPath + "/HeadIndex/vectors.bin";
+            std::string backupPath = loadPath + "/HeadIndex/vectors.bin.orig";
+            rename(origPath.c_str(), backupPath.c_str());
+            rename(tempVectorsPath.c_str(), origPath.c_str());
+            usedSQ8 = true;
+        }
+        m_sq8Cache.erase(sq8It);  // Free SQ8 buffer
+    }
+
     AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
+
+    // Restore original vectors.bin if we used SQ8
+    if (usedSQ8)
+    {
+        std::string origPath = loadPath + "/HeadIndex/vectors.bin";
+        std::string backupPath = loadPath + "/HeadIndex/vectors.bin.orig";
+        remove(origPath.c_str());
+        rename(backupPath.c_str(), origPath.c_str());
+    }
+
     if (!loadedIndex.ReadyToServe())
     {
         fprintf(stderr, "[ERROR] Failed to load tenant %d from %s\n", p_tenantId, loadPath.c_str());
@@ -1257,6 +1300,30 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
 
     // With SharedAIOPool: destruction only does close(fd) + free memory (~1ms).
     // AIO contexts are shared and never destroyed.
+
+    // Before destroying: compress head vectors to SQ8 for fast reload.
+    // Read vectors directly from HeadIndex/vectors.bin (known format: int32 rows, int32 cols, float32 data).
+    auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
+    if (wdIt != m_tenantSpannWorkDirs.end())
+    {
+        std::string vecPath = wdIt->second + "/HeadIndex/vectors.bin";
+        FILE* vf = fopen(vecPath.c_str(), "rb");
+        if (vf)
+        {
+            int32_t rows = 0, cols = 0;
+            fread(&rows, sizeof(int32_t), 1, vf);
+            fread(&cols, sizeof(int32_t), 1, vf);
+            if (rows > 0 && cols > 0 && cols == static_cast<int32_t>(m_dimension))
+            {
+                std::vector<float> vecs(rows * cols);
+                fread(vecs.data(), sizeof(float), rows * cols, vf);
+                auto sq8 = SPTAG::Cache::SQ8CompressedVectors::Compress(vecs.data(), rows, cols);
+                m_sq8Cache[p_tenantId] = sq8;
+            }
+            fclose(vf);
+        }
+    }
+
     it->second.reset();
     m_tenantIndices.erase(it);
 

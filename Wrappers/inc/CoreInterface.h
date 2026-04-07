@@ -11,6 +11,7 @@
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Helper/KeyValueIO.h"
 #include "inc/Core/Cache/HeadIndexCache.h"
+#include "inc/Core/Cache/SQ8Compressor.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -90,6 +91,9 @@ public:
     static AnnIndex Load(const char* p_loaderFile);
 
     static AnnIndex Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);
+
+    // Access underlying VectorIndex (for HeadIndex extraction etc.)
+    std::shared_ptr<SPTAG::VectorIndex> GetInternalIndex() const { return m_index; }
 
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
@@ -208,6 +212,13 @@ private:
     std::list<int> m_lruList;
     std::unordered_map<int, std::list<int>::iterator> m_lruMap;
     uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
+
+    // SQ8 compressed head vectors cache: kept in memory on eviction for fast reload.
+    // On reload, dequantize from SQ8 (in-memory) instead of reading 78% of HeadIndex from disk.
+    std::map<int, std::shared_ptr<SPTAG::Cache::SQ8CompressedVectors>> m_sq8Cache;
+
+    // Background upgrade: after loading SQ8-dequantized index, async load full precision
+    void BackgroundUpgrade(int tenantId, const std::string& loadPath);
     
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;
