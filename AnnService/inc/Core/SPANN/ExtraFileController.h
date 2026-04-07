@@ -520,6 +520,7 @@ namespace SPTAG::SPANN {
         };
 
         bool m_disableCheckpoint = true;  // Skip mapping save + checkpoint on shutdown
+        std::atomic<bool> m_dirty{false}; // Set by any write op; checkpoint only when dirty
 
     public:
         FileIO(SPANN::Options& p_opt) {
@@ -609,7 +610,8 @@ namespace SPTAG::SPANN {
                     At(cleanKey) = 0xffffffffffffffff;
                 }
             }
-            if (!m_disableCheckpoint && !m_mappingPath.empty()) Save(m_mappingPath);
+            if (!m_disableCheckpoint && m_dirty.load(std::memory_order_relaxed) && !m_mappingPath.empty())
+                Save(m_mappingPath);
             // TODO: Should we add a lock here?
             for (int i = 0; i < m_pBlockMapping.R(); i++) {
                 if (At(i) != 0xffffffffffffffff) {
@@ -622,7 +624,7 @@ namespace SPTAG::SPANN {
                 uintptr_t ptr = 0xffffffffffffffff;
                 if (m_buffer.try_pop(ptr)) delete[]((AddressType*)ptr);
             }
-            m_pBlockController.m_disableCheckpoint = m_disableCheckpoint;
+            m_pBlockController.m_disableCheckpoint = m_disableCheckpoint || !m_dirty.load(std::memory_order_relaxed);
 	        m_pBlockController.ShutDown();
             if (m_pShardedLRUCache) {
                 delete m_pShardedLRUCache;
@@ -779,6 +781,7 @@ namespace SPTAG::SPANN {
         */
 
         ErrorCode Put(const SizeType key, const std::string& value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, bool useCache) {
+            m_dirty.store(true, std::memory_order_relaxed);
             int blocks = (int)(((value.size() + PageSize - 1) >> PageSizeEx));
             if (blocks >= m_blockLimit) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put key:%d value:%lld since value too long!\n", key, value.size());
@@ -986,6 +989,7 @@ namespace SPTAG::SPANN {
                         std::vector<Helper::AsyncReadRequest> *reqs,
                         std::function<bool(const void *val, const int size)> checksum)
         {
+            m_dirty.store(true, std::memory_order_relaxed);
             SizeType r = m_pBlockMapping.R();
             if (key >= r)
             {
@@ -1108,6 +1112,7 @@ namespace SPTAG::SPANN {
 
 
         ErrorCode Delete(SizeType key) override {
+            m_dirty.store(true, std::memory_order_relaxed);
             SizeType r = m_pBlockMapping.R();
             if (key >= r) return ErrorCode::Key_OverFlow;
 
@@ -1150,6 +1155,7 @@ namespace SPTAG::SPANN {
         }
 
         void ForceCompaction() {
+            m_dirty.store(true, std::memory_order_relaxed);
             Save(m_mappingPath);
         }
 
