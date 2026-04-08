@@ -1449,34 +1449,12 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
     sigs->BuildPS(numHeads, posting_tags);
 
-    // Build NS: need graph adjacency. Read from graph.bin.
-    // RNG graph format: num_nodes × num_neighbors, each is int32 (neighbor VID)
-    std::string graphPath = workDir + "/HeadIndex/graph.bin";
-    std::vector<std::vector<int>> neighbors(numHeads);
-    FILE* gf = fopen(graphPath.c_str(), "rb");
-    if (gf) {
-        int32_t rows = 0, cols = 0;
-        fread(&rows, sizeof(int32_t), 1, gf);
-        fread(&cols, sizeof(int32_t), 1, gf);
-        for (int i = 0; i < std::min(rows, numHeads); i++) {
-            std::vector<int32_t> nbrs(cols);
-            fread(nbrs.data(), sizeof(int32_t), cols, gf);
-            for (int j = 0; j < cols; j++) {
-                if (nbrs[j] >= 0 && nbrs[j] < numHeads) {
-                    neighbors[i].push_back(nbrs[j]);
-                }
-            }
-        }
-        fclose(gf);
-    }
-    sigs->BuildNS(neighbors);
-
     // Save alongside HeadIndex
     std::string sigPath = workDir + "/signatures.bin";
     sigs->Save(sigPath);
 
     m_tenantSignatures[p_tenantId] = sigs;
-    fprintf(stderr, "[INFO] Tenant %d: built PS+NS signatures (%d postings, %zu bytes)\n",
+    fprintf(stderr, "[INFO] Tenant %d: built PS signatures (%d postings, %zu bytes)\n",
             p_tenantId, numHeads, sigs->MemoryBytes());
     return true;
 }

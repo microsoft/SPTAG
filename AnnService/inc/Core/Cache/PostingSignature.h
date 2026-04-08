@@ -91,7 +91,6 @@ private:
 struct TenantSignatures {
     int num_postings = 0;
     std::vector<Bloom128> ps;   // Posting Signatures, indexed by posting_id (= head VID)
-    std::vector<Bloom128> ns;   // Navigation Signatures, indexed by head VID
 
     // Build PS from per-vector tags.
     // posting_tags[posting_id] = list of tag IDs for vectors in that posting.
@@ -106,20 +105,6 @@ struct TenantSignatures {
         }
     }
 
-    // Build NS from PS + graph adjacency (1-hop OR).
-    // neighbors[head_id] = list of neighbor head IDs.
-    void BuildNS(const std::vector<std::vector<int>>& neighbors) {
-        ns.resize(num_postings);
-        for (int i = 0; i < num_postings; i++) {
-            ns[i] = ps[i];  // Start with own PS
-            for (int nbr : neighbors[i]) {
-                if (nbr >= 0 && nbr < num_postings) {
-                    ns[i].MergeOR(ps[nbr]);
-                }
-            }
-        }
-    }
-
     // Save to file
     bool Save(const std::string& path) const {
         FILE* f = fopen(path.c_str(), "wb");
@@ -127,7 +112,6 @@ struct TenantSignatures {
         int32_t n = num_postings;
         fwrite(&n, sizeof(int32_t), 1, f);
         fwrite(ps.data(), sizeof(Bloom128), n, f);
-        fwrite(ns.data(), sizeof(Bloom128), n, f);
         fclose(f);
         return true;
     }
@@ -140,30 +124,20 @@ struct TenantSignatures {
         fread(&n, sizeof(int32_t), 1, f);
         num_postings = n;
         ps.resize(n);
-        ns.resize(n);
         fread(ps.data(), sizeof(Bloom128), n, f);
-        fread(ns.data(), sizeof(Bloom128), n, f);
         fclose(f);
         return true;
     }
 
     // Memory usage in bytes
     size_t MemoryBytes() const {
-        return sizeof(*this) + ps.capacity() * sizeof(Bloom128) + ns.capacity() * sizeof(Bloom128);
+        return sizeof(*this) + ps.capacity() * sizeof(Bloom128);
     }
 
     // Check if posting should be read from SSD (PS hard reject)
     bool ShouldReadPosting(int posting_id, const Bloom128& query_bloom) const {
-        if (posting_id < 0 || posting_id >= num_postings) return true; // safety: read if unknown
+        if (posting_id < 0 || posting_id >= num_postings) return true;
         return ps[posting_id].MayIntersect(query_bloom);
-    }
-
-    // Get navigation priority multiplier for a head node (NS soft filter)
-    // Returns 1.0 if NS matches (normal priority), >1.0 if not (deprioritize).
-    float NavigationPriority(int head_id, const Bloom128& query_bloom) const {
-        if (head_id < 0 || head_id >= num_postings) return 1.0f;
-        if (ns[head_id].IsSaturated()) return 1.0f;  // Saturated NS → don't filter
-        return ns[head_id].MayIntersect(query_bloom) ? 1.0f : 2.0f;
     }
 };
 
