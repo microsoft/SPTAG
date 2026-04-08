@@ -195,8 +195,9 @@ public:
 
     // --- ACL/Tag Filtered Search ---
     // Build posting signatures (PS + NS) for a tenant from per-vector tags.
-    // p_tags: ByteArray of uint32_t tag IDs, one per vector.
-    bool BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors);
+    // p_tags: ByteArray of uint32_t, layout [p_numVectors × p_numTagsPerVec].
+    // Each vector can have multiple tags (e.g. org, dept, team, project).
+    bool BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors, int p_numTagsPerVec);
 
     // Search with ACL tag filter: PS hard reject + NS soft navigation.
     // p_queryTags: ByteArray of uint32_t allowed tag IDs.

@@ -1322,9 +1322,10 @@ void TenantIndexManager::EvictIfNeeded()
 // ACL / Tag Filtered Search — Two-Level Signature Implementation
 // ============================================================================
 
-bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors)
+bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors, int p_numTagsPerVec)
 {
     const uint32_t* p_tagsPtr = reinterpret_cast<const uint32_t*>(p_tags.Data());
+    // Tags layout: p_tagsPtr[i * p_numTagsPerVec + t] = t-th tag of vector i
     // Read the posting structure to build per-posting tag sets.
     // Each vector was assigned to a posting during SPANN build.
     // We need: for each posting (head), which tags appear in its vectors?
@@ -1364,7 +1365,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     for (int i = 0; i < p_numVectors; i++) {
         int posting_id = (int)((int64_t)i * numHeads / p_numVectors);
         if (posting_id >= numHeads) posting_id = numHeads - 1;
-        posting_tags[posting_id].push_back(p_tagsPtr[i]);
+        // Insert ALL tags for this vector into the posting's Bloom
+        for (int t = 0; t < p_numTagsPerVec; t++) {
+            posting_tags[posting_id].push_back(p_tagsPtr[i * p_numTagsPerVec + t]);
+        }
     }
 
     auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
