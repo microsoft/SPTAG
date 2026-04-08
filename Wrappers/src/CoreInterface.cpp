@@ -788,6 +788,69 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
     return !m_tenantVectorCounts.empty();
 }
 
+bool TenantIndexManager::BuildFromDataWithTags(ByteArray p_vectors, ByteArray p_metadata, SizeType p_vectorNum,
+                                                ByteArray p_tags, int p_numTagsPerVec,
+                                                bool p_withMetaIndex, bool p_normalized)
+{
+    // Step 1: Build SPANN indexes (standard flow)
+    if (!BuildFromData(p_vectors, p_metadata, p_vectorNum, p_withMetaIndex, p_normalized))
+        return false;
+
+    // Step 2: Build signatures for each tenant using real posting assignments.
+    // Parse metadata to get per-vector tenant assignment (same logic as BuildFromData).
+    const char* metaPtr = reinterpret_cast<const char*>(p_metadata.Data());
+    const char* metaEnd = metaPtr + p_metadata.Length();
+    const uint32_t* tagsPtr = reinterpret_cast<const uint32_t*>(p_tags.Data());
+
+    // Rebuild tenant→vector ranges (same as BuildFromData parsing)
+    std::map<int, std::vector<int>> tenantGlobalIndices;  // tenantId → [global vector indices]
+    SizeType globalIdx = 0;
+    const char* mp = metaPtr;
+    while (mp < metaEnd && globalIdx < p_vectorNum)
+    {
+        const char* lineEnd = mp;
+        while (lineEnd < metaEnd && *lineEnd != '\n') lineEnd++;
+        std::string metaLine(mp, lineEnd - mp);
+
+        int tenantId = -1;
+        {
+            std::lock_guard<std::mutex> lock(m_tenantIdMutex);
+            auto it = m_tenantStrToInt.find(metaLine);
+            if (it != m_tenantStrToInt.end()) tenantId = it->second;
+        }
+        if (tenantId >= 0)
+            tenantGlobalIndices[tenantId].push_back(globalIdx);
+
+        mp = (lineEnd < metaEnd) ? (lineEnd + 1) : lineEnd;
+        globalIdx++;
+    }
+
+    // For each tenant, build signatures from its vectors' tags
+    for (auto& [tenantId, globalIds] : tenantGlobalIndices)
+    {
+        int n = (int)globalIds.size();
+        // Extract this tenant's tags (n × p_numTagsPerVec)
+        std::vector<uint32_t> tenantTags(n * p_numTagsPerVec);
+        for (int i = 0; i < n; i++)
+        {
+            for (int t = 0; t < p_numTagsPerVec; t++)
+            {
+                tenantTags[i * p_numTagsPerVec + t] = tagsPtr[globalIds[i] * p_numTagsPerVec + t];
+            }
+        }
+
+        uint8_t* tagBuf = new uint8_t[tenantTags.size() * sizeof(uint32_t)];
+        memcpy(tagBuf, tenantTags.data(), tenantTags.size() * sizeof(uint32_t));
+        ByteArray tagBytes(tagBuf, tenantTags.size() * sizeof(uint32_t), true);
+
+        BuildSignatures(tenantId, tagBytes, n, p_numTagsPerVec);
+    }
+
+    fprintf(stderr, "[INFO] BuildFromDataWithTags: built signatures for %d tenants\n",
+            (int)tenantGlobalIndices.size());
+    return true;
+}
+
 std::shared_ptr<QueryResult> TenantIndexManager::Search(ByteArray p_queryVector, int p_tenantId, int p_resultNum)
 {
     if (!EnsureTenantLoaded(p_tenantId))
@@ -1210,6 +1273,18 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     m_loadedHeadIndexBytes += estimatedBytes;
     m_lruList.push_back(p_tenantId);
     m_lruMap[p_tenantId] = std::prev(m_lruList.end());
+
+    // Auto-load signatures if available
+    if (m_tenantSignatures.find(p_tenantId) == m_tenantSignatures.end())
+    {
+        std::string sigPath = loadPath + "/signatures.bin";
+        auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
+        if (sigs->Load(sigPath))
+        {
+            m_tenantSignatures[p_tenantId] = sigs;
+        }
+    }
+
     return true;
 }
 

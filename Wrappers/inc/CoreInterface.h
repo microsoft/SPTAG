@@ -199,6 +199,13 @@ public:
     // Each vector can have multiple tags (e.g. org, dept, team, project).
     bool BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors, int p_numTagsPerVec);
 
+    // Build index with per-vector tags integrated.
+    // Same as BuildFromData but also generates PS/NS signatures per tenant.
+    // p_tags: ByteArray of uint32_t, layout [p_vectorNum × p_numTagsPerVec].
+    bool BuildFromDataWithTags(ByteArray p_vectors, ByteArray p_metadata, SizeType p_vectorNum,
+                               ByteArray p_tags, int p_numTagsPerVec,
+                               bool p_withMetaIndex, bool p_normalized);
+
     // Search with ACL tag filter: PS hard reject + NS soft navigation.
     // p_queryTags: ByteArray of uint32_t allowed tag IDs.
     std::shared_ptr<QueryResult> SearchWithACL(ByteArray p_queryVector, int p_tenantId,
