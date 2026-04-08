@@ -276,6 +276,11 @@ namespace SPTAG {
             // Pointer to the SPANN-level metadata (for filter lookup by posting vector ID)
             const VectorIndex* m_pFilterSource = nullptr;
 
+            // Posting-level pre-filter: called with posting ID before SSD read.
+            // Returns true if the posting should be read, false to skip.
+            // Used by PS (Posting Signature) hard reject.
+            std::function<bool(int)> m_postingFilter;
+
             std::function<void()> m_callback;
         };
 

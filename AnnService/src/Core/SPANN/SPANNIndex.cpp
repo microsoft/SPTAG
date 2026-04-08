@@ -318,6 +318,8 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         {
             m_extraSearcher->InitWorkSpace(workSpace.get(), true);
         }
+        // Propagate posting-level pre-filter (for ACL/tag PS hard reject)
+        workSpace->m_postingFilter = m_postingFilter;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
 

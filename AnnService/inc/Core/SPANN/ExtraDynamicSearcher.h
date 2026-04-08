@@ -1860,6 +1860,17 @@ namespace SPTAG::SPANN {
             else remainLimit = m_hardLatencyLimit;
 
             auto readStart = std::chrono::high_resolution_clock::now();
+
+            // PS posting-level pre-filter: remove posting IDs that cannot contain
+            // matching ACL/tags BEFORE reading from SSD.
+            if (p_exWorkSpace->m_postingFilter) {
+                auto& ids = p_exWorkSpace->m_postingIDs;
+                ids.erase(
+                    std::remove_if(ids.begin(), ids.end(),
+                        [&](int pid) { return !p_exWorkSpace->m_postingFilter(pid); }),
+                    ids.end());
+            }
+
             if (db->MultiGet(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers, remainLimit, &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success ||
                 !ValidatePostings(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers))
             {

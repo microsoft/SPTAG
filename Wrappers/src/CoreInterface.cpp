@@ -1446,39 +1446,25 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         indexPtr = it->second;
     }
 
-    // Step 1: HeadIndex search to get candidate postings (standard path)
-    // We request MORE candidates than needed, then PS-filter
-    int expandedResultNum = std::min(p_resultNum * 4, 256);
-    auto headResult = std::make_shared<QueryResult>(p_queryVector.Data(), expandedResultNum, false);
-    if (indexPtr->GetInternalIndex()) {
-        // Search HeadIndex only (not full SPANN search)
-        indexPtr->GetInternalIndex()->SearchIndex(*headResult);
+    // Set posting filter on the underlying VectorIndex.
+    // This filter is propagated to the workspace's m_postingFilter
+    // and checked in ExtraDynamicSearcher::SearchIndex before MultiGet.
+    auto internalIdx = indexPtr->GetInternalIndex();
+    if (internalIdx) {
+        SPTAG::Cache::Bloom128 qb = queryBloom;  // capture by value
+        auto sigPtr = sigs;  // capture shared_ptr
+        internalIdx->m_postingFilter = [qb, sigPtr](int postingId) -> bool {
+            return sigPtr->ShouldReadPosting(postingId, qb);
+        };
     }
 
-    // Step 2: PS hard reject — filter posting IDs before SSD read
-    std::vector<int> filteredPostings;
-    int rejected = 0;
-    for (int i = 0; i < headResult->GetResultNum(); i++) {
-        auto* res = headResult->GetResult(i);
-        if (res->VID < 0) continue;
-
-        if (sigs->ShouldReadPosting(res->VID, queryBloom)) {
-            filteredPostings.push_back(res->VID);
-            if ((int)filteredPostings.size() >= p_resultNum * 2) break;
-        } else {
-            rejected++;
-        }
-    }
-
-    // Step 3: Read only filtered postings and do per-vector ACL check
-    // Use the standard SPANN search but with a filter function
-    // For simplicity, do full SPANN search and post-filter
-    // (the PS filtering above reduces the effective nprobe)
+    // Run standard search — the filter is active inside SPANN's search path
     auto result = indexPtr->Search(p_queryVector, p_resultNum);
 
-    // TODO: In a full implementation, we'd pass filteredPostings to
-    // ExtraDynamicSearcher::SearchIndex to only read those postings.
-    // For now, the PS rejection count is logged for benchmarking.
+    // Clear filter after search (thread safety for concurrent queries)
+    if (internalIdx) {
+        internalIdx->m_postingFilter = nullptr;
+    }
 
     return result;
 }

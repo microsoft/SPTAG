@@ -220,6 +220,11 @@ protected:
     std::shared_ptr<void> m_pMetaToVec;
 
 public:
+    // Posting-level pre-filter for ACL/tag filtering.
+    // Set before SearchIndex; copied to workspace's m_postingFilter.
+    std::function<bool(int)> m_postingFilter;
+
+public:
     int m_iDataBlockSize = 1024 * 1024;
     int m_iDataCapacity = MaxSize;
     int m_iMetaRecordSize = 10;
