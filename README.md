@@ -11,6 +11,7 @@
  </p>
 
 ## What's NEW
+* **Multi-Tenant SPANN with Per-Tenant Isolation** — see [Multi-Tenant Features](#multi-tenant-features) below
 * Result Iterator with Relaxed Monotonicity Signal Support
 * New Research Paper [SPFresh: Incremental In-Place Update for Billion-Scale Vector Search](https://dl.acm.org/doi/10.1145/3600006.3613166) - _published in SOSP 2023_
 * New Research Paper [VBASE: Unifying Online Vector Similarity Search and Relational Queries via Relaxed Monotonicity](https://www.usenix.org/system/files/osdi23-zhang-qianxi_1.pdf) - _published in OSDI 2023_
@@ -210,6 +211,59 @@ Please cite SPTAG in your publications if it helps your research:
 This project welcomes contributions and suggestions from all the users.
 
 We use [GitHub issues](https://github.com/Microsoft/SPTAG/issues) for tracking suggestions and bugs.
+
+## **Multi-Tenant Features**
+
+This fork adds production-grade multi-tenant support on top of SPANN:
+
+### Architecture
+- **Per-tenant SPANN index**: each tenant has independent HeadIndex + posting files, query isolation guaranteed
+- **LRU HeadIndex cache** with configurable memory budget (`SetHeadIndexCacheLimit`)
+- **SharedAIOPool**: global AIO context pool eliminates `io_destroy` overhead on eviction (930ms → 2ms)
+- **Dirty flag checkpoint**: `ShutDown` only writes back when data was modified (`Put/Delete/Merge`)
+- **Lazy-load**: tenants loaded on first query, evicted under memory pressure
+
+### ACL/Tag Filtered Search
+- **Posting Signature (PS)**: per-posting Bloom128 filter, hard-rejects postings before SSD read
+- **Hierarchical tags**: supports multi-level ACL (org/dept/team/project), all levels in one Bloom
+- **Mid-filtering**: filters between graph search output and SSD IO — graph traversal unchanged
+- **22-120× speedup** at 0.39-25% selectivity, Recall@10 = 1.0
+
+### API
+```python
+from sptag import SPTAG
+
+# Create manager
+mgr = SPTAG.CreateTenantIndexManager(128, "SPANN", "Float")
+
+# Build with tags
+mgr.BuildFromDataWithTags(vectors, metadata, n, tags, num_tags_per_vec, True, False)
+mgr.SaveAll("/path/to/index")
+
+# Load and search
+mgr.LoadAll("/path/to/index")
+result = mgr.Search(query, tenant_id, topk)                              # unfiltered
+result = mgr.SearchWithACL(query, tenant_id, topk, query_tags, num_tags) # filtered
+
+# Cache control
+mgr.SetHeadIndexCacheLimit(64 * 1024 * 1024)  # 64MB HeadIndex budget
+```
+
+### Performance (SIFT-1M, 100 tenants, AMD EPYC 24 vCPU)
+
+| Metric | Value |
+|--------|-------|
+| Recall@10 (all tenant sizes) | ≥ 0.996 |
+| Warm query latency | 2.8-4.3 ms |
+| Eviction latency | 2-4 ms |
+| Cold load (page cache warm) | 16-60 ms |
+| Filtered search (1.56% sel.) | 10-22 ms (60-120× vs unfiltered) |
+
+### Build
+```bash
+mkdir build && cd build && cmake ..
+bash rebuild_and_editable_install.sh  # builds + pip install -e .
+```
 
 ## **License**
 The entire codebase is under [MIT license](https://github.com/Microsoft/SPTAG/blob/master/LICENSE)
