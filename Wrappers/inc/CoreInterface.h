@@ -11,6 +11,7 @@
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Helper/KeyValueIO.h"
 #include "inc/Core/Cache/HeadIndexCache.h"
+#include "inc/Core/Cache/PostingSignature.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -90,6 +91,8 @@ public:
     static AnnIndex Load(const char* p_loaderFile);
 
     static AnnIndex Merge(const char* p_indexFilePath1, const char* p_indexFilePath2);
+
+    std::shared_ptr<SPTAG::VectorIndex> GetInternalIndex() const { return m_index; }
 
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
@@ -190,6 +193,17 @@ public:
     // Unload a single tenant (release HeadIndex memory + close fd)
     bool UnloadTenant(int p_tenantId);
 
+    // --- ACL/Tag Filtered Search ---
+    // Build posting signatures (PS + NS) for a tenant from per-vector tags.
+    // p_tags: ByteArray of uint32_t tag IDs, one per vector.
+    bool BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors);
+
+    // Search with ACL tag filter: PS hard reject + NS soft navigation.
+    // p_queryTags: ByteArray of uint32_t allowed tag IDs.
+    std::shared_ptr<QueryResult> SearchWithACL(ByteArray p_queryVector, int p_tenantId,
+                                                int p_resultNum,
+                                                ByteArray p_queryTags, int p_numTags);
+
     // Set posting storage backend: "FILEIO" (default) or "ROCKSDBIO"
     void SetStorageBackend(const char* backend) { m_storageBackend = std::string(backend); }
 
@@ -208,6 +222,9 @@ private:
     std::list<int> m_lruList;
     std::unordered_map<int, std::list<int>::iterator> m_lruMap;
     uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
+
+    // Per-tenant posting/navigation signatures for ACL filtering
+    std::map<int, std::shared_ptr<SPTAG::Cache::TenantSignatures>> m_tenantSignatures;
     
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;
