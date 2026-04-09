@@ -162,6 +162,14 @@ public:
     std::shared_ptr<QueryResult> BatchSearch(ByteArray p_queryVectors, int p_vectorNum, 
                                             int p_tenantId, int p_resultNum);
 
+    // Multi-tenant batch search: each query can target a different tenant.
+    // p_queryVectors: N query vectors concatenated.
+    // p_tenantIds: ByteArray of N int32 tenant IDs (one per query).
+    // Groups queries by tenant, dispatches BatchSearch per tenant in parallel,
+    // returns results in original query order.
+    std::shared_ptr<QueryResult> MultiBatchSearch(ByteArray p_queryVectors, int p_vectorNum,
+                                                   ByteArray p_tenantIds, int p_resultNum);
+
     // Get list of tenant IDs (sorted)
     void GetTenantIds(int* p_tenants, int* p_count) const;
 

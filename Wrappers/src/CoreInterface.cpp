@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <thread>
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include <map>
@@ -886,6 +887,84 @@ std::shared_ptr<QueryResult> TenantIndexManager::BatchSearch(ByteArray p_queryVe
         indexPtr = it->second;
     }
     return indexPtr->BatchSearch(p_queryVectors, p_vectorNum, p_resultNum, false);
+}
+
+std::shared_ptr<QueryResult> TenantIndexManager::MultiBatchSearch(
+    ByteArray p_queryVectors, int p_vectorNum, ByteArray p_tenantIds, int p_resultNum)
+{
+    const int32_t* tenantIds = reinterpret_cast<const int32_t*>(p_tenantIds.Data());
+    const uint8_t* vectors = p_queryVectors.Data();
+    size_t vecSize = m_inputVectorSize;
+
+    // Group queries by tenant: tenant_id → [(original_index, vector_ptr)]
+    std::map<int, std::vector<std::pair<int, const uint8_t*>>> groups;
+    for (int i = 0; i < p_vectorNum; i++)
+    {
+        groups[tenantIds[i]].emplace_back(i, vectors + i * vecSize);
+    }
+
+    // Allocate output: p_vectorNum × p_resultNum results
+    auto output = std::make_shared<QueryResult>(nullptr, p_vectorNum * p_resultNum, false);
+    BasicResult* outResults = output->GetResults();
+
+    // Initialize all results to invalid
+    for (int i = 0; i < p_vectorNum * p_resultNum; i++)
+    {
+        outResults[i].VID = -1;
+        outResults[i].Dist = SPTAG::MaxDist;
+    }
+
+    // Pre-load all needed tenants
+    for (auto& [tid, _] : groups)
+    {
+        EnsureTenantLoaded(tid);
+    }
+
+    // Dispatch BatchSearch per tenant in parallel using std::thread
+    std::vector<std::thread> threads;
+    std::mutex outputMutex;  // Only needed if we write to shared output
+
+    for (auto& [tid, queryList] : groups)
+    {
+        threads.emplace_back([&, tid, &queryList]() {
+            int n = (int)queryList.size();
+            if (n == 0) return;
+
+            // Build contiguous query buffer for this tenant
+            std::vector<uint8_t> buf(n * vecSize);
+            for (int i = 0; i < n; i++)
+            {
+                memcpy(buf.data() + i * vecSize, queryList[i].second, vecSize);
+            }
+
+            // Get index
+            std::shared_ptr<AnnIndex> indexPtr;
+            {
+                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                auto it = m_tenantIndices.find(tid);
+                if (it == m_tenantIndices.end()) return;
+                indexPtr = it->second;
+            }
+
+            ByteArray batchData(buf.data(), buf.size(), false);
+            auto batchResult = indexPtr->BatchSearch(batchData, n, p_resultNum, false);
+            if (!batchResult) return;
+
+            // Copy results back to original positions
+            BasicResult* batchRes = batchResult->GetResults();
+            for (int i = 0; i < n; i++)
+            {
+                int origIdx = queryList[i].first;
+                memcpy(outResults + origIdx * p_resultNum,
+                       batchRes + i * p_resultNum,
+                       p_resultNum * sizeof(BasicResult));
+            }
+        });
+    }
+
+    for (auto& t : threads) t.join();
+
+    return output;
 }
 
 void TenantIndexManager::GetTenantIds(int* p_tenants, int* p_count) const
