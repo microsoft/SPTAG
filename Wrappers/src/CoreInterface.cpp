@@ -534,8 +534,10 @@ TenantIndexManager::TenantIndexManager(DimensionType p_dimension, const char* p_
     SPTAG::Helper::Convert::ConvertStringTo<SPTAG::VectorValueType>(p_valueType, m_valueType);
     m_inputVectorSize = SPTAG::GetValueTypeSize(m_valueType) * m_dimension;
 
-    // Initialize shared AIO pool (4 contexts, 64 events each) — created once, never destroyed
-    SPTAG::Helper::SharedAIOPool::Instance().Initialize(4, 64);
+    // Initialize shared AIO pool: 4 contexts, 1024 events each
+    // Must be large enough for concurrent MultiBatchSearch across multiple tenants
+    // Each tenant's BatchSearch submits nprobe(64) × batch_threads IO requests
+    SPTAG::Helper::SharedAIOPool::Instance().Initialize(4, 1024);
 }
 
 TenantIndexManager::~TenantIndexManager()
