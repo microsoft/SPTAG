@@ -1206,9 +1206,8 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
         if (m_tenantIndices.count(p_tenantId))
         {
-            auto it = m_lruMap.find(p_tenantId);
-            if (it != m_lruMap.end())
-                m_lruList.splice(m_lruList.end(), m_lruList, it->second);
+            // Skip LRU update on fast path — splice is not thread-safe under shared_lock.
+            // LRU order is approximate; only updated on slow path (exclusive lock).
             return true;
         }
     }
