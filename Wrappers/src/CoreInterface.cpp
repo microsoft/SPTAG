@@ -899,60 +899,68 @@ std::shared_ptr<QueryResult> TenantIndexManager::MultiBatchSearch(
     size_t vecSize = m_inputVectorSize;
 
     // Group queries by tenant: tenant_id → [(original_index, vector_ptr)]
+    // Using ordered map ensures deterministic tenant processing order
     std::map<int, std::vector<std::pair<int, const uint8_t*>>> groups;
     for (int i = 0; i < p_vectorNum; i++)
     {
         groups[tenantIds[i]].emplace_back(i, vectors + i * vecSize);
     }
 
+    // OPTIMIZATION 1: Sort tenants by batch count (most queries first)
+    // and group same-tenant queries together for better cache locality.
+    std::vector<std::pair<int, int>> tenantOrder;  // (tenant_id, query_count)
+    for (auto& [tid, qs] : groups)
+        tenantOrder.emplace_back(tid, (int)qs.size());
+    std::sort(tenantOrder.begin(), tenantOrder.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+
     // Allocate output: p_vectorNum × p_resultNum results
     auto output = std::make_shared<QueryResult>(nullptr, p_vectorNum * p_resultNum, false);
     BasicResult* outResults = output->GetResults();
 
-    // Initialize all results to invalid
     for (int i = 0; i < p_vectorNum * p_resultNum; i++)
     {
         outResults[i].VID = -1;
         outResults[i].Dist = SPTAG::MaxDist;
     }
 
-    // Pre-load all needed tenants
-    for (auto& [tid, _] : groups)
+    // Pre-load each tenant and IMMEDIATELY grab shared_ptr to prevent
+    // subsequent loads from evicting it.  This lets the cache temporarily
+    // exceed the limit for one batch; excess is reclaimed on next batch.
+    std::map<int, std::shared_ptr<AnnIndex>> heldIndices;
+    for (auto& [tid, _] : tenantOrder)
     {
         EnsureTenantLoaded(tid);
+        // Immediately pin so the next EnsureTenantLoaded won't evict this one
+        std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+        auto it = m_tenantIndices.find(tid);
+        if (it != m_tenantIndices.end())
+            heldIndices[tid] = it->second;  // use_count > 1 → eviction-proof
     }
 
-    // Dispatch BatchSearch per tenant in parallel using std::thread
+    // Dispatch BatchSearch per tenant in parallel
     std::vector<std::thread> threads;
-    std::mutex outputMutex;  // Only needed if we write to shared output
 
     for (auto& [tid, queryList] : groups)
     {
-        threads.emplace_back([&, tid, &queryList]() {
+        auto idxIt = heldIndices.find(tid);
+        if (idxIt == heldIndices.end()) continue;
+        auto indexPtr = idxIt->second;  // shared_ptr copy → ref count held during search
+
+        threads.emplace_back([&, tid, indexPtr, &queryList]() {
             int n = (int)queryList.size();
             if (n == 0) return;
 
-            // Build contiguous query buffer for this tenant
             std::vector<uint8_t> buf(n * vecSize);
             for (int i = 0; i < n; i++)
             {
                 memcpy(buf.data() + i * vecSize, queryList[i].second, vecSize);
             }
 
-            // Get index
-            std::shared_ptr<AnnIndex> indexPtr;
-            {
-                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
-                auto it = m_tenantIndices.find(tid);
-                if (it == m_tenantIndices.end()) return;
-                indexPtr = it->second;
-            }
-
             ByteArray batchData(buf.data(), buf.size(), false);
             auto batchResult = indexPtr->BatchSearch(batchData, n, p_resultNum, false);
             if (!batchResult) return;
 
-            // Copy results back to original positions
             BasicResult* batchRes = batchResult->GetResults();
             for (int i = 0; i < n; i++)
             {
@@ -965,6 +973,9 @@ std::shared_ptr<QueryResult> TenantIndexManager::MultiBatchSearch(
     }
 
     for (auto& t : threads) t.join();
+
+    // Release held indices after all searches complete
+    heldIndices.clear();
 
     return output;
 }
@@ -1315,12 +1326,28 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     // Soft-evict LRU hot tenants until we have room
     if (m_headIndexCacheLimitBytes > 0)
     {
+        int retries = 0;
         while (m_loadedHeadIndexBytes + estimatedBytes > m_headIndexCacheLimitBytes
                && !m_lruList.empty())
         {
             int evictId = m_lruList.front();
             if (evictId == p_tenantId) break;
-            UnloadTenantLocked(evictId);  // With shared AIO pool: ~1ms (just close fd)
+            bool evicted = UnloadTenantLocked(evictId);
+            if (!evicted)
+            {
+                // Tenant is in use (use_count > 1). Try next LRU candidate.
+                // Move to back of LRU to avoid spinning on same tenant.
+                m_lruList.pop_front();
+                m_lruList.push_back(evictId);
+                m_lruMap[evictId] = std::prev(m_lruList.end());
+                retries++;
+                if (retries > (int)m_lruList.size())
+                {
+                    // All LRU candidates are pinned (held by caller or another thread).
+                    // Break and allow the cache to temporarily exceed the limit.
+                    break;
+                }
+            }
         }
     }
 
@@ -1401,6 +1428,14 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
     // Must be called under exclusive lock (m_tenantIndicesMutex)
     auto it = m_tenantIndices.find(p_tenantId);
     if (it == m_tenantIndices.end()) return false;
+
+    // SAFETY: If another thread holds a shared_ptr to this index (e.g. BatchSearch
+    // in progress), skip eviction. The search thread's shared_ptr keeps the object alive.
+    // use_count > 1 means: 1 (in map) + N (held by search threads).
+    if (it->second.use_count() > 1)
+    {
+        return false;  // Skip: tenant in use
+    }
 
     // Estimate size being freed
     uint64_t freedBytes = 0;
