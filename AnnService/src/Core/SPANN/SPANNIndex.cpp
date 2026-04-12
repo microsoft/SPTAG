@@ -295,13 +295,125 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
 
+    SPTAG::VectorIndex::ResetThreadLocalPostingScanStats();
+
+    // ═══ Sparse tag fast path: skip graph search, read postings directly ═══
+    if (!m_directPostingIDs.empty() && m_extraSearcher != nullptr)
+    {
+        auto workSpace = m_workSpaceFactory->GetWorkSpace();
+        if (!workSpace) {
+            workSpace.reset(new ExtraWorkSpace());
+            m_extraSearcher->InitWorkSpace(workSpace.get(), false);
+        } else {
+            m_extraSearcher->InitWorkSpace(workSpace.get(), true);
+        }
+        workSpace->m_queryTags = m_queryTags;
+        workSpace->m_numQueryTags = m_numQueryTags;
+        workSpace->m_deduper.clear();
+        workSpace->m_postingIDs.clear();
+        workSpace->m_postingFilter = nullptr;  // no PS needed, we know exact postings
+        workSpace->m_postingProbeStats.Reset();
+
+        const int directPostingCount = static_cast<int>(m_directPostingIDs.size());
+        if (directPostingCount > m_options.m_searchInternalResultNum) {
+            int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
+                           + m_options.m_bufferLength) << PageSizeEx;
+            workSpace->Clear(directPostingCount, maxPages, true, m_options.m_enableDataCompression);
+        }
+
+        // Directly inject all target posting IDs for sparse brute-force.
+        int maxPostings = directPostingCount;
+        for (SizeType pid : m_directPostingIDs) {
+            if ((int)workSpace->m_postingIDs.size() >= maxPostings) break;
+            if (m_extraSearcher->CheckValidPosting(pid)) {
+                workSpace->m_postingIDs.emplace_back(pid);
+            }
+        }
+
+        // Initialize result set — head vectors stay empty (no graph search)
+        COMMON::QueryResultSet<T> *p_queryResults;
+        if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
+            p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
+        else
+            p_queryResults = new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(),
+                                                           m_options.m_searchInternalResultNum);
+
+        // Read postings and scan with inline tag filter
+        ErrorCode ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults,
+                                                     m_index, nullptr, nullptr, nullptr);
+        SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
+            workSpace->m_postingProbeStats.m_readPostings,
+            workSpace->m_postingProbeStats.m_matchedPostings);
+
+        if (ret == ErrorCode::Success &&
+            m_queryTags != nullptr &&
+            m_numQueryTags > 0 &&
+            m_index != nullptr)
+        {
+            const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
+            for (SizeType sampleId = 0; sampleId < sampleCount; ++sampleId) {
+                if (!m_index->HeadNodeMatchesAnyQueryTag(sampleId, m_queryTags, m_numQueryTags)) {
+                    continue;
+                }
+
+                const void* headSample = m_index->GetSample(sampleId);
+                if (headSample == nullptr) {
+                    continue;
+                }
+
+                SizeType globalVID = m_index->GetHeadNodeGlobalVID(sampleId);
+                if (globalVID == MaxSize) {
+                    continue;
+                }
+
+                auto distance = m_index->ComputeDistance(p_queryResults->GetQuantizedTarget(), headSample);
+                p_queryResults->AddPoint(globalVID, distance);
+            }
+        }
+
+        p_queryResults->SortResult();
+        if (p_queryResults != (COMMON::QueryResultSet<T>*)&p_query) {
+            // Copy results back
+            for (int i = 0; i < p_query.GetResultNum(); ++i) {
+                auto* src = p_queryResults->GetResult(i);
+                auto* dst = p_query.GetResult(i);
+                dst->VID = src->VID;
+                dst->Dist = src->Dist;
+            }
+            delete p_queryResults;
+        }
+        m_directPostingIDs.clear();
+        m_queryTags = nullptr;
+        m_numQueryTags = 0;
+        return ret;
+    }
+
+    // ═══ Normal path: graph search + post-graph PS + inline filter ═══
+    // Adaptive nprobe: when tag filter is active, scale nprobe inversely
+    // with estimated selectivity so that enough matching vectors are scanned.
+    //   nprobe_adaptive = nprobe_base / selectivity  (capped at num_heads)
+    // m_filterSelectivity is set by CoreInterface::SearchWithACL.
+    int nprobeBase = m_options.m_searchInternalResultNum;  // 64
+    int postingTarget = nprobeBase;
+
+    if (m_filterSelectivity < 1.0f) {
+        float sel = std::max(0.01f, m_filterSelectivity);
+        postingTarget = std::min(m_index->GetNumSamples(),
+                                 std::max(nprobeBase, (int)(nprobeBase / sel)));
+    }
+
+    // Graph search must return at least postingTarget candidates
+    // (PS will filter some out, so request more)
+    int graphResultNum = postingTarget;
+
     COMMON::QueryResultSet<T> *p_queryResults;
-    if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
+    if (p_query.GetResultNum() >= graphResultNum)
         p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
     else
         p_queryResults =
-            new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum);
+            new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), graphResultNum);
 
+    // No graph-level filter — pure distance-based greedy navigation
     ErrorCode ret;
     if ((ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
         return ret;
@@ -318,33 +430,63 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         {
             m_extraSearcher->InitWorkSpace(workSpace.get(), true);
         }
-        // Propagate posting-level pre-filter (for ACL/tag PS hard reject)
+
+        // If adaptive nprobe > base, expand workspace buffers
+        if (postingTarget > nprobeBase) {
+            int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
+                           + m_options.m_bufferLength) << PageSizeEx;
+            workSpace->Clear(postingTarget, maxPages, true, m_options.m_enableDataCompression);
+        }
+
+        // Propagate posting-level PS pre-filter (applied in ExtraDynamicSearcher before MultiGet)
         workSpace->m_postingFilter = m_postingFilter;
+        // Propagate inline tag filter (for per-vector exact tag check in posting scan)
+        workSpace->m_queryTags = m_queryTags;
+        workSpace->m_numQueryTags = m_numQueryTags;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
+        workSpace->m_postingProbeStats.Reset();
+
+        const bool hasTagFilter = m_queryTags != nullptr && m_numQueryTags > 0;
+        auto translateHeadVID = [&](SizeType localHid) -> SizeType {
+            if (m_index != nullptr && m_index->HasHeadNodeMeta()) {
+                SizeType metaVID = m_index->GetHeadNodeGlobalVID(localHid);
+                if (metaVID != MaxSize) return metaVID;
+            }
+            if (m_vectorTranslateMap.R() != 0)
+                return static_cast<SizeType>(*(m_vectorTranslateMap[localHid]));
+            return MaxSize;
+        };
+        auto shouldKeepHeadResult = [&](SizeType localHid) -> bool {
+            if (!hasTagFilter) return true;
+            return m_index != nullptr &&
+                   m_index->HasHeadNodeMeta() &&
+                   m_index->HeadNodeMatchesAnyQueryTag(localHid, m_queryTags, m_numQueryTags);
+        };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
         int i = 0;
-        for (; i < m_options.m_searchInternalResultNum; ++i)
+        for (; i < graphResultNum; ++i)
         {
+            if ((int)workSpace->m_postingIDs.size() >= postingTarget) break;
             auto res = p_queryResults->GetResult(i);
             if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist))
                 break;
-            if (m_extraSearcher->CheckValidPosting(res->VID))
+            SizeType localHid = res->VID;
+            if (m_extraSearcher->CheckValidPosting(localHid))
             {
-                workSpace->m_postingIDs.emplace_back(res->VID);
+                // Post-graph PS filter: only add postings that pass PS check
+                if (!workSpace->m_postingFilter || workSpace->m_postingFilter(localHid)) {
+                    workSpace->m_postingIDs.emplace_back(localHid);
+                }
             }
-            if (m_vectorTranslateMap.R() != 0)
-                res->VID = static_cast<SizeType>(*(m_vectorTranslateMap[res->VID]));
-            else
+            SizeType globalVID = translateHeadVID(localHid);
+            if (!shouldKeepHeadResult(localHid) || globalVID == MaxSize)
             {
                 res->VID = -1;
                 res->Dist = MaxDist;
-            }
-            if (res->VID == MaxSize)
-            {
-                res->VID = -1;
-                res->Dist = MaxDist;
+            } else {
+                res->VID = globalVID;
             }
         }
 
@@ -354,22 +496,52 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             if (res->VID == -1)
                 break;
 
-            if (m_vectorTranslateMap.R() != 0)
-                res->VID = static_cast<SizeType>(*(m_vectorTranslateMap[res->VID]));
-            else
+            SizeType localHid = res->VID;
+            SizeType globalVID = translateHeadVID(localHid);
+            if (!shouldKeepHeadResult(localHid) || globalVID == MaxSize)
             {
                 res->VID = -1;
                 res->Dist = MaxDist;
-            }
-            if (res->VID == MaxSize)
-            {
-                res->VID = -1;
-                res->Dist = MaxDist;
+            } else {
+                res->VID = globalVID;
             }
         }
+
+        int head = 0;
+        for (int j = 0; j < p_queryResults->GetResultNum(); ++j)
+        {
+            SPTAG::BasicResult* ri = p_queryResults->GetResult(j);
+            bool keep = false;
+            if (ri->VID != -1 && !m_versionMap.Deleted(ri->VID) && !workSpace->m_deduper.CheckAndSet(ri->VID))
+            {
+                keep = true;
+            }
+
+            if (keep)
+            {
+                if (head != j)
+                {
+                    SPTAG::BasicResult* rhead = p_queryResults->GetResult(head);
+                    *rhead = *ri;
+                    ri->VID = -1;
+                    ri->Dist = MaxDist;
+                }
+
+                ++head;
+            }
+            else
+            {
+                ri->VID = -1;
+                ri->Dist = MaxDist;
+            }
+        }
+
         p_queryResults->Reverse();
-        if ((ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr)) !=
-            ErrorCode::Success)
+        ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
+        SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
+            workSpace->m_postingProbeStats.m_readPostings,
+            workSpace->m_postingProbeStats.m_matchedPostings);
+        if (ret != ErrorCode::Success)
             return ret;
         m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
         p_queryResults->SortResult();
@@ -1229,6 +1401,15 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_extraSearcher.reset(new ExtraDynamicSearcher<std::uint8_t>(m_options));
             else
                 m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
+        }
+
+        // Pass pending vector tags to ExtraDynamicSearcher for embedding in postings
+        if (!m_pendingVectorTags.empty() && m_pendingNumTagsPerVec > 0) {
+            auto* eds = dynamic_cast<ExtraDynamicSearcher<T>*>(m_extraSearcher.get());
+            if (eds) {
+                int numVecs = (int)(m_pendingVectorTags.size() / m_pendingNumTagsPerVec);
+                eds->SetVectorTags(m_pendingVectorTags.data(), numVecs, m_pendingNumTagsPerVec);
+            }
         }
 
        {

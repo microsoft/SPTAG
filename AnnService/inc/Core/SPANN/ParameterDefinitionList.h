@@ -106,6 +106,7 @@ DefineSSDParameter(m_preReassignRatio, float, 0.7f, "PreReassignRatio")
 DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
+DefineSSDParameter(m_numTagsPerVec, int, 0, "NumTagsPerVec")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

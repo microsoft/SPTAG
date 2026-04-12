@@ -66,6 +66,10 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
+            // Pre-set vector tags for embedding in postings during build
+            std::vector<uint32_t> m_pendingVectorTags;
+            int m_pendingNumTagsPerVec = 0;
+
  
 
         public:
@@ -82,6 +86,13 @@ namespace SPTAG
             inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_index; }
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex() { return m_extraSearcher; }
             inline Options* GetOptions() { return &m_options; }
+
+            // Set per-vector tags to be embedded in posting metadata during build
+            void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
+                m_pendingNumTagsPerVec = numTagsPerVec;
+                m_options.m_numTagsPerVec = numTagsPerVec;
+                m_pendingVectorTags.assign(tags, tags + (size_t)numVecs * numTagsPerVec);
+            }
 
             inline SizeType GetNumSamples() const { return m_versionMap.Count(); }
             inline DimensionType GetFeatureDim() const { return m_index->GetFeatureDim(); }

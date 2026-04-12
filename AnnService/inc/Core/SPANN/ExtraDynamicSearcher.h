@@ -202,10 +202,23 @@ namespace SPTAG::SPANN {
         Helper::Concurrent::ConcurrentMap<SizeType, SizeType> m_mergeList;
         std::shared_timed_mutex m_mergeListLock;
 
+        // Per-vector tags stored alongside posting data
+        std::vector<uint32_t> m_vectorTags;  // [vid * m_numTagsPerVec + t]
+        int m_numTagsPerVec = 0;
+        int m_tagBytesPerVec = 0;  // m_numTagsPerVec * sizeof(uint32_t)
+
     public:
+        void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
+            m_numTagsPerVec = numTagsPerVec;
+            m_tagBytesPerVec = numTagsPerVec * sizeof(uint32_t);
+            m_vectorTags.assign(tags, tags + (size_t)numVecs * numTagsPerVec);
+        }
+
         ExtraDynamicSearcher(SPANN::Options& p_opt) {
             m_opt = &p_opt;
-            m_metaDataSize = sizeof(int) + sizeof(uint8_t);
+            m_numTagsPerVec = p_opt.m_numTagsPerVec;
+            m_tagBytesPerVec = m_numTagsPerVec * sizeof(uint32_t);
+            m_metaDataSize = sizeof(int) + sizeof(uint8_t) + m_tagBytesPerVec;
             m_vectorInfoSize = p_opt.m_dim * sizeof(ValueType) + m_metaDataSize;
             p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * m_vectorInfoSize + PageSize - 1) / PageSize));
             p_opt.m_searchPostingPageLimit = p_opt.m_postingPageLimit;
@@ -442,6 +455,14 @@ namespace SPTAG::SPANN {
         inline void Serialize(char* ptr, SizeType VID, std::uint8_t version, const void* vector) {
             memcpy(ptr, &VID, sizeof(VID));
             memcpy(ptr + sizeof(VID), &version, sizeof(version));
+            // Write per-vector tags if available
+            if (m_tagBytesPerVec > 0 && VID >= 0 && (size_t)VID * m_numTagsPerVec < m_vectorTags.size()) {
+                memcpy(ptr + sizeof(VID) + sizeof(version),
+                       &m_vectorTags[(size_t)VID * m_numTagsPerVec],
+                       m_tagBytesPerVec);
+            } else if (m_tagBytesPerVec > 0) {
+                memset(ptr + sizeof(VID) + sizeof(version), 0, m_tagBytesPerVec);
+            }
             memcpy(ptr + m_metaDataSize, vector, m_vectorInfoSize - m_metaDataSize);
         }
 
@@ -1823,32 +1844,6 @@ namespace SPTAG::SPANN {
             if (p_stats) p_stats->m_exSetUpLatency = 0;
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
-            if (queryResults.GetResult(0)->VID != -1)
-            {
-                int head = 0;
-                for (int i = 0; i < queryResults.GetResultNum(); ++i)
-                {
-                    SPTAG::BasicResult* ri = queryResults.GetResult(i);
-                    if (ri->VID != -1 && !m_versionMap->Deleted(ri->VID) && !p_exWorkSpace->m_deduper.CheckAndSet(ri->VID))
-                    {
-                        if (head != i)
-                        {
-                            SPTAG::BasicResult* rhead = queryResults.GetResult(head);
-                            *rhead = *ri;
-                            ri->VID = -1;
-                            ri->Dist = MaxDist;
-                        }
- 
-                        ++head;
-                    }
-                    else
-                    {
-                        ri->VID = -1;
-                        ri->Dist = MaxDist;
-                    }
-                }
-            }
-
             int diskRead = 0;
             int diskIO = 0;
             int listElements = 0;
@@ -1880,12 +1875,23 @@ namespace SPTAG::SPANN {
             auto readEnd = std::chrono::high_resolution_clock::now();
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
+            const bool hasMetadataFilter = p_exWorkSpace->m_filterFunc != nullptr;
+            const bool hasInlineTagFilter =
+                m_tagBytesPerVec > 0 &&
+                p_exWorkSpace->m_queryTags != nullptr &&
+                p_exWorkSpace->m_numQueryTags > 0;
+            const bool trackPostingStats = hasMetadataFilter || hasInlineTagFilter;
+
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+            if (trackPostingStats) {
+                p_exWorkSpace->m_postingProbeStats.m_readPostings += postingListCount;
+            }
             for (uint32_t pi = 0; pi < postingListCount; ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
                 char* p_postingListFullData = (char*)(buffer.GetBuffer());
                 int vectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
+                bool postingHasExactMatch = false;
 
                 diskIO += ((buffer.GetAvailableSize() + PageSize - 1) >> PageSizeEx);
                 diskRead += (int)(buffer.GetAvailableSize());
@@ -1904,20 +1910,47 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
+
+                    bool metadataMatch = true;
+                    if (hasMetadataFilter) {
+                        const VectorIndex* filterSrc = p_exWorkSpace->m_pFilterSource ? p_exWorkSpace->m_pFilterSource : p_index.get();
+                        metadataMatch = p_exWorkSpace->m_filterFunc(filterSrc->GetMetadata(vectorID));
+                    }
+
+                    bool tagMatch = true;
+                    if (hasInlineTagFilter) {
+                        tagMatch = false;
+                        const uint32_t* vecTags = reinterpret_cast<const uint32_t*>(vectorInfo + sizeof(int) + sizeof(uint8_t));
+                        for (int ti = 0; ti < m_numTagsPerVec && !tagMatch; ti++) {
+                            for (int qi = 0; qi < p_exWorkSpace->m_numQueryTags && !tagMatch; qi++) {
+                                if (vecTags[ti] == p_exWorkSpace->m_queryTags[qi]) tagMatch = true;
+                            }
+                        }
+                    }
+
+                    if (metadataMatch && tagMatch) {
+                        postingHasExactMatch = true;
+                    }
+
                     if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
                     // Multi-attribute filter: skip vectors whose metadata doesn't match
-                    if (p_exWorkSpace->m_filterFunc != nullptr) {
-                        const VectorIndex* filterSrc = p_exWorkSpace->m_pFilterSource ? p_exWorkSpace->m_pFilterSource : p_index.get();
-                        if (!p_exWorkSpace->m_filterFunc(filterSrc->GetMetadata(vectorID))) {
-                            listElements--;
-                            continue;
-                        }
+                    if (!metadataMatch) {
+                        listElements--;
+                        continue;
+                    }
+                    // Inline tag filter: check tags embedded in posting metadata
+                    if (!tagMatch) {
+                        listElements--;
+                        continue;
                     }
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
+                }
+                if (trackPostingStats && postingHasExactMatch) {
+                    ++p_exWorkSpace->m_postingProbeStats.m_matchedPostings;
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
                 // Async merge requires update-mode thread pools; in read-only serving they are not initialized.
@@ -2118,12 +2151,12 @@ namespace SPTAG::SPANN {
             {
                 auto fullVectors = p_reader->GetVectorSet();
                 fullCount = fullVectors->Count();
-                m_vectorInfoSize = fullVectors->PerVectorDataSize() + m_metaDataSize;
             }
             if (upperBound > 0) fullCount = upperBound;
 
-            // m_metaDataSize = sizeof(int) + sizeof(uint8_t) + sizeof(float);
-            m_metaDataSize = sizeof(int) + sizeof(uint8_t);
+            // m_metaDataSize and m_vectorInfoSize already set in constructor
+            // (includes tag bytes if m_numTagsPerVec > 0)
+            m_vectorInfoSize = m_opt->m_dim * sizeof(ValueType) + m_metaDataSize;
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build SSD Index.\n");
 

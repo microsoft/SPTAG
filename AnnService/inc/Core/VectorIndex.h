@@ -13,6 +13,7 @@
 #include "MetadataSet.h"
 #include "inc/Helper/SimpleIniReader.h"
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Core/Cache/PostingSignature.h"
 
 class ResultIterator;
 
@@ -204,6 +205,56 @@ public:
     }
 
     virtual std::string GetPriorityID(int queryID) const { return ""; }
+
+        void ClearHeadNodeMeta();
+
+        void InitializeHeadNodeMeta(SizeType p_numSamples, int p_numTagsPerSample);
+
+        bool HasHeadNodeMeta() const { return m_headNodeMetaStride > 0 && !m_headNodeMeta.empty(); }
+
+        SizeType GetHeadNodeMetaSampleCount() const;
+
+        size_t GetHeadNodeMetaStride() const { return m_headNodeMetaStride; }
+
+        const std::vector<std::uint8_t>& GetHeadNodeMetaBlob() const { return m_headNodeMeta; }
+
+        std::vector<std::uint8_t>& GetHeadNodeMetaBlob() { return m_headNodeMeta; }
+
+        void SetHeadNodeGlobalVID(SizeType p_sampleId, SizeType p_globalVID);
+
+        SizeType GetHeadNodeGlobalVID(SizeType p_sampleId) const;
+
+        void SetHeadNodePS(SizeType p_sampleId, const Cache::PostingBitmask& p_ps);
+
+        const Cache::PostingBitmask* GetHeadNodePS(SizeType p_sampleId) const;
+
+        bool HeadNodePSMayIntersect(SizeType p_sampleId, const Cache::PostingBitmask& p_queryMask) const;
+
+        void SetHeadNodeHeadOnly(SizeType p_sampleId, bool p_isHeadOnly);
+
+        bool IsHeadNodeHeadOnly(SizeType p_sampleId) const;
+
+        uint32_t* MutableHeadNodeTags(SizeType p_sampleId);
+
+        const uint32_t* GetHeadNodeTags(SizeType p_sampleId) const;
+
+        bool HeadNodeMatchesAnyQueryTag(SizeType p_sampleId, const uint32_t* p_queryTags, int p_numQueryTags) const;
+
+        struct PostingScanStats {
+            uint64_t m_readPostings = 0;
+            uint64_t m_matchedPostings = 0;
+
+            uint64_t FalsePositivePostings() const
+            {
+                return (m_readPostings >= m_matchedPostings) ? (m_readPostings - m_matchedPostings) : 0;
+            }
+        };
+
+        static void ResetThreadLocalPostingScanStats();
+
+        static void SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings);
+
+        static PostingScanStats GetThreadLocalPostingScanStats();
     
   private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
@@ -223,6 +274,36 @@ public:
     // Posting-level pre-filter for ACL/tag filtering.
     // Set before SearchIndex; copied to workspace's m_postingFilter.
     std::function<bool(int)> m_postingFilter;
+
+    // Inline tag filter: query tags for per-vector exact check in posting scan
+    mutable const uint32_t* m_queryTags = nullptr;
+    mutable int m_numQueryTags = 0;
+
+    // Estimated vector-level selectivity for adaptive nprobe (0.0 to 1.0)
+    // Set by SearchWithACL before calling Search.
+    mutable float m_filterSelectivity = 1.0f;
+
+    // Head-level node filter for graph traversal.
+    // When set, only nodes passing this filter are added to graph search results.
+    // Non-matching nodes are still traversed (neighbors expanded) but don't occupy result slots.
+    // Used by SPANN to apply PS Bloom check during HeadIndex graph traversal.
+    std::function<bool(SizeType)> m_headNodeFilter;
+
+    // Direct posting IDs for sparse tag brute-force path.
+    // When non-empty, skip graph search entirely and read these postings directly.
+    mutable std::vector<SizeType> m_directPostingIDs;
+
+    // Per-head-node metadata blob, indexed by local head sample id (hid).
+    // Each record stores:
+    //   [PostingBitmask PS][global VID][head-only flag][fixed tag array]
+    // so filtered search can reach node-local metadata via one hid-based offset.
+    size_t m_headNodeMetaStride = 0;
+    size_t m_headNodePSOffset = 0;
+    size_t m_headNodeGlobalVIDOffset = 0;
+    size_t m_headNodeHeadOnlyOffset = 0;
+    size_t m_headNodeTagOffset = 0;
+    int m_headTagCountPerSample = 0;
+    std::vector<std::uint8_t> m_headNodeMeta;
 
 public:
     int m_iDataBlockSize = 1024 * 1024;

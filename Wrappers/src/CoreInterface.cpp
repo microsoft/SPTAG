@@ -11,10 +11,11 @@
 #include <thread>
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
+#include "inc/Core/SPANN/Index.h"
+#include <algorithm>
 #include <map>
 #include <vector>
 #include <sstream>
-#include <fstream>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -48,6 +49,119 @@ bool CopyDirRecursive(const std::string& src, const std::string& dst)
 }
 
 } // namespace
+
+constexpr int32_t kHeadNodeMetaVersion = 1;
+
+struct HeadNodeMetaFileHeader {
+    int32_t version;
+    int32_t numSamples;
+    int32_t numTagsPerSample;
+    int32_t stride;
+};
+
+std::string HeadNodeMetaPath(const std::string& workDir)
+{
+    return workDir + "/HeadIndex/head_node_meta.bin";
+}
+
+std::shared_ptr<SPTAG::VectorIndex> GetMemoryIndexForInternal(const std::shared_ptr<SPTAG::VectorIndex>& internalIndex)
+{
+    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIndex.get());
+    if (spannInternalIdx == nullptr) return nullptr;
+    return spannInternalIdx->GetMemoryIndex();
+}
+
+bool SaveHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTAG::VectorIndex>& headIndex)
+{
+    if (headIndex == nullptr || !headIndex->HasHeadNodeMeta()) return false;
+
+    std::string metaPath = HeadNodeMetaPath(workDir);
+    FILE* f = fopen(metaPath.c_str(), "wb");
+    if (!f) return false;
+
+    HeadNodeMetaFileHeader header{};
+    header.version = kHeadNodeMetaVersion;
+    header.numSamples = headIndex->GetHeadNodeMetaSampleCount();
+    header.numTagsPerSample = headIndex->m_headTagCountPerSample;
+    header.stride = static_cast<int32_t>(headIndex->GetHeadNodeMetaStride());
+
+    const auto& blob = headIndex->GetHeadNodeMetaBlob();
+    bool ok =
+        fwrite(&header, sizeof(header), 1, f) == 1 &&
+        fwrite(blob.data(), 1, blob.size(), f) == blob.size();
+    fclose(f);
+    return ok;
+}
+
+bool LoadHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTAG::VectorIndex>& headIndex)
+{
+    if (headIndex == nullptr) return false;
+
+    std::string metaPath = HeadNodeMetaPath(workDir);
+    FILE* f = fopen(metaPath.c_str(), "rb");
+    if (!f) return false;
+
+    HeadNodeMetaFileHeader header{};
+    bool ok = fread(&header, sizeof(header), 1, f) == 1;
+    if (!ok || header.version != kHeadNodeMetaVersion || header.numSamples < 0 || header.numTagsPerSample < 0 ||
+        header.stride <= 0 || header.numSamples != headIndex->GetNumSamples()) {
+        fclose(f);
+        return false;
+    }
+
+    headIndex->InitializeHeadNodeMeta(header.numSamples, header.numTagsPerSample);
+    if (static_cast<int32_t>(headIndex->GetHeadNodeMetaStride()) != header.stride) {
+        headIndex->ClearHeadNodeMeta();
+        fclose(f);
+        return false;
+    }
+
+    auto& blob = headIndex->GetHeadNodeMetaBlob();
+    ok = fread(blob.data(), 1, blob.size(), f) == blob.size();
+    fclose(f);
+    if (!ok) {
+        headIndex->ClearHeadNodeMeta();
+        return false;
+    }
+    return true;
+}
+
+bool LoadPostingSignaturesIntoHeadIndex(const std::string& workDir,
+                                        const std::shared_ptr<SPTAG::VectorIndex>& internalIndex)
+{
+    if (internalIndex == nullptr) return false;
+
+    auto headIndex = GetMemoryIndexForInternal(internalIndex);
+    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIndex.get());
+    if (headIndex == nullptr || spannInternalIdx == nullptr) return false;
+
+    SPTAG::Cache::TenantBitmaskPS sigs;
+    std::string sigPath = workDir + "/signatures_bitmask.bin";
+    if (!sigs.Load(sigPath)) return false;
+
+    const SizeType numHeadSamples = headIndex->GetNumSamples();
+    if (!headIndex->HasHeadNodeMeta()) {
+        headIndex->InitializeHeadNodeMeta(numHeadSamples, 0);
+    }
+
+    for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
+        SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
+        headIndex->SetHeadNodeGlobalVID(hid, globalVID);
+        if (hid < sigs.num_postings) {
+            headIndex->SetHeadNodePS(hid, sigs.ps[hid]);
+        }
+    }
+    return true;
+}
+
+bool EnsureHeadNodeMetaLoaded(const std::string& workDir, const std::shared_ptr<SPTAG::VectorIndex>& internalIndex)
+{
+    auto headIndex = GetMemoryIndexForInternal(internalIndex);
+    if (headIndex == nullptr) return false;
+    if (headIndex->HasHeadNodeMeta()) return true;
+    if (LoadHeadNodeMetaFile(workDir, headIndex)) return true;
+    return LoadPostingSignaturesIntoHeadIndex(workDir, internalIndex);
+}
 
 AnnIndex::AnnIndex(DimensionType p_dimension)
     : m_algoType(SPTAG::IndexAlgoType::BKT), m_inputValueType(SPTAG::VectorValueType::Float), m_dimension(p_dimension)
@@ -357,6 +471,16 @@ bool AnnIndex::ReadyToServe() const
     return m_index != nullptr;
 }
 
+void AnnIndex::SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec)
+{
+    if (!m_index) return;
+    // Cast to SPANN Index<float> to access SetVectorTags
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    if (spannIdx) {
+        spannIdx->SetVectorTags(tags, numVecs, numTagsPerVec);
+    }
+}
+
 void AnnIndex::UpdateIndex()
 {
     m_index->UpdateIndex();
@@ -591,6 +715,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
 
         tenantVectorRanges[tenantId].push_back({vectorPtr, m_inputVectorSize});
         tenantMetadataLines[tenantId].push_back(metaLine);
+        m_tenantGlobalIndices[tenantId].push_back(globalIdx);
         vectorPtr += m_inputVectorSize;
         metaPtr = (lineEnd < metaEnd) ? (lineEnd + 1) : lineEnd;
         globalIdx++;
@@ -685,6 +810,32 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             }
             tenantIndex->SetBuildParam("TPTNumber", std::to_string(tptNumber).c_str(), "BuildHead");
             tenantIndex->SetBuildParam("RefineIterations", std::to_string(refineIter).c_str(), "BuildHead");
+
+            // Set per-vector tags to embed in posting metadata (if available from BuildFromDataWithTags)
+            if (m_buildNumTagsPerVec > 0 && m_buildTags.Data() != nullptr) {
+                tenantIndex->SetBuildParam("NumTagsPerVec", std::to_string(m_buildNumTagsPerVec).c_str(), "BuildSSDIndex");
+                // Extract this tenant's tags (ordered by local vector index)
+                const uint32_t* globalTags = reinterpret_cast<const uint32_t*>(m_buildTags.Data());
+                std::vector<uint32_t> localTags(tenantVecCount * m_buildNumTagsPerVec);
+                // tenantVectorRanges[tenantId] has the same order as vectors were concatenated
+                // We need global indices; recompute from the metadata parsing
+                // Since vectors are concatenated in the same order as tenantVectorRanges,
+                // local index i corresponds to the i-th vector added for this tenant
+                // But we don't have globalIdx per tenant here. Let me use a side map.
+                // Actually, we built tenantVectorRanges from sequential global indices,
+                // so m_tenantGlobalIndices can be built alongside.
+                auto gidIt = m_tenantGlobalIndices.find(tenantId);
+                if (gidIt != m_tenantGlobalIndices.end()) {
+                    auto& gids = gidIt->second;
+                    for (int i = 0; i < tenantVecCount && i < (int)gids.size(); i++) {
+                        int gid = gids[i];
+                        for (int t = 0; t < m_buildNumTagsPerVec; t++) {
+                            localTags[i * m_buildNumTagsPerVec + t] = globalTags[gid * m_buildNumTagsPerVec + t];
+                        }
+                    }
+                }
+                tenantIndex->SetVectorTags(localTags.data(), tenantVecCount, m_buildNumTagsPerVec);
+            }
 
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             m_tenantSpannWorkDirs[tenantId] = spannWorkDir;
@@ -795,18 +946,21 @@ bool TenantIndexManager::BuildFromDataWithTags(ByteArray p_vectors, ByteArray p_
                                                 ByteArray p_tags, int p_numTagsPerVec,
                                                 bool p_withMetaIndex, bool p_normalized)
 {
-    // Step 1: Build SPANN indexes (standard flow)
+    // Store tags and numTagsPerVec for the build process.
+    // BuildFromData will be modified to pass tags to each SPANN index.
+    m_buildTags = p_tags;
+    m_buildNumTagsPerVec = p_numTagsPerVec;
+
+    // Build SPANN indexes — tags will be embedded in postings via SetVectorTags
     if (!BuildFromData(p_vectors, p_metadata, p_vectorNum, p_withMetaIndex, p_normalized))
         return false;
 
-    // Step 2: Build signatures for each tenant using real posting assignments.
-    // Parse metadata to get per-vector tenant assignment (same logic as BuildFromData).
+    // Also build PS (Posting Signature) Bloom filters for posting-level pre-filter
     const char* metaPtr = reinterpret_cast<const char*>(p_metadata.Data());
     const char* metaEnd = metaPtr + p_metadata.Length();
     const uint32_t* tagsPtr = reinterpret_cast<const uint32_t*>(p_tags.Data());
 
-    // Rebuild tenant→vector ranges (same as BuildFromData parsing)
-    std::map<int, std::vector<int>> tenantGlobalIndices;  // tenantId → [global vector indices]
+    std::map<int, std::vector<int>> tenantGlobalIndices;
     SizeType globalIdx = 0;
     const char* mp = metaPtr;
     while (mp < metaEnd && globalIdx < p_vectorNum)
@@ -828,28 +982,24 @@ bool TenantIndexManager::BuildFromDataWithTags(ByteArray p_vectors, ByteArray p_
         globalIdx++;
     }
 
-    // For each tenant, build signatures from its vectors' tags
     for (auto& [tenantId, globalIds] : tenantGlobalIndices)
     {
         int n = (int)globalIds.size();
-        // Extract this tenant's tags (n × p_numTagsPerVec)
         std::vector<uint32_t> tenantTags(n * p_numTagsPerVec);
         for (int i = 0; i < n; i++)
-        {
             for (int t = 0; t < p_numTagsPerVec; t++)
-            {
                 tenantTags[i * p_numTagsPerVec + t] = tagsPtr[globalIds[i] * p_numTagsPerVec + t];
-            }
-        }
 
         uint8_t* tagBuf = new uint8_t[tenantTags.size() * sizeof(uint32_t)];
         memcpy(tagBuf, tenantTags.data(), tenantTags.size() * sizeof(uint32_t));
         ByteArray tagBytes(tagBuf, tenantTags.size() * sizeof(uint32_t), true);
-
         BuildSignatures(tenantId, tagBytes, n, p_numTagsPerVec);
     }
 
-    fprintf(stderr, "[INFO] BuildFromDataWithTags: built signatures for %d tenants\n",
+    m_buildTags = ByteArray();  // release reference
+    m_buildNumTagsPerVec = 0;
+
+    fprintf(stderr, "[INFO] BuildFromDataWithTags: tags embedded in postings + PS signatures for %d tenants\n",
             (int)tenantGlobalIndices.size());
     return true;
 }
@@ -947,7 +1097,7 @@ std::shared_ptr<QueryResult> TenantIndexManager::MultiBatchSearch(
         if (idxIt == heldIndices.end()) continue;
         auto indexPtr = idxIt->second;  // shared_ptr copy → ref count held during search
 
-        threads.emplace_back([&, tid, indexPtr, &queryList]() {
+        threads.emplace_back([&, tid, indexPtr]() {
             int n = (int)queryList.size();
             if (n == 0) return;
 
@@ -1381,16 +1531,7 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     m_lruList.push_back(p_tenantId);
     m_lruMap[p_tenantId] = std::prev(m_lruList.end());
 
-    // Auto-load signatures if available
-    if (m_tenantSignatures.find(p_tenantId) == m_tenantSignatures.end())
-    {
-        std::string sigPath = loadPath + "/signatures.bin";
-        auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
-        if (sigs->Load(sigPath))
-        {
-            m_tenantSignatures[p_tenantId] = sigs;
-        }
-    }
+    EnsureHeadNodeMetaLoaded(loadPath, indexPtr->GetInternalIndex());
 
     return true;
 }
@@ -1415,6 +1556,21 @@ uint64_t TenantIndexManager::GetHeadIndexCacheUsage() const
 {
     std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
     return m_loadedHeadIndexBytes;
+}
+
+uint64_t TenantIndexManager::GetLastPostingReadCount() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().m_readPostings;
+}
+
+uint64_t TenantIndexManager::GetLastPostingMatchCount() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().m_matchedPostings;
+}
+
+uint64_t TenantIndexManager::GetLastPostingFP() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().FalsePositivePostings();
 }
 
 bool TenantIndexManager::UnloadTenant(int p_tenantId)
@@ -1515,62 +1671,237 @@ void TenantIndexManager::EvictIfNeeded()
 bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors, int p_numTagsPerVec)
 {
     const uint32_t* p_tagsPtr = reinterpret_cast<const uint32_t*>(p_tags.Data());
-    // Tags layout: p_tagsPtr[i * p_numTagsPerVec + t] = t-th tag of vector i
-    // Read the posting structure to build per-posting tag sets.
-    // Each vector was assigned to a posting during SPANN build.
-    // We need: for each posting (head), which tags appear in its vectors?
 
-    // Read SPTAGHeadVectorIDs.bin to get vector→head mapping
     auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
     if (wdIt == m_tenantSpannWorkDirs.end()) return false;
     std::string workDir = wdIt->second;
 
-    // Read head count
+    // Read head count from HeadIndex vectors.bin
     auto hcIt = m_tenantHeadCounts.find(p_tenantId);
     int numHeads = (hcIt != m_tenantHeadCounts.end()) ? hcIt->second : 0;
     if (numHeads <= 0) {
-        // Try to get from HeadIndex vectors.bin
         std::string vecPath = workDir + "/HeadIndex/vectors.bin";
         FILE* vf = fopen(vecPath.c_str(), "rb");
         if (vf) {
             int32_t rows = 0;
-            fread(&rows, sizeof(int32_t), 1, vf);
+            if (fread(&rows, sizeof(int32_t), 1, vf) == 1) numHeads = rows;
             fclose(vf);
-            numHeads = rows;
         }
     }
     if (numHeads <= 0) return false;
 
-    // Build per-posting tag sets.
-    // For now, assign vectors to postings round-robin based on their order.
-    // In practice, SPANN assigns each vector to the nearest head(s).
-    // We approximate: vector i → posting (i % numHeads) or read from ssdinfo.
-    // Better: use the posting size record to reconstruct assignment.
-    std::vector<std::vector<uint32_t>> posting_tags(numHeads);
+    // ── Read real posting→vector assignment from SPANN on-disk data ──
+    // Files: ssdinfo (posting sizes), ssdmapping (block addresses), ssdmapping_postings (block data)
+    // Posting format per vector: [VID(4B) | Version(1B) | Tags(N*4B) | VectorData(dim*sizeof(T))]
+    const int PAGE_SIZE = 4096;
+    const int TAG_BYTES = p_numTagsPerVec * (int)sizeof(uint32_t);
+    const int META_SIZE = sizeof(int32_t) + sizeof(uint8_t) + TAG_BYTES;
+    const int VEC_INFO_SIZE = m_inputVectorSize + META_SIZE;
 
-    // Simple assignment: distribute tags based on vector index modulo heads
-    // This is approximate — real assignment would require reading posting data.
-    // For correctness, we assign each vector's tag to ALL postings within
-    // its replication factor. Simplified: assign to posting (i * numHeads / p_numVectors).
-    for (int i = 0; i < p_numVectors; i++) {
-        int posting_id = (int)((int64_t)i * numHeads / p_numVectors);
-        if (posting_id >= numHeads) posting_id = numHeads - 1;
-        // Insert ALL tags for this vector into the posting's Bloom
-        for (int t = 0; t < p_numTagsPerVec; t++) {
-            posting_tags[posting_id].push_back(p_tagsPtr[i * p_numTagsPerVec + t]);
+    // 1. Read ssdinfo: header (rows, cols=1) then rows × int32 posting sizes
+    std::string ssdinfoPath = workDir + "/ssdinfo";
+    FILE* infoF = fopen(ssdinfoPath.c_str(), "rb");
+    if (!infoF) {
+        fprintf(stderr, "[ERROR] Cannot open %s\n", ssdinfoPath.c_str());
+        return false;
+    }
+    int32_t infoHeader[2];
+    if (fread(infoHeader, sizeof(int32_t), 2, infoF) != 2) { fclose(infoF); return false; }
+    int numPostings = infoHeader[0];
+    std::vector<int32_t> postingSizes(numPostings);
+    if ((int)fread(postingSizes.data(), sizeof(int32_t), numPostings, infoF) != numPostings) {
+        fclose(infoF); return false;
+    }
+    fclose(infoF);
+
+    // 2. Read ssdmapping: header (rows, cols) then rows × cols × int64 block addresses
+    //    addrs[pid][0] = data size in bytes, addrs[pid][1..] = block addresses
+    std::string mappingPath = workDir + "/ssdmapping";
+    FILE* mapF = fopen(mappingPath.c_str(), "rb");
+    if (!mapF) {
+        fprintf(stderr, "[ERROR] Cannot open %s\n", mappingPath.c_str());
+        return false;
+    }
+    int32_t mapHeader[2];
+    if (fread(mapHeader, sizeof(int32_t), 2, mapF) != 2) { fclose(mapF); return false; }
+    int mapRows = mapHeader[0], mapCols = mapHeader[1];
+    std::vector<int64_t> addrFlat((size_t)mapRows * mapCols);
+    if ((int)fread(addrFlat.data(), sizeof(int64_t), (size_t)mapRows * mapCols, mapF)
+        != mapRows * mapCols) {
+        fclose(mapF); return false;
+    }
+    fclose(mapF);
+
+    // 3. Open posting data file
+    std::string postingPath = workDir + "/ssdmapping_postings";
+    FILE* postF = fopen(postingPath.c_str(), "rb");
+    if (!postF) {
+        fprintf(stderr, "[ERROR] Cannot open %s\n", postingPath.c_str());
+        return false;
+    }
+
+    // 4. For each posting, read its blocks and extract vector IDs
+    std::vector<std::vector<uint32_t>> posting_tags(numHeads);
+    int totalAssignments = 0;
+    std::vector<uint8_t> blockBuf(PAGE_SIZE);
+
+    for (int pid = 0; pid < std::min(numPostings, numHeads); pid++) {
+        int nVecs = postingSizes[pid];
+        if (nVecs <= 0) continue;
+
+        // Gather block addresses (skip index 0 which is data size)
+        int64_t* rowAddrs = addrFlat.data() + (int64_t)pid * mapCols;
+        // rowAddrs[0] = data size, rowAddrs[1..] = block addresses
+
+        // Read blocks into contiguous buffer
+        int dataSize = nVecs * VEC_INFO_SIZE;
+        std::vector<uint8_t> raw;
+        raw.reserve(dataSize + PAGE_SIZE);
+        for (int b = 1; b < mapCols; b++) {
+            int64_t blkAddr = rowAddrs[b];
+            if (blkAddr < 0) break;  // -1 marks end of block list; 0 is valid
+            fseek(postF, blkAddr * PAGE_SIZE, SEEK_SET);
+            raw.resize(raw.size() + PAGE_SIZE);
+            size_t readBytes = fread(raw.data() + raw.size() - PAGE_SIZE, 1, PAGE_SIZE, postF);
+            (void)readBytes;
+        }
+
+        if ((int)raw.size() < dataSize) continue;
+
+        // Extract VIDs and map to tags
+        for (int j = 0; j < nVecs; j++) {
+            int offset = j * VEC_INFO_SIZE;
+            int32_t vid;
+            memcpy(&vid, raw.data() + offset, sizeof(int32_t));
+            if (vid < 0 || vid >= p_numVectors) continue;
+            // Insert ALL tags for this vector into this posting's Bloom
+            for (int t = 0; t < p_numTagsPerVec; t++) {
+                posting_tags[pid].push_back(p_tagsPtr[vid * p_numTagsPerVec + t]);
+            }
+            totalAssignments++;
+        }
+    }
+    fclose(postF);
+
+    auto sigs = std::make_shared<SPTAG::Cache::TenantBitmaskPS>();
+    sigs->Build(numHeads, posting_tags);
+
+    std::string sigPath = workDir + "/signatures_bitmask.bin";
+    sigs->Save(sigPath);
+
+    std::unordered_map<uint32_t, int> tagVectorCounts;
+    tagVectorCounts.reserve(static_cast<size_t>(p_numVectors) * p_numTagsPerVec);
+    for (int vid = 0; vid < p_numVectors; ++vid) {
+        std::unordered_set<uint32_t> seenTags;
+        for (int t = 0; t < p_numTagsPerVec; ++t) {
+            uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
+            if (seenTags.insert(tag).second) {
+                ++tagVectorCounts[tag];
+            }
         }
     }
 
-    auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
-    sigs->BuildPS(numHeads, posting_tags);
+    // Build sparse tag index: tag → [posting_ids] for low-selectivity tags
+    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
+    int tenantSize = (vcIt != m_tenantVectorCounts.end()) ? vcIt->second : p_numVectors;
+    int postingCount = std::max(1, std::min(numPostings, numHeads));
+    double avgPosting = static_cast<double>(tenantSize) / static_cast<double>(postingCount);
+    constexpr float kSparseRouteTargetRecall = 0.95f;
+    constexpr int kSparseRouteTopK = 10;
+    int threshold = SPTAG::Cache::SparseTagThreshold(
+        tenantSize,
+        64,
+        avgPosting,
+        kSparseRouteTargetRecall,
+        kSparseRouteTopK);
+    auto sparseIdx = std::make_shared<SPTAG::Cache::SparseTagIndex>();
+    sparseIdx->Build(numHeads, posting_tags, tagVectorCounts, threshold);
 
-    // Save alongside HeadIndex
-    std::string sigPath = workDir + "/signatures.bin";
-    sigs->Save(sigPath);
+    std::string sparsePath = workDir + "/sparse_tags.bin";
+    sparseIdx->Save(sparsePath);
+    m_tenantSparseIdx[p_tenantId] = sparseIdx;
 
-    m_tenantSignatures[p_tenantId] = sigs;
-    fprintf(stderr, "[INFO] Tenant %d: built PS signatures (%d postings, %zu bytes)\n",
-            p_tenantId, numHeads, sigs->MemoryBytes());
+    // Build head tag table: VIDs NOT found in any posting are head vectors.
+    // They need tag metadata for filtered search since inline tag filter
+    // can't check them (they're not in posting data).
+    std::unordered_set<int> postingVIDs;
+    // Re-derive from posting_tags: impossible to get VIDs from tags alone.
+    // Instead, use the totalAssignments count: if a VID was found in postings,
+    // it contributed to posting_tags. Just re-scan the posting file.
+    {
+        FILE* pf2 = fopen(postingPath.c_str(), "rb");
+        if (pf2) {
+            for (int pid = 0; pid < std::min(numPostings, numHeads); pid++) {
+                int nVecs = postingSizes[pid];
+                if (nVecs <= 0) continue;
+                int64_t* rowAddrs2 = addrFlat.data() + (int64_t)pid * mapCols;
+                std::vector<uint8_t> raw2;
+                raw2.reserve(nVecs * VEC_INFO_SIZE + PAGE_SIZE);
+                for (int b = 1; b < mapCols; b++) {
+                    int64_t blkAddr = rowAddrs2[b];
+                    if (blkAddr < 0) break;
+                    fseek(pf2, blkAddr * PAGE_SIZE, SEEK_SET);
+                    raw2.resize(raw2.size() + PAGE_SIZE);
+                    size_t r = fread(raw2.data() + raw2.size() - PAGE_SIZE, 1, PAGE_SIZE, pf2);
+                    (void)r;
+                }
+                for (int j = 0; j < nVecs && j * VEC_INFO_SIZE + 4 <= (int)raw2.size(); j++) {
+                    int32_t vid;
+                    memcpy(&vid, raw2.data() + j * VEC_INFO_SIZE, sizeof(int32_t));
+                    if (vid >= 0 && vid < p_numVectors) postingVIDs.insert(vid);
+                }
+            }
+            fclose(pf2);
+        }
+    }
+
+    // Store per-head-node metadata on the inner head index (if loaded).
+    // First ensure the tenant is loaded.
+    EnsureTenantLoaded(p_tenantId);
+    std::shared_ptr<AnnIndex> idxPtr;
+    {
+        std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+        auto it = m_tenantIndices.find(p_tenantId);
+        if (it != m_tenantIndices.end()) idxPtr = it->second;
+    }
+    int headTagCount = 0;
+    if (idxPtr) {
+        auto internalIdx = idxPtr->GetInternalIndex();
+        auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
+        auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+        if (memoryIndex != nullptr && spannInternalIdx != nullptr) {
+            const SizeType numHeadSamples = memoryIndex->GetNumSamples();
+            memoryIndex->InitializeHeadNodeMeta(numHeadSamples, p_numTagsPerVec);
+            for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
+                SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
+                memoryIndex->SetHeadNodeGlobalVID(hid, globalVID);
+                if (hid < sigs->num_postings) {
+                    memoryIndex->SetHeadNodePS(hid, sigs->ps[hid]);
+                }
+
+                if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(p_numVectors)) {
+                    continue;
+                }
+                if (postingVIDs.count(static_cast<int>(globalVID)) != 0) {
+                    continue;
+                }
+
+                memoryIndex->SetHeadNodeHeadOnly(hid, true);
+                uint32_t* headTags = memoryIndex->MutableHeadNodeTags(hid);
+                if (headTags == nullptr) {
+                    continue;
+                }
+                for (int t = 0; t < p_numTagsPerVec; ++t) {
+                    headTags[t] = p_tagsPtr[static_cast<size_t>(globalVID) * static_cast<size_t>(p_numTagsPerVec) + static_cast<size_t>(t)];
+                }
+                headTagCount++;
+            }
+            SaveHeadNodeMetaFile(workDir, memoryIndex);
+        }
+    }
+
+    fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, threshold=%d)\n",
+            p_tenantId, headTagCount, numHeads, totalAssignments, threshold);
     return true;
 }
 
@@ -1580,34 +1911,64 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 {
     const uint32_t* queryTagsPtr = reinterpret_cast<const uint32_t*>(p_queryTags.Data());
     if (!EnsureTenantLoaded(p_tenantId)) return nullptr;
+    auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
+    if (wdIt == m_tenantSpannWorkDirs.end()) return nullptr;
+    const std::string& workDir = wdIt->second;
 
-    // Build query Bloom from requested tags
-    SPTAG::Cache::Bloom128 queryBloom;
-    queryBloom.Clear();
-    for (int i = 0; i < p_numTags; i++) {
-        queryBloom.Insert(queryTagsPtr[i]);
-    }
-
-    // Load signatures if not cached
-    auto sigIt = m_tenantSignatures.find(p_tenantId);
-    if (sigIt == m_tenantSignatures.end()) {
-        auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
-        if (wdIt != m_tenantSpannWorkDirs.end()) {
-            auto sigs = std::make_shared<SPTAG::Cache::TenantSignatures>();
-            std::string sigPath = wdIt->second + "/signatures.bin";
-            if (sigs->Load(sigPath)) {
-                m_tenantSignatures[p_tenantId] = sigs;
-                sigIt = m_tenantSignatures.find(p_tenantId);
+    // Check if ALL query tags are sparse → use brute-force path
+    auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
+    if (sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
+        auto& sparseIdx = sparseIt->second;
+        bool allSparse = true;
+        // Collect posting IDs for all query tags
+        std::unordered_set<int> bfPostings;
+        for (int i = 0; i < p_numTags; i++) {
+            if (!sparseIdx->IsSparse(queryTagsPtr[i])) {
+                allSparse = false;
+                break;
             }
+            auto* pids = sparseIdx->GetPostings(queryTagsPtr[i]);
+            if (pids) {
+                bfPostings.insert(pids->begin(), pids->end());
+            }
+        }
+
+        if (allSparse && !bfPostings.empty()) {
+            // TRUE brute-force: bypass graph search, inject posting IDs directly
+            std::shared_ptr<AnnIndex> indexPtr;
+            {
+                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                auto it = m_tenantIndices.find(p_tenantId);
+                if (it == m_tenantIndices.end()) return nullptr;
+                indexPtr = it->second;
+            }
+            auto internalIdx = indexPtr->GetInternalIndex();
+            if (internalIdx) {
+                // Set inline tag filter
+                internalIdx->m_queryTags = queryTagsPtr;
+                internalIdx->m_numQueryTags = p_numTags;
+                // Inject exact posting IDs — SPANNIndex will skip graph search
+                internalIdx->m_directPostingIDs.assign(bfPostings.begin(), bfPostings.end());
+            }
+
+            auto result = indexPtr->Search(p_queryVector, p_resultNum);
+
+            if (internalIdx) {
+                internalIdx->m_directPostingIDs.clear();
+                internalIdx->m_queryTags = nullptr;
+                internalIdx->m_numQueryTags = 0;
+            }
+            return result;
         }
     }
 
-    // If no signatures available, fall back to unfiltered search
-    if (sigIt == m_tenantSignatures.end()) {
-        return Search(p_queryVector, p_tenantId, p_resultNum);
+    // Dense tag path: SPANN graph + bitmask PS + inline filter
+    // Build query bitmask from requested tags
+    SPTAG::Cache::PostingBitmask queryMask;
+    queryMask.Clear();
+    for (int i = 0; i < p_numTags; i++) {
+        queryMask.Insert(queryTagsPtr[i]);
     }
-
-    auto& sigs = sigIt->second;
 
     // Get tenant index
     std::shared_ptr<AnnIndex> indexPtr;
@@ -1618,24 +1979,56 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         indexPtr = it->second;
     }
 
-    // Set posting filter on the underlying VectorIndex.
-    // This filter is propagated to the workspace's m_postingFilter
-    // and checked in ExtraDynamicSearcher::SearchIndex before MultiGet.
     auto internalIdx = indexPtr->GetInternalIndex();
+    auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
+    EnsureHeadNodeMetaLoaded(workDir, internalIdx);
     if (internalIdx) {
-        SPTAG::Cache::Bloom128 qb = queryBloom;  // capture by value
-        auto sigPtr = sigs;  // capture shared_ptr
-        internalIdx->m_postingFilter = [qb, sigPtr](int postingId) -> bool {
-            return sigPtr->ShouldReadPosting(postingId, qb);
-        };
+        // Dense path upper-bound test: disable PS-based posting selection.
+        // Keep exact inline tag filtering, and only reuse PS for selectivity estimation.
+        internalIdx->m_postingFilter = nullptr;
+
+        // Inline tag filter in posting scan
+        internalIdx->m_queryTags = queryTagsPtr;
+        internalIdx->m_numQueryTags = p_numTags;
+
+        // Compute vector-level selectivity for adaptive nprobe.
+        // Count how many of this tenant's vectors match any query tag.
+        // Use inline scan of t0_tags if available via BuildSignatures data.
+        // Since we don't store per-vector tags in memory anymore,
+        // estimate from PS bitmask: count PS-pass postings, then
+        // vector_sel = PS_pass_postings × avg_matching_vecs_per_posting / tenant_size
+        // avg_matching_vecs = 1 per posting (conservative for single tag query)
+        auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
+        int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
+        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0) {
+            int passCount = 0;
+            for (SizeType pid = 0; pid < memoryIndex->GetHeadNodeMetaSampleCount(); ++pid) {
+                if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
+            }
+            // PS pass count ≈ number of postings containing the tag (+ FP)
+            // Each true-positive posting has ~1 matching vector (for sparse tags)
+            // to ~avg_posting * tag_fraction (for dense tags).
+            // Use: vector_sel = passCount / total_postings
+            // This is posting-level selectivity, but since each posting has
+            // avg_posting vecs, and we want matching vecs / total vecs:
+            // vector_sel ≈ passCount × 1 / tenant_size  (1 match per posting, conservative)
+            // For better estimate: passCount / num_postings (fraction of postings)
+            // then vector_sel ≈ that (assumes 1:1 posting:tag density)
+            float vectorSel = (float)passCount / (float)tenantSize2;
+            if (vectorSel > 1.0f) vectorSel = 1.0f;
+            if (vectorSel < 0.001f) vectorSel = 0.001f;
+            internalIdx->m_filterSelectivity = vectorSel;
+        }
     }
 
-    // Run standard search — the filter is active inside SPANN's search path
     auto result = indexPtr->Search(p_queryVector, p_resultNum);
 
-    // Clear filter after search (thread safety for concurrent queries)
     if (internalIdx) {
         internalIdx->m_postingFilter = nullptr;
+        internalIdx->m_headNodeFilter = nullptr;
+        internalIdx->m_queryTags = nullptr;
+        internalIdx->m_numQueryTags = 0;
+        internalIdx->m_filterSelectivity = 1.0f;
     }
 
     return result;

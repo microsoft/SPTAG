@@ -94,6 +94,9 @@ public:
 
     std::shared_ptr<SPTAG::VectorIndex> GetInternalIndex() const { return m_index; }
 
+    // Set per-vector tags for embedding in SPANN posting metadata
+    void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec);
+
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
     
@@ -195,6 +198,11 @@ public:
     // Get current HeadIndex cache usage (bytes)
     uint64_t GetHeadIndexCacheUsage() const;
 
+    // Last ACL search posting-level stats on the current thread.
+    uint64_t GetLastPostingReadCount() const;
+    uint64_t GetLastPostingMatchCount() const;
+    uint64_t GetLastPostingFP() const;
+
     // Enable/disable dropping OS page cache on HeadIndex eviction (for benchmarking)
     void SetDropPageCacheOnEvict(bool enable) { m_dropPageCacheOnEvict = enable; }
 
@@ -239,8 +247,13 @@ private:
     std::unordered_map<int, std::list<int>::iterator> m_lruMap;
     uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
 
-    // Per-tenant posting/navigation signatures for ACL filtering
-    std::map<int, std::shared_ptr<SPTAG::Cache::TenantSignatures>> m_tenantSignatures;
+    // Per-tenant sparse tag index: tag → [posting_ids] for low-selectivity tags
+    std::map<int, std::shared_ptr<SPTAG::Cache::SparseTagIndex>> m_tenantSparseIdx;
+
+    // Temporary storage during BuildFromDataWithTags
+    ByteArray m_buildTags;
+    int m_buildNumTagsPerVec = 0;
+    std::map<int, std::vector<int>> m_tenantGlobalIndices;  // tenantId → [global vector indices]
     
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;

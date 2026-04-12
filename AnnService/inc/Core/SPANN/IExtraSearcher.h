@@ -15,6 +15,7 @@
 #include <vector>
 #include <chrono>
 #include <atomic>
+#include <cstdint>
 #include <set>
 
 namespace SPTAG {
@@ -159,6 +160,17 @@ namespace SPTAG {
 
         struct ExtraWorkSpace : public SPTAG::COMMON::IWorkSpace
         {
+            struct PostingProbeStats {
+                std::uint64_t m_readPostings = 0;
+                std::uint64_t m_matchedPostings = 0;
+
+                void Reset()
+                {
+                    m_readPostings = 0;
+                    m_matchedPostings = 0;
+                }
+            };
+
             ExtraWorkSpace() {}
 
             ~ExtraWorkSpace() {
@@ -271,6 +283,8 @@ namespace SPTAG {
 
             int m_loadedPostingNum = 0;
 
+            PostingProbeStats m_postingProbeStats;
+
             std::function<bool(const ByteArray&)> m_filterFunc;
 
             // Pointer to the SPANN-level metadata (for filter lookup by posting vector ID)
@@ -280,6 +294,10 @@ namespace SPTAG {
             // Returns true if the posting should be read, false to skip.
             // Used by PS (Posting Signature) hard reject.
             std::function<bool(int)> m_postingFilter;
+
+            // Inline tag filter: query tags for exact per-vector filtering in posting scan
+            const uint32_t* m_queryTags = nullptr;
+            int m_numQueryTags = 0;
 
             std::function<void()> m_callback;
         };

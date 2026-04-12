@@ -12,11 +12,39 @@
 #include "inc/Core/SPANN/Index.h"
 
 #include <filesystem>
+#include <cstring>
 
 typedef typename SPTAG::Helper::Concurrent::ConcurrentMap<std::string, SPTAG::SizeType> MetadataMap;
 
 namespace fs = std::filesystem;
 using namespace SPTAG;
+
+namespace {
+
+thread_local VectorIndex::PostingScanStats g_threadLocalPostingScanStats{};
+
+size_t AlignUp(size_t value, size_t alignment)
+{
+    return (value + alignment - 1) / alignment * alignment;
+}
+
+std::uint8_t* HeadNodeMetaBase(VectorIndex* index, SizeType sampleId)
+{
+    if (index == nullptr || sampleId < 0 || !index->HasHeadNodeMeta()) return nullptr;
+    const size_t sid = static_cast<size_t>(sampleId);
+    if (sid >= static_cast<size_t>(index->GetHeadNodeMetaSampleCount())) return nullptr;
+    return index->GetHeadNodeMetaBlob().data() + sid * index->GetHeadNodeMetaStride();
+}
+
+const std::uint8_t* HeadNodeMetaBase(const VectorIndex* index, SizeType sampleId)
+{
+    if (index == nullptr || sampleId < 0 || !index->HasHeadNodeMeta()) return nullptr;
+    const size_t sid = static_cast<size_t>(sampleId);
+    if (sid >= static_cast<size_t>(index->GetHeadNodeMetaSampleCount())) return nullptr;
+    return index->GetHeadNodeMetaBlob().data() + sid * index->GetHeadNodeMetaStride();
+}
+
+} // namespace
 
 Helper::LoggerHolder &SPTAG::GetLoggerHolder()
 {
@@ -203,6 +231,137 @@ VectorIndex::VectorIndex()
 
 VectorIndex::~VectorIndex()
 {
+}
+
+void VectorIndex::ClearHeadNodeMeta()
+{
+    m_headNodeMetaStride = 0;
+    m_headNodePSOffset = 0;
+    m_headNodeGlobalVIDOffset = 0;
+    m_headNodeHeadOnlyOffset = 0;
+    m_headNodeTagOffset = 0;
+    m_headTagCountPerSample = 0;
+    m_headNodeMeta.clear();
+}
+
+void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numTagsPerSample)
+{
+    ClearHeadNodeMeta();
+    if (p_numSamples <= 0) return;
+
+    m_headTagCountPerSample = std::max(0, p_numTagsPerSample);
+    m_headNodePSOffset = 0;
+    m_headNodeGlobalVIDOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(SizeType));
+    m_headNodeHeadOnlyOffset = AlignUp(m_headNodeGlobalVIDOffset + sizeof(SizeType), alignof(std::uint8_t));
+    m_headNodeTagOffset = AlignUp(m_headNodeHeadOnlyOffset + sizeof(std::uint8_t), alignof(uint32_t));
+    m_headNodeMetaStride = AlignUp(
+        m_headNodeTagOffset + static_cast<size_t>(m_headTagCountPerSample) * sizeof(uint32_t),
+        alignof(Cache::PostingBitmask));
+
+    m_headNodeMeta.assign(static_cast<size_t>(p_numSamples) * m_headNodeMetaStride, 0);
+    for (SizeType sampleId = 0; sampleId < p_numSamples; ++sampleId) {
+        SetHeadNodeGlobalVID(sampleId, MaxSize);
+    }
+}
+
+SizeType VectorIndex::GetHeadNodeMetaSampleCount() const
+{
+    if (m_headNodeMetaStride == 0) return 0;
+    return static_cast<SizeType>(m_headNodeMeta.size() / m_headNodeMetaStride);
+}
+
+void VectorIndex::SetHeadNodeGlobalVID(SizeType p_sampleId, SizeType p_globalVID)
+{
+    auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return;
+    std::memcpy(base + m_headNodeGlobalVIDOffset, &p_globalVID, sizeof(SizeType));
+}
+
+SizeType VectorIndex::GetHeadNodeGlobalVID(SizeType p_sampleId) const
+{
+    const auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return MaxSize;
+    SizeType globalVID = MaxSize;
+    std::memcpy(&globalVID, base + m_headNodeGlobalVIDOffset, sizeof(SizeType));
+    return globalVID;
+}
+
+void VectorIndex::SetHeadNodePS(SizeType p_sampleId, const Cache::PostingBitmask& p_ps)
+{
+    auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return;
+    std::memcpy(base + m_headNodePSOffset, &p_ps, sizeof(Cache::PostingBitmask));
+}
+
+const Cache::PostingBitmask* VectorIndex::GetHeadNodePS(SizeType p_sampleId) const
+{
+    const auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return nullptr;
+    return reinterpret_cast<const Cache::PostingBitmask*>(base + m_headNodePSOffset);
+}
+
+bool VectorIndex::HeadNodePSMayIntersect(SizeType p_sampleId, const Cache::PostingBitmask& p_queryMask) const
+{
+    const auto* ps = GetHeadNodePS(p_sampleId);
+    return ps != nullptr && ps->MayIntersect(p_queryMask);
+}
+
+void VectorIndex::SetHeadNodeHeadOnly(SizeType p_sampleId, bool p_isHeadOnly)
+{
+    auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return;
+    base[m_headNodeHeadOnlyOffset] = p_isHeadOnly ? 1 : 0;
+}
+
+bool VectorIndex::IsHeadNodeHeadOnly(SizeType p_sampleId) const
+{
+    const auto* base = HeadNodeMetaBase(this, p_sampleId);
+    return base != nullptr && base[m_headNodeHeadOnlyOffset] != 0;
+}
+
+uint32_t* VectorIndex::MutableHeadNodeTags(SizeType p_sampleId)
+{
+    auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr || m_headTagCountPerSample <= 0) return nullptr;
+    return reinterpret_cast<uint32_t*>(base + m_headNodeTagOffset);
+}
+
+const uint32_t* VectorIndex::GetHeadNodeTags(SizeType p_sampleId) const
+{
+    const auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr || m_headTagCountPerSample <= 0) return nullptr;
+    return reinterpret_cast<const uint32_t*>(base + m_headNodeTagOffset);
+}
+
+bool VectorIndex::HeadNodeMatchesAnyQueryTag(SizeType p_sampleId, const uint32_t* p_queryTags, int p_numQueryTags) const
+{
+    if (p_queryTags == nullptr || p_numQueryTags <= 0) return false;
+    if (!IsHeadNodeHeadOnly(p_sampleId)) return false;
+    const uint32_t* headTags = GetHeadNodeTags(p_sampleId);
+    if (headTags == nullptr) return false;
+    for (int ti = 0; ti < m_headTagCountPerSample; ++ti) {
+        uint32_t headTag = headTags[ti];
+        for (int qi = 0; qi < p_numQueryTags; ++qi) {
+            if (headTag == p_queryTags[qi]) return true;
+        }
+    }
+    return false;
+}
+
+void VectorIndex::ResetThreadLocalPostingScanStats()
+{
+    g_threadLocalPostingScanStats = PostingScanStats{};
+}
+
+void VectorIndex::SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings)
+{
+    g_threadLocalPostingScanStats.m_readPostings = p_readPostings;
+    g_threadLocalPostingScanStats.m_matchedPostings = p_matchedPostings;
+}
+
+VectorIndex::PostingScanStats VectorIndex::GetThreadLocalPostingScanStats()
+{
+    return g_threadLocalPostingScanStats;
 }
 
 std::string VectorIndex::GetParameter(const std::string &p_param, const std::string &p_section) const

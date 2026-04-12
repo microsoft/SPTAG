@@ -109,6 +109,9 @@ namespace SPTAG {
             bool m_enableWAL;
             bool m_disableCheckpoint;
 
+            // Per-vector tags embedded in posting metadata
+            int m_numTagsPerVec;
+
             // GPU building
             int m_gpuSSDNumTrees;
             int m_gpuSSDLeafSize;
