@@ -13,14 +13,25 @@
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include "inc/Core/SPANN/Index.h"
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <vector>
 #include <sstream>
+#include <cstring>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstdlib>
 
 namespace {
+
+struct TagRoutingStatRecord {
+    uint32_t tag;
+    int32_t vectorCount;
+    int32_t postingCount;
+};
+
+static_assert(sizeof(TagRoutingStatRecord) == sizeof(uint32_t) + 2 * sizeof(int32_t),
+              "Unexpected TagRoutingStatRecord layout");
 
 bool EnsureDir(const std::string& path)
 {
@@ -46,6 +57,93 @@ bool CopyDirRecursive(const std::string& src, const std::string& dst)
 
     std::string cmd = "cp -a \"" + src + "\" \"" + dst + "\"";
     return std::system(cmd.c_str()) == 0;
+}
+
+uint64_t GetPathSizeBytes(const std::string& path)
+{
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0) {
+        return 0;
+    }
+
+    if (S_ISREG(st.st_mode)) {
+        return static_cast<uint64_t>(st.st_size);
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        return 0;
+    }
+
+    DIR* dir = opendir(path.c_str());
+    if (dir == nullptr) {
+        return 0;
+    }
+
+    uint64_t totalBytes = 0;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        totalBytes += GetPathSizeBytes(path + "/" + entry->d_name);
+    }
+
+    closedir(dir);
+    return totalBytes;
+}
+
+} // namespace
+
+namespace {
+
+int TagLevel(uint32_t tag)
+{
+    return static_cast<int>(tag / 1000U);
+}
+
+float EstimateQueryVectorSelectivity(
+    int tenantSize,
+    const std::unordered_map<uint32_t, TenantIndexManager::TagRoutingStats>* tagStats,
+    const uint32_t* queryTags,
+    int numQueryTags)
+{
+    if (tenantSize <= 0 || tagStats == nullptr || queryTags == nullptr || numQueryTags <= 0) {
+        return 1.0f;
+    }
+
+    std::unordered_set<uint32_t> seenTags;
+    std::unordered_map<int, double> levelSelectivities;
+    for (int index = 0; index < numQueryTags; ++index) {
+        uint32_t tag = queryTags[index];
+        if (!seenTags.insert(tag).second) {
+            continue;
+        }
+
+        auto statIt = tagStats->find(tag);
+        if (statIt == tagStats->end()) {
+            continue;
+        }
+
+        double tagSelectivity = static_cast<double>(statIt->second.vectorCount) / static_cast<double>(tenantSize);
+        int level = TagLevel(tag);
+        double& levelSel = levelSelectivities[level];
+        levelSel = std::min(1.0, levelSel + tagSelectivity);
+    }
+
+    if (levelSelectivities.empty()) {
+        return 1.0f;
+    }
+
+    double productNotSelected = 1.0;
+    for (const auto& [level, selectivity] : levelSelectivities) {
+        (void)level;
+        productNotSelected *= std::max(0.0, 1.0 - selectivity);
+    }
+
+    double unionSelectivity = 1.0 - productNotSelected;
+    unionSelectivity = std::clamp(unionSelectivity, 1e-6, 1.0);
+    return static_cast<float>(unionSelectivity);
 }
 
 } // namespace
@@ -1155,6 +1253,42 @@ int TenantIndexManager::GetTenantVectorCount(int p_tenantId) const
     return 0;  // Tenant not found
 }
 
+uint64_t TenantIndexManager::GetTenantHeadIndexSize(int p_tenantId) const
+{
+    auto workIt = m_tenantSpannWorkDirs.find(p_tenantId);
+    if (workIt == m_tenantSpannWorkDirs.end()) {
+        return 0;
+    }
+
+    return GetPathSizeBytes(workIt->second + "/HeadIndex");
+}
+
+ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
+{
+    auto routeIt = m_tenantTagRoutingStats.find(p_tenantId);
+    if (routeIt == m_tenantTagRoutingStats.end() || routeIt->second.empty()) {
+        return ByteArray();
+    }
+
+    std::vector<TagRoutingStatRecord> entries;
+    entries.reserve(routeIt->second.size());
+    for (const auto& [tag, stats] : routeIt->second) {
+        entries.push_back(TagRoutingStatRecord{
+            tag,
+            static_cast<int32_t>(stats.vectorCount),
+            static_cast<int32_t>(stats.postingCount),
+        });
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const TagRoutingStatRecord& left, const TagRoutingStatRecord& right) {
+        return left.tag < right.tag;
+    });
+
+    ByteArray payload = ByteArray::Alloc(entries.size() * sizeof(TagRoutingStatRecord));
+    std::memcpy(payload.Data(), entries.data(), payload.Length());
+    return payload;
+}
+
 bool TenantIndexManager::SaveAll(const char* p_baseDir)
 {
     m_baseStoragePath = std::string(p_baseDir);
@@ -1435,6 +1569,26 @@ void TenantIndexManager::SetBuildParam(const char* p_name, const char* p_value, 
 
 void TenantIndexManager::SetSearchParam(const char* p_name, const char* p_value, const char* p_section)
 {
+    if (p_name == nullptr || p_value == nullptr || p_section == nullptr) {
+        return;
+    }
+
+    std::unique_lock<std::shared_mutex> wlock(m_tenantIndicesMutex);
+    bool updated = false;
+    for (auto& pendingParam : m_pendingSearchParams)
+    {
+        if (std::get<0>(pendingParam) == p_name && std::get<2>(pendingParam) == p_section)
+        {
+            std::get<1>(pendingParam) = p_value;
+            updated = true;
+            break;
+        }
+    }
+    if (!updated)
+    {
+        m_pendingSearchParams.emplace_back(p_name, p_value, p_section);
+    }
+
     for (auto& tenantEntry : m_tenantIndices)
     {
         tenantEntry.second->SetSearchParam(p_name, p_value, p_section);
@@ -1526,6 +1680,12 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     }
 
     auto indexPtr = std::make_shared<AnnIndex>(loadedIndex);
+    for (const auto& pendingParam : m_pendingSearchParams)
+    {
+        indexPtr->SetSearchParam(std::get<0>(pendingParam).c_str(),
+                                 std::get<1>(pendingParam).c_str(),
+                                 std::get<2>(pendingParam).c_str());
+    }
     m_tenantIndices[p_tenantId] = indexPtr;
     m_loadedHeadIndexBytes += estimatedBytes;
     m_lruList.push_back(p_tenantId);
@@ -1801,21 +1961,31 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         }
     }
 
-    // Build sparse tag index: tag → [posting_ids] for low-selectivity tags
-    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
-    int tenantSize = (vcIt != m_tenantVectorCounts.end()) ? vcIt->second : p_numVectors;
-    int postingCount = std::max(1, std::min(numPostings, numHeads));
-    double avgPosting = static_cast<double>(tenantSize) / static_cast<double>(postingCount);
-    constexpr float kSparseRouteTargetRecall = 0.95f;
-    constexpr int kSparseRouteTopK = 10;
-    int threshold = SPTAG::Cache::SparseTagThreshold(
-        tenantSize,
-        64,
-        avgPosting,
-        kSparseRouteTargetRecall,
-        kSparseRouteTopK);
+    std::unordered_map<uint32_t, int> tagPostingCounts;
+    tagPostingCounts.reserve(tagVectorCounts.size());
+    for (int pid = 0; pid < numHeads; ++pid) {
+        std::unordered_set<uint32_t> seenTags;
+        for (uint32_t tag : posting_tags[pid]) {
+            if (seenTags.insert(tag).second) {
+                ++tagPostingCounts[tag];
+            }
+        }
+    }
+
+    auto& routeStats = m_tenantTagRoutingStats[p_tenantId];
+    routeStats.clear();
+    routeStats.reserve(tagVectorCounts.size());
+    for (const auto& [tag, vectorCount] : tagVectorCounts) {
+        routeStats[tag] = TagRoutingStats{vectorCount, tagPostingCounts[tag]};
+    }
+
+    // Build sparse tag index from exact posting fanout instead of a fixed top-k
+    // vector-count heuristic. Query-time routing already checks the exact posting
+    // union size, so materializing bounded-fanout tags here keeps sparse routing
+    // general across top-k choices while keeping the side metadata bounded.
+    constexpr int kSparseIndexBuildMaxPostings = 1024;
     auto sparseIdx = std::make_shared<SPTAG::Cache::SparseTagIndex>();
-    sparseIdx->Build(numHeads, posting_tags, tagVectorCounts, threshold);
+    sparseIdx->Build(numHeads, posting_tags, tagPostingCounts, kSparseIndexBuildMaxPostings);
 
     std::string sparsePath = workDir + "/sparse_tags.bin";
     sparseIdx->Save(sparsePath);
@@ -1900,8 +2070,8 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         }
     }
 
-    fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, threshold=%d)\n",
-            p_tenantId, headTagCount, numHeads, totalAssignments, threshold);
+        fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, sparse_max_postings=%d)\n",
+            p_tenantId, headTagCount, numHeads, totalAssignments, kSparseIndexBuildMaxPostings);
     return true;
 }
 
@@ -1915,34 +2085,68 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     if (wdIt == m_tenantSpannWorkDirs.end()) return nullptr;
     const std::string& workDir = wdIt->second;
 
-    // Check if ALL query tags are sparse → use brute-force path
-    auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
-    if (sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
-        auto& sparseIdx = sparseIt->second;
-        bool allSparse = true;
-        // Collect posting IDs for all query tags
-        std::unordered_set<int> bfPostings;
-        for (int i = 0; i < p_numTags; i++) {
-            if (!sparseIdx->IsSparse(queryTagsPtr[i])) {
-                allSparse = false;
-                break;
-            }
-            auto* pids = sparseIdx->GetPostings(queryTagsPtr[i]);
-            if (pids) {
-                bfPostings.insert(pids->begin(), pids->end());
+    std::shared_ptr<AnnIndex> indexPtr;
+    {
+        std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+        auto it = m_tenantIndices.find(p_tenantId);
+        if (it == m_tenantIndices.end()) return nullptr;
+        indexPtr = it->second;
+    }
+
+    auto internalIdx = indexPtr->GetInternalIndex();
+    bool forceDenseTagSearch = false;
+    int directSparseMaxPostings = 320;
+    float filteredSearchNprobeSafety = 1.0f;
+    if (internalIdx != nullptr) {
+        const std::string forceDenseParam = internalIdx->GetParameter("ForceDenseTagSearch", "BuildSSDIndex");
+        if (!forceDenseParam.empty()) {
+            SPTAG::Helper::Convert::ConvertStringTo<bool>(forceDenseParam.c_str(), forceDenseTagSearch);
+        }
+
+        const std::string directSparseMaxPostingsParam = internalIdx->GetParameter("DirectSparseMaxPostings", "BuildSSDIndex");
+        if (!directSparseMaxPostingsParam.empty()) {
+            int parsedDirectSparseMaxPostings = 0;
+            if (SPTAG::Helper::Convert::ConvertStringTo<int>(directSparseMaxPostingsParam.c_str(), parsedDirectSparseMaxPostings)
+                && parsedDirectSparseMaxPostings > 0) {
+                directSparseMaxPostings = parsedDirectSparseMaxPostings;
             }
         }
 
-        if (allSparse && !bfPostings.empty()) {
-            // TRUE brute-force: bypass graph search, inject posting IDs directly
-            std::shared_ptr<AnnIndex> indexPtr;
-            {
-                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
-                auto it = m_tenantIndices.find(p_tenantId);
-                if (it == m_tenantIndices.end()) return nullptr;
-                indexPtr = it->second;
+        const std::string filteredSearchNprobeSafetyParam = internalIdx->GetParameter("FilteredSearchNprobeSafety", "BuildSSDIndex");
+        if (!filteredSearchNprobeSafetyParam.empty()) {
+            float parsedFilteredSearchNprobeSafety = 1.0f;
+            if (SPTAG::Helper::Convert::ConvertStringTo<float>(filteredSearchNprobeSafetyParam.c_str(), parsedFilteredSearchNprobeSafety)
+                && parsedFilteredSearchNprobeSafety > 0.0f) {
+                filteredSearchNprobeSafety = parsedFilteredSearchNprobeSafety;
             }
-            auto internalIdx = indexPtr->GetInternalIndex();
+        }
+    }
+
+    const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
+    const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
+
+    // Check if ALL query tags are sparse → use brute-force path
+    auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
+    if (!forceDenseTagSearch && sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
+        auto& sparseIdx = sparseIt->second;
+        bool hasDirectPostingListsForAllTags = true;
+        // Collect posting IDs for all query tags
+        std::unordered_set<int> bfPostings;
+        for (int i = 0; i < p_numTags; i++) {
+            auto* pids = sparseIdx->GetPostings(queryTagsPtr[i]);
+            if (!pids) {
+                hasDirectPostingListsForAllTags = false;
+                break;
+            }
+            bfPostings.insert(pids->begin(), pids->end());
+        }
+
+        // The sparse fast path reads every matching posting directly.
+        // Only use it when the exact posting union is small enough; this keeps
+        // the route stable across tenant scales because the decision is based on
+        // actual posting fanout instead of raw matching vector count.
+        if (hasDirectPostingListsForAllTags && !bfPostings.empty() && static_cast<int>(bfPostings.size()) <= directSparseMaxPostings) {
+            // TRUE brute-force: bypass graph search, inject posting IDs directly
             if (internalIdx) {
                 // Set inline tag filter
                 internalIdx->m_queryTags = queryTagsPtr;
@@ -1969,17 +2173,6 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     for (int i = 0; i < p_numTags; i++) {
         queryMask.Insert(queryTagsPtr[i]);
     }
-
-    // Get tenant index
-    std::shared_ptr<AnnIndex> indexPtr;
-    {
-        std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
-        auto it = m_tenantIndices.find(p_tenantId);
-        if (it == m_tenantIndices.end()) return nullptr;
-        indexPtr = it->second;
-    }
-
-    auto internalIdx = indexPtr->GetInternalIndex();
     auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
     EnsureHeadNodeMetaLoaded(workDir, internalIdx);
     if (internalIdx) {
@@ -1991,33 +2184,19 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         internalIdx->m_queryTags = queryTagsPtr;
         internalIdx->m_numQueryTags = p_numTags;
 
-        // Compute vector-level selectivity for adaptive nprobe.
-        // Count how many of this tenant's vectors match any query tag.
-        // Use inline scan of t0_tags if available via BuildSignatures data.
-        // Since we don't store per-vector tags in memory anymore,
-        // estimate from PS bitmask: count PS-pass postings, then
-        // vector_sel = PS_pass_postings × avg_matching_vecs_per_posting / tenant_size
-        // avg_matching_vecs = 1 per posting (conservative for single tag query)
         auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
         int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
-        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0) {
+        float vectorSel = EstimateQueryVectorSelectivity(tenantSize2, tagStats, queryTagsPtr, p_numTags);
+        vectorSel = std::clamp(vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
+        internalIdx->m_filterSelectivity = vectorSel;
+
+        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && internalIdx->m_filterSelectivity >= 1.0f) {
             int passCount = 0;
             for (SizeType pid = 0; pid < memoryIndex->GetHeadNodeMetaSampleCount(); ++pid) {
                 if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
             }
-            // PS pass count ≈ number of postings containing the tag (+ FP)
-            // Each true-positive posting has ~1 matching vector (for sparse tags)
-            // to ~avg_posting * tag_fraction (for dense tags).
-            // Use: vector_sel = passCount / total_postings
-            // This is posting-level selectivity, but since each posting has
-            // avg_posting vecs, and we want matching vecs / total vecs:
-            // vector_sel ≈ passCount × 1 / tenant_size  (1 match per posting, conservative)
-            // For better estimate: passCount / num_postings (fraction of postings)
-            // then vector_sel ≈ that (assumes 1:1 posting:tag density)
-            float vectorSel = (float)passCount / (float)tenantSize2;
-            if (vectorSel > 1.0f) vectorSel = 1.0f;
-            if (vectorSel < 0.001f) vectorSel = 0.001f;
-            internalIdx->m_filterSelectivity = vectorSel;
+            float fallbackVectorSel = (float)passCount / (float)tenantSize2;
+            internalIdx->m_filterSelectivity = std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
         }
     }
 

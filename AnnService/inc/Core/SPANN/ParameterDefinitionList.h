@@ -126,6 +126,11 @@ DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler") // Mutable
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum") // Mutable
 DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
+DefineSSDParameter(m_forceDenseTagSearch, bool, false, "ForceDenseTagSearch") // Mutable
+DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Mutable
+DefineSSDParameter(m_filteredSearchNprobeSafety, float, 1.0f, "FilteredSearchNprobeSafety") // Mutable
+DefineSSDParameter(m_filteredSearchTargetRecall, float, 1.0f, "FilteredSearchTargetRecall") // Mutable
+DefineSSDParameter(m_filteredSearchCoverageExponent, float, 0.5f, "FilteredSearchCoverageExponent") // Mutable
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")

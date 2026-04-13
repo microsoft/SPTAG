@@ -6,6 +6,7 @@
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <shared_mutex>
 
@@ -389,17 +390,50 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     }
 
     // ═══ Normal path: graph search + post-graph PS + inline filter ═══
-    // Adaptive nprobe: when tag filter is active, scale nprobe inversely
-    // with estimated selectivity so that enough matching vectors are scanned.
-    //   nprobe_adaptive = nprobe_base / selectivity  (capped at num_heads)
+    // Adaptive nprobe: when tag filter is active, choose enough postings to
+    // satisfy both (1) expected filtered top-k coverage and (2) graph-routing
+    // coverage under the current selectivity.
+    // expected_matches_per_posting ~= avg_posting_size * selectivity
+    // postings_for_recall ~= target_recall * topk / expected_matches_per_posting
+    // postings_for_coverage ~= nprobe_base / selectivity^coverage_exponent
+    // final postingTarget = max(base, postings_for_recall, postings_for_coverage)
     // m_filterSelectivity is set by CoreInterface::SearchWithACL.
-    int nprobeBase = m_options.m_searchInternalResultNum;  // 64
+    int nprobeBase = std::max(m_options.m_searchInternalResultNum, p_query.GetResultNum());
     int postingTarget = nprobeBase;
 
     if (m_filterSelectivity < 1.0f) {
-        float sel = std::max(0.01f, m_filterSelectivity);
+        float sel = m_filterSelectivity;
+        if (sel < 1e-6f) sel = 1e-6f;
+
+        double tenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : m_index->GetNumSamples());
+        double postingCount = static_cast<double>(std::max<SizeType>(1, m_index->GetNumSamples()));
+        double avgPosting = tenantSize / postingCount;
+        if (avgPosting < 1.0) avgPosting = 1.0;
+
+        float recallTarget = m_options.m_filteredSearchTargetRecall;
+        if (recallTarget < 0.01f) recallTarget = 0.01f;
+        if (recallTarget > 1.0f) recallTarget = 1.0f;
+
+        float coverageExponent = m_options.m_filteredSearchCoverageExponent;
+        if (coverageExponent < 0.0f) coverageExponent = 0.0f;
+        if (coverageExponent > 2.0f) coverageExponent = 2.0f;
+
+        int filteredTopK = p_query.GetResultNum();
+        if (filteredTopK <= 0) filteredTopK = 10;
+
+        double expectedMatchesPerPosting = avgPosting * static_cast<double>(sel);
+        if (expectedMatchesPerPosting < 1e-6) expectedMatchesPerPosting = 1e-6;
+
+        int postingsForRecall = static_cast<int>(std::ceil(
+            (static_cast<double>(filteredTopK) * static_cast<double>(recallTarget)) /
+            expectedMatchesPerPosting));
+
+        double coverageDenominator = std::pow(static_cast<double>(sel), static_cast<double>(coverageExponent));
+        if (coverageDenominator < 1e-6) coverageDenominator = 1e-6;
+        int postingsForCoverage = static_cast<int>(std::ceil(static_cast<double>(nprobeBase) / coverageDenominator));
+
         postingTarget = std::min(m_index->GetNumSamples(),
-                                 std::max(nprobeBase, (int)(nprobeBase / sel)));
+                                 std::max(nprobeBase, std::max(postingsForRecall, postingsForCoverage)));
     }
 
     // Graph search must return at least postingTarget candidates
@@ -547,7 +581,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         p_queryResults->SortResult();
     }
 
-    if (p_query.GetResultNum() < m_options.m_searchInternalResultNum)
+    if (p_queryResults != (COMMON::QueryResultSet<T> *)&p_query)
     {
         std::copy(p_queryResults->GetResults(), p_queryResults->GetResults() + p_query.GetResultNum(),
                   p_query.GetResults());

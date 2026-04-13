@@ -130,6 +130,11 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
+            bool m_forceDenseTagSearch;
+            int m_directSparseMaxPostings;
+            float m_filteredSearchNprobeSafety;
+            float m_filteredSearchTargetRecall;
+            float m_filteredSearchCoverageExponent;
             int m_rerank;
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;

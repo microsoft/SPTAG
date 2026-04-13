@@ -40,6 +40,26 @@
 %include "CoreInterface.h"
 
 %pythoncode %{
+def _tenant_get_tag_routing_stats(self, tenant_id):
+    """Return exact tag routing stats for one tenant as a sorted list of dicts."""
+    import struct as _struct
+
+    payload = self.GetTagRoutingStatsBlob(int(tenant_id))
+    entry_format = "<Iii"
+    entry_size = _struct.calcsize(entry_format)
+    if len(payload) % entry_size != 0:
+        raise ValueError("Unexpected GetTagRoutingStatsBlob payload length")
+
+    return [
+        {
+            "tag": int(tag),
+            "vector_count": int(vector_count),
+            "posting_count": int(posting_count),
+        }
+        for tag, vector_count, posting_count in _struct.iter_unpack(entry_format, payload)
+    ]
+
+
 def _tenant_build_from_numpy(self, vectors, tenant_ids, with_meta_index=True, normalized=False):
     """
     Build per-tenant independent indices from numpy vectors and tenant id array.
@@ -75,6 +95,7 @@ def _create_tenant_index_manager(dimension, algo_type="BKT", value_type="Float")
 
 # Python API additions for multi-tenant index construction.
 TenantIndexManager.BuildFromNumpy = _tenant_build_from_numpy
+TenantIndexManager.GetTagRoutingStats = _tenant_get_tag_routing_stats
 CreateTenantIndexManager = _create_tenant_index_manager
 %}
 

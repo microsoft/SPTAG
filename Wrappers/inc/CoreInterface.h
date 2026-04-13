@@ -19,6 +19,7 @@
 #include <shared_mutex>
 #include <list>
 #include <atomic>
+#include <tuple>
 #include <unordered_map>
 
 typedef int SizeType;
@@ -139,6 +140,11 @@ public:
     TenantIndexManager(DimensionType p_dimension, const char* p_algoType = "BKT", const char* p_valueType = "Float");
 
     ~TenantIndexManager();
+    struct TagRoutingStats {
+        int vectorCount = 0;
+        int postingCount = 0;
+    };
+
 
     // Build indices from global vectors and metadata (metadata are tenant IDs as integers)
     // Returns true on success, false otherwise
@@ -187,6 +193,14 @@ public:
 
     // Get vector count for a specific tenant
     int GetTenantVectorCount(int p_tenantId) const;
+
+    // Get on-disk HeadIndex size for a specific tenant in bytes.
+    // Returns 0 when the tenant has no HeadIndex workdir.
+    uint64_t GetTenantHeadIndexSize(int p_tenantId) const;
+
+    // Get exact tag routing stats for a tenant as a packed byte buffer.
+    // Each entry uses the layout: uint32_t tag, int32_t vectorCount, int32_t postingCount.
+    ByteArray GetTagRoutingStatsBlob(int p_tenantId) const;
 
     // Set build/search parameters for all tenant indices
     void SetBuildParam(const char* p_name, const char* p_value, const char* p_section);
@@ -258,11 +272,17 @@ private:
     // tenant_id -> vector count mapping  
     std::map<int, int> m_tenantVectorCounts;
 
+    // Exact per-tag routing stats computed by BuildSignatures.
+    std::map<int, std::unordered_map<uint32_t, TagRoutingStats>> m_tenantTagRoutingStats;
+
     // Unified storage path (base directory for all tenants)
     std::string m_baseStoragePath;
 
     // tenant_id -> on-disk index path (for legacy loading/saving)
     std::map<int, std::string> m_tenantIndexPaths;
+
+    // Search params to apply to both currently loaded and future lazy-loaded tenants.
+    std::vector<std::tuple<std::string, std::string, std::string>> m_pendingSearchParams;
 
     // tenant_id -> SPANN build work directory (IndexDirectory)
     std::map<int, std::string> m_tenantSpannWorkDirs;

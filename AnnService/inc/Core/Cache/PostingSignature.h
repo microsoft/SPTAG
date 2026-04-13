@@ -319,23 +319,23 @@ inline int SparseTagThreshold(int tenant_size,
 struct SparseTagIndex {
     // tag_id → list of posting IDs that contain vectors with this tag
     std::unordered_map<uint32_t, std::vector<int>> tag_to_postings;
-    // Set of tag IDs that are sparse (below threshold)
+    // Set of tag IDs whose posting fanout is small enough for direct sparse routing.
     std::unordered_set<uint32_t> sparse_tags;
 
-    // Build from per-posting tag lists and exact per-tag vector counts.
+    // Build from per-posting tag lists and exact per-tag posting counts.
     // posting_tags[pid] = list of tag IDs in that posting.
-    // tag_vector_counts[tag] = number of tenant vectors that carry this tag.
-    // threshold = SparseTagThreshold(tenant_size, ...).
+    // tag_posting_counts[tag] = number of postings that contain this tag.
+    // max_postings = build-time fanout cap for materializing direct posting lists.
     void Build(int num_postings,
                const std::vector<std::vector<uint32_t>>& posting_tags,
-               const std::unordered_map<uint32_t, int>& tag_vector_counts,
-               int threshold)
+               const std::unordered_map<uint32_t, int>& tag_posting_counts,
+               int max_postings)
     {
-        // Identify sparse tags by their exact vector counts.
+        // Materialize direct posting lists only for tags with bounded posting fanout.
         tag_to_postings.clear();
         sparse_tags.clear();
-        for (const auto& [tag, vector_count] : tag_vector_counts) {
-            if (vector_count <= threshold) {
+        for (const auto& [tag, posting_count] : tag_posting_counts) {
+            if (posting_count > 0 && posting_count <= max_postings) {
                 sparse_tags.insert(tag);
             }
         }
