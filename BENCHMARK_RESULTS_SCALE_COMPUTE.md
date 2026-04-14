@@ -208,3 +208,154 @@
 9. **Recall trade-off at 10M multi-node**: Pre-insert recall is similar across topologies (0.935-0.951). After insert, 2/3-node recall drops to 0.82-0.85 due to FullSearch routing across nodes (each node only has partial head index). This is expected and can be improved with head sync.
 10. **P99 tail latency**: 100K ~4-5ms, 1M ~5-12ms, 10M ~20-32ms. Multi-node 10M shows higher P99 (25-32ms) due to cross-node RPC tail.
 11. **HandleSearchPosting sort fix (2026-04-09)**: Fixed a bug where worker nodes returned 0 results when the TopK heap was not fully filled, causing recall degradation at small scales (100K). After fix, 1M insert throughput improved significantly (2-node: 456→548, 3-node: 475→622).
+
+---
+
+## 8. Float32 Benchmark Results
+
+### Configuration
+
+- **Machine**: 2× Intel Xeon Gold 6530, 128GB DDR5, 1× NVMe SSD
+- **Vector**: Float32, dim=64, L2 distance
+- **Queries**: 200 queries, TopK=5
+- **Data**: `vectors.1b.fbin`, `query.1k.fbin` (1000 vectors, first 200 used)
+- **TiKV**: Same config as above (3 PD + 3 TiKV, Docker v8.5.5, block-cache=40GB)
+- **Date**: 2026-04-13
+- **Note**: Different machine from UInt8 tests above; only relative scaling ratios (Nx vs 1-node) are meaningful across sections
+
+| Scale | Base Vectors | Insert Vectors | Batch Size |
+|-------|-------------|---------------|------------|
+| 1M | 990,000 | 10,000 | 1,000 × 10 |
+| 10M | 9,900,000 | 100,000 | 10,000 × 10 |
+
+### 8.1 Build Time
+
+| Scale | 1-node | 2-node | 3-node |
+|-------|--------|--------|--------|
+| 1M | 193.2s | 208.5s | 198.9s |
+| 10M | 2827s (47.1min) | 3040s (50.7min) | 2928s (48.8min) |
+
+### 8.2 Query Latency — Pre-insert
+
+| Scale | Topo | Mean (ms) | P50 | P95 | P99 | QPS | Recall@5 |
+|-------|------|-----------|-----|-----|-----|-----|----------|
+| 1M | 1-node | 6.09 | 5.84 | 7.85 | 11.87 | 1299 | 0.661 |
+| 1M | 2-node | 10.02 | 9.84 | 13.42 | 16.72 | 790 | 0.653 |
+| 1M | 3-node | 8.91 | 8.50 | 11.49 | 18.57 | 884 | 0.702 |
+| 10M | 1-node | 43.81 | 43.37 | 51.21 | 54.59 | 181 | 0.595 |
+| 10M | 2-node | 31.56 | 31.52 | 36.03 | 38.21 | 250 | 0.603 |
+| 10M | 3-node | 51.13 | 50.70 | 57.80 | 65.47 | 155 | 0.627 |
+
+### 8.3 Query Latency — Avg B1-B10 (search round 1)
+
+| Scale | Topo | Mean (ms) | P50 | P95 | P99 | QPS | Recall@5 |
+|-------|------|-----------|-----|-----|-----|-----|----------|
+| 1M | 1-node | 8.73 | 8.59 | 10.77 | 13.57 | 908 | 0.648 |
+| 1M | 2-node | 9.54 | 9.27 | 12.47 | 16.22 | 833 | 0.641 |
+| 1M | 3-node | 9.12 | 8.96 | 11.15 | 15.63 | 872 | 0.686 |
+| 10M | 1-node | 39.72 | 39.78 | 46.09 | 50.12 | 204 | 0.594 |
+| 10M | 2-node | 44.69 | 44.70 | 52.33 | 57.35 | 178 | 0.594 |
+| 10M | 3-node | 45.66 | 46.22 | 52.12 | 56.71 | 175 | 0.620 |
+
+### 8.4 Query Latency — Per Batch Detail (search round 1)
+
+#### 1M
+
+| Batch | 1-node avg (ms) | 1-node P99 (ms) | 1-node QPS | 2-node avg (ms) | 2-node P99 (ms) | 2-node QPS | 3-node avg (ms) | 3-node P99 (ms) | 3-node QPS |
+|-------|-----------------|-----------------|------------|-----------------|-----------------|------------|-----------------|-----------------|------------|
+| 0 | 6.09 | 11.87 | 1299 | 10.02 | 16.72 | 790 | 8.91 | 18.57 | 884 |
+| 1 | 8.66 | 17.20 | 914 | 10.99 | 22.29 | 718 | 8.96 | 26.75 | 881 |
+| 2 | 7.89 | 11.30 | 998 | 9.94 | 15.76 | 795 | 9.34 | 18.42 | 846 |
+| 3 | 8.70 | 13.44 | 906 | 10.52 | 19.63 | 749 | 9.17 | 13.62 | 860 |
+| 4 | 8.07 | 12.51 | 979 | 9.74 | 16.79 | 812 | 9.95 | 17.88 | 793 |
+| 5 | 8.69 | 13.62 | 911 | 9.33 | 14.60 | 846 | 9.73 | 14.71 | 812 |
+| 6 | 8.39 | 12.90 | 939 | 9.79 | 12.99 | 809 | 8.16 | 12.82 | 968 |
+| 7 | 9.02 | 14.95 | 871 | 8.88 | 13.51 | 889 | 9.59 | 14.78 | 823 |
+| 8 | 8.78 | 11.74 | 898 | 8.41 | 16.05 | 939 | 7.50 | 11.75 | 1053 |
+| 9 | 10.20 | 14.51 | 772 | 8.17 | 15.97 | 965 | 9.73 | 13.16 | 808 |
+| 10 | 8.88 | 13.54 | 887 | 9.66 | 14.62 | 814 | 9.01 | 12.42 | 875 |
+
+#### 10M
+
+| Batch | 1-node avg (ms) | 1-node P99 (ms) | 1-node QPS | 2-node avg (ms) | 2-node P99 (ms) | 2-node QPS | 3-node avg (ms) | 3-node P99 (ms) | 3-node QPS |
+|-------|-----------------|-----------------|------------|-----------------|-----------------|------------|-----------------|-----------------|------------|
+| 0 | 43.81 | 54.59 | 181 | 31.56 | 38.21 | 250 | 51.13 | 65.47 | 155 |
+| 1 | 42.77 | 54.57 | 186 | 49.96 | 61.63 | 159 | 47.35 | 64.78 | 167 |
+| 2 | 41.82 | 52.62 | 190 | 48.28 | 63.69 | 164 | 49.47 | 63.09 | 160 |
+| 3 | 41.12 | 53.82 | 193 | 48.25 | 63.90 | 164 | 48.84 | 60.02 | 163 |
+| 4 | 42.09 | 48.94 | 189 | 47.81 | 66.36 | 166 | 49.65 | 59.69 | 160 |
+| 5 | 40.55 | 51.78 | 196 | 44.23 | 51.91 | 180 | 46.23 | 54.65 | 172 |
+| 6 | 40.82 | 51.81 | 194 | 42.03 | 50.91 | 189 | 46.18 | 54.49 | 172 |
+| 7 | 40.63 | 51.54 | 196 | 42.23 | 51.41 | 188 | 43.01 | 56.24 | 185 |
+| 8 | 40.62 | 52.29 | 195 | 41.68 | 51.38 | 191 | 41.12 | 51.15 | 193 |
+| 9 | 25.98 | 32.44 | 307 | 41.48 | 55.09 | 191 | 42.49 | 52.92 | 187 |
+| 10 | 40.78 | 51.34 | 194 | 40.94 | 57.21 | 194 | 42.27 | 50.11 | 188 |
+
+### 8.5 Insert Throughput (avg vec/s)
+
+| Scale | 1-node | 2-node | 3-node | 2-node vs 1 | 3-node vs 1 |
+|-------|--------|--------|--------|-------------|-------------|
+| 1M | 91 | 170 | 284 | 1.86x | 3.11x |
+| 10M | 121 | 233 | 373 | 1.92x | 3.07x |
+
+### Per-Batch Detail
+
+#### 1M
+
+| Batch | 1-node | 2-node | 3-node | 2n/1n | 3n/1n |
+|-------|--------|--------|--------|-------|-------|
+| B1 | 85.9 | 186.3 | 269.2 | 2.17x | 3.13x |
+| B2 | 87.9 | 171.6 | 276.8 | 1.95x | 3.15x |
+| B3 | 88.2 | 169.5 | 259.1 | 1.92x | 2.94x |
+| B4 | 91.9 | 170.9 | 272.7 | 1.86x | 2.97x |
+| B5 | 79.2 | 179.7 | 275.7 | 2.27x | 3.48x |
+| B6 | 95.5 | 175.6 | 292.3 | 1.84x | 3.06x |
+| B7 | 101.0 | 181.3 | 297.5 | 1.79x | 2.94x |
+| B8 | 100.1 | 184.7 | 322.7 | 1.85x | 3.23x |
+| B9 | 92.6 | 182.8 | 277.4 | 1.97x | 3.00x |
+| B10 | 90.5 | 95.0 | 298.0 | 1.05x | 3.29x |
+| **Avg** | **91.3** | **169.7** | **284.1** | **1.86x** | **3.11x** |
+
+#### 10M
+
+| Batch | 1-node | 2-node | 3-node | 2n/1n | 3n/1n |
+|-------|--------|--------|--------|-------|-------|
+| B1 | 80.8 | 179.6 | 354.4 | 2.22x | 4.39x |
+| B2 | 146.2 | 173.4 | 179.5 | 1.19x | 1.23x |
+| B3 | 144.8 | 237.8 | 332.9 | 1.64x | 2.30x |
+| B4 | 136.0 | 235.9 | 334.1 | 1.73x | 2.46x |
+| B5 | 99.8 | 281.3 | 350.3 | 2.82x | 3.51x |
+| B6 | 74.4 | 274.5 | 474.5 | 3.69x | 6.38x |
+| B7 | 128.3 | 291.6 | 451.5 | 2.27x | 3.52x |
+| B8 | 78.3 | 157.0 | 462.3 | 2.00x | 5.90x |
+| B9 | 195.6 | 228.1 | 423.4 | 1.17x | 2.16x |
+| B10 | 130.3 | 269.1 | 368.4 | 2.07x | 2.83x |
+| **Avg** | **121.4** | **232.8** | **373.1** | **1.92x** | **3.07x** |
+
+### 8.6 Recall@5
+
+#### Avg Recall@5 (B1-B10)
+
+| Scale | 1-node | 2-node | 3-node |
+|-------|--------|--------|--------|
+| 1M | 0.648 | 0.641 | 0.686 |
+| 10M | 0.594 | 0.594 | 0.620 |
+
+#### Recall@5 Trend (Pre → B10)
+
+| Scale | Topo | Pre | B1 | B5 | B10 |
+|-------|------|-----|----|----|-----|
+| 1M | 1-node | 0.661 | 0.661 | 0.658 | 0.630 |
+| 1M | 2-node | 0.653 | 0.653 | 0.653 | 0.623 |
+| 1M | 3-node | 0.702 | 0.702 | 0.700 | 0.664 |
+| 10M | 1-node | 0.595 | 0.595 | 0.594 | 0.595 |
+| 10M | 2-node | 0.603 | 0.598 | 0.602 | 0.590 |
+| 10M | 3-node | 0.627 | 0.627 | 0.627 | 0.613 |
+
+### 8.7 Key Observations
+
+1. **Insert throughput scales near-linearly**: 1M 1.86x/3.11x, 10M 1.92x/3.07x. Slightly super-linear at 3-node due to reduced per-node TiKV contention.
+2. **Build time is identical across topologies**: Build runs on a single node; multi-node only affects insert/search phases.
+3. **Search QPS does NOT scale with compute nodes**: Pre-insert QPS actually decreases with more nodes (1M: 1299→790→884). This is due to RPC overhead in the scatter-gather search path (`BatchRouteSearch`), where ~5ms network round-trip is comparable to per-query search latency.
+4. **10M insert throughput has high variance**: Per-batch VPS ranges from 74-196 (1-node) due to TiKV background compaction interference.
+5. **Recall is consistent across topologies at 1M**: ~0.66 for all topologies. At 10M, multi-node recall drops slightly (0.595→0.590→0.613) due to distributed posting routing.
