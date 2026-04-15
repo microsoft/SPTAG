@@ -15,7 +15,7 @@
 9. [Job Routing 容错](#9-job-routing-容错)
 10. [节点 Crash 故障处理总表](#10-节点-crash-故障处理总表)
 11. [弹性伸缩设计](#11-弹性伸缩设计)
-12. [五条链路容错全景](#12-五条链路容错全景)
+12. [四条链路容错全景](#12-四条链路容错全景)
 13. [实现路线图：PR 计划](#13-实现路线图pr-计划)
 14. [附录](#附录)
 
@@ -44,19 +44,11 @@
 
 ```
 +------------------------------------------------------------------+
-|                          Clients                                  |
-+------------+-----------------------------------+-----------------+
-             | Query                             | Insert
-             v                                   v
-+------------------------+          +----------------------------+
-|   Aggregator x M       |          |   Any Compute Node         |
-|   (无状态, LB 后面)     |          |   (接受写入的入口)          |
-|   * 仅处理查询          |          |                            |
-+------------+-----------+          +--------------+-------------+
-             |                                    |
-             | Fan-out Query                      | Route via
-             | to Compute Nodes                   | ConsistentHash
-             v                                    v
+|              Clients (内嵌 SDK, Client-side LB)                   |
++------------------------------------------------------------------+
+             | Query / Insert
+             | (SDK 从 PD 获取健康节点列表, round-robin 选节点)
+             v
 +------------------------------------------------------------------+
 |                  Compute Node x 2000                              |
 |  +------------------------------------------------------------+  |
@@ -86,18 +78,18 @@
 ```
 
 **关键架构决策**：
-- **查询路径**：Client -> Aggregator -> Compute Nodes（Aggregator 扇出+合并）
-- **写入路径**：Client -> Any Compute Node（写入直连 Compute，Aggregator 不参与写入）
-- **共享存储**：所有 Posting 在 TiKV (Raft 3 副本)，"Owner" 仅指"谁负责处理请求"，不指"数据在哪"
+- **查询路径**：Client SDK 直连任意 Compute Node（Node 本地完成全部查询：Head Search → RawBatchGet posting → Top-K）
+- **写入路径**：Client SDK 直连任意 Compute Node（PostingRouter 路由到 Owner 写入）
+- **无 Aggregator 层**：Client 数量有限（后端服务 pod），SDK 内置 LB 即可
+- **共享存储**：所有 Posting 在 TiKV (Raft 3 副本)，"Owner" 仅用于写入串行化，查询不经过 Owner
 
 ### 2.2 核心组件职责
 
 | 组件 | 实例数 | 状态 | 职责 |
 |------|--------|------|------|
-| **Client** | 任意 | 无状态 | 发起查询/写入请求，重试，负载均衡选择入口 |
-| **Aggregator** | M (>=3) | 无状态 | **仅查询**入口，扇出到 Compute Node，合并 Top-K 结果 |
-| **Compute Node** | 2000 | 有状态* | Head Index 搜索，Posting 读写，Split/Merge，写入入口 |
-| **PostingRouter** | (内嵌) | 可重建 | 一致性哈希 headID->Node 路由 |
+| **Client SDK** | 任意 | 无状态 | 内嵌在业务服务中；从 PD 获取节点列表；Client-side LB；重试；CircuitBreaker |
+| **Compute Node** | 2000 | 有状态* | Head Index 搜索，Posting 读写，Split/Merge，查询+写入入口 |
+| **PostingRouter** | (内嵌) | 可重建 | 一致性哈希 headID->Node 路由（仅写入路径使用） |
 | **TiKV Store** | 2000 | 持久化 | Posting/VersionMap/WAL/Intent/HeadSyncLog (Raft 3 副本) |
 | **PD** | 5 | 持久化 | Region 调度 + Compute Node 集群管理 + Ring Epoch |
 
@@ -105,14 +97,14 @@
 
 ### 2.3 当前 Benchmark 架构 vs 生产架构
 
-当前 benchmark 只有 **1 个 Client**（即 Driver 进程 n0），它同时承担三个角色：
+当前 benchmark 只有 **1 个 Client**（即 Driver 进程 n0），它同时承担两个角色：
 
 ```
 +----------------------------------------------------------------+
-|              当前 Benchmark 架构 (1 Driver = 3 合 1)              |
+|              当前 Benchmark 架构 (1 Driver = 2 合 1)              |
 |                                                                  |
 |  +----------------------------------------------------------+   |
-|  |  Driver (Node n0) = Client + Aggregator + Compute Node    |   |
+|  |  Driver (Node n0) = Client + Compute Node                 |   |
 |  +----------------------------------------------------------+   |
 |                       |                                          |
 |         +-------------+-------------+                            |
@@ -463,36 +455,42 @@ class DistributedVIDAllocator {
   +  阶段 A/B 随 Client 数量线性扩展
   x  每节点只查自己的 Posting -> 退化为 M 个独立单机实例
 
-模式 3: M Aggregators -> N Compute Nodes（生产推荐）
-  +  阶段 A: M 个 Aggregator 并行接入/合并
-  +  阶段 B: N 个 Compute Node 并行 Head Search
-  +  阶段 C: Posting 分布在 N 节点 -> I/O 线性扩展
-  +  任何一层故障都可独立恢复，无单点
+模式 3: M Client SDK -> N Compute Nodes（生产推荐）
+  +  M 个 Client SDK 各自选不同 Compute Node 发送查询（Client-side LB）
+  +  N 个 Compute Node 并行处理不同查询（跨查询并行）
+  +  每个查询在 1 个 Compute Node 内完成（不做单查询跨节点并行，避免网络开销）
+  +  任何 Compute Node 故障 -> Client SDK 自动切到其他节点
+  +  无 Aggregator 层，架构更简单
 ```
 
 ### 5.2 吞吐量公式
 
 ```
-  单查询延迟分解:
-    Latency = T_network + T_head + T_posting + T_merge
-    T_network ~ 0.1ms (同机房)
-    T_head    ~ 0.5-2ms (BKT 图搜索, CPU)
-    T_posting ~ 1-5ms (TiKV RawBatchGet, I/O)
-    T_merge   ~ 0.1ms (Top-K 合并)
+  单查询延迟分解 (单 Compute Node 内完成):
+    Latency = T_head + T_routing + T_posting + T_distance
+    T_head    ~ 0.5-2ms (BKT 图搜索, CPU, 本地内存)
+    T_routing ~ 0.1ms (hash ring lookup + RPC to owner)
+    T_posting ~ 1-5ms (Owner 从 TiKV RawBatchGet)
+    T_distance~ 0.1ms (距离计算 + Top-K 选择)
 
   单节点 QPS ~ NumThreads / Latency ~ 32 / 3ms ~ 10,000 QPS (单 Compute)
 
   三种模式吞吐量对比 (N=2000 Compute Nodes):
 
+  Client SDK 内置 LB, 直连 Compute Node。每个查询由 1 个 Node 完成。
+  QPS 靠跨查询并行增长: 不同查询分到不同 Node。
+
   +---------------+-----------------+-----------------+-------------------+
   |               | 模式 1          | 模式 2          | 模式 3 (推荐)     |
-  |               | 1 Client, N Node| M Client, 独立  | M Agg, N Node     |
+  |               | 1 Client, N Node| M Client, 独立  | M SDK, N Node     |
   +---------------+-----------------+-----------------+-------------------+
-  | 阶段 A (接入) | 1 进程 ~50K     | M x 10K         | M x 50K           |
-  | 阶段 B (Head) | 1 节点 ~10K     | M x 10K         | N x 10K = 20M     |
-  | 阶段 C (I/O)  | N x 10K 理论    | 1 x 10K         | N x 10K = 20M     |
-  | 实际总吞吐    | ~10K (瓶颈: B)  | M x 10K         | M x 50K           |
+  | 单查询延迟    | ~3ms            | ~3ms            | ~3ms              |
+  | 总 QPS        | ~10K (1 节点)   | M x 10K         | N x 10K = 20M*   |
   +---------------+-----------------+-----------------+-------------------+
+
+  * 每个查询只用 1 个 Compute Node，但 N 个 Node 并行处理不同查询
+  * 总吞吐 = N x 单节点 QPS = 2000 x 10K = 20M QPS (理论上限)
+  * 实际瓶颈通常在 TiKV I/O
 ```
 
 ### 5.3 三态写入语义 (API 契约)
@@ -542,15 +540,15 @@ class DistributedVIDAllocator {
 |  |                                                              | |
 |  |  +-----------------+  +------------------------------+       | |
 |  |  | ConnectionPool  |  | RetryPolicy                  |       | |
-|  |  | * Aggregator    |  | * MaxRetries: 3              |       | |
+|  |  | * ComputeNode   |  | * MaxRetries: 3              |       | |
 |  |  |   endpoints[]   |  | * Backoff: exp(100ms,2s)     |       | |
-|  |  | * HealthCheck   |  | * Query -> 总是安全重试       |       | |
-|  |  |   (TCP ping 1s) |  | * Write -> VID+Ver 去重      |       | |
+|  |  | * From PD       |  | * Query -> 总是安全重试       |       | |
+|  |  | * HealthCheck   |  | * Write -> VID+Ver 去重      |       | |
 |  |  | * RoundRobin LB |  | * 400 Bad Request -> 不重试   |       | |
 |  |  +-----------------+  +------------------------------+       | |
 |  |  +-----------------+  +------------------------------+       | |
 |  |  | Timeout Config  |  | CircuitBreaker               |       | |
-|  |  | * Connect: 1s   |  | * Per-Aggregator 独立         |       | |
+|  |  | * Connect: 1s   |  | * Per-Node 独立              |       | |
 |  |  | * Query: 5s     |  | * 5 failures in 30s -> OPEN  |       | |
 |  |  | * Write: 10s    |  | * OPEN 30s -> HALF_OPEN      |       | |
 |  |  | * Overall: 30s  |  | * 1 success -> CLOSED        |       | |
@@ -574,43 +572,39 @@ class DistributedVIDAllocator {
 ### 5.5 Client 容错路径
 
 ```
-  Client                        Load Balancer              Aggregator Pool
-    |                               |                           |
-    |  (1) 发送查询请求              |                           |
-    |------------------------------>|                           |
-    |                               |  (2) 选择 Agg A          |
-    |                               |-------------------------->| Agg A
-    |                               |                           |
-    |                 +----------- 正常路径 ---------------+     |
-    |                 |             |                      |     |
-    |                 |             |  (3) Agg A 处理成功   |     |
-    |                 |             |<-------------------- |     |
-    |  (4) 返回结果   |             |                           |
-    |<------------------------------|                           |
-    |                                                           |
-    |                 +----------- 故障路径 ---------------+     |
-    |  (5) Agg A 超时/失败 (CircuitBreaker 记录失败)        |     |
-    |                               |                           |
-    |  (6) 自动重试                  |                           |
-    |------------------------------>|                           |
-    |                               |  (7) LB 跳过 Agg A       |
-    |                               |  选择 Agg B              |
-    |                               |-------------------------->| Agg B
-    |                               |                           |
-    |  (8) Agg B 成功返回            |                           |
-    |<------------------------------|<--------------------------| 
+  Client SDK (内嵌在业务服务中)              Compute Node Pool
+    |                                           |
+    |  (1) 从 PD 获取健康节点列表               |
+    |  (2) RoundRobin 选 Node A                |
+    |  (3) 发送查询/写入请求                     |
+    |------------------------------------------>| Node A
+    |                                           |
+    |                 +----------- 正常路径 ----+
+    |                 |                         |
+    |                 |  (4) Node A 处理成功     |
+    |  (5) 返回结果   |                         |
+    |<------------------------------------------|
+    |                                           |
+    |                 +----------- 故障路径 ----+
+    |  (6) Node A 超时/失败                     |
+    |      CircuitBreaker 记录失败              |
+    |                                           |
+    |  (7) 自动重试: 选 Node B                  |
+    |------------------------------------------>| Node B
+    |                                           |
+    |  (8) Node B 成功返回                      |
+    |<------------------------------------------|
 
   故障处理表:
   +----------------------+-----------------+-------------------------------+
-  | 故障点               | 检测方式         | Client 行为                    |
+  | 故障点               | 检测方式         | Client SDK 行为                |
   +----------------------+-----------------+-------------------------------+
-  | DNS 解析失败          | getaddrinfo err | 使用缓存的 IP; fallback DNS    |
-  | LB 不可达            | connect timeout | 直连已知 Aggregator IP         |
-  | Aggregator 超时       | read timeout    | 重试到其他 Agg (max 3 次)     |
-  | Aggregator 返回错误   | HTTP 5xx/gRPC  | CircuitBreaker 标记; 重试      |
-  | 响应格式错误          | decode error    | 丢弃，重试到其他 Agg           |
-  | 部分结果 (degraded)   | response flag   | 返回给应用层，标记 degraded    |
-  | 全部 Agg 不可用       | all retries fail| 返回错误，应用层决定策略       |
+  | PD 不可达            | connect timeout | 使用缓存的节点列表              |
+  | Compute Node 超时    | read timeout    | CircuitBreaker 标记; 重试到    |
+  |                      |                 | 其他 Node (max 3 次)           |
+  | Compute Node 返回错误| gRPC error      | CircuitBreaker 标记; 重试      |
+  | 响应格式错误          | decode error    | 丢弃，重试到其他 Node          |
+  | 全部 Node 不可用      | all retries fail| 返回错误，业务层决定策略       |
   +----------------------+-----------------+-------------------------------+
 ```
 
@@ -622,8 +616,7 @@ class DistributedVIDAllocator {
     |  Insert(vid, vec, meta)       |
     |------------------------------>|
     |                               |
-    |  写入路径: Client -> 任意 Compute Node
-    |  (Aggregator 不参与写入, 减少一跳)
+    |  写入路径: Client SDK -> 任意 Compute Node
     |  -> PostingRouter 路由到 Owner
     |                               |
     |  ACK: {persistent: true}      |
@@ -642,84 +635,73 @@ class DistributedVIDAllocator {
 
 ### 6.1 查询流完整路径图
 
+**单查询不做跨节点并行**——网络开销太大。Client SDK 直连 1 个 Compute Node，
+该 Node 独立完成全部工作：Head Search → 直接从 TiKV 读所有 posting → 距离计算 → Top-K。
+QPS 靠**跨查询并行**增长：N 个 Compute Node 同时处理不同 Client 的查询。
+
 ```
-  Client                Aggregator           Compute Node           TiKV Cluster
-    |                      |                      |                      |
-    |  (1) Search Request  |                      |                      |
-    |--------------------->|                      |                      |
-    |                      |                      |                      |
-    |                      |  (2) Fan-out Query   |                      |
-    |                      |  (选 K 个健康节点)    |                      |
-    |                      |--------------------->|                      |
-    |                      |--------------------->|(Node B)              |
-    |                      |--------------------->|(Node C)              |
-    |                      |                      |                      |
-    |                      |                      |  (3) Head Index      |
-    |                      |                      |  Search (本地内存)    |
-    |                      |                      |                      |
-    |                      |                      |  (4) Posting Read    |
-    |                      |                      |--------------------->|
-    |                      |                      |  RawBatchGet         |
-    |                      |                      |<---------------------|
-    |                      |                      |                      |
-    |                      |                      |  (5) Distance +      |
-    |                      |                      |  Top-K Selection     |
-    |                      |                      |                      |
-    |                      |  (6) Results Return  |                      |
-    |                      |<---------------------|                      |
-    |                      |                      |                      |
-    |                      |  (7) Merge K Results |                      |
-    |                      |  (取全局 Top-K)       |                      |
-    |                      |                      |                      |
-    |  (8) Final Results   |                      |                      |
-    |<---------------------|                      |                      |
+  Client SDK              Compute Node A                       TiKV Cluster
+    |                          |                                    |
+    |  (1) Search Request      |                                    |
+    |  (SDK round-robin 选 A)  |                                    |
+    |------------------------->|                                    |
+    |                          |                                    |
+    |                          |  (2) Head Index Search (本地内存)   |
+    |                          |  -> K headIDs                      |
+    |                          |                                    |
+    |                          |  (3) RawBatchGet                   |
+    |                          |  所有 K 个 headID 的 posting       |
+    |                          |----------------------------------->|
+    |                          |<-----------------------------------|
+    |                          |                                    |
+    |                          |  (4) Distance + Top-K Selection    |
+    |                          |                                    |
+    |  (5) Results             |                                    |
+    |<-------------------------|                                    |
 ```
+
+**关键点**：
+- 查询路径**零跨节点通信**，只有 Compute Node <-> TiKV 的存储 I/O
+- Owner / PostingRouter 在查询路径中**不参与**，仅用于写入路径
+- QPS = N × 单节点 QPS（2000 × 10K = 20M QPS 理论上限）
 
 ### 6.2 查询流每步故障处理表
 
 | 步骤 | 断开位置 | 故障模式 | 检测方式 | 处理策略 | 用户感知 |
 |------|----------|----------|----------|----------|----------|
-| **(1)** Client->Aggregator | 网络不通 / Agg 宕机 | connect timeout (1s) | Client 侧 | LB 自动切换; Client 重试 (max 3, exp backoff) | 延迟 ~1s |
-| **(2)** Agg->Compute | Node 宕机 / 网络分区 | TCP RST / 超时 (500ms) | Aggregator | 该节点加入 Blacklist; 路由到其他健康节点; Head Index 全量副本 | 延迟 ~500ms |
-| **(3)** Head Index Search | 内存损坏 / OOM | SIGSEGV | Compute watchdog | 节点自杀重启; Agg 超时后切到其他节点 | 延迟 ~1s |
-| **(4)** Compute->TiKV Read | Leader 迁移 / Store 宕机 | gRPC UNAVAILABLE | Region Error | **分级容错链** (见 6.4) | Leader迁移 ~400ms |
-| **(5)** Distance Compute | CPU 异常 | 同 (3) | 同 (3) | 同 (3) | 同 (3) |
-| **(6)** Compute->Agg | 响应丢失 / Compute 中途宕机 | 超时 (2s) | Agg 等待 | Agg 只需 >=1 个结果即可返回; 超时节点丢弃 | degraded=true |
-| **(7)** Merge Results | Agg 自身 OOM | 进程崩溃 | LB 健康检查 | Client 重试到另一 Agg | 延迟 ~1s |
-| **(8)** Agg->Client | 网络断开 | TCP RST / 超时 | Client 侧 | Client 重试（查询天然幂等） | 延迟 ~1-2s |
+| **(1)** Client->Compute | Node 宕机 / 网络不通 | connect timeout (1s) | Client SDK | CircuitBreaker 标记; 重试到其他 Node (max 3) | 延迟 ~1s |
+| **(2)** Head Index Search | 内存损坏 / OOM | SIGSEGV | 进程崩溃 | Client SDK 超时后重试到其他节点 | 延迟 ~1s |
+| **(3)** Compute->TiKV Read | Leader 迁移 / Store 宕机 | gRPC UNAVAILABLE | Region Error | **分级容错** (见 6.4): 刷新 Region Cache → 重试 Leader → Follower Read | Leader迁移 ~400ms |
+| **(4)** Distance + Top-K | CPU 异常 | SIGSEGV | 同 (2) | 同 (2) | 同 (2) |
+| **(5)** Compute->Client | 响应丢失 / 中途宕机 | TCP RST / 超时 | Client SDK | 重试到另一 Compute Node（查询天然幂等） | 延迟 ~1-2s |
 
-### 6.3 查询流容错详图（含 Blacklist）
+查询容错极其简单：**任何一步失败 → Client SDK 重试到另一个 Compute Node**
+（因为每个 Node 都有全量 Head Index + 能直接读 TiKV）。
+
+### 6.3 Client SDK 选节点与故障切换
 
 ```
-             (2) Aggregator 发送查询到 Compute Node
+  Client SDK 维护 Compute Node 健康列表 (从 PD 定期拉取):
+
+  healthy_nodes = AllNodes - CircuitBreaker.OpenNodes
+  selected = RoundRobin(healthy_nodes)
 
   +------------------------------------------------------+
-  | Aggregator                                           |
+  |  Client SDK                                          |
   |                                                      |
-  |  healthy_nodes = AllNodes - Blacklist                 |
-  |  candidates = Select(healthy_nodes, K=3)             |
-  |                                                      |
-  |     +-----------+  +-----------+  +-----------+      |
-  |     |  Node A   |  |  Node B   |  |  Node C   |      |
-  |     |  (500ms)  |  |  (500ms)  |  |  (500ms)  |      |
-  |     +-----+-----+  +-----+-----+  +-----+-----+     |
-  |           |              |              |              |
-  |           v              v              v              |
-  |     +---------+  +-----------+  +----------+          |
-  |     |   OK    |  |  Timeout  |  |   OK     |          |
-  |     | results |  |  (500ms)  |  | results  |          |
-  |     +-----+---+  +-----+-----+  +----+-----+         |
-  |           |            |              |               |
-  |           |     +------v------+       |               |
-  |           |     | Add Node B  |       |               |
-  |           |     | to Blacklist|       |               |
-  |           |     | (TTL=30s)   |       |               |
-  |           |     +-------------+       |               |
-  |           |                           |               |
-  |           +----------+----------------+               |
-  |                      v                                |
-  |              Merge(A, C) -> Top-K                     |
-  |              Return to Client                         |
+  |  选 Node A -> 直连发送查询                             |
+  |       |                                              |
+  |       +-- 成功 -> 返回给业务层                         |
+  |       |                                              |
+  |       +-- 超时/失败 (1s)                              |
+  |              |                                       |
+  |              +-- CircuitBreaker 记录                  |
+  |              |   (连续 5 次失败 in 30s -> OPEN)        |
+  |              |                                       |
+  |              +-- 重试: 选 Node B -> 直连               |
+  |                    |                                 |
+  |                    +-- 成功 -> 返回                    |
+  |                    +-- 失败 -> 选 Node C (max 3 次)   |
   +------------------------------------------------------+
 ```
 
@@ -756,61 +738,20 @@ class DistributedVIDAllocator {
       +--+--+--+--------------------------------+
 ```
 
-### 6.5 降级阶梯 (Degradation Ladder)
+### 6.5 TiKV 读取部分失败
 
 ```
-4 个 candidate headIDs 分配到 3 个 owner:
+  查询路径中唯一可能的"部分失败"是 TiKV RawBatchGet:
+  K 个 headID 的 posting 分布在多个 TiKV Region,
+  部分 Region 可能暂时不可用。
 
-  local(K): [99]          -> OK 成功
-  Node J:   [42, 55]      -> OK 成功
-  Node M:   [1001]        -> x 超时!
+  处理策略:
+    - 成功读到的 posting -> 正常计算距离
+    - 读取失败的 headID -> 跳过
+    - 只要有 >=1 个 posting 成功 -> 返回结果 (recall 略降)
+    - 全部失败 -> 返回错误, Client SDK 重试到其他 Compute Node
 
-降级流程:
-  1. 已有: results(99) + results(42) + results(55)
-  2. 缺失: results(1001)
-  3. Local fallback: Aggregator 指示任意健康 Compute 去 TiKV 读 headID=1001
-     (任何 node 都可以读 TiKV 中的任何 headID, 因为 TiKV 是共享存储)
-  4. 如果 TiKV 读也失败 -> 用已有的 3 个 head 的结果返回
-     (recall 略降, 但查询不阻塞)
-
-  +---------------------------------------+
-  |         Degradation Ladder            |
-  |                                       |
-  |  Level 0: 所有 owner 正常返回          | -> 最佳 recall
-  |  Level 1: 部分 owner 超时,            |
-  |           fallback 到 TiKV 直读        | -> recall 略降, 延迟略增
-  |  Level 2: owner 超时 + TiKV 也失败,   |
-  |           跳过该 headID               | -> recall 再降, 但返回可用
-  |  Level 3: 所有 remote 失败,           |
-  |           只用 local heads             | -> 单节点 recall, 仍可用
-  |                                       |
-  |  每一级都标记 response.degraded=true   |
-  |  让 client 知道结果质量               |
-  +---------------------------------------+
-```
-
-### 6.6 Hedged Request（长尾优化）
-
-```
-对延迟敏感场景，同时发给 primary + secondary owner:
-
-  primary   = hashRing.GetOwner(headID)
-  secondary = hashRing.GetNextOwner(headID)    // ring 上下一个物理 node
-
-  +--------+      SearchReq       +---------+
-  |Aggr    |--------------------->| Primary |
-  |        |                      +---------+
-  |        |      SearchReq       +-----------+
-  |        |--------------------->| Secondary |
-  |        |                      +-----------+
-  |        |
-  |        |<-- 先到的 Response -- 使用
-  |        |    后到的 Response -- 丢弃
-  +--------+
-
-  启用条件: 仅当 fan-out <= 3 个 remote node (避免放大流量)
-  效果:     p99 延迟降低 ~30-50% (消除单 node 慢响应)
-  代价:     流量 x2 (仅在低 fan-out 时可接受)
+  对 Client 透明: response 中标记 degraded=true 即可
 ```
 
 ---
@@ -1352,28 +1293,9 @@ Owner (Node B) 在步骤 (5)-(10) 之间 crash：
 
 ## 10. 节点 Crash 故障处理总表
 
-### 10.1 Aggregator 节点 Crash
+> 无 Aggregator 层，Client SDK 直连 Compute Node，故障表只涉及 Compute Node 和 TiKV。
 
-```
-  +----+--------------------+-------------------------------------------+
-  | #  | 故障场景           | 处理方式                                   |
-  +----+--------------------+-------------------------------------------+
-  | A1 | Agg 进程崩溃       | LB 健康检查 (TCP/HTTP, 3s) 检测到            |
-  |    |                    | -> 摘除节点, 请求路由到其他 Agg              |
-  |    |                    | 无状态设计: 新 Agg 立即可服务                |
-  +----+--------------------+-------------------------------------------+
-  | A2 | Agg 所在主机宕机   | LB 健康检查 (TCP, 3s) 检测到                |
-  |    |                    | -> 摘除; 已发出的 Client 请求超时 -> retry  |
-  +----+--------------------+-------------------------------------------+
-  | A3 | Agg 和 Compute     | Agg 超时 (2s) -> Blacklist 该 Compute      |
-  |    | 之间网络分区       | -> 查询路由到其他 Compute Node              |
-  +----+--------------------+-------------------------------------------+
-  | A4 | 所有 Agg 不可用    | Client 返回错误, 应用层降级                 |
-  |    |                    | -> 备选: Client 可直连 Compute Node         |
-  +----+--------------------+-------------------------------------------+
-```
-
-### 10.2 Compute Node Crash
+### 10.1 Compute Node Crash
 
 ```
   +----+--------------------+-------------------------------------------+
@@ -1394,7 +1316,7 @@ Owner (Node B) 在步骤 (5)-(10) 之间 crash：
   |    |                    | (6) PD 更新 ring -> 接管 headIDs            |
   +----+--------------------+-------------------------------------------+
   | N4 | 多个 Compute 同时  | Ring 自动 rebalance (O(K/N) 变动)          |
-  |    | 故障 (批量宕机)    | -> 查询: degradation ladder 降级            |
+  |    | 故障 (批量宕机)    | -> 查询: Client SDK 重试到存活节点           |
   |    |                    | -> 写入: Bypass 直写 TiKV                   |
   |    |                    | -> 前提: TiKV Raft 仍有 majority            |
   +----+--------------------+-------------------------------------------+
@@ -1404,7 +1326,7 @@ Owner (Node B) 在步骤 (5)-(10) 之间 crash：
   +----+--------------------+-------------------------------------------+
 ```
 
-### 10.3 TiKV 节点 Crash
+### 10.2 TiKV 节点 Crash
 
 ```
   +----+--------------------+-------------------------------------------+
@@ -1518,55 +1440,49 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 
 ---
 
-## 12. 五条链路容错全景
+## 12. 四条链路容错全景
 
 ### 12.1 链路分类
 
-系统中的数据流可以归纳为 **5 条链路**，每条链路有独立的容错机制:
+系统中的数据流可以归纳为 **4 条链路**，每条链路有独立的容错机制:
 
 ```
   +-----+------------------------------------------+------------------------+
   | 链路 | 描述                                      | 容错机制               |
   +-----+------------------------------------------+------------------------+
-  | L1   | Client <-> Aggregator                   | LB + Retry + Circuit   |
-  |      | (查询接入)                                | Breaker                |
+  | L1   | Client SDK <-> Compute Node             | Client-side LB +       |
+  |      | (查询 + 写入接入)                         | Retry + CircuitBreaker |
   +-----+------------------------------------------+------------------------+
-  | L2   | Aggregator <-> Compute Node             | Blacklist + Hedged +   |
-  |      | (查询分发 + 结果合并)                     | Degradation Ladder     |
+  | L2   | Compute Node <-> TiKV                   | Region Cache + Leader  |
+  |      | (存储 I/O: posting 读写)                  | Transfer + Raft 3x    |
   +-----+------------------------------------------+------------------------+
-  | L3   | Client -> Compute Node                  | WAL + VID Idempotent + |
-  |      | (写入路径)                                | Bypass + Retry         |
-  +-----+------------------------------------------+------------------------+
-  | L4   | Compute Node <-> TiKV                   | Region Cache + Leader  |
-  |      | (存储 I/O)                                | Transfer + Raft 3x    |
-  +-----+------------------------------------------+------------------------+
-  | L5   | Compute Node <-> Compute Node           | SWIM + Ring Epoch +    |
+  | L3   | Compute Node <-> Compute Node           | SWIM + Ring Epoch +    |
   |      | (节点间: Append/Split/Merge/HeadSync)     | Intent + LockTTL      |
+  +-----+------------------------------------------+------------------------+
+  | L4   | Client SDK -> Compute Node -> Owner     | WAL + VID Idempotent + |
+  |      | (写入路径, 含 Owner 路由)                  | Bypass + Retry         |
   +-----+------------------------------------------+------------------------+
 ```
 
-### 12.2 五条链路故障 x 处理矩阵
+### 12.2 四条链路故障 x 处理矩阵
 
 ```
   +-------+-------------------+--------------------+--------------------+
   |       | 超时/网络断       | 进程崩溃           | 部分失败           |
   +-------+-------------------+--------------------+--------------------+
-  | L1    | Client retry to   | LB 摘除 Agg       | N/A                |
-  |       | other Agg         | 新 Agg 无状态接管  |                    |
+  | L1    | Client SDK retry  | CircuitBreaker ->  | N/A (单查询单节点)  |
+  |       | to other Node     | 切到其他 Node      |                    |
   +-------+-------------------+--------------------+--------------------+
-  | L2    | Blacklist + route  | SWIM detect ->     | 部分节点超时 ->    |
-  |       | to healthy node   | Blacklist          | 返回 partial 结果  |
+  | L2    | Region Cache      | Raft majority ->   | RawBatchGet 部分   |
+  |       | invalidate +      | Leader transfer    | Region 失败 ->     |
+  |       | retry new leader  | (~400ms)           | 跳过 + degraded    |
   +-------+-------------------+--------------------+--------------------+
-  | L3    | Client retry +    | WAL 恢复 +         | Batch 全失败策略   |
-  |       | VID 幂等          | 节点重启重放       | -> Client retry    |
-  +-------+-------------------+--------------------+--------------------+
-  | L4    | Region Cache      | Raft majority ->   | Region split ->    |
-  |       | invalidate +      | Leader transfer    | 部分成功部分失败   |
-  |       | retry new leader  | (~400ms)           | -> 上层重试        |
-  +-------+-------------------+--------------------+--------------------+
-  | L5    | Blacklist +       | Intent 状态机 ->   | Split/Merge 部分   |
+  | L3    | Blacklist +       | Intent 状态机 ->   | Split/Merge 部分   |
   |       | Bypass / Skip     | 恢复或回滚         | 完成 -> 数据正确   |
   |       |                   | Lock TTL 防死锁    | 但需 GC 清理       |
+  +-------+-------------------+--------------------+--------------------+
+  | L4    | Client retry +    | WAL 恢复 +         | Batch 全失败策略   |
+  |       | VID 幂等          | 节点重启重放       | -> Client retry    |
   +-------+-------------------+--------------------+--------------------+
 ```
 
@@ -1576,7 +1492,7 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 
 ### 13.1 PR 总览
 
-共 14 个 PR，分为 4 个阶段:
+共 12 个 PR，分为 4 个阶段:
 
 ```
   阶段 1: 基础容错 (PR1-PR4)
@@ -1586,20 +1502,18 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
     PR4: SWIM + Blacklist + Owner Detection
 
   阶段 2: 路径容错 (PR5-PR8)
-    PR5: 查询 Retry + Blacklist + Degradation
+    PR5: 查询容错 (Client SDK Retry + TiKV 分级容错)
     PR6: 写入 Bypass + Pending Queue
     PR7: HeadSync TiKV Log + Pull Recovery
-    PR8: Client SDK + Three-State Write + Batch
+    PR8: Client SDK + Three-State Write + Client-side LB
 
-  阶段 3: 高可用增强 (PR9-PR12)
+  阶段 3: 高可用增强 (PR9-PR10)
     PR9:  VID Segmented Pre-allocation
     PR10: ConnectionPool LRU + HealthCheck
-    PR11: Aggregator Layer (独立进程)
-    PR12: Hedged Request
 
-  阶段 4: 弹性伸缩 (PR13-PR14)
-    PR13: 自动扩缩容 (PD 触发)
-    PR14: 监控 + 可观测性
+  阶段 4: 弹性伸缩 (PR11-PR12)
+    PR11: 自动扩缩容 (PD 触发)
+    PR12: 监控 + 可观测性
 ```
 
 ### 13.2 依赖关系图
@@ -1609,23 +1523,23 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
                          |
   PR2 (Intent/Lock) -----+--------> PR6
                          |
-  PR3 (Ring Epoch) ------+--------> PR5 (Query Retry)
+  PR3 (Ring Epoch) ------+--------> PR5 (Query 容错)
                          |         PR6
                          |
   PR4 (SWIM/Blacklist) --+--------> PR5
-                                    PR6 --------> PR11 (Aggregator)
+                                    PR6
 
-  PR5 (Query) ---------> PR12 (Hedged Request)
+  PR5 (Query) --(standalone after Phase 1)
 
-  PR7 (HeadSync) ---------------------> PR11 (Aggregator)
+  PR7 (HeadSync) --(standalone after Phase 1)
 
-  PR8 (Client SDK) --(standalone, builds on PR5/PR6 API)
+  PR8 (Client SDK) --(builds on PR5/PR6 API)
 
   PR9  (VID Pre-alloc) --(standalone)
-  PR10 (ConnectionPool) -------> PR12 (Hedged, 需要连接池支持)
+  PR10 (ConnectionPool) --(standalone)
 
-  PR13 (Auto Scale) --(需要 PR4 + PR11)
-  PR14 (Monitoring)  --(standalone, 可随时做)
+  PR11 (Auto Scale) --(需要 PR4)
+  PR12 (Monitoring)  --(standalone, 可随时做)
 ```
 
 ### 13.3 PR 详细说明
@@ -1654,10 +1568,10 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 - **关键接口**: `SuspectNode()`, `ConfirmDead()`, `AddToBlacklist()`, `IsBlacklisted()`
 - **行数预估**: ~1500 行 (最大 PR)
 
-#### PR5: 查询 Retry + Blacklist + Degradation
-- **范围**: `ExtraDynamicSearcher.h`, `PostingRouter.h`
-- **核心**: 查询时跳过 Blacklist; TiKV 读分级容错; 降级阶梯
-- **行数预估**: ~600 行
+#### PR5: 查询容错 (Client SDK Retry + TiKV 分级容错)
+- **范围**: `ExtraDynamicSearcher.h`, Client SDK
+- **核心**: TiKV 读分级容错 (Leader retry → Follower Read → 跳过); Client SDK 自动重试到其他 Node
+- **行数预估**: ~400 行
 
 #### PR6: 写入 Bypass + Pending Queue
 - **范围**: `PostingRouter.h`, `ExtraTiKVController.h`
@@ -1669,9 +1583,9 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 - **核心**: HeadSync 写入 TiKV durable log; 节点启动时 Pull 追赶; cursor 管理
 - **行数预估**: ~600 行
 
-#### PR8: Client SDK + Three-State Write + Batch
+#### PR8: Client SDK + Three-State Write + Client-side LB
 - **范围**: 新目录 `Client/`
-- **核心**: gRPC client; 三态写入语义; CircuitBreaker; 连接池; 批量接口
+- **核心**: gRPC client; 三态写入语义; CircuitBreaker; Client-side LB (从 PD 拉节点列表); 批量接口
 - **行数预估**: ~1200 行
 
 #### PR9: VID Segmented Pre-allocation
@@ -1684,22 +1598,12 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 - **核心**: Per-peer TCP 连接池; LRU 淘汰; 后台健康检查; 2000 节点 fan-out 支撑
 - **行数预估**: ~500 行
 
-#### PR11: Aggregator Layer
-- **范围**: 新目录 `Aggregator/`
-- **核心**: 独立进程; 接收查询, fan-out 到 Compute Node, 合并 Top-K; 无状态
-- **行数预估**: ~1000 行
-
-#### PR12: Hedged Request
-- **范围**: `PostingRouter.h`, `Aggregator/`
-- **核心**: 低 fan-out 时同时发 primary + secondary; 先到者胜
-- **行数预估**: ~400 行
-
-#### PR13: 自动扩缩容
+#### PR11: 自动扩缩容
 - **范围**: PD integration
 - **核心**: CPU/latency 触发扩缩容; grace period; ring 更新
 - **行数预估**: ~600 行
 
-#### PR14: 监控 + 可观测性
+#### PR12: 监控 + 可观测性
 - **范围**: 全局
 - **核心**: metrics (Prometheus); 每条链路 latency/error rate; Dashboard
 - **行数预估**: ~800 行
@@ -1710,11 +1614,11 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
   时间线:
 
   Phase 1: PR1 + PR2 + PR3 + PR4 (可并行)     -> "一切容错的基础"
-  Phase 2: PR5 + PR6 + PR7 + PR8 (依赖 Phase 1) -> "五条链路全覆盖"
-  Phase 3: PR9 + PR10 + PR11 + PR12             -> "生产级性能"
-  Phase 4: PR13 + PR14                           -> "自动化运维"
+  Phase 2: PR5 + PR6 + PR7 + PR8 (依赖 Phase 1) -> "四条链路全覆盖"
+  Phase 3: PR9 + PR10                            -> "高可用增强"
+  Phase 4: PR11 + PR12                           -> "弹性伸缩 + 可观测性"
 
-  总代码量预估: ~9,600 行 (14 PRs)
+  总代码量预估: ~8,200 行 (12 PRs)
 ```
 
 ---
@@ -1784,13 +1688,13 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 
 | 术语 | 含义 |
 |------|------|
-| **Aggregator** | 查询接入层，无状态，接收查询请求并 fan-out 到 Compute Node |
-| **Compute Node** | 计算节点，持有 Head Index 全量副本，执行 Head Search + Posting I/O |
-| **Owner** | 某个 headID 在 hash ring 上的主节点，负责该 headID 的 Append/Split/Merge |
+| **Client SDK** | 内嵌在业务服务中的客户端库，提供 Client-side LB、重试、CircuitBreaker |
+| **Compute Node** | 计算节点，持有 Head Index 全量副本，执行 Head Search + Posting I/O，查询+写入入口 |
+| **Owner** | 某个 headID 在 hash ring 上的主节点，负责该 headID 的 Append/Split/Merge（仅写入路径） |
 | **Posting** | 一个 headID 下挂载的向量列表，存储在 TiKV 中 |
 | **Head Index** | BKT/KDT 图索引，用于 Head Search，每个 Compute Node 都有全量副本 |
 | **SWIM** | Scalable Weakly-consistent Infection-style Membership protocol |
-| **Blacklist** | 被检测到故障的节点列表，TTL 过期自动移除 |
+| **Blacklist** | 被检测到故障的节点列表，TTL 过期自动移除（用于写入路径 Owner 检测） |
 | **Ring Epoch** | Hash Ring 的版本号，每次 topology 变更递增 |
 | **WAL** | Write-Ahead Log，写入前先持久化到 TiKV 的日志 |
 | **Intent** | Split/Merge 操作的事务意图记录，存储在 TiKV 中 |
@@ -1798,8 +1702,6 @@ TiKV 的扩缩容由 PD 自动调度，对 Compute Node 完全透明:
 | **HeadSync** | 头索引同步机制，通知所有节点 head 变更 |
 | **VID** | Vector ID，向量的唯一标识，分段预分配 |
 | **Bypass** | Owner 不可达时绕过 Owner 直接写 TiKV 的备选路径 |
-| **Degradation Ladder** | 查询降级阶梯，逐步降低 recall 保证可用性 |
-| **Hedged Request** | 同时发给 primary + secondary，先到者胜 |
 | **PD** | Placement Driver (TiKV 的调度组件)，复用为 Cluster Controller |
 | **Raft** | TiKV 底层一致性协议，3 副本 majority commit |
 
