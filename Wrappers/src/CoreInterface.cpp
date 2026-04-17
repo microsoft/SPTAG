@@ -18,9 +18,18 @@
 #include <vector>
 #include <sstream>
 #include <cstring>
+#include <unordered_set>
+#include <limits>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <cstdlib>
+#ifdef __linux__
+#include <unistd.h>
+#endif
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 namespace {
 
@@ -93,6 +102,38 @@ uint64_t GetPathSizeBytes(const std::string& path)
     return totalBytes;
 }
 
+uint64_t GetCurrentProcessRSSBytes()
+{
+#ifdef __linux__
+    long rssPages = 0;
+    FILE* statm = fopen("/proc/self/statm", "r");
+    if (statm == nullptr) {
+        return 0;
+    }
+
+    int scanned = fscanf(statm, "%*s %ld", &rssPages);
+    fclose(statm);
+    if (scanned != 1 || rssPages <= 0) {
+        return 0;
+    }
+
+    long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0) {
+        return 0;
+    }
+
+    return static_cast<uint64_t>(rssPages) * static_cast<uint64_t>(pageSize);
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
+        return static_cast<uint64_t>(pmc.WorkingSetSize);
+    }
+    return 0;
+#else
+    return 0;
+#endif
+}
+
 } // namespace
 
 namespace {
@@ -144,6 +185,109 @@ float EstimateQueryVectorSelectivity(
     double unionSelectivity = 1.0 - productNotSelected;
     unionSelectivity = std::clamp(unionSelectivity, 1e-6, 1.0);
     return static_cast<float>(unionSelectivity);
+}
+
+struct PivotEstimatorLevelData {
+    std::vector<uint32_t> uniqueTags;
+    std::vector<int> counts;
+    std::unordered_map<uint32_t, uint32_t> parentByTag;
+};
+
+struct PivotEstimatorCandidate {
+    int pivotLevel = -1;
+    int nodeCount = 0;
+    double latencyCost = 0.0;
+    double recallPenalty = 0.0;
+    double totalCost = std::numeric_limits<double>::infinity();
+    std::vector<std::vector<uint32_t>> nodePivotTags;
+    std::vector<int> nodeSizes;
+};
+
+std::string JsonEscape(const std::string& input)
+{
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (char ch : input)
+    {
+        switch (ch)
+        {
+        case '\\': out += "\\\\"; break;
+        case '"': out += "\\\""; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+bool ParseLevelWeights(const std::string& csv, int levelCount, std::vector<double>& outWeights)
+{
+    outWeights.clear();
+    if (levelCount <= 0) return false;
+
+    if (csv.empty()) {
+        outWeights.assign(levelCount, 1.0 / static_cast<double>(levelCount));
+        return true;
+    }
+
+    std::stringstream ss(csv);
+    std::string token;
+    while (std::getline(ss, token, ','))
+    {
+        if (token.empty()) continue;
+        try {
+            outWeights.push_back(std::stod(token));
+        }
+        catch (...) {
+            return false;
+        }
+    }
+
+    if (static_cast<int>(outWeights.size()) != levelCount) return false;
+
+    double sum = 0.0;
+    for (double value : outWeights)
+    {
+        if (value < 0.0) return false;
+        sum += value;
+    }
+    if (sum <= 0.0) return false;
+
+    for (double& value : outWeights)
+    {
+        value /= sum;
+    }
+    return true;
+}
+
+bool TryGetAncestorTag(uint32_t tag,
+                       int fromLevel,
+                       int targetLevel,
+                       const std::vector<PivotEstimatorLevelData>& levelData,
+                       uint32_t& ancestorTag)
+{
+    ancestorTag = tag;
+    if (fromLevel == targetLevel) return true;
+    if (fromLevel < targetLevel || fromLevel < 0 || targetLevel < 0 ||
+        fromLevel >= static_cast<int>(levelData.size()) ||
+        targetLevel >= static_cast<int>(levelData.size())) {
+        return false;
+    }
+
+    uint32_t currentTag = tag;
+    for (int level = fromLevel; level > targetLevel; --level)
+    {
+        const auto parentIt = levelData[level].parentByTag.find(currentTag);
+        if (parentIt == levelData[level].parentByTag.end()) {
+            return false;
+        }
+        currentTag = parentIt->second;
+    }
+
+    ancestorTag = currentTag;
+    return true;
 }
 
 } // namespace
@@ -259,6 +403,601 @@ bool EnsureHeadNodeMetaLoaded(const std::string& workDir, const std::shared_ptr<
     if (headIndex->HasHeadNodeMeta()) return true;
     if (LoadHeadNodeMetaFile(workDir, headIndex)) return true;
     return LoadPostingSignaturesIntoHeadIndex(workDir, internalIndex);
+}
+
+constexpr int32_t kHeadNodeRoutingIndexVersion = 1;
+
+struct HeadNodeRoutingIndexFileHeader {
+    int32_t version;
+    int32_t pivotLevel;
+    int32_t nodeCount;
+    int32_t numHeadSamples;
+    int32_t numTagMappings;
+};
+
+struct PivotEstimatorComputation {
+    std::vector<PivotEstimatorLevelData> levelData;
+    std::vector<double> levelWeights;
+    std::vector<PivotEstimatorCandidate> candidates;
+};
+
+constexpr double kGreedyLeafMinLocalSelectivity = 0.05;
+
+struct LeafGreedyPlanEntry {
+    uint32_t leafTag = 0;
+    int leafCount = 0;
+    std::vector<uint32_t> ancestorPath;
+};
+
+std::string HeadNodeRoutingIndexPath(const std::string& workDir)
+{
+    return workDir + "/HeadIndex/tag_node_index.bin";
+}
+
+void BuildNodeByPivotTag(const PivotEstimatorCandidate& candidate,
+                         std::unordered_map<uint32_t, int>& nodeByPivotTag)
+{
+    nodeByPivotTag.clear();
+    for (int nodeId = 0; nodeId < candidate.nodeCount; ++nodeId)
+    {
+        if (nodeId < 0 || nodeId >= static_cast<int>(candidate.nodePivotTags.size())) continue;
+        for (uint32_t pivotTag : candidate.nodePivotTags[nodeId])
+        {
+            nodeByPivotTag[pivotTag] = nodeId;
+        }
+    }
+}
+
+void CollectNodesForTag(int tagLevel,
+                        uint32_t tag,
+                        const PivotEstimatorCandidate& candidate,
+                        const std::vector<PivotEstimatorLevelData>& levelData,
+                        const std::unordered_map<uint32_t, int>& nodeByPivotTag,
+                        std::vector<int>& outNodes)
+{
+    std::unordered_set<int> touchedNodes;
+
+    if (tagLevel < candidate.pivotLevel)
+    {
+        for (const auto& nodePivotTags : candidate.nodePivotTags)
+        {
+            for (uint32_t pivotTag : nodePivotTags)
+            {
+                uint32_t ancestor = 0;
+                if (TryGetAncestorTag(pivotTag, candidate.pivotLevel, tagLevel, levelData, ancestor) &&
+                    ancestor == tag)
+                {
+                    auto nodeIt = nodeByPivotTag.find(pivotTag);
+                    if (nodeIt != nodeByPivotTag.end()) {
+                        touchedNodes.insert(nodeIt->second);
+                    }
+                }
+            }
+        }
+    }
+    else if (tagLevel == candidate.pivotLevel)
+    {
+        auto nodeIt = nodeByPivotTag.find(tag);
+        if (nodeIt != nodeByPivotTag.end()) {
+            touchedNodes.insert(nodeIt->second);
+        }
+    }
+    else
+    {
+        uint32_t ancestorPivot = 0;
+        if (TryGetAncestorTag(tag, tagLevel, candidate.pivotLevel, levelData, ancestorPivot)) {
+            auto nodeIt = nodeByPivotTag.find(ancestorPivot);
+            if (nodeIt != nodeByPivotTag.end()) {
+                touchedNodes.insert(nodeIt->second);
+            }
+        }
+    }
+
+    outNodes.assign(touchedNodes.begin(), touchedNodes.end());
+    std::sort(outNodes.begin(), outNodes.end());
+}
+
+bool BuildPivotEstimatorComputation(const uint32_t* tags,
+                                    int numVectors,
+                                    int numTagsPerVec,
+                                    int maxNodes,
+                                    double recallTarget,
+                                    double lambdaRecall,
+                                    double estimatedRecall,
+                                    const std::string& weightsCsv,
+                                    PivotEstimatorComputation& out)
+{
+    out = PivotEstimatorComputation();
+    if (tags == nullptr || numVectors <= 0 || numTagsPerVec <= 0) {
+        return false;
+    }
+
+    (void)maxNodes;
+
+    out.levelData.resize(numTagsPerVec);
+    for (int level = 0; level < numTagsPerVec; ++level)
+    {
+        std::unordered_map<uint32_t, int> levelCounts;
+        levelCounts.reserve(static_cast<size_t>(numVectors) / 4 + 8);
+        std::unordered_map<uint32_t, uint32_t> parentByTag;
+        if (level > 0) {
+            parentByTag.reserve(static_cast<size_t>(numVectors) / 4 + 8);
+        }
+
+        for (int vectorId = 0; vectorId < numVectors; ++vectorId)
+        {
+            const size_t vectorOffset = static_cast<size_t>(vectorId) * static_cast<size_t>(numTagsPerVec);
+            uint32_t tag = tags[vectorOffset + static_cast<size_t>(level)];
+            levelCounts[tag] += 1;
+
+            if (level > 0)
+            {
+                uint32_t parentTag = tags[vectorOffset + static_cast<size_t>(level - 1)];
+                auto parentIt = parentByTag.find(tag);
+                if (parentIt == parentByTag.end()) {
+                    parentByTag.emplace(tag, parentTag);
+                } else if (parentIt->second != parentTag) {
+                    return false;
+                }
+            }
+        }
+
+        std::vector<std::pair<uint32_t, int>> pairs(levelCounts.begin(), levelCounts.end());
+        std::sort(pairs.begin(), pairs.end(), [](const auto& left, const auto& right) { return left.first < right.first; });
+
+        out.levelData[level].uniqueTags.reserve(pairs.size());
+        out.levelData[level].counts.reserve(pairs.size());
+        for (size_t i = 0; i < pairs.size(); ++i)
+        {
+            out.levelData[level].uniqueTags.push_back(pairs[i].first);
+            out.levelData[level].counts.push_back(pairs[i].second);
+        }
+        if (level > 0) {
+            out.levelData[level].parentByTag = std::move(parentByTag);
+        }
+    }
+
+    if (!ParseLevelWeights(weightsCsv, numTagsPerVec, out.levelWeights)) {
+        out.levelWeights.assign(numTagsPerVec, 1.0 / static_cast<double>(numTagsPerVec));
+    }
+
+    const double totalVectors = static_cast<double>(numVectors);
+
+    const int leafLevel = numTagsPerVec - 1;
+    const auto& leafTags = out.levelData[leafLevel].uniqueTags;
+    const auto& leafCounts = out.levelData[leafLevel].counts;
+    if (leafTags.empty() || leafTags.size() != leafCounts.size()) {
+        return false;
+    }
+
+    std::vector<LeafGreedyPlanEntry> leafEntries;
+    leafEntries.reserve(leafTags.size());
+    for (size_t idx = 0; idx < leafTags.size(); ++idx)
+    {
+        if (leafCounts[idx] <= 0) {
+            continue;
+        }
+
+        LeafGreedyPlanEntry entry;
+        entry.leafTag = leafTags[idx];
+        entry.leafCount = leafCounts[idx];
+        entry.ancestorPath.resize(static_cast<size_t>(numTagsPerVec));
+
+        bool validPath = true;
+        for (int level = 0; level <= leafLevel; ++level)
+        {
+            uint32_t ancestorTag = 0;
+            if (!TryGetAncestorTag(entry.leafTag, leafLevel, level, out.levelData, ancestorTag)) {
+                validPath = false;
+                break;
+            }
+            entry.ancestorPath[static_cast<size_t>(level)] = ancestorTag;
+        }
+
+        if (!validPath) {
+            return false;
+        }
+
+        leafEntries.emplace_back(std::move(entry));
+    }
+
+    if (leafEntries.empty()) {
+        return false;
+    }
+
+    std::sort(leafEntries.begin(), leafEntries.end(), [](const LeafGreedyPlanEntry& left, const LeafGreedyPlanEntry& right) {
+        if (std::lexicographical_compare(left.ancestorPath.begin(), left.ancestorPath.end(),
+                                         right.ancestorPath.begin(), right.ancestorPath.end())) {
+            return true;
+        }
+        if (std::lexicographical_compare(right.ancestorPath.begin(), right.ancestorPath.end(),
+                                         left.ancestorPath.begin(), left.ancestorPath.end())) {
+            return false;
+        }
+        return left.leafTag < right.leafTag;
+    });
+
+    PivotEstimatorCandidate candidate;
+    candidate.pivotLevel = leafLevel;
+
+    std::vector<uint32_t> currentNodeLeafTags;
+    int currentNodeSize = 0;
+    int currentMinLeafCount = std::numeric_limits<int>::max();
+    auto flushCurrentNode = [&]() {
+        if (currentNodeLeafTags.empty()) {
+            return;
+        }
+        std::sort(currentNodeLeafTags.begin(), currentNodeLeafTags.end());
+        candidate.nodePivotTags.push_back(currentNodeLeafTags);
+        currentNodeLeafTags.clear();
+        currentNodeSize = 0;
+        currentMinLeafCount = std::numeric_limits<int>::max();
+    };
+
+    for (const auto& leafEntry : leafEntries)
+    {
+        int nextNodeSize = currentNodeSize + leafEntry.leafCount;
+        int nextMinLeafCount = std::min(currentMinLeafCount, leafEntry.leafCount);
+        bool canMerge = currentNodeLeafTags.empty() ||
+            (static_cast<double>(nextMinLeafCount) / static_cast<double>(nextNodeSize) >= kGreedyLeafMinLocalSelectivity);
+
+        if (!canMerge) {
+            flushCurrentNode();
+            nextNodeSize = leafEntry.leafCount;
+            nextMinLeafCount = leafEntry.leafCount;
+        }
+
+        currentNodeLeafTags.push_back(leafEntry.leafTag);
+        currentNodeSize = nextNodeSize;
+        currentMinLeafCount = nextMinLeafCount;
+    }
+    flushCurrentNode();
+
+    candidate.nodeCount = static_cast<int>(candidate.nodePivotTags.size());
+    if (candidate.nodeCount <= 0) {
+        return false;
+    }
+
+    std::unordered_map<uint32_t, int> nodeByPivotTag;
+    BuildNodeByPivotTag(candidate, nodeByPivotTag);
+    candidate.nodeSizes.assign(candidate.nodeCount, 0);
+    for (int vectorId = 0; vectorId < numVectors; ++vectorId)
+    {
+        uint32_t pivotTag = tags[static_cast<size_t>(vectorId) * static_cast<size_t>(numTagsPerVec) + static_cast<size_t>(candidate.pivotLevel)];
+        auto nodeIt = nodeByPivotTag.find(pivotTag);
+        if (nodeIt != nodeByPivotTag.end()) {
+            candidate.nodeSizes[nodeIt->second] += 1;
+        }
+    }
+
+    double latencyCost = 0.0;
+    for (int queryLevel = 0; queryLevel < numTagsPerVec; ++queryLevel)
+    {
+        double levelCost = 0.0;
+        const auto& qTags = out.levelData[queryLevel].uniqueTags;
+        const auto& qCounts = out.levelData[queryLevel].counts;
+
+        for (size_t qIdx = 0; qIdx < qTags.size(); ++qIdx)
+        {
+            std::vector<int> touchedNodes;
+            CollectNodesForTag(queryLevel, qTags[qIdx], candidate, out.levelData, nodeByPivotTag, touchedNodes);
+            if (touchedNodes.empty()) continue;
+
+            double touchedSize = 0.0;
+            for (int nodeId : touchedNodes)
+            {
+                if (nodeId >= 0 && nodeId < static_cast<int>(candidate.nodeSizes.size())) {
+                    touchedSize += static_cast<double>(candidate.nodeSizes[nodeId]);
+                }
+            }
+            if (touchedSize <= 0.0) continue;
+
+            double selectivity = std::max(1e-9, static_cast<double>(qCounts[qIdx]) / totalVectors);
+            double baseLatency = std::log2(touchedSize + 1.0);
+            double tagLatency = baseLatency * (1.0 / selectivity);
+            double probability = static_cast<double>(qCounts[qIdx]) / totalVectors;
+            levelCost += probability * tagLatency;
+        }
+
+        latencyCost += out.levelWeights[queryLevel] * levelCost;
+    }
+
+    candidate.latencyCost = latencyCost;
+    candidate.recallPenalty = lambdaRecall * std::max(0.0, recallTarget - estimatedRecall);
+    candidate.totalCost = candidate.latencyCost + candidate.recallPenalty;
+    out.candidates.push_back(std::move(candidate));
+
+    return !out.candidates.empty();
+}
+
+const PivotEstimatorCandidate* FindBestPivotEstimatorCandidate(const std::vector<PivotEstimatorCandidate>& candidates)
+{
+    if (candidates.empty()) return nullptr;
+
+    const PivotEstimatorCandidate* best = &candidates.front();
+    for (const auto& candidate : candidates)
+    {
+        if (candidate.totalCost < best->totalCost) {
+            best = &candidate;
+        }
+    }
+    return best;
+}
+
+void BuildTagToNodeIndexForCandidate(const PivotEstimatorCandidate& candidate,
+                                     const std::vector<PivotEstimatorLevelData>& levelData,
+                                     std::unordered_map<uint32_t, std::vector<int>>& tagToNodes)
+{
+    tagToNodes.clear();
+
+    std::unordered_map<uint32_t, int> nodeByPivotTag;
+    BuildNodeByPivotTag(candidate, nodeByPivotTag);
+
+    for (int level = 0; level < static_cast<int>(levelData.size()); ++level)
+    {
+        for (uint32_t tag : levelData[level].uniqueTags)
+        {
+            std::vector<int> nodes;
+            CollectNodesForTag(level, tag, candidate, levelData, nodeByPivotTag, nodes);
+            if (!nodes.empty()) {
+                tagToNodes[tag] = std::move(nodes);
+            }
+        }
+    }
+}
+
+void BuildNodeVectorAssignmentsForTagToNodes(const uint32_t* tags,
+                                             int numVectors,
+                                             int numTagsPerVec,
+                                             const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+                                             int nodeCount,
+                                             std::vector<std::vector<int>>& nodeVectors)
+{
+    nodeVectors.clear();
+    if (tags == nullptr || numVectors <= 0 || numTagsPerVec <= 0 || nodeCount <= 0) {
+        return;
+    }
+
+    nodeVectors.assign(nodeCount, std::vector<int>());
+    for (int vectorId = 0; vectorId < numVectors; ++vectorId)
+    {
+        std::unordered_set<int> touchedNodes;
+        const size_t vectorOffset = static_cast<size_t>(vectorId) * static_cast<size_t>(numTagsPerVec);
+        for (int tagIdx = 0; tagIdx < numTagsPerVec; ++tagIdx)
+        {
+            auto tagIt = tagToNodes.find(tags[vectorOffset + static_cast<size_t>(tagIdx)]);
+            if (tagIt == tagToNodes.end()) {
+                continue;
+            }
+
+            touchedNodes.insert(tagIt->second.begin(), tagIt->second.end());
+        }
+
+        if (touchedNodes.empty()) {
+            continue;
+        }
+
+        for (int nodeId : touchedNodes)
+        {
+            if (nodeId >= 0 && nodeId < nodeCount) {
+                nodeVectors[static_cast<size_t>(nodeId)].push_back(vectorId);
+            }
+        }
+    }
+}
+
+void BuildPrimaryNodeVectorAssignmentsForCandidate(const PivotEstimatorCandidate& candidate,
+                                                   const uint32_t* tags,
+                                                   int numVectors,
+                                                   int numTagsPerVec,
+                                                   std::vector<std::vector<int>>& nodeVectors)
+{
+    nodeVectors.clear();
+    if (tags == nullptr || numVectors <= 0 || numTagsPerVec <= 0 || candidate.nodeCount <= 0) {
+        return;
+    }
+
+    std::unordered_map<uint32_t, int> nodeByPivotTag;
+    BuildNodeByPivotTag(candidate, nodeByPivotTag);
+
+    nodeVectors.assign(candidate.nodeCount, std::vector<int>());
+    for (int vectorId = 0; vectorId < numVectors; ++vectorId)
+    {
+        uint32_t pivotTag = tags[static_cast<size_t>(vectorId) * static_cast<size_t>(numTagsPerVec) + static_cast<size_t>(candidate.pivotLevel)];
+        auto nodeIt = nodeByPivotTag.find(pivotTag);
+        if (nodeIt == nodeByPivotTag.end()) {
+            continue;
+        }
+
+        int nodeId = nodeIt->second;
+        if (nodeId >= 0 && nodeId < candidate.nodeCount) {
+            nodeVectors[static_cast<size_t>(nodeId)].push_back(vectorId);
+        }
+    }
+}
+
+void BuildHeadNodeToNodeIndexForCandidate(const PivotEstimatorCandidate& candidate,
+                                          const uint32_t* tags,
+                                          int numVectors,
+                                          int numTagsPerVec,
+                                          const std::shared_ptr<SPTAG::VectorIndex>& memoryIndex,
+                                          SPTAG::SPANN::Index<float>* spannInternalIdx,
+                                          std::vector<int>& headNodeToNode)
+{
+    headNodeToNode.clear();
+    if (tags == nullptr || numVectors <= 0 || numTagsPerVec <= 0 || memoryIndex == nullptr || spannInternalIdx == nullptr) {
+        return;
+    }
+
+    std::unordered_map<uint32_t, int> nodeByPivotTag;
+    BuildNodeByPivotTag(candidate, nodeByPivotTag);
+
+    const SizeType numHeadSamples = memoryIndex->GetNumSamples();
+    headNodeToNode.assign(numHeadSamples, -1);
+    for (SizeType hid = 0; hid < numHeadSamples; ++hid)
+    {
+        SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
+        if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(numVectors)) {
+            continue;
+        }
+
+        uint32_t pivotTag = tags[static_cast<size_t>(globalVID) * static_cast<size_t>(numTagsPerVec) + static_cast<size_t>(candidate.pivotLevel)];
+        auto nodeIt = nodeByPivotTag.find(pivotTag);
+        if (nodeIt != nodeByPivotTag.end()) {
+            headNodeToNode[hid] = nodeIt->second;
+        }
+    }
+}
+
+bool TryCollectRoutingNodesForQuery(const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+                                    const uint32_t* queryTags,
+                                    int numQueryTags,
+                                    std::vector<int>& outNodes)
+{
+    outNodes.clear();
+    if (queryTags == nullptr || numQueryTags <= 0) {
+        return false;
+    }
+
+    std::unordered_set<int> unionNodes;
+    for (int idx = 0; idx < numQueryTags; ++idx)
+    {
+        auto tagIt = tagToNodes.find(queryTags[idx]);
+        if (tagIt == tagToNodes.end() || tagIt->second.empty()) {
+            continue;
+        }
+
+        unionNodes.insert(tagIt->second.begin(), tagIt->second.end());
+    }
+
+    outNodes.assign(unionNodes.begin(), unionNodes.end());
+    std::sort(outNodes.begin(), outNodes.end());
+    return !outNodes.empty();
+}
+
+bool SaveHeadNodeRoutingIndexFile(const std::string& workDir,
+                                  int pivotLevel,
+                                  const std::vector<std::vector<uint32_t>>& nodePivotTags,
+                                  const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+                                  const std::vector<int>& headNodeToNode)
+{
+    std::string path = HeadNodeRoutingIndexPath(workDir);
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+
+    HeadNodeRoutingIndexFileHeader header{};
+    header.version = kHeadNodeRoutingIndexVersion;
+    header.pivotLevel = pivotLevel;
+    header.nodeCount = static_cast<int32_t>(nodePivotTags.size());
+    header.numHeadSamples = static_cast<int32_t>(headNodeToNode.size());
+    header.numTagMappings = static_cast<int32_t>(tagToNodes.size());
+
+    bool ok = fwrite(&header, sizeof(header), 1, f) == 1;
+    for (const auto& tagsForNode : nodePivotTags)
+    {
+        int32_t tagCount = static_cast<int32_t>(tagsForNode.size());
+        ok = ok && fwrite(&tagCount, sizeof(tagCount), 1, f) == 1;
+        if (tagCount > 0) {
+            ok = ok && fwrite(tagsForNode.data(), sizeof(uint32_t), tagCount, f) == static_cast<size_t>(tagCount);
+        }
+    }
+
+    std::vector<std::pair<uint32_t, std::vector<int>>> mappings(tagToNodes.begin(), tagToNodes.end());
+    std::sort(mappings.begin(), mappings.end(), [](const auto& left, const auto& right) { return left.first < right.first; });
+    for (auto& [tag, nodes] : mappings)
+    {
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+
+        int32_t nodeCount = static_cast<int32_t>(nodes.size());
+        ok = ok && fwrite(&tag, sizeof(tag), 1, f) == 1;
+        ok = ok && fwrite(&nodeCount, sizeof(nodeCount), 1, f) == 1;
+        if (nodeCount > 0) {
+            ok = ok && fwrite(nodes.data(), sizeof(int32_t), nodeCount, f) == static_cast<size_t>(nodeCount);
+        }
+    }
+
+    if (!headNodeToNode.empty()) {
+        ok = ok && fwrite(headNodeToNode.data(), sizeof(int32_t), headNodeToNode.size(), f) == headNodeToNode.size();
+    }
+    fclose(f);
+    return ok;
+}
+
+bool LoadHeadNodeRoutingIndexFile(const std::string& workDir,
+                                  int& pivotLevel,
+                                  int& nodeCount,
+                                  std::vector<std::vector<uint32_t>>& nodePivotTags,
+                                  std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+                                  std::vector<int>& headNodeToNode)
+{
+    pivotLevel = -1;
+    nodeCount = 0;
+    nodePivotTags.clear();
+    tagToNodes.clear();
+    headNodeToNode.clear();
+
+    std::string path = HeadNodeRoutingIndexPath(workDir);
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+
+    HeadNodeRoutingIndexFileHeader header{};
+    bool ok = fread(&header, sizeof(header), 1, f) == 1;
+    if (!ok || header.version != kHeadNodeRoutingIndexVersion || header.nodeCount < 0 ||
+        header.numHeadSamples < 0 || header.numTagMappings < 0) {
+        fclose(f);
+        return false;
+    }
+
+    pivotLevel = header.pivotLevel;
+    nodeCount = header.nodeCount;
+    nodePivotTags.assign(header.nodeCount, std::vector<uint32_t>());
+    for (int nodeId = 0; nodeId < header.nodeCount; ++nodeId)
+    {
+        int32_t tagCount = 0;
+        ok = fread(&tagCount, sizeof(tagCount), 1, f) == 1;
+        if (!ok || tagCount < 0) {
+            fclose(f);
+            return false;
+        }
+        nodePivotTags[nodeId].resize(tagCount);
+        if (tagCount > 0) {
+            ok = fread(nodePivotTags[nodeId].data(), sizeof(uint32_t), tagCount, f) == static_cast<size_t>(tagCount);
+            if (!ok) {
+                fclose(f);
+                return false;
+            }
+        }
+    }
+
+    for (int mappingId = 0; mappingId < header.numTagMappings; ++mappingId)
+    {
+        uint32_t tag = 0;
+        int32_t mappingNodeCount = 0;
+        ok = fread(&tag, sizeof(tag), 1, f) == 1;
+        ok = ok && fread(&mappingNodeCount, sizeof(mappingNodeCount), 1, f) == 1;
+        if (!ok || mappingNodeCount < 0) {
+            fclose(f);
+            return false;
+        }
+
+        std::vector<int> nodes(mappingNodeCount);
+        if (mappingNodeCount > 0) {
+            ok = fread(nodes.data(), sizeof(int32_t), mappingNodeCount, f) == static_cast<size_t>(mappingNodeCount);
+            if (!ok) {
+                fclose(f);
+                return false;
+            }
+        }
+        tagToNodes.emplace(tag, std::move(nodes));
+    }
+
+    headNodeToNode.resize(header.numHeadSamples);
+    if (header.numHeadSamples > 0) {
+        ok = fread(headNodeToNode.data(), sizeof(int32_t), header.numHeadSamples, f) == static_cast<size_t>(header.numHeadSamples);
+    }
+    fclose(f);
+    return ok;
 }
 
 AnnIndex::AnnIndex(DimensionType p_dimension)
@@ -579,6 +1318,54 @@ void AnnIndex::SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVe
     }
 }
 
+void AnnIndex::SetNodeVectorAssignments(const std::vector<std::vector<int>>& nodeVectorAssignments)
+{
+    if (!m_index) return;
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    if (!spannIdx) return;
+
+    std::vector<std::vector<SPTAG::SizeType>> convertedAssignments;
+    convertedAssignments.reserve(nodeVectorAssignments.size());
+    for (const auto& nodeVectors : nodeVectorAssignments)
+    {
+        std::vector<SPTAG::SizeType> convertedNode;
+        convertedNode.reserve(nodeVectors.size());
+        for (int vectorId : nodeVectors)
+        {
+            if (vectorId >= 0) {
+                convertedNode.push_back(static_cast<SPTAG::SizeType>(vectorId));
+            }
+        }
+        convertedAssignments.emplace_back(std::move(convertedNode));
+    }
+
+    spannIdx->SetNodeVectorAssignments(convertedAssignments);
+}
+
+void AnnIndex::SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int>>& primaryNodeVectorAssignments)
+{
+    if (!m_index) return;
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    if (!spannIdx) return;
+
+    std::vector<std::vector<SPTAG::SizeType>> convertedAssignments;
+    convertedAssignments.reserve(primaryNodeVectorAssignments.size());
+    for (const auto& nodeVectors : primaryNodeVectorAssignments)
+    {
+        std::vector<SPTAG::SizeType> convertedNode;
+        convertedNode.reserve(nodeVectors.size());
+        for (int vectorId : nodeVectors)
+        {
+            if (vectorId >= 0) {
+                convertedNode.push_back(static_cast<SPTAG::SizeType>(vectorId));
+            }
+        }
+        convertedAssignments.emplace_back(std::move(convertedNode));
+    }
+
+    spannIdx->SetPrimaryNodeVectorAssignments(convertedAssignments);
+}
+
 void AnnIndex::UpdateIndex()
 {
     m_index->UpdateIndex();
@@ -750,6 +1537,7 @@ TenantIndexManager::TenantIndexManager(DimensionType p_dimension, const char* p_
     : m_dimension(p_dimension), m_algoType(SPTAG::IndexAlgoType::Undefined), 
     m_valueType(SPTAG::VectorValueType::Undefined),
     m_headIndexCacheLimitBytes(1024*1024*1024),  // Default 1GB cache limit
+    m_headIndexCacheSafetyFactor(1.3),
     m_headCache(nullptr)
 {
     SPTAG::Helper::Convert::ConvertStringTo<SPTAG::IndexAlgoType>(p_algoType, m_algoType);
@@ -766,10 +1554,22 @@ TenantIndexManager::~TenantIndexManager()
 {
     if (m_headCache) m_headCache->Clear();
     m_tenantIndices.clear();
+    m_lruList.clear();
+    m_lruMap.clear();
+    m_tenantHeadIndexAccountedBytes.clear();
+    m_loadedHeadIndexBytes = 0;
     m_tenantVectorCounts.clear();
     m_tenantSpannWorkDirs.clear();
     m_tenantPostingOffsets.clear();
     m_tenantHeadCounts.clear();
+    m_tenantTagRoutingStats.clear();
+    m_tenantPivotLevels.clear();
+    m_tenantPivotNodeCounts.clear();
+    m_tenantNodePivotTags.clear();
+    m_tenantPlannedNodeVectors.clear();
+    m_tenantPlannedPrimaryNodeVectors.clear();
+    m_tenantTagToNodes.clear();
+    m_tenantHeadNodeToNode.clear();
 }
 
 bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata, SizeType p_vectorNum,
@@ -781,11 +1581,18 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
     }
 
     m_tenantIndices.clear();
+    m_lruList.clear();
+    m_lruMap.clear();
+    m_tenantHeadIndexAccountedBytes.clear();
+    m_loadedHeadIndexBytes = 0;
     m_tenantVectorCounts.clear();
     m_tenantSpannWorkDirs.clear();
-    
-    
-    
+    m_tenantTagRoutingStats.clear();
+    m_tenantPivotLevels.clear();
+    m_tenantPivotNodeCounts.clear();
+    m_tenantNodePivotTags.clear();
+    m_tenantTagToNodes.clear();
+    m_tenantHeadNodeToNode.clear();
 
     std::map<int, std::vector<std::pair<const uint8_t*, size_t>>> tenantVectorRanges;
     std::map<int, std::vector<std::string>> tenantMetadataLines;
@@ -856,6 +1663,23 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         auto tenantIndex = std::make_shared<AnnIndex>(algoTypeStr.c_str(), valueTypeStr.c_str(), m_dimension);
         bool buildOk = false;
         SizeType tenantVecCount = static_cast<SizeType>(vectorRanges.size());
+        std::vector<uint32_t> tenantLocalTags;
+
+        if (m_buildNumTagsPerVec > 0 && m_buildTags.Data() != nullptr) {
+            const uint32_t* globalTags = reinterpret_cast<const uint32_t*>(m_buildTags.Data());
+            auto gidIt = m_tenantGlobalIndices.find(tenantId);
+            if (gidIt != m_tenantGlobalIndices.end()) {
+                const auto& gids = gidIt->second;
+                tenantLocalTags.resize(static_cast<size_t>(tenantVecCount) * static_cast<size_t>(m_buildNumTagsPerVec));
+                for (int i = 0; i < tenantVecCount && i < static_cast<int>(gids.size()); ++i) {
+                    int gid = gids[i];
+                    for (int t = 0; t < m_buildNumTagsPerVec; ++t) {
+                        tenantLocalTags[static_cast<size_t>(i) * static_cast<size_t>(m_buildNumTagsPerVec) + static_cast<size_t>(t)] =
+                            globalTags[static_cast<size_t>(gid) * static_cast<size_t>(m_buildNumTagsPerVec) + static_cast<size_t>(t)];
+                    }
+                }
+            }
+        }
 
         // Choose index type based on tenant size (hybrid strategy)
         TenantIndexType indexType = ChooseIndexType(tenantVecCount);
@@ -863,7 +1687,65 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
 
         if (indexType == TenantIndexType::SPANN)
         {
+            if (!tenantLocalTags.empty()) {
+                PivotEstimatorComputation pivotComputation;
+                const PivotEstimatorCandidate* pivotCandidate = nullptr;
+                if (BuildPivotEstimatorComputation(tenantLocalTags.data(),
+                                                   static_cast<int>(tenantVecCount),
+                                                   m_buildNumTagsPerVec,
+                                                   0,
+                                                   0.99,
+                                                   10.0,
+                                                   1.0,
+                                                   std::string(),
+                                                   pivotComputation)) {
+                    pivotCandidate = FindBestPivotEstimatorCandidate(pivotComputation.candidates);
+                }
+
+                if (pivotCandidate != nullptr) {
+                    m_tenantPivotLevels[tenantId] = pivotCandidate->pivotLevel;
+                    m_tenantPivotNodeCounts[tenantId] = pivotCandidate->nodeCount;
+                    m_tenantNodePivotTags[tenantId] = pivotCandidate->nodePivotTags;
+                    BuildTagToNodeIndexForCandidate(*pivotCandidate,
+                                                    pivotComputation.levelData,
+                                                    m_tenantTagToNodes[tenantId]);
+                    BuildPrimaryNodeVectorAssignmentsForCandidate(*pivotCandidate,
+                                                                  tenantLocalTags.data(),
+                                                                  static_cast<int>(tenantVecCount),
+                                                                  m_buildNumTagsPerVec,
+                                                                  m_tenantPlannedPrimaryNodeVectors[tenantId]);
+
+                    // Keep tree-structured tag-to-node merges for query routing, but
+                    // partition postings by the pivot-layer owner only so vectors are
+                    // evenly distributed across nodes instead of being replicated by
+                    // higher-level ancestor tags.
+                    m_tenantPlannedNodeVectors[tenantId] = m_tenantPlannedPrimaryNodeVectors[tenantId];
+
+                    fprintf(stderr,
+                            "[INFO] Tenant %d: planned %d routing nodes before SPANN build\n",
+                            tenantId,
+                            pivotCandidate->nodeCount);
+                }
+            }
+
+            auto planIt = m_tenantPlannedNodeVectors.find(tenantId);
+            auto primaryPlanIt = m_tenantPlannedPrimaryNodeVectors.find(tenantId);
+            bool hasNodeAwarePlan = (planIt != m_tenantPlannedNodeVectors.end() && !planIt->second.empty());
+
+            int64_t postingAssignmentCount = static_cast<int64_t>(tenantVecCount);
+            if (hasNodeAwarePlan) {
+                int64_t plannedAssignmentTotal = 0;
+                for (const auto& nodeAssignments : planIt->second) {
+                    plannedAssignmentTotal += static_cast<int64_t>(nodeAssignments.size());
+                }
+
+                if (plannedAssignmentTotal > 0) {
+                    postingAssignmentCount = plannedAssignmentTotal;
+                }
+            }
+
             std::string spannWorkDir = "/tmp/sptag_spann_tenant_" + std::to_string(tenantId);
+            RemovePathRecursive(spannWorkDir);
             EnsureDir(spannWorkDir);
             tenantIndex->SetBuildParam("IndexDirectory", spannWorkDir.c_str(), "Base");
             tenantIndex->SetBuildParam("DistCalcMethod", "Cosine", "Base");
@@ -875,18 +1757,33 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
 
             // Scale DataCapacity and SSD file size to tenant size
             // Block pool uses 4KB pages; each vector with replication needs multiple blocks
-            // Use generous multiplier to avoid "cannot expand beyond cap" errors
-            int dataCapacity = std::max(tenantVecCount * 8, (SizeType)4096);
+            // Use the routed posting assignment count instead of raw tenant size,
+            // because node-aware builds can replicate vectors across routing nodes.
+            int64_t dataCapacity64 = std::max<int64_t>(postingAssignmentCount * 8LL, 4096LL);
+            int dataCapacity = static_cast<int>(std::min<int64_t>(dataCapacity64, std::numeric_limits<int>::max()));
             tenantIndex->SetBuildParam("DataCapacity", std::to_string(dataCapacity).c_str(), "Base");
             tenantIndex->SetBuildParam("DataBlockSize", std::to_string(std::min(dataCapacity, 1024 * 1024)).c_str(), "Base");
 
             // Scale SSD file size: each posting can hold ~PostingVectorLimit(118) vectors
             // Each vector in posting: dim*sizeof(float) + metadata overhead ~= dim*4+64 bytes
-            // With ReplicaCount=8, total data ~ N * replica * vec_bytes / page_size blocks
-            int64_t estimatedBytes = (int64_t)tenantVecCount * (int64_t)(m_dimension * 4 + 64) * 10;
-            int startFileSizeGB = std::max(1, (int)(estimatedBytes / (1024LL * 1024LL * 1024LL)) + 1);
+            // With ReplicaCount=8, total data ~ assignments * replica * vec_bytes / page_size blocks.
+            int64_t estimatedBytes = postingAssignmentCount * static_cast<int64_t>(m_dimension * 4 + 64) * 10LL;
+                int startFileSizeGB = std::max(1, (int)(estimatedBytes / (1024LL * 1024LL * 1024LL)) + 1);
+                if (hasNodeAwarePlan) {
+                startFileSizeGB = std::max(startFileSizeGB, 4);
+                }
+                int maxFileSizeGB = std::max(startFileSizeGB * 3, hasNodeAwarePlan ? 32 : 10);
             tenantIndex->SetBuildParam("StartFileSizeGB", std::to_string(startFileSizeGB).c_str(), "BuildSSDIndex");
-            tenantIndex->SetBuildParam("MaxFileSizeGB", std::to_string(std::max(startFileSizeGB * 3, 10)).c_str(), "BuildSSDIndex");
+                tenantIndex->SetBuildParam("MaxFileSizeGB", std::to_string(maxFileSizeGB).c_str(), "BuildSSDIndex");
+
+            fprintf(stderr,
+                    "[INFO] Tenant %d: posting assignments=%lld raw_vectors=%d StartFileSizeGB=%d MaxFileSizeGB=%d DataCapacity=%d\n",
+                    tenantId,
+                    static_cast<long long>(postingAssignmentCount),
+                    tenantVecCount,
+                    startFileSizeGB,
+                    maxFileSizeGB,
+                    dataCapacity);
 
             // Scale graph build parameters by tenant size to avoid fixed overhead on small tenants
             // TPTNumber: controls how many random partition trees for initial KNN graph
@@ -910,29 +1807,15 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             tenantIndex->SetBuildParam("RefineIterations", std::to_string(refineIter).c_str(), "BuildHead");
 
             // Set per-vector tags to embed in posting metadata (if available from BuildFromDataWithTags)
-            if (m_buildNumTagsPerVec > 0 && m_buildTags.Data() != nullptr) {
+            if (!tenantLocalTags.empty()) {
                 tenantIndex->SetBuildParam("NumTagsPerVec", std::to_string(m_buildNumTagsPerVec).c_str(), "BuildSSDIndex");
-                // Extract this tenant's tags (ordered by local vector index)
-                const uint32_t* globalTags = reinterpret_cast<const uint32_t*>(m_buildTags.Data());
-                std::vector<uint32_t> localTags(tenantVecCount * m_buildNumTagsPerVec);
-                // tenantVectorRanges[tenantId] has the same order as vectors were concatenated
-                // We need global indices; recompute from the metadata parsing
-                // Since vectors are concatenated in the same order as tenantVectorRanges,
-                // local index i corresponds to the i-th vector added for this tenant
-                // But we don't have globalIdx per tenant here. Let me use a side map.
-                // Actually, we built tenantVectorRanges from sequential global indices,
-                // so m_tenantGlobalIndices can be built alongside.
-                auto gidIt = m_tenantGlobalIndices.find(tenantId);
-                if (gidIt != m_tenantGlobalIndices.end()) {
-                    auto& gids = gidIt->second;
-                    for (int i = 0; i < tenantVecCount && i < (int)gids.size(); i++) {
-                        int gid = gids[i];
-                        for (int t = 0; t < m_buildNumTagsPerVec; t++) {
-                            localTags[i * m_buildNumTagsPerVec + t] = globalTags[gid * m_buildNumTagsPerVec + t];
-                        }
-                    }
-                }
-                tenantIndex->SetVectorTags(localTags.data(), tenantVecCount, m_buildNumTagsPerVec);
+                tenantIndex->SetVectorTags(tenantLocalTags.data(), tenantVecCount, m_buildNumTagsPerVec);
+            }
+            if (hasNodeAwarePlan) {
+                tenantIndex->SetNodeVectorAssignments(planIt->second);
+            }
+            if (primaryPlanIt != m_tenantPlannedPrimaryNodeVectors.end() && !primaryPlanIt->second.empty()) {
+                tenantIndex->SetPrimaryNodeVectorAssignments(primaryPlanIt->second);
             }
 
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
@@ -1263,6 +2146,21 @@ uint64_t TenantIndexManager::GetTenantHeadIndexSize(int p_tenantId) const
     return GetPathSizeBytes(workIt->second + "/HeadIndex");
 }
 
+uint64_t TenantIndexManager::EstimateTenantHeadIndexBytes(int p_tenantId) const
+{
+    uint64_t onDiskBytes = GetTenantHeadIndexSize(p_tenantId);
+    if (onDiskBytes > 0) {
+        return static_cast<uint64_t>(std::ceil(static_cast<double>(onDiskBytes) * m_headIndexCacheSafetyFactor));
+    }
+
+    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
+    if (vcIt != m_tenantVectorCounts.end()) {
+        return static_cast<uint64_t>(vcIt->second) * 128ULL;
+    }
+
+    return 1024ULL * 1024ULL;
+}
+
 ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
 {
     auto routeIt = m_tenantTagRoutingStats.find(p_tenantId);
@@ -1287,6 +2185,102 @@ ByteArray TenantIndexManager::GetTagRoutingStatsBlob(int p_tenantId) const
     ByteArray payload = ByteArray::Alloc(entries.size() * sizeof(TagRoutingStatRecord));
     std::memcpy(payload.Data(), entries.data(), payload.Length());
     return payload;
+}
+
+ByteArray TenantIndexManager::EstimatePivotBuildPlan(ByteArray p_tags,
+                                                     int p_numVectors,
+                                                     int p_numTagsPerVec,
+                                                     int p_maxNodes,
+                                                     float p_recallTarget,
+                                                     float p_lambdaRecall,
+                                                     float p_estimatedRecall,
+                                                     ByteArray p_levelWeightsCsv) const
+{
+    if (p_numVectors <= 0 || p_numTagsPerVec <= 0 || p_tags.Data() == nullptr) {
+        return ByteArray();
+    }
+
+    size_t expectedBytes = static_cast<size_t>(p_numVectors) * static_cast<size_t>(p_numTagsPerVec) * sizeof(uint32_t);
+    if (p_tags.Length() < expectedBytes) {
+        return ByteArray();
+    }
+
+    std::string weightsCsv;
+    if (p_levelWeightsCsv.Data() != nullptr && p_levelWeightsCsv.Length() > 0) {
+        weightsCsv.assign(reinterpret_cast<const char*>(p_levelWeightsCsv.Data()), p_levelWeightsCsv.Length());
+    }
+
+    PivotEstimatorComputation computation;
+    if (!BuildPivotEstimatorComputation(reinterpret_cast<const uint32_t*>(p_tags.Data()),
+                                        p_numVectors,
+                                        p_numTagsPerVec,
+                                        p_maxNodes,
+                                        std::clamp(static_cast<double>(p_recallTarget), 0.01, 1.0),
+                                        std::max(0.0, static_cast<double>(p_lambdaRecall)),
+                                        std::clamp(static_cast<double>(p_estimatedRecall), 0.0, 1.0),
+                                        weightsCsv,
+                                        computation)) {
+        return ByteArray();
+    }
+
+    const PivotEstimatorCandidate* best = FindBestPivotEstimatorCandidate(computation.candidates);
+    if (best == nullptr) return ByteArray();
+
+    std::ostringstream json;
+    json << "{";
+    json << "\"planner_strategy\":\"greedy_leaf_packing\",";
+    json << "\"min_local_selectivity\":" << kGreedyLeafMinLocalSelectivity << ",";
+    json << "\"num_vectors\":" << p_numVectors << ",";
+    json << "\"num_levels\":" << p_numTagsPerVec << ",";
+    json << "\"requested_max_nodes\":" << p_maxNodes << ",";
+    json << "\"recall_target\":" << std::clamp(static_cast<double>(p_recallTarget), 0.01, 1.0) << ",";
+    json << "\"lambda_recall\":" << std::max(0.0, static_cast<double>(p_lambdaRecall)) << ",";
+    json << "\"estimated_recall\":" << std::clamp(static_cast<double>(p_estimatedRecall), 0.0, 1.0) << ",";
+    json << "\"best_plan\":{";
+    json << "\"pivot_level\":" << best->pivotLevel << ",";
+    json << "\"node_count\":" << best->nodeCount << ",";
+    json << "\"latency_cost\":" << best->latencyCost << ",";
+    json << "\"recall_penalty\":" << best->recallPenalty << ",";
+    json << "\"total_cost\":" << best->totalCost << "},";
+    json << "\"candidates\":[";
+    for (size_t idx = 0; idx < computation.candidates.size(); ++idx)
+    {
+        const auto& candidate = computation.candidates[idx];
+        if (idx > 0) json << ",";
+        json << "{";
+        json << "\"pivot_level\":" << candidate.pivotLevel << ",";
+        json << "\"node_count\":" << candidate.nodeCount << ",";
+        json << "\"latency_cost\":" << candidate.latencyCost << ",";
+        json << "\"recall_penalty\":" << candidate.recallPenalty << ",";
+        json << "\"total_cost\":" << candidate.totalCost << ",";
+        json << "\"node_sizes\":[";
+        for (size_t i = 0; i < candidate.nodeSizes.size(); ++i) {
+            if (i > 0) json << ",";
+            json << candidate.nodeSizes[i];
+        }
+        json << "],";
+        json << "\"node_pivot_tags\":[";
+        for (size_t node = 0; node < candidate.nodePivotTags.size(); ++node)
+        {
+            if (node > 0) json << ",";
+            json << "[";
+            for (size_t tagIdx = 0; tagIdx < candidate.nodePivotTags[node].size(); ++tagIdx)
+            {
+                if (tagIdx > 0) json << ",";
+                json << candidate.nodePivotTags[node][tagIdx];
+            }
+            json << "]";
+        }
+        json << "]";
+        json << "}";
+    }
+    json << "]";
+    json << "}";
+
+    const std::string payload = json.str();
+    ByteArray output = ByteArray::Alloc(payload.size());
+    std::memcpy(output.Data(), payload.data(), payload.size());
+    return output;
 }
 
 bool TenantIndexManager::SaveAll(const char* p_baseDir)
@@ -1354,12 +2348,19 @@ bool TenantIndexManager::SaveAll(const char* p_baseDir)
 bool TenantIndexManager::LoadAll(const char* p_baseDir)
 {
     m_tenantIndices.clear();
+    m_lruList.clear();
+    m_lruMap.clear();
+    m_tenantHeadIndexAccountedBytes.clear();
+    m_loadedHeadIndexBytes = 0;
     m_tenantVectorCounts.clear();
     m_tenantIndexPaths.clear();
     m_tenantSpannWorkDirs.clear();
-    
-    
-    
+    m_tenantTagRoutingStats.clear();
+    m_tenantPivotLevels.clear();
+    m_tenantPivotNodeCounts.clear();
+    m_tenantNodePivotTags.clear();
+    m_tenantTagToNodes.clear();
+    m_tenantHeadNodeToNode.clear();
 
     // Clear tenant ID mapping
     {
@@ -1619,13 +2620,8 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         return true;
     }
 
-    // Estimate HeadIndex size
-    uint64_t estimatedBytes = 0;
-    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
-    if (vcIt != m_tenantVectorCounts.end())
-        estimatedBytes = static_cast<uint64_t>(vcIt->second) * 128;
-    else
-        estimatedBytes = 1024 * 1024;
+    // Estimate loaded HeadIndex bytes from on-disk bytes and a safety factor.
+    uint64_t estimatedBytes = EstimateTenantHeadIndexBytes(p_tenantId);
 
     // Soft-evict LRU hot tenants until we have room
     if (m_headIndexCacheLimitBytes > 0)
@@ -1655,6 +2651,48 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         }
     }
 
+    // Best-effort RSS guard using current process RSS instead of only estimated cache bytes.
+    if (m_rssHighWaterMarkBytes > 0)
+    {
+        uint64_t currentRSSBytes = GetCurrentProcessRSSBytes();
+        int retries = 0;
+        while (currentRSSBytes > 0
+               && currentRSSBytes + estimatedBytes > m_rssHighWaterMarkBytes
+               && !m_lruList.empty())
+        {
+            int evictId = m_lruList.front();
+            if (evictId == p_tenantId) break;
+            bool evicted = UnloadTenantLocked(evictId);
+            if (!evicted)
+            {
+                m_lruList.pop_front();
+                m_lruList.push_back(evictId);
+                m_lruMap[evictId] = std::prev(m_lruList.end());
+                retries++;
+                if (retries > (int)m_lruList.size())
+                {
+                    break;
+                }
+            }
+            else
+            {
+                retries = 0;
+                currentRSSBytes = GetCurrentProcessRSSBytes();
+            }
+        }
+
+        if (currentRSSBytes > 0 && currentRSSBytes + estimatedBytes > m_rssHighWaterMarkBytes)
+        {
+            fprintf(stderr,
+                    "[WARN] Rejecting tenant %d load: current RSS %.2f MB + estimated HeadIndex %.2f MB exceeds RSS high-water %.2f MB\n",
+                    p_tenantId,
+                    currentRSSBytes / (1024.0 * 1024.0),
+                    estimatedBytes / (1024.0 * 1024.0),
+                    m_rssHighWaterMarkBytes / (1024.0 * 1024.0));
+            return false;
+        }
+    }
+
     // Full load from disk
     auto typeIt = m_tenantIndexTypes.find(p_tenantId);
     TenantIndexType indexType = (typeIt != m_tenantIndexTypes.end()) ? typeIt->second : TenantIndexType::SPANN;
@@ -1679,6 +2717,20 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         return false;
     }
 
+    if (m_rssHighWaterMarkBytes > 0)
+    {
+        uint64_t currentRSSBytes = GetCurrentProcessRSSBytes();
+        if (currentRSSBytes > 0 && currentRSSBytes > m_rssHighWaterMarkBytes)
+        {
+            fprintf(stderr,
+                    "[WARN] Rejecting tenant %d after load: current RSS %.2f MB exceeds RSS high-water %.2f MB\n",
+                    p_tenantId,
+                    currentRSSBytes / (1024.0 * 1024.0),
+                    m_rssHighWaterMarkBytes / (1024.0 * 1024.0));
+            return false;
+        }
+    }
+
     auto indexPtr = std::make_shared<AnnIndex>(loadedIndex);
     for (const auto& pendingParam : m_pendingSearchParams)
     {
@@ -1688,11 +2740,50 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     }
     m_tenantIndices[p_tenantId] = indexPtr;
     m_loadedHeadIndexBytes += estimatedBytes;
+    m_tenantHeadIndexAccountedBytes[p_tenantId] = estimatedBytes;
     m_lruList.push_back(p_tenantId);
     m_lruMap[p_tenantId] = std::prev(m_lruList.end());
 
     EnsureHeadNodeMetaLoaded(loadPath, indexPtr->GetInternalIndex());
+    if (indexType == TenantIndexType::SPANN) {
+        EnsureTenantPivotIndexLoaded(p_tenantId);
+    }
 
+    return true;
+}
+
+bool TenantIndexManager::EnsureTenantPivotIndexLoaded(int p_tenantId)
+{
+    if (m_tenantPivotLevels.count(p_tenantId) &&
+        m_tenantPivotNodeCounts.count(p_tenantId) &&
+        m_tenantNodePivotTags.count(p_tenantId) &&
+        m_tenantTagToNodes.count(p_tenantId) &&
+        m_tenantHeadNodeToNode.count(p_tenantId)) {
+        return true;
+    }
+
+    auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
+    if (wdIt == m_tenantSpannWorkDirs.end()) return false;
+
+    int pivotLevel = -1;
+    int nodeCount = 0;
+    std::vector<std::vector<uint32_t>> nodePivotTags;
+    std::unordered_map<uint32_t, std::vector<int>> tagToNodes;
+    std::vector<int> headNodeToNode;
+    if (!LoadHeadNodeRoutingIndexFile(wdIt->second,
+                                      pivotLevel,
+                                      nodeCount,
+                                      nodePivotTags,
+                                      tagToNodes,
+                                      headNodeToNode)) {
+        return false;
+    }
+
+    m_tenantPivotLevels[p_tenantId] = pivotLevel;
+    m_tenantPivotNodeCounts[p_tenantId] = nodeCount;
+    m_tenantNodePivotTags[p_tenantId] = std::move(nodePivotTags);
+    m_tenantTagToNodes[p_tenantId] = std::move(tagToNodes);
+    m_tenantHeadNodeToNode[p_tenantId] = std::move(headNodeToNode);
     return true;
 }
 
@@ -1708,14 +2799,47 @@ void TenantIndexManager::InitCache()
 void TenantIndexManager::SetHeadIndexCacheLimit(uint64_t p_bytesLimit)
 {
     m_headIndexCacheLimitBytes = p_bytesLimit;
+    if (m_headCache) {
+        m_headCache->SetCapacity(p_bytesLimit);
+    }
     fprintf(stderr, "[INFO] HeadIndex cache limit set to %lu bytes (%.1f MB)\n",
             (unsigned long)p_bytesLimit, p_bytesLimit / (1024.0 * 1024.0));
+}
+
+void TenantIndexManager::SetHeadIndexCacheSafetyFactor(double p_factor)
+{
+    if (p_factor < 1.0) p_factor = 1.0;
+    if (p_factor > 8.0) p_factor = 8.0;
+    m_headIndexCacheSafetyFactor = p_factor;
+    fprintf(stderr, "[INFO] HeadIndex cache safety factor set to %.3f\n", m_headIndexCacheSafetyFactor);
+}
+
+double TenantIndexManager::GetHeadIndexCacheSafetyFactor() const
+{
+    return m_headIndexCacheSafetyFactor;
 }
 
 uint64_t TenantIndexManager::GetHeadIndexCacheUsage() const
 {
     std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
     return m_loadedHeadIndexBytes;
+}
+
+uint64_t TenantIndexManager::GetCurrentRSSBytes() const
+{
+    return GetCurrentProcessRSSBytes();
+}
+
+void TenantIndexManager::SetRSSHighWaterMark(uint64_t p_bytesLimit)
+{
+    m_rssHighWaterMarkBytes = p_bytesLimit;
+    fprintf(stderr, "[INFO] RSS high-water mark set to %lu bytes (%.1f MB)\n",
+            (unsigned long)p_bytesLimit, p_bytesLimit / (1024.0 * 1024.0));
+}
+
+uint64_t TenantIndexManager::GetRSSHighWaterMark() const
+{
+    return m_rssHighWaterMarkBytes;
 }
 
 uint64_t TenantIndexManager::GetLastPostingReadCount() const
@@ -1753,13 +2877,14 @@ bool TenantIndexManager::UnloadTenantLocked(int p_tenantId)
         return false;  // Skip: tenant in use
     }
 
-    // Estimate size being freed
     uint64_t freedBytes = 0;
-    auto vcIt = m_tenantVectorCounts.find(p_tenantId);
-    if (vcIt != m_tenantVectorCounts.end())
-        freedBytes = static_cast<uint64_t>(vcIt->second) * 128;
-    else
-        freedBytes = 1024 * 1024;
+    auto accountedIt = m_tenantHeadIndexAccountedBytes.find(p_tenantId);
+    if (accountedIt != m_tenantHeadIndexAccountedBytes.end()) {
+        freedBytes = accountedIt->second;
+        m_tenantHeadIndexAccountedBytes.erase(accountedIt);
+    } else {
+        freedBytes = EstimateTenantHeadIndexBytes(p_tenantId);
+    }
 
     // With SharedAIOPool: destruction only does close(fd) + free memory (~1ms).
     // AIO contexts are shared and never destroyed.
@@ -1991,6 +3116,40 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     sparseIdx->Save(sparsePath);
     m_tenantSparseIdx[p_tenantId] = sparseIdx;
 
+    constexpr int kPivotEstimatorDefaultMaxNodes = 0;
+    constexpr double kPivotEstimatorDefaultRecallTarget = 0.99;
+    constexpr double kPivotEstimatorDefaultLambdaRecall = 10.0;
+    constexpr double kPivotEstimatorDefaultEstimatedRecall = 1.0;
+
+    PivotEstimatorComputation pivotComputation;
+    const PivotEstimatorCandidate* pivotCandidate = nullptr;
+    if (BuildPivotEstimatorComputation(p_tagsPtr,
+                                       p_numVectors,
+                                       p_numTagsPerVec,
+                                       kPivotEstimatorDefaultMaxNodes,
+                                       kPivotEstimatorDefaultRecallTarget,
+                                       kPivotEstimatorDefaultLambdaRecall,
+                                       kPivotEstimatorDefaultEstimatedRecall,
+                                       std::string(),
+                                       pivotComputation)) {
+        pivotCandidate = FindBestPivotEstimatorCandidate(pivotComputation.candidates);
+    }
+
+    if (pivotCandidate != nullptr) {
+        m_tenantPivotLevels[p_tenantId] = pivotCandidate->pivotLevel;
+        m_tenantPivotNodeCounts[p_tenantId] = pivotCandidate->nodeCount;
+        m_tenantNodePivotTags[p_tenantId] = pivotCandidate->nodePivotTags;
+        BuildTagToNodeIndexForCandidate(*pivotCandidate,
+                                        pivotComputation.levelData,
+                                        m_tenantTagToNodes[p_tenantId]);
+    } else {
+        m_tenantPivotLevels.erase(p_tenantId);
+        m_tenantPivotNodeCounts.erase(p_tenantId);
+        m_tenantNodePivotTags.erase(p_tenantId);
+        m_tenantTagToNodes.erase(p_tenantId);
+        m_tenantHeadNodeToNode.erase(p_tenantId);
+    }
+
     // Build head tag table: VIDs NOT found in any posting are head vectors.
     // They need tag metadata for filtered search since inline tag filter
     // can't check them (they're not in posting data).
@@ -2067,10 +3226,35 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 headTagCount++;
             }
             SaveHeadNodeMetaFile(workDir, memoryIndex);
+
+            if (pivotCandidate != nullptr) {
+                std::vector<int> headNodeToNode;
+                BuildHeadNodeToNodeIndexForCandidate(*pivotCandidate,
+                                                     p_tagsPtr,
+                                                     p_numVectors,
+                                                     p_numTagsPerVec,
+                                                     memoryIndex,
+                                                     spannInternalIdx,
+                                                     headNodeToNode);
+                m_tenantHeadNodeToNode[p_tenantId] = headNodeToNode;
+                SaveHeadNodeRoutingIndexFile(workDir,
+                                             pivotCandidate->pivotLevel,
+                                             pivotCandidate->nodePivotTags,
+                                             m_tenantTagToNodes[p_tenantId],
+                                             headNodeToNode);
+            }
         }
     }
 
-        fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, sparse_max_postings=%d)\n",
+    if (pivotCandidate != nullptr) {
+        fprintf(stderr,
+                "[INFO] Tenant %d: pivot estimator selected level=%d nodes=%d\n",
+                p_tenantId,
+                pivotCandidate->pivotLevel,
+                pivotCandidate->nodeCount);
+    }
+
+    fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, sparse_max_postings=%d)\n",
             p_tenantId, headTagCount, numHeads, totalAssignments, kSparseIndexBuildMaxPostings);
     return true;
 }
@@ -2125,6 +3309,41 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
     const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
 
+    const auto tagToNodesIt = m_tenantTagToNodes.find(p_tenantId);
+    const auto headNodeToNodeIt = m_tenantHeadNodeToNode.find(p_tenantId);
+    const std::vector<int>* headNodeToNode = (headNodeToNodeIt != m_tenantHeadNodeToNode.end())
+        ? &headNodeToNodeIt->second
+        : nullptr;
+    std::vector<int> routedNodes;
+    std::vector<uint8_t> allowedNodeMask;
+    bool hasRoutingNodeFilter = false;
+    if (p_numTags > 0 &&
+        tagToNodesIt != m_tenantTagToNodes.end() &&
+        headNodeToNode != nullptr &&
+        !headNodeToNode->empty() &&
+        TryCollectRoutingNodesForQuery(tagToNodesIt->second, queryTagsPtr, p_numTags, routedNodes)) {
+        int nodeCount = 0;
+        auto nodeCountIt = m_tenantPivotNodeCounts.find(p_tenantId);
+        if (nodeCountIt != m_tenantPivotNodeCounts.end()) {
+            nodeCount = nodeCountIt->second;
+        }
+        if (nodeCount <= 0) {
+            for (int nodeId : routedNodes) {
+                nodeCount = std::max(nodeCount, nodeId + 1);
+            }
+        }
+
+        if (nodeCount > 0) {
+            allowedNodeMask.assign(static_cast<size_t>(nodeCount), 0);
+            for (int nodeId : routedNodes) {
+                if (nodeId >= 0 && nodeId < nodeCount) {
+                    allowedNodeMask[static_cast<size_t>(nodeId)] = 1;
+                    hasRoutingNodeFilter = true;
+                }
+            }
+        }
+    }
+
     // Check if ALL query tags are sparse → use brute-force path
     auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
     if (!forceDenseTagSearch && sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
@@ -2146,22 +3365,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         // the route stable across tenant scales because the decision is based on
         // actual posting fanout instead of raw matching vector count.
         if (hasDirectPostingListsForAllTags && !bfPostings.empty() && static_cast<int>(bfPostings.size()) <= directSparseMaxPostings) {
-            // TRUE brute-force: bypass graph search, inject posting IDs directly
-            if (internalIdx) {
-                // Set inline tag filter
-                internalIdx->m_queryTags = queryTagsPtr;
-                internalIdx->m_numQueryTags = p_numTags;
-                // Inject exact posting IDs — SPANNIndex will skip graph search
-                internalIdx->m_directPostingIDs.assign(bfPostings.begin(), bfPostings.end());
-            }
+            SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
+            searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
+            searchContext.m_directPostingIDs.assign(bfPostings.begin(), bfPostings.end());
+            SPTAG::VectorIndex::ThreadLocalSearchContextGuard searchContextGuard(std::move(searchContext));
 
             auto result = indexPtr->Search(p_queryVector, p_resultNum);
-
-            if (internalIdx) {
-                internalIdx->m_directPostingIDs.clear();
-                internalIdx->m_queryTags = nullptr;
-                internalIdx->m_numQueryTags = 0;
-            }
             return result;
         }
     }
@@ -2175,40 +3384,49 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     }
     auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
     EnsureHeadNodeMetaLoaded(workDir, internalIdx);
+    SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
+    if (p_numTags > 0 && queryTagsPtr != nullptr) {
+        searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
+    }
     if (internalIdx) {
-        // Dense path upper-bound test: disable PS-based posting selection.
-        // Keep exact inline tag filtering, and only reuse PS for selectivity estimation.
-        internalIdx->m_postingFilter = nullptr;
+            // Dense path uses the pivot routing index as a coarse posting filter.
+            // If routing metadata is missing or the node intersection collapses to
+            // empty, fall back to the original exact-filter-only behavior.
+            if (hasRoutingNodeFilter && headNodeToNode != nullptr) {
+                searchContext.m_postingFilter =
+                    [allowedNodeMask = std::move(allowedNodeMask), headNodeToNode](int localHid) {
+                        if (localHid < 0 || localHid >= static_cast<int>(headNodeToNode->size())) {
+                            return true;
+                        }
 
-        // Inline tag filter in posting scan
-        internalIdx->m_queryTags = queryTagsPtr;
-        internalIdx->m_numQueryTags = p_numTags;
+                        int nodeId = (*headNodeToNode)[static_cast<size_t>(localHid)];
+                        if (nodeId < 0 || nodeId >= static_cast<int>(allowedNodeMask.size())) {
+                            return true;
+                        }
+
+                        return allowedNodeMask[static_cast<size_t>(nodeId)] != 0;
+                    };
+                searchContext.m_searchHeadBundleNodes = routedNodes;
+            }
 
         auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
         int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
         float vectorSel = EstimateQueryVectorSelectivity(tenantSize2, tagStats, queryTagsPtr, p_numTags);
         vectorSel = std::clamp(vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
-        internalIdx->m_filterSelectivity = vectorSel;
+        searchContext.m_filterSelectivity = vectorSel;
 
-        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && internalIdx->m_filterSelectivity >= 1.0f) {
+        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && searchContext.m_filterSelectivity >= 1.0f) {
             int passCount = 0;
             for (SizeType pid = 0; pid < memoryIndex->GetHeadNodeMetaSampleCount(); ++pid) {
                 if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
             }
             float fallbackVectorSel = (float)passCount / (float)tenantSize2;
-            internalIdx->m_filterSelectivity = std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
+            searchContext.m_filterSelectivity = std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
         }
     }
+    SPTAG::VectorIndex::ThreadLocalSearchContextGuard searchContextGuard(std::move(searchContext));
 
     auto result = indexPtr->Search(p_queryVector, p_resultNum);
-
-    if (internalIdx) {
-        internalIdx->m_postingFilter = nullptr;
-        internalIdx->m_headNodeFilter = nullptr;
-        internalIdx->m_queryTags = nullptr;
-        internalIdx->m_numQueryTags = 0;
-        internalIdx->m_filterSelectivity = 1.0f;
-    }
 
     return result;
 }

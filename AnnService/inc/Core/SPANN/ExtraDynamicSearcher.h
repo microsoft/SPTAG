@@ -214,6 +214,18 @@ namespace SPTAG::SPANN {
             m_vectorTags.assign(tags, tags + (size_t)numVecs * numTagsPerVec);
         }
 
+        void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments) {
+            m_plannedNodeVectorAssignments = nodeVectorAssignments;
+        }
+
+        void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments) {
+            m_primaryNodeVectorAssignments = primaryNodeVectorAssignments;
+        }
+
+        void SetHeadVectorOwners(const std::unordered_map<SizeType, int>& headVectorOwners) {
+            m_headVectorOwners = headVectorOwners;
+        }
+
         ExtraDynamicSearcher(SPANN::Options& p_opt) {
             m_opt = &p_opt;
             m_numTagsPerVec = p_opt.m_numTagsPerVec;
@@ -1395,7 +1407,7 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
-        bool RNGSelection(std::vector<Edge>& selections, ValueType* queryVector, VectorIndex* p_index, SizeType p_fullID, int& replicaCount, int checkHeadID = -1)
+        bool RNGSelection(std::vector<Edge>& selections, ValueType* queryVector, VectorIndex* p_index, SizeType p_fullID, int& replicaCount, int checkHeadID = -1, const std::vector<uint8_t>* p_allowedHeads = nullptr)
         {
             COMMON::QueryResultSet<ValueType> queryResults(queryVector, m_opt->m_internalResultNum);
             std::shared_ptr<std::uint8_t> rec_query;
@@ -1412,6 +1424,14 @@ namespace SPTAG::SPANN {
                 BasicResult* queryResult = queryResults.GetResult(i);
                 if (queryResult->VID == -1) {
                     break;
+                }
+                if (p_allowedHeads != nullptr)
+                {
+                    if (queryResult->VID < 0 || queryResult->VID >= static_cast<SizeType>(p_allowedHeads->size()) ||
+                        (*p_allowedHeads)[static_cast<size_t>(queryResult->VID)] == 0)
+                    {
+                        continue;
+                    }
                 }
                 // RNG Check.
                 bool rngAccpeted = true;
@@ -2160,16 +2180,48 @@ namespace SPTAG::SPANN {
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build SSD Index.\n");
 
-            Selection selections(static_cast<size_t>(fullCount) * m_opt->m_replicaCount, m_opt->m_tmpdir);
+            std::vector<std::vector<SizeType>> plannedNodeVectors;
+            std::vector<std::vector<int>> vectorMemberships;
+            bool useNodeAwareBuild = !m_plannedNodeVectorAssignments.empty();
+            size_t plannedAssignmentCount = static_cast<size_t>(fullCount);
+            if (useNodeAwareBuild)
+            {
+                plannedNodeVectors.resize(m_plannedNodeVectorAssignments.size());
+                vectorMemberships.assign(fullCount, std::vector<int>());
+                plannedAssignmentCount = 0;
+
+                for (size_t nodeId = 0; nodeId < m_plannedNodeVectorAssignments.size(); ++nodeId)
+                {
+                    std::unordered_set<SizeType> seenNodeVectors;
+                    for (SizeType vectorId : m_plannedNodeVectorAssignments[nodeId])
+                    {
+                        if (vectorId < 0 || vectorId >= fullCount) {
+                            continue;
+                        }
+                        if (!seenNodeVectors.insert(vectorId).second) {
+                            continue;
+                        }
+
+                        plannedNodeVectors[nodeId].push_back(vectorId);
+                        vectorMemberships[vectorId].push_back(static_cast<int>(nodeId));
+                        ++plannedAssignmentCount;
+                    }
+                }
+
+                useNodeAwareBuild = plannedAssignmentCount > 0;
+            }
+
+            Selection selections((useNodeAwareBuild ? plannedAssignmentCount : static_cast<size_t>(fullCount)) * m_opt->m_replicaCount, m_opt->m_tmpdir);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
             std::vector<std::atomic_int> replicaCount(fullCount);
             std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
+            for (auto& rc : replicaCount) rc = 0;
             for (auto& pls : postingListSize) pls = 0;
             std::unordered_set<SizeType> emptySet;
             SizeType batchSize = (fullCount + m_opt->m_batches - 1) / m_opt->m_batches;
 
             auto t1 = std::chrono::high_resolution_clock::now();
-            if (p_opt.m_batches > 1)
+            if (!useNodeAwareBuild && p_opt.m_batches > 1)
             {
                 if (selections.SaveBatch() != ErrorCode::Success)
                 {
@@ -2178,69 +2230,228 @@ namespace SPTAG::SPANN {
             }
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
-                SizeType sampleSize = m_opt->m_samples;
-                std::vector<SizeType> samples(sampleSize, 0);
-                for (int i = 0; i < m_opt->m_batches; i++) {
-                    SizeType start = i * batchSize;
-                    SizeType end = min(start + batchSize, fullCount);
-                    auto fullVectors = p_reader->GetVectorSet(start, end);
-                    if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
+                if (useNodeAwareBuild)
+                {
+                    auto fullVectors = p_reader->GetVectorSet();
+                    if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) {
+                        fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
+                    }
 
-                    if (p_opt.m_batches > 1) {
-                        if (selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount) != ErrorCode::Success)
+                    std::vector<int> primaryOwner(fullCount, -1);
+                    if (!m_primaryNodeVectorAssignments.empty())
+                    {
+                        for (size_t nodeId = 0; nodeId < m_primaryNodeVectorAssignments.size(); ++nodeId)
                         {
-                            return false;
-                        }
-                        emptySet.clear();
-                        for (auto& pair : headVectorIDS) {
-                            if (pair.first >= start && pair.first < end) emptySet.insert(pair.first - start);
-                        }
-                    }
-                    else {
-                        for (auto& pair : headVectorIDS) {
-                            emptySet.insert(pair.first);
-                        }
-                    }
-
-                    int sampleNum = 0;
-                    for (int j = start; j < end && sampleNum < sampleSize; j++)
-                    {
-                        if (headVectorIDS.count(j) == 0) samples[sampleNum++] = j - start;
-                    }
-
-                    float acc = 0;
-                    for (int j = 0; j < sampleNum; j++)
-                    {
-                        COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
-                    }
-                    acc = acc / sampleNum;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
-
-                    p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), m_opt->m_replicaCount, numThreads, m_opt->m_gpuSSDNumTrees, m_opt->m_gpuSSDLeafSize, m_opt->m_rngFactor, m_opt->m_numGPUs);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
-
-                    for (SizeType j = start; j < end; j++) {
-                        replicaCount[j] = 0;
-                        size_t vecOffset = j * (size_t)m_opt->m_replicaCount;
-                        if (headVectorIDS.count(j) == 0) {
-                            for (int resNum = 0; resNum < m_opt->m_replicaCount && selections[vecOffset + resNum].node != INT_MAX; resNum++) {
-                                ++postingListSize[selections[vecOffset + resNum].node];
-                                selections[vecOffset + resNum].tonode = j;
-                                ++replicaCount[j];
+                            for (SizeType vectorId : m_primaryNodeVectorAssignments[nodeId])
+                            {
+                                if (vectorId >= 0 && vectorId < fullCount) {
+                                    primaryOwner[vectorId] = static_cast<int>(nodeId);
+                                }
                             }
-                        } else if (!p_opt.m_excludehead) {
-                                selections[vecOffset].node = headVectorIDS[j];
-                                selections[vecOffset].tonode = j;
-                                ++postingListSize[selections[vecOffset].node];
-                                ++replicaCount[j];
                         }
                     }
 
-                    if (p_opt.m_batches > 1)
+                    std::vector<int> headToNode(p_headIndex->GetNumSamples(), -1);
+                    for (const auto& pair : headVectorIDS)
                     {
-                        if (selections.SaveBatch() != ErrorCode::Success)
+                        if (pair.first < 0 || pair.first >= fullCount) {
+                            continue;
+                        }
+
+                        int assignedNode = -1;
+                        auto ownerIt = m_headVectorOwners.find(pair.first);
+                        if (ownerIt != m_headVectorOwners.end()) {
+                            assignedNode = ownerIt->second;
+                        } else if (pair.first >= 0 && pair.first < static_cast<SizeType>(primaryOwner.size()) && primaryOwner[pair.first] >= 0) {
+                            assignedNode = primaryOwner[pair.first];
+                        } else if (!vectorMemberships[pair.first].empty()) {
+                            assignedNode = vectorMemberships[pair.first].front();
+                        }
+                        if (assignedNode < 0) {
+                            assignedNode = 0;
+                        }
+                        headToNode[pair.second] = assignedNode;
+                    }
+
+                    std::vector<std::vector<uint8_t>> allowedHeadMasks(plannedNodeVectors.size(), std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
+                    std::vector<size_t> nodeHeadCounts(plannedNodeVectors.size(), 0);
+                    for (SizeType headId = 0; headId < static_cast<SizeType>(headToNode.size()); ++headId)
+                    {
+                        int nodeId = headToNode[headId];
+                        if (nodeId >= 0 && nodeId < static_cast<int>(allowedHeadMasks.size())) {
+                            allowedHeadMasks[static_cast<size_t>(nodeId)][static_cast<size_t>(headId)] = 1;
+                            ++nodeHeadCounts[static_cast<size_t>(nodeId)];
+                        }
+                    }
+                    for (size_t nodeId = 0; nodeId < allowedHeadMasks.size(); ++nodeId)
+                    {
+                        if (!plannedNodeVectors[nodeId].empty() && nodeHeadCounts[nodeId] == 0)
                         {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Node-aware build requires dedicated heads, but node %d has none.\n",
+                                         static_cast<int>(nodeId));
                             return false;
+                        }
+                    }
+
+                    std::vector<std::pair<int, SizeType>> assignmentEntries;
+                    assignmentEntries.reserve(plannedAssignmentCount);
+                    for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId)
+                    {
+                        for (SizeType vectorId : plannedNodeVectors[nodeId])
+                        {
+                            assignmentEntries.emplace_back(static_cast<int>(nodeId), vectorId);
+                        }
+                    }
+
+                    std::atomic_size_t sent(0);
+                    std::vector<std::thread> mythreads;
+                    mythreads.reserve(numThreads);
+                    for (int tid = 0; tid < numThreads; ++tid)
+                    {
+                        mythreads.emplace_back([&, tid]() {
+                            std::vector<Edge> localSelections(static_cast<size_t>(m_opt->m_replicaCount));
+                            while (true)
+                            {
+                                size_t assignmentIdx = sent.fetch_add(1);
+                                if (assignmentIdx >= assignmentEntries.size()) {
+                                    return;
+                                }
+
+                                const auto& assignment = assignmentEntries[assignmentIdx];
+                                int nodeId = assignment.first;
+                                SizeType vectorId = assignment.second;
+                                size_t selectionOffset = assignmentIdx * static_cast<size_t>(m_opt->m_replicaCount);
+                                int assignedReplicaCount = 0;
+
+                                auto headIt = headVectorIDS.find(vectorId);
+                                int headNodeId = -1;
+                                if (headIt != headVectorIDS.end()) {
+                                    headNodeId = headToNode[headIt->second];
+                                }
+
+                                if (!p_opt.m_excludehead && headIt != headVectorIDS.end() && headNodeId == nodeId)
+                                {
+                                    Edge& selfSelection = selections.m_selections[selectionOffset];
+                                    selfSelection.node = headIt->second;
+                                    selfSelection.tonode = vectorId;
+                                    selfSelection.distance = 0.0f;
+                                    ++postingListSize[selfSelection.node];
+                                    ++replicaCount[vectorId];
+                                    assignedReplicaCount = 1;
+                                }
+
+                                if (assignedReplicaCount >= m_opt->m_replicaCount) {
+                                    continue;
+                                }
+
+                                std::fill(localSelections.begin(), localSelections.end(), Edge());
+                                int localReplicaCount = 0;
+                                RNGSelection(localSelections,
+                                             (ValueType*)(fullVectors->GetVector(vectorId)),
+                                             p_headIndex.get(),
+                                             vectorId,
+                                             localReplicaCount,
+                                             -1,
+                                             &allowedHeadMasks[static_cast<size_t>(nodeId)]);
+
+                                for (int selIdx = 0; selIdx < localReplicaCount && assignedReplicaCount < m_opt->m_replicaCount; ++selIdx)
+                                {
+                                    const Edge& candidate = localSelections[static_cast<size_t>(selIdx)];
+                                    bool duplicateHead = false;
+                                    for (int prevIdx = 0; prevIdx < assignedReplicaCount; ++prevIdx)
+                                    {
+                                        if (selections.m_selections[selectionOffset + static_cast<size_t>(prevIdx)].node == candidate.node)
+                                        {
+                                            duplicateHead = true;
+                                            break;
+                                        }
+                                    }
+                                    if (duplicateHead) {
+                                        continue;
+                                    }
+
+                                    Edge& target = selections.m_selections[selectionOffset + static_cast<size_t>(assignedReplicaCount)];
+                                    target = candidate;
+                                    ++postingListSize[target.node];
+                                    ++replicaCount[vectorId];
+                                    ++assignedReplicaCount;
+                                }
+                            }
+                        });
+                    }
+                    for (auto& thread : mythreads) { thread.join(); }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "Node-aware candidate search finished with %zu node/vector assignments across %zu nodes.\n",
+                                 assignmentEntries.size(),
+                                 plannedNodeVectors.size());
+                }
+                else
+                {
+                    SizeType sampleSize = m_opt->m_samples;
+                    std::vector<SizeType> samples(sampleSize, 0);
+                    for (int i = 0; i < m_opt->m_batches; i++) {
+                        SizeType start = i * batchSize;
+                        SizeType end = min(start + batchSize, fullCount);
+                        auto fullVectors = p_reader->GetVectorSet(start, end);
+                        if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
+
+                        if (p_opt.m_batches > 1) {
+                            if (selections.LoadBatch(static_cast<size_t>(start) * p_opt.m_replicaCount, static_cast<size_t>(end) * p_opt.m_replicaCount) != ErrorCode::Success)
+                            {
+                                return false;
+                            }
+                            emptySet.clear();
+                            for (auto& pair : headVectorIDS) {
+                                if (pair.first >= start && pair.first < end) emptySet.insert(pair.first - start);
+                            }
+                        }
+                        else {
+                            for (auto& pair : headVectorIDS) {
+                                emptySet.insert(pair.first);
+                            }
+                        }
+
+                        int sampleNum = 0;
+                        for (int j = start; j < end && sampleNum < sampleSize; j++)
+                        {
+                            if (headVectorIDS.count(j) == 0) samples[sampleNum++] = j - start;
+                        }
+
+                        float acc = 0;
+                        for (int j = 0; j < sampleNum; j++)
+                        {
+                            COMMON::Utils::atomic_float_add(&acc, COMMON::TruthSet::CalculateRecall(p_headIndex.get(), fullVectors->GetVector(samples[j]), candidateNum));
+                        }
+                        acc = acc / sampleNum;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d vector(%d,%d) loaded with %d vectors (%zu) HeadIndex acc @%d:%f.\n", i, start, end, fullVectors->Count(), selections.m_selections.size(), candidateNum, acc);
+
+                        p_headIndex->ApproximateRNG(fullVectors, emptySet, candidateNum, selections.m_selections.data(), m_opt->m_replicaCount, numThreads, m_opt->m_gpuSSDNumTrees, m_opt->m_gpuSSDLeafSize, m_opt->m_rngFactor, m_opt->m_numGPUs);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Batch %d finished!\n", i);
+
+                        for (SizeType j = start; j < end; j++) {
+                            replicaCount[j] = 0;
+                            size_t vecOffset = j * (size_t)m_opt->m_replicaCount;
+                            if (headVectorIDS.count(j) == 0) {
+                                for (int resNum = 0; resNum < m_opt->m_replicaCount && selections[vecOffset + resNum].node != INT_MAX; resNum++) {
+                                    ++postingListSize[selections[vecOffset + resNum].node];
+                                    selections[vecOffset + resNum].tonode = j;
+                                    ++replicaCount[j];
+                                }
+                            } else if (!p_opt.m_excludehead) {
+                                    selections[vecOffset].node = headVectorIDS[j];
+                                    selections[vecOffset].tonode = j;
+                                    ++postingListSize[selections[vecOffset].node];
+                                    ++replicaCount[j];
+                            }
+                        }
+
+                        if (p_opt.m_batches > 1)
+                        {
+                            if (selections.SaveBatch() != ErrorCode::Success)
+                            {
+                                return false;
+                            }
                         }
                     }
                 }
@@ -2248,7 +2459,7 @@ namespace SPTAG::SPANN {
             auto t2 = std::chrono::high_resolution_clock::now();
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) / 60.0);
 
-            if (p_opt.m_batches > 1)
+            if (!useNodeAwareBuild && p_opt.m_batches > 1)
             {
                 if (selections.LoadBatch(0, static_cast<size_t>(fullCount) * p_opt.m_replicaCount) != ErrorCode::Success)
                 {
@@ -2263,11 +2474,21 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Time to sort selections:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count()) / 1000);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d\n", m_postingSizeLimit);
             {
-                std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
+                int maxReplicaSlots = m_opt->m_replicaCount;
+                if (useNodeAwareBuild)
+                {
+                    for (const auto& memberships : vectorMemberships)
+                    {
+                        maxReplicaSlots = max(maxReplicaSlots, static_cast<int>(memberships.size()) * m_opt->m_replicaCount);
+                    }
+                }
+                std::vector<int> replicaCountDist(maxReplicaSlots + 1, 0);
                 for (int i = 0; i < replicaCount.size(); ++i)
                 {
                     if (headVectorIDS.count(i) > 0) continue;
-                    ++replicaCountDist[replicaCount[i]];
+                    int rc = replicaCount[i].load();
+                    rc = min<int>(rc, static_cast<int>(replicaCountDist.size()) - 1);
+                    ++replicaCountDist[rc];
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Before Posting Cut:\n");
@@ -2336,10 +2557,20 @@ namespace SPTAG::SPANN {
                 mythreads.clear();
             }
             {
-                std::vector<int> replicaCountDist(m_opt->m_replicaCount + 1, 0);
+                int maxReplicaSlots = m_opt->m_replicaCount;
+                if (useNodeAwareBuild)
+                {
+                    for (const auto& memberships : vectorMemberships)
+                    {
+                        maxReplicaSlots = max(maxReplicaSlots, static_cast<int>(memberships.size()) * m_opt->m_replicaCount);
+                    }
+                }
+                std::vector<int> replicaCountDist(maxReplicaSlots + 1, 0);
                 for (int i = 0; i < replicaCount.size(); ++i)
                 {
-                    ++replicaCountDist[replicaCount[i]];
+                    int rc = replicaCount[i].load();
+                    rc = min<int>(rc, static_cast<int>(replicaCountDist.size()) - 1);
+                    ++replicaCountDist[rc];
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After Posting Cut:\n");
@@ -2770,6 +3001,10 @@ namespace SPTAG::SPANN {
         ErrorCode m_asyncStatus = ErrorCode::Success;
 
 	    COMMON::Dataset<std::uint64_t>* m_vectorTranslateMap;
+
+        std::vector<std::vector<SizeType>> m_plannedNodeVectorAssignments;
+        std::vector<std::vector<SizeType>> m_primaryNodeVectorAssignments;
+        std::unordered_map<SizeType, int> m_headVectorOwners;
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

@@ -22,6 +22,7 @@ using namespace SPTAG;
 namespace {
 
 thread_local VectorIndex::PostingScanStats g_threadLocalPostingScanStats{};
+thread_local VectorIndex::ThreadLocalSearchContext g_threadLocalSearchContext{};
 
 size_t AlignUp(size_t value, size_t alignment)
 {
@@ -45,6 +46,25 @@ const std::uint8_t* HeadNodeMetaBase(const VectorIndex* index, SizeType sampleId
 }
 
 } // namespace
+
+VectorIndex::ThreadLocalSearchContextGuard::ThreadLocalSearchContextGuard(ThreadLocalSearchContext p_context)
+    : m_hadPrevious(g_threadLocalSearchContext.m_active),
+      m_previous(g_threadLocalSearchContext)
+{
+    VectorIndex::SetThreadLocalSearchContext(std::move(p_context));
+}
+
+VectorIndex::ThreadLocalSearchContextGuard::~ThreadLocalSearchContextGuard()
+{
+    if (m_hadPrevious)
+    {
+        VectorIndex::SetThreadLocalSearchContext(std::move(m_previous));
+    }
+    else
+    {
+        VectorIndex::ResetThreadLocalSearchContext();
+    }
+}
 
 Helper::LoggerHolder &SPTAG::GetLoggerHolder()
 {
@@ -362,6 +382,22 @@ void VectorIndex::SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64
 VectorIndex::PostingScanStats VectorIndex::GetThreadLocalPostingScanStats()
 {
     return g_threadLocalPostingScanStats;
+}
+
+void VectorIndex::SetThreadLocalSearchContext(ThreadLocalSearchContext p_context)
+{
+    p_context.m_active = true;
+    g_threadLocalSearchContext = std::move(p_context);
+}
+
+void VectorIndex::ResetThreadLocalSearchContext()
+{
+    g_threadLocalSearchContext.Reset();
+}
+
+const VectorIndex::ThreadLocalSearchContext* VectorIndex::GetThreadLocalSearchContext()
+{
+    return g_threadLocalSearchContext.m_active ? &g_threadLocalSearchContext : nullptr;
 }
 
 std::string VectorIndex::GetParameter(const std::string &p_param, const std::string &p_section) const

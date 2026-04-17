@@ -37,8 +37,14 @@ def import_sptag_module():
             manager_cls is not None
             and native_module is not None
             and hasattr(manager_cls, "GetTenantHeadIndexSize")
+            and hasattr(manager_cls, "GetCurrentRSSBytes")
+            and hasattr(manager_cls, "SetRSSHighWaterMark")
+            and hasattr(manager_cls, "GetRSSHighWaterMark")
             and hasattr(native_module, "TenantIndexManager_GetTenantHeadIndexSize")
             and hasattr(native_module, "TenantIndexManager_GetTagRoutingStatsBlob")
+            and hasattr(native_module, "TenantIndexManager_GetCurrentRSSBytes")
+            and hasattr(native_module, "TenantIndexManager_SetRSSHighWaterMark")
+            and hasattr(native_module, "TenantIndexManager_GetRSSHighWaterMark")
         )
 
     try:
@@ -130,6 +136,89 @@ def choose_cache_limit_bytes(head_sizes: list[int]) -> int:
     candidate = max(largest * 2, total // 4)
     candidate_mb = max(1, (candidate + MB - 1) // MB)
     return candidate_mb * MB
+
+
+def parse_rss_budget_specs(raw_value: str | None) -> list[str]:
+    if raw_value is None:
+        return []
+    specs = [item.strip() for item in raw_value.split(",") if item.strip()]
+    if not specs:
+        raise RuntimeError("rss-high-water-sweep-mb must contain at least one non-empty budget token")
+    return specs
+
+
+def budget_token_to_slug(token: str) -> str:
+    token = token.strip().lower()
+    if token in {"off", "none", "disable", "disabled", "0", "0.0"}:
+        return "off"
+    slug = token.replace("+", "plus_").replace(".", "p")
+    return slug.replace(" ", "_")
+
+
+def resolve_rss_budget_spec(raw_value: str | None, baseline_rss_bytes: int) -> dict[str, object]:
+    if raw_value is None:
+        return {
+            "input": None,
+            "mode": "disabled",
+            "effective_bytes": 0,
+            "effective_mb": 0.0,
+            "label": "off",
+            "display": "disabled",
+        }
+
+    token = raw_value.strip()
+    if not token:
+        raise RuntimeError("rss-high-water-mb must not be empty")
+
+    lowered = token.lower()
+    if lowered in {"off", "none", "disable", "disabled", "0", "0.0"}:
+        return {
+            "input": token,
+            "mode": "disabled",
+            "effective_bytes": 0,
+            "effective_mb": 0.0,
+            "label": "off",
+            "display": "disabled",
+        }
+
+    is_relative = token.startswith("+")
+    numeric_token = token[1:] if is_relative else token
+    try:
+        value_mb = float(numeric_token)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Invalid RSS budget token '{raw_value}'. Use 'off', an absolute MB value like '1024', or a relative headroom like '+128'."
+        ) from exc
+
+    if value_mb < 0:
+        raise RuntimeError(f"RSS budget token '{raw_value}' must be non-negative")
+
+    requested_bytes = int(value_mb * MB)
+    if is_relative:
+        if baseline_rss_bytes <= 0:
+            raise RuntimeError(
+                f"RSS budget token '{raw_value}' uses relative headroom, but current RSS is unavailable"
+            )
+        effective_bytes = baseline_rss_bytes + requested_bytes
+        label = f"baseline+{value_mb:g}MB"
+        display = f"baseline + {value_mb:g} MB"
+        mode = "relative"
+    else:
+        effective_bytes = requested_bytes
+        label = f"{value_mb:g}MB"
+        display = f"{value_mb:g} MB"
+        mode = "absolute"
+
+    return {
+        "input": token,
+        "mode": mode,
+        "requested_mb": value_mb,
+        "requested_bytes": requested_bytes,
+        "effective_bytes": effective_bytes,
+        "effective_mb": effective_bytes / MB,
+        "label": label,
+        "display": display,
+    }
 
 
 def compute_quantiles(latencies_ms: list[float]) -> tuple[float, float, float, float]:
@@ -317,6 +406,7 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
     total_valid = 0
     total_expected_valid = 0
     total_shortfall_queries = 0
+    total_none_result_queries = 0
     total_posting_read = 0
     total_posting_match = 0
     total_posting_fp = 0
@@ -332,6 +422,7 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
         posting_fps = []
         recall_values = []
         selectivity_values = []
+        none_result_queries = 0
         level_hist = {level_name: 0 for level_name in LEVEL_NAMES}
         tenant_sequence = [item["tenant_id"] for item in batch["items"]]
         unique_tenants = sorted(set(tenant_sequence), key=lambda value: int(value))
@@ -357,9 +448,15 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
             )
             latencies.append((time.perf_counter() - start_time) * 1000.0)
 
-            posting_read = int(manager.GetLastPostingReadCount())
-            posting_match = int(manager.GetLastPostingMatchCount())
-            posting_fp = int(manager.GetLastPostingFP())
+            if result is None:
+                posting_read = 0
+                posting_match = 0
+                posting_fp = 0
+                none_result_queries += 1
+            else:
+                posting_read = int(manager.GetLastPostingReadCount())
+                posting_match = int(manager.GetLastPostingMatchCount())
+                posting_fp = int(manager.GetLastPostingFP())
             posting_reads.append(posting_read)
             posting_matches.append(posting_match)
             posting_fps.append(posting_fp)
@@ -410,6 +507,7 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
             "avg_valid": float(np.mean(valid_arr)) if valid_arr.size else 0.0,
             "avg_expected_valid": float(np.mean(expected_valid_arr)) if expected_valid_arr.size else 0.0,
             "shortfall_queries": shortfall_queries,
+            "none_result_queries": none_result_queries,
             "avg_posting_read": float(np.mean(posting_reads)) if posting_reads else 0.0,
             "avg_posting_match": float(np.mean(posting_matches)) if posting_matches else 0.0,
             "fp_rate_pct": fp_rate,
@@ -423,6 +521,7 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
         total_valid += int(np.sum(valid_arr))
         total_expected_valid += int(np.sum(expected_valid_arr))
         total_shortfall_queries += shortfall_queries
+        total_none_result_queries += none_result_queries
         total_posting_read += posting_read_sum
         total_posting_match += posting_match_sum
         total_posting_fp += posting_fp_sum
@@ -445,6 +544,7 @@ def run_batches(manager, batches: list[dict], tenant_infos: dict[str, dict], top
         "avg_valid": (total_valid / total_queries) if total_queries > 0 else 0.0,
         "avg_expected_valid": (total_expected_valid / total_queries) if total_queries > 0 else 0.0,
         "shortfall_queries": total_shortfall_queries,
+        "none_result_queries": total_none_result_queries,
         "avg_posting_read": (total_posting_read / total_queries) if total_queries > 0 else 0.0,
         "avg_posting_match": (total_posting_match / total_queries) if total_queries > 0 else 0.0,
         "fp_rate_pct": (100.0 * total_posting_fp / total_posting_read) if total_posting_read > 0 else 0.0,
@@ -493,7 +593,7 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
             "scenario", "batch_index", "label", "unique_tenants", "tenant_ids", "tenant_switches",
             "avg_latency_ms", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "qps",
             "avg_recall", "avg_selectivity_pct",
-            "avg_valid", "avg_expected_valid", "shortfall_queries",
+            "avg_valid", "avg_expected_valid", "shortfall_queries", "none_result_queries",
             "avg_posting_read", "avg_posting_match", "fp_rate_pct", "cache_usage_mb",
             "org_count", "dept_count", "team_count", "project_count",
         ])
@@ -502,7 +602,7 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
                 row["scenario"], row["batch_index"], row["label"], row["unique_tenants"], row["tenant_ids"], row["tenant_switches"],
                 row["avg_latency_ms"], row["p50_latency_ms"], row["p95_latency_ms"], row["p99_latency_ms"], row["qps"],
                 row["avg_recall"], row["avg_selectivity_pct"],
-                row["avg_valid"], row["avg_expected_valid"], row["shortfall_queries"],
+                row["avg_valid"], row["avg_expected_valid"], row["shortfall_queries"], row["none_result_queries"],
                 row["avg_posting_read"], row["avg_posting_match"], row["fp_rate_pct"], row["cache_usage_mb"],
                 row["level_hist"]["org"], row["level_hist"]["dept"], row["level_hist"]["team"], row["level_hist"]["project"],
             ])
@@ -526,6 +626,10 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
         f"- Cache limit: {payload['cache_limit_mb']:.1f} MB ({payload['cache_limit_source']})",
         f"- Cache policy: `{payload['cache_limit_policy']}`",
         f"- Drop page cache on evict: {payload['drop_page_cache_on_evict']}",
+        f"- RSS baseline before workloads: {payload['rss_baseline_mb']:.2f} MB",
+        f"- RSS high-water spec: `{payload['rss_high_water_input']}`",
+        f"- RSS high-water mode: `{payload['rss_high_water_mode']}`",
+        f"- RSS high-water effective limit: {payload['rss_high_water_mb']:.2f} MB",
         "",
         "## Search Params",
         "",
@@ -549,13 +653,13 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
         "",
         "## Overall",
         "",
-        "| Scenario | Avg Latency | P95 | P99 | QPS | Avg Recall | Avg Selectivity | Avg Valid | Avg Expected Valid | Shortfall Queries | Avg Posting Read | Avg Posting Match | FP Rate | Cache End |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Scenario | Avg Latency | P95 | P99 | QPS | Avg Recall | Avg Selectivity | Avg Valid | Avg Expected Valid | Shortfall Queries | None Results | Avg Posting Read | Avg Posting Match | FP Rate | Cache End |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for row in payload["overall_rows"]:
         lines.append(
             f"| {row['scenario']} | {row['avg_latency_ms']:.2f} ms | {row['p95_latency_ms']:.2f} ms | {row['p99_latency_ms']:.2f} ms | "
-            f"{row['qps']:.2f} | {row['avg_recall']:.4f} | {row['avg_selectivity_pct']:.2f}% | {row['avg_valid']:.2f} | {row['avg_expected_valid']:.2f} | {row['shortfall_queries']} | "
+            f"{row['qps']:.2f} | {row['avg_recall']:.4f} | {row['avg_selectivity_pct']:.2f}% | {row['avg_valid']:.2f} | {row['avg_expected_valid']:.2f} | {row['shortfall_queries']} | {row['none_result_queries']} | "
             f"{row['avg_posting_read']:.2f} | {row['avg_posting_match']:.2f} | {row['fp_rate_pct']:.2f}% | {row['cache_usage_end_mb']:.2f} MB |"
         )
 
@@ -564,8 +668,8 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
             "",
             f"## {scenario_name.title()} Batches",
             "",
-            "| Batch | Label | Unique Tenants | Switches | Avg Latency | P95 | P99 | QPS | Avg Recall | Avg Selectivity | Avg Valid | Avg Expected Valid | Shortfall Queries | Avg Posting Read | FP Rate | Cache Usage | Levels (org/dept/team/project) |",
-            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Batch | Label | Unique Tenants | Switches | Avg Latency | P95 | P99 | QPS | Avg Recall | Avg Selectivity | Avg Valid | Avg Expected Valid | Shortfall Queries | None Results | Avg Posting Read | FP Rate | Cache Usage | Levels (org/dept/team/project) |",
+            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ])
         for row in payload["batch_rows"]:
             if row["scenario"] != scenario_name:
@@ -574,11 +678,208 @@ def write_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
             lines.append(
                 f"| {row['batch_index']} | {row['label']} | {row['unique_tenants']} | {row['tenant_switches']} | {row['avg_latency_ms']:.2f} ms | "
                 f"{row['p95_latency_ms']:.2f} ms | {row['p99_latency_ms']:.2f} ms | {row['qps']:.2f} | {row['avg_recall']:.4f} | {row['avg_selectivity_pct']:.2f}% | {row['avg_valid']:.2f} | "
-                f"{row['avg_expected_valid']:.2f} | {row['shortfall_queries']} | {row['avg_posting_read']:.2f} | {row['fp_rate_pct']:.2f}% | "
+                f"{row['avg_expected_valid']:.2f} | {row['shortfall_queries']} | {row['none_result_queries']} | {row['avg_posting_read']:.2f} | {row['fp_rate_pct']:.2f}% | "
                 f"{row['cache_usage_mb']:.2f} MB | {level_hist['org']}/{level_hist['dept']}/{level_hist['team']}/{level_hist['project']} |"
             )
 
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_sweep_outputs(output_dir: Path, payload: dict, meta: dict) -> None:
+    json_path = output_dir / "summary.json"
+    csv_path = output_dir / "budget_summary.csv"
+    md_path = output_dir / "summary.md"
+    meta_json_path = output_dir / "meta.json"
+    meta_txt_path = output_dir / "meta.txt"
+
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    meta_json_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    meta_txt_path.write_text("\n".join(meta_to_text_lines(meta)) + "\n", encoding="utf-8")
+
+    with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow([
+            "rss_budget_label", "rss_budget_input", "rss_budget_mode", "rss_baseline_mb", "rss_high_water_mb",
+            "scenario", "avg_latency_ms", "p50_latency_ms", "p95_latency_ms", "p99_latency_ms", "qps",
+            "avg_recall", "avg_selectivity_pct", "avg_valid", "avg_expected_valid", "shortfall_queries",
+            "none_result_queries", "avg_posting_read", "avg_posting_match", "fp_rate_pct", "cache_usage_end_mb",
+            "run_dir",
+        ])
+        for run in payload["budget_runs"]:
+            for row in run["overall_rows"]:
+                writer.writerow([
+                    run["rss_budget_label"], run["rss_budget_input"], run["rss_budget_mode"], run["rss_baseline_mb"], run["rss_high_water_mb"],
+                    row["scenario"], row["avg_latency_ms"], row["p50_latency_ms"], row["p95_latency_ms"], row["p99_latency_ms"], row["qps"],
+                    row["avg_recall"], row["avg_selectivity_pct"], row["avg_valid"], row["avg_expected_valid"], row["shortfall_queries"],
+                    row["none_result_queries"], row["avg_posting_read"], row["avg_posting_match"], row["fp_rate_pct"], row["cache_usage_end_mb"],
+                    run["run_dir"],
+                ])
+
+    lines = [
+        "# Multi-Tenant Tag Cache Stress Sweep",
+        "",
+        f"- Created at (UTC): `{meta['created_at_utc']}`",
+        f"- Script: `{meta['script_path']}`",
+        f"- Repository root: `{meta['repo_root']}`",
+        f"- Git commit: `{meta['git_commit']}`",
+        f"- Git dirty: `{meta['git_dirty']}`",
+        f"- Scenario file: `{payload['scenario_file']}`",
+        f"- Index: `{payload['index_dir']}`",
+        f"- Query file: `{payload['query_file']}`",
+        f"- Tenants: {', '.join(payload['tenant_ids'])}",
+        f"- Queries per workload: {payload['num_queries']}",
+        f"- Batch size: {payload['batch_size']}",
+        f"- TopK: {payload['topk']}",
+        f"- Seed: {payload['seed']} (random workload seed `{payload['random_seed']}`)",
+        f"- Cache limit: {payload['cache_limit_mb']:.1f} MB ({payload['cache_limit_source']})",
+        f"- Cache policy: `{payload['cache_limit_policy']}`",
+        f"- RSS budget specs: `{', '.join(payload['rss_budget_inputs'])}`",
+        "",
+        "## Budget Summary",
+        "",
+        "| RSS Budget | Mode | Baseline RSS | Effective High-Water | Scenario | Avg Latency | P95 | P99 | QPS | Avg Recall | Shortfall Queries | None Results | Cache End | Run Dir |",
+        "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for run in payload["budget_runs"]:
+        for row in run["overall_rows"]:
+            lines.append(
+                f"| {run['rss_budget_label']} | {run['rss_budget_mode']} | {run['rss_baseline_mb']:.2f} MB | {run['rss_high_water_mb']:.2f} MB | {row['scenario']} | "
+                f"{row['avg_latency_ms']:.2f} ms | {row['p95_latency_ms']:.2f} ms | {row['p99_latency_ms']:.2f} ms | {row['qps']:.2f} | {row['avg_recall']:.4f} | "
+                f"{row['shortfall_queries']} | {row['none_result_queries']} | {row['cache_usage_end_mb']:.2f} MB | {run['run_dir']} |"
+            )
+
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run_rss_budget_sweep(args: argparse.Namespace, output_dir: Path) -> None:
+    budget_specs = parse_rss_budget_specs(args.rss_high_water_sweep_mb)
+    script_path = Path(__file__).resolve()
+
+    print("=" * 90)
+    print("  Multi-Tenant + Tag Filtering Cache Stress RSS Budget Sweep")
+    print("=" * 90)
+    print(f"Scenario file: {args.scenario_file}")
+    print(f"Query file: {args.query_file}")
+    print(f"Output root: {output_dir}")
+    print(f"RSS budgets: {', '.join(budget_specs)}")
+
+    budget_runs = []
+    first_child_summary = None
+    for index, spec in enumerate(budget_specs, start=1):
+        child_dir = output_dir / f"rss_budget_{index:02d}_{budget_token_to_slug(spec)}"
+        child_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--scenario-file", args.scenario_file,
+            "--query-file", args.query_file,
+            "--output-dir", str(child_dir),
+            "--num-queries", str(args.num_queries),
+            "--batch-size", str(args.batch_size),
+            "--topk", str(args.topk),
+            "--tenant-range", args.tenant_range,
+            "--seed", str(args.seed),
+            "--rss-high-water-mb", spec,
+            "--direct-sparse-max-postings", str(args.direct_sparse_max_postings),
+            "--filtered-search-nprobe-safety", str(args.filtered_search_nprobe_safety),
+            "--filtered-search-target-recall", str(args.filtered_search_target_recall),
+            "--filtered-search-coverage-exponent", str(args.filtered_search_coverage_exponent),
+        ]
+        if args.cache_limit_mb is not None:
+            cmd.extend(["--cache-limit-mb", str(args.cache_limit_mb)])
+        if args.drop_page_cache_on_evict:
+            cmd.append("--drop-page-cache-on-evict")
+        if args.force_dense_tag_search:
+            cmd.append("--force-dense-tag-search")
+
+        print(f"\n[{index}/{len(budget_specs)}] Running RSS budget {spec} -> {child_dir}")
+        subprocess.run(cmd, check=True)
+
+        child_summary = json.loads((child_dir / "summary.json").read_text(encoding="utf-8"))
+        child_meta = json.loads((child_dir / "meta.json").read_text(encoding="utf-8"))
+        if first_child_summary is None:
+            first_child_summary = child_summary
+        budget_runs.append({
+            "rss_budget_input": child_summary["rss_high_water_input"],
+            "rss_budget_mode": child_summary["rss_high_water_mode"],
+            "rss_budget_label": child_summary["rss_high_water_label"],
+            "rss_baseline_mb": child_summary["rss_baseline_mb"],
+            "rss_high_water_mb": child_summary["rss_high_water_mb"],
+            "overall_rows": child_summary["overall_rows"],
+            "run_dir": str(child_dir),
+            "summary_path": str(child_dir / "summary.json"),
+            "meta_path": str(child_dir / "meta.json"),
+            "python_executable": child_meta.get("python_executable"),
+        })
+
+    scenario = json.loads(Path(args.scenario_file).read_text(encoding="utf-8"))
+    index_dir = Path(scenario["index_dir"])
+    if first_child_summary is None:
+        raise RuntimeError("RSS budget sweep produced no child summaries")
+    created_at = utc_timestamp()
+    git_commit, git_dirty = detect_git_state()
+    payload = {
+        "created_at_utc": created_at,
+        "script_path": str(script_path),
+        "repo_root": str(REPO_ROOT),
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "scenario_file": args.scenario_file,
+        "index_dir": str(index_dir),
+        "query_file": args.query_file,
+        "num_queries": args.num_queries,
+        "batch_size": args.batch_size,
+        "topk": args.topk,
+        "seed": args.seed,
+        "random_seed": args.seed + 1,
+        "tenant_ids": [item.strip() for item in args.tenant_range.split(",") if item.strip()],
+        "cache_limit_mb": float(first_child_summary["cache_limit_mb"]),
+        "cache_limit_source": first_child_summary["cache_limit_source"],
+        "cache_limit_policy": first_child_summary["cache_limit_policy"],
+        "rss_budget_inputs": budget_specs,
+        "budget_runs": budget_runs,
+    }
+    meta = {
+        "created_at_utc": created_at,
+        "script_path": str(script_path),
+        "repo_root": str(REPO_ROOT),
+        "output_dir": str(output_dir),
+        "cwd": os.getcwd(),
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "python_executable": sys.executable,
+        "python_version": sys.version.split()[0],
+        "git_commit": git_commit,
+        "git_dirty": git_dirty,
+        "ld_preload": os.environ.get("LD_PRELOAD"),
+        "command_argv": sys.argv,
+        "scenario_file": args.scenario_file,
+        "query_file": args.query_file,
+        "index_dir": str(index_dir),
+        "seed": args.seed,
+        "random_seed": args.seed + 1,
+        "num_queries": args.num_queries,
+        "batch_size": args.batch_size,
+        "topk": args.topk,
+        "tenant_range": args.tenant_range,
+        "cache_limit_mb": first_child_summary["cache_limit_mb"],
+        "cache_limit_source": first_child_summary["cache_limit_source"],
+        "cache_limit_policy": first_child_summary["cache_limit_policy"],
+        "drop_page_cache_on_evict": bool(args.drop_page_cache_on_evict),
+        "search_params": first_child_summary["search_params"],
+        "rss_budget_inputs": budget_specs,
+    }
+    write_sweep_outputs(output_dir, payload, meta)
+
+    print("\n[done] RSS budget sweep summary")
+    for run in budget_runs:
+        for row in run["overall_rows"]:
+            print(
+                f"  {run['rss_budget_label']} / {row['scenario']}: avg={row['avg_latency_ms']:.2f}ms p95={row['p95_latency_ms']:.2f}ms "
+                f"p99={row['p99_latency_ms']:.2f}ms qps={row['qps']:.2f} recall={row['avg_recall']:.4f} "
+                f"shortfall={row['shortfall_queries']} none={row['none_result_queries']} cache_end={row['cache_usage_end_mb']:.2f}MB"
+            )
+    print(f"\nArtifacts written to {output_dir}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -595,6 +896,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tenant-range", default="0,1,2,3,4,5,6,7,8,9")
     parser.add_argument("--seed", type=int, default=20260413)
     parser.add_argument("--cache-limit-mb", type=float, default=None)
+    parser.add_argument(
+        "--rss-high-water-mb",
+        default=None,
+        help="RSS high-water in MB. Use an absolute value like '1024', a relative headroom like '+128', or 'off' to disable.",
+    )
+    parser.add_argument(
+        "--rss-high-water-sweep-mb",
+        default=None,
+        help="Comma-separated RSS high-water specs. Each token accepts the same format as --rss-high-water-mb, for example 'off,+64,+128,1024'.",
+    )
     parser.add_argument("--drop-page-cache-on-evict", action="store_true")
     parser.add_argument("--force-dense-tag-search", action="store_true")
     parser.add_argument("--direct-sparse-max-postings", type=int, default=DEFAULT_SEARCH_PARAMS["direct_sparse_max_postings"])
@@ -614,9 +925,15 @@ def main() -> None:
         raise RuntimeError("num-queries and batch-size must be positive")
     if args.num_queries % args.batch_size != 0:
         raise RuntimeError("num-queries must be divisible by batch-size")
+    if args.rss_high_water_mb is not None and args.rss_high_water_sweep_mb is not None:
+        raise RuntimeError("rss-high-water-mb and rss-high-water-sweep-mb are mutually exclusive")
 
     output_dir = Path(args.output_dir) if args.output_dir else default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.rss_high_water_sweep_mb is not None:
+        run_rss_budget_sweep(args, output_dir)
+        return
 
     scenario = json.loads(Path(args.scenario_file).read_text(encoding="utf-8"))
     index_dir = Path(scenario["index_dir"])
@@ -671,6 +988,8 @@ def main() -> None:
     print(f"Queries: {args.num_queries} (batch size {args.batch_size})")
     print(f"TopK: {args.topk}")
     print(f"Tenants: {', '.join(selected_tenants)}")
+    if args.rss_high_water_mb is not None:
+        print(f"RSS high-water spec: {args.rss_high_water_mb}")
 
     print("\n[1] Loading manager and building tenant signatures ...")
     manager = SPTAG.CreateTenantIndexManager(scenario["dimension"], "SPANN", "Float")
@@ -712,6 +1031,9 @@ def main() -> None:
 
     manager.SetHeadIndexCacheLimit(cache_limit_bytes)
     manager.SetDropPageCacheOnEvict(bool(args.drop_page_cache_on_evict))
+    rss_baseline_bytes = int(manager.GetCurrentRSSBytes())
+    rss_budget = resolve_rss_budget_spec(args.rss_high_water_mb, rss_baseline_bytes)
+    manager.SetRSSHighWaterMark(int(rss_budget["effective_bytes"]))
 
     rng_sequential = np.random.default_rng(args.seed)
     rng_random = np.random.default_rng(args.seed + 1)
@@ -756,6 +1078,11 @@ def main() -> None:
         "cache_limit_mb": cache_limit_bytes / MB,
         "cache_limit_source": cache_limit_source,
         "cache_limit_policy": cache_limit_policy,
+        "rss_baseline_mb": rss_baseline_bytes / MB,
+        "rss_high_water_input": rss_budget["input"] or "off",
+        "rss_high_water_mode": rss_budget["mode"],
+        "rss_high_water_label": rss_budget["label"],
+        "rss_high_water_mb": float(rss_budget["effective_mb"]),
         "drop_page_cache_on_evict": bool(args.drop_page_cache_on_evict),
         "search_params": search_params,
         "tenant_rows": tenant_rows,
@@ -789,6 +1116,11 @@ def main() -> None:
         "cache_limit_mb": cache_limit_bytes / MB,
         "cache_limit_source": cache_limit_source,
         "cache_limit_policy": cache_limit_policy,
+        "rss_baseline_mb": rss_baseline_bytes / MB,
+        "rss_high_water_input": rss_budget["input"] or "off",
+        "rss_high_water_mode": rss_budget["mode"],
+        "rss_high_water_label": rss_budget["label"],
+        "rss_high_water_mb": float(rss_budget["effective_mb"]),
         "drop_page_cache_on_evict": bool(args.drop_page_cache_on_evict),
         "search_params": search_params,
     }
@@ -800,6 +1132,7 @@ def main() -> None:
             f"  {row['scenario']}: avg={row['avg_latency_ms']:.2f}ms p95={row['p95_latency_ms']:.2f}ms "
             f"p99={row['p99_latency_ms']:.2f}ms qps={row['qps']:.2f} recall={row['avg_recall']:.4f} "
             f"sel={row['avg_selectivity_pct']:.2f}% valid={row['avg_valid']:.2f}/{row['avg_expected_valid']:.2f} "
+            f"shortfall={row['shortfall_queries']} none={row['none_result_queries']} "
             f"fp={row['fp_rate_pct']:.2f}% cache_end={row['cache_usage_end_mb']:.2f}MB"
         )
 

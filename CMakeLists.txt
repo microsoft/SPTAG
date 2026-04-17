@@ -5,6 +5,8 @@ cmake_minimum_required (VERSION 3.12)
 
 project (SPTAGLib)
 
+enable_testing()
+
 function(CXX_COMPILER_DUMPVERSION _OUTPUT_VERSION)
   exec_program(${CMAKE_CXX_COMPILER}
     ARGS ${CMAKE_CXX_COMPILER_ARG1} -dumpversion
@@ -169,9 +171,15 @@ endif()
 
 set (TBB_LIBRARIES "")
 if (TBB)
-    find_package(TBB REQUIRED)
+    find_package(TBB CONFIG REQUIRED)
     if (TBB_FOUND)
-        list(APPEND TBB_LIBRARIES tbb)
+        if (TARGET TBB::tbb)
+            list(APPEND TBB_LIBRARIES TBB::tbb)
+        elseif (DEFINED TBB_LIBRARIES AND TBB_LIBRARIES)
+            list(APPEND TBB_LIBRARIES ${TBB_LIBRARIES})
+        else()
+            list(APPEND TBB_LIBRARIES tbb)
+        endif()
         add_definitions(-DTBB)
 	message (STATUS "Found TBB ${TBB_LIBRARIES}")
     else()

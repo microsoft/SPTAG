@@ -131,6 +131,7 @@ DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings
 DefineSSDParameter(m_filteredSearchNprobeSafety, float, 1.0f, "FilteredSearchNprobeSafety") // Mutable
 DefineSSDParameter(m_filteredSearchTargetRecall, float, 1.0f, "FilteredSearchTargetRecall") // Mutable
 DefineSSDParameter(m_filteredSearchCoverageExponent, float, 0.5f, "FilteredSearchCoverageExponent") // Mutable
+DefineSSDParameter(m_enableAdaptiveFilteredNprobe, bool, true, "EnableAdaptiveFilteredNprobe") // Mutable
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")

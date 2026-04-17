@@ -40,6 +40,23 @@ SPTAG_STRESS_TENANT_RANGE=0,1 \
 bash Tools/benchmarks/run_multitenant_tag_cache_stress.sh
 ```
 
+Run a small RSS high-water sweep relative to the benchmark process baseline RSS:
+
+```bash
+SPTAG_STRESS_NUM_QUERIES=20 \
+SPTAG_STRESS_BATCH_SIZE=10 \
+SPTAG_STRESS_TENANT_RANGE=0,1 \
+SPTAG_STRESS_RSS_HIGH_WATER_SWEEP_MB=off,+64,+128 \
+bash Tools/benchmarks/run_multitenant_tag_cache_stress.sh
+```
+
+Run with an absolute RSS high-water cap:
+
+```bash
+python Tools/benchmarks/multitenant_tag_cache_stress.py \
+	--rss-high-water-mb 2048
+```
+
 Useful environment overrides for the runner:
 
 - `SPTAG_STRESS_SCENARIO_FILE`
@@ -51,6 +68,8 @@ Useful environment overrides for the runner:
 - `SPTAG_STRESS_TENANT_RANGE`
 - `SPTAG_STRESS_SEED`
 - `SPTAG_STRESS_CACHE_LIMIT_MB`
+- `SPTAG_STRESS_RSS_HIGH_WATER_MB`
+- `SPTAG_STRESS_RSS_HIGH_WATER_SWEEP_MB`
 - `SPTAG_STRESS_DROP_PAGE_CACHE_ON_EVICT`
 - `SPTAG_STRESS_FORCE_DENSE_TAG_SEARCH`
 - `SPTAG_STRESS_DIRECT_SPARSE_MAX_POSTINGS`
@@ -70,8 +89,16 @@ Artifacts written per run:
 - `summary.md`: human-readable summary table
 - `batch_summary.csv`: batch-level metrics
 
+Artifacts written for RSS sweep mode:
+
+- root `summary.json` / `summary.md`: aggregated per-budget summary
+- root `budget_summary.csv`: one row per `(rss_budget, scenario)`
+- one child directory per RSS budget, each containing the normal per-run artifacts above
+
 Notes:
 
 - The benchmark uses exact recall computed from the base vectors referenced by the scenario file.
 - The runner records seed, search parameters, git commit, and runtime environment so the workload is reproducible.
 - Latency is statistically reproducible, not bitwise identical, because OS scheduling and file cache state can vary.
+- `--rss-high-water-mb` accepts `off`, an absolute MB value like `1024`, or a relative headroom like `+128` measured above the benchmark process RSS right before workloads start.
+- `--rss-high-water-sweep-mb` accepts a comma-separated list in the same format and runs each budget in a fresh child process so process-level RSS measurements do not drift across sweep points.

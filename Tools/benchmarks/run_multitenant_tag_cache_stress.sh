@@ -17,6 +17,8 @@ topk=${SPTAG_STRESS_TOPK:-10}
 tenant_range=${SPTAG_STRESS_TENANT_RANGE:-0,1,2,3,4,5,6,7,8,9}
 seed=${SPTAG_STRESS_SEED:-20260413}
 cache_limit_mb=${SPTAG_STRESS_CACHE_LIMIT_MB:-auto}
+rss_high_water_mb=${SPTAG_STRESS_RSS_HIGH_WATER_MB:-}
+rss_high_water_sweep_mb=${SPTAG_STRESS_RSS_HIGH_WATER_SWEEP_MB:-}
 drop_page_cache_on_evict=${SPTAG_STRESS_DROP_PAGE_CACHE_ON_EVICT:-true}
 
 force_dense_tag_search=${SPTAG_STRESS_FORCE_DENSE_TAG_SEARCH:-false}
@@ -56,6 +58,8 @@ topk=$topk
 tenant_range=$tenant_range
 seed=$seed
 cache_limit_mb=$cache_limit_mb
+rss_high_water_mb=$rss_high_water_mb
+rss_high_water_sweep_mb=$rss_high_water_sweep_mb
 drop_page_cache_on_evict=$drop_page_cache_on_evict
 force_dense_tag_search=$force_dense_tag_search
 direct_sparse_max_postings=$direct_sparse_max_postings
@@ -85,6 +89,14 @@ cmd=(
 
 if [[ "$cache_limit_mb" != "auto" ]]; then
   cmd+=(--cache-limit-mb "$cache_limit_mb")
+fi
+
+if [[ -n "$rss_high_water_mb" ]]; then
+  cmd+=(--rss-high-water-mb "$rss_high_water_mb")
+fi
+
+if [[ -n "$rss_high_water_sweep_mb" ]]; then
+  cmd+=(--rss-high-water-sweep-mb "$rss_high_water_sweep_mb")
 fi
 
 if [[ "$drop_page_cache_on_evict" == "true" ]]; then

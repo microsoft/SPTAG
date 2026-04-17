@@ -99,5 +99,6 @@
         "spanstream": "cpp",
         "stacktrace": "cpp",
         "__nullptr": "cpp"
-    }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

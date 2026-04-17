@@ -42,6 +42,17 @@ namespace SPTAG
 
     namespace SPANN
     {
+        struct HeadBundleNodeInfo
+        {
+            int nodeId = 0;
+            std::string headIndexRelativePath;
+            SizeType headOffset = 0;
+            SizeType headCount = 0;
+            SizeType postingOffset = 0;
+            SizeType postingCount = 0;
+            SizeType assignmentCount = 0;
+        };
+
         template<typename T>
 	    class SPANNResultIterator;
 
@@ -50,6 +61,12 @@ namespace SPTAG
         {
         private:
             std::shared_ptr<VectorIndex> m_index;
+	        std::vector<HeadBundleNodeInfo> m_headBundleNodes;
+            mutable std::vector<std::shared_ptr<VectorIndex>> m_loadedHeadBundleIndexes;
+            mutable std::vector<std::vector<SizeType>> m_headBundleLocalToGlobalHIDs;
+            mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
+            mutable std::mutex m_headBundleLoadLock;
+            std::string m_headBundleBaseDir;
 	        COMMON::Dataset<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
 
@@ -69,6 +86,10 @@ namespace SPTAG
             // Pre-set vector tags for embedding in postings during build
             std::vector<uint32_t> m_pendingVectorTags;
             int m_pendingNumTagsPerVec = 0;
+            std::vector<std::vector<SizeType>> m_pendingNodeVectorAssignments;
+            std::vector<std::vector<SizeType>> m_pendingPrimaryNodeVectorAssignments;
+            std::vector<std::vector<SizeType>> m_pendingNodeHeadSelections;
+            std::unordered_map<SizeType, int> m_pendingHeadVectorOwners;
 
  
 
@@ -86,12 +107,24 @@ namespace SPTAG
             inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_index; }
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex() { return m_extraSearcher; }
             inline Options* GetOptions() { return &m_options; }
+            inline const std::vector<HeadBundleNodeInfo>& GetHeadBundleNodes() const { return m_headBundleNodes; }
+            inline bool HasHeadBundleNodes() const { return !m_headBundleNodes.empty(); }
 
             // Set per-vector tags to be embedded in posting metadata during build
             void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
                 m_pendingNumTagsPerVec = numTagsPerVec;
                 m_options.m_numTagsPerVec = numTagsPerVec;
                 m_pendingVectorTags.assign(tags, tags + (size_t)numVecs * numTagsPerVec);
+            }
+
+            void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments)
+            {
+                m_pendingNodeVectorAssignments = nodeVectorAssignments;
+            }
+
+            void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments)
+            {
+                m_pendingPrimaryNodeVectorAssignments = primaryNodeVectorAssignments;
             }
 
             inline SizeType GetNumSamples() const { return m_versionMap.Count(); }
@@ -167,6 +200,12 @@ namespace SPTAG
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
                 SearchStats* p_stats = nullptr, std::set<int>* truth = nullptr, std::map<int, std::set<int>>* found = nullptr) const;
             ErrorCode UpdateIndex();
+
+            void InitializeDefaultHeadBundle();
+            ErrorCode SaveHeadBundleManifest(const std::string& p_baseDir) const;
+            ErrorCode LoadHeadBundleManifest(const std::string& p_baseDir);
+            ErrorCode InitializeHeadBundleRuntime(const std::string& p_baseDir);
+            ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
 
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr);
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;

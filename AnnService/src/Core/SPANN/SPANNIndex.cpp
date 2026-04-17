@@ -6,6 +6,8 @@
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
 #include <chrono>
+#include <cstdlib>
+#include <cstdio>
 #include <cmath>
 #include <random>
 #include <shared_mutex>
@@ -24,9 +26,436 @@ namespace SPANN
 {
 EdgeCompare Selection::g_edgeComparer;
 
+namespace
+{
+constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
+constexpr std::int32_t kHeadBundleManifestVersion = 2;
+
+double GetMultiNodeBudgetKeepRatio()
+{
+    static const double kDefaultKeepRatio = 0.60;
+    static const double ratio = []() {
+        const char* value = std::getenv("SPTAG_MULTI_NODE_BUDGET_KEEP_RATIO");
+        if (value == nullptr || *value == '\0') {
+            return kDefaultKeepRatio;
+        }
+
+        char* end = nullptr;
+        double parsed = std::strtod(value, &end);
+        if (end == value || !std::isfinite(parsed) || parsed <= 0.0 || parsed > 1.0) {
+            return kDefaultKeepRatio;
+        }
+        return parsed;
+    }();
+    return ratio;
+}
+
+struct HeadBundleManifestHeader
+{
+    std::uint32_t magic;
+    std::int32_t version;
+    std::int32_t nodeCount;
+    std::int32_t reserved;
+};
+
+struct HeadBundleManifestNodeRecordV2
+{
+    std::int32_t nodeId;
+    std::int32_t pathLength;
+    std::int64_t headOffset;
+    std::int64_t headCount;
+    std::int64_t postingOffset;
+    std::int64_t postingCount;
+    std::int64_t assignmentCount;
+};
+
+std::string HeadBundleManifestPath(const Options& p_options, const std::string& p_baseDir)
+{
+    std::string root = p_baseDir;
+    if (!root.empty() && *(root.rbegin()) != FolderSep) {
+        root += FolderSep;
+    }
+    return root + p_options.m_headIndexFolder + FolderSep + "head_bundle_manifest.bin";
+}
+
+std::string HeadBundleNodeRelativePath(const Options& p_options, int nodeId)
+{
+    return p_options.m_headIndexFolder + FolderSep + (std::string("node_") + std::to_string(nodeId));
+}
+
+std::string HeadBundleNodeAbsolutePath(const Options& p_options, const std::string& p_baseDir, int nodeId)
+{
+    std::string root = p_baseDir;
+    if (!root.empty() && *(root.rbegin()) != FolderSep) {
+        root += FolderSep;
+    }
+    return root + HeadBundleNodeRelativePath(p_options, nodeId);
+}
+
+bool EnsureDirectory(const std::string& path)
+{
+    if (path.empty()) return false;
+    if (direxists(path.c_str())) return true;
+    mkdir(path.c_str());
+    return direxists(path.c_str());
+}
+
+std::string JoinPath(const std::string& baseDir, const std::string& relativePath)
+{
+    if (relativePath.empty()) return baseDir;
+
+    std::string root = baseDir;
+    if (!root.empty() && *(root.rbegin()) != FolderSep) {
+        root += FolderSep;
+    }
+    return root + relativePath;
+}
+
+template <typename InternalDataType>
+bool WriteSelectedHeadFiles(const COMMON::Dataset<InternalDataType>& data,
+                            const std::vector<SizeType>& selected,
+                            const std::string& vectorFilePath,
+                            const std::string& idFilePath)
+{
+    std::shared_ptr<Helper::DiskIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
+    if (output == nullptr || outputIDs == nullptr ||
+        !output->Initialize(vectorFilePath.c_str(), std::ios::binary | std::ios::out) ||
+        !outputIDs->Initialize(idFilePath.c_str(), std::ios::binary | std::ios::out))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create head selection files: %s %s\n",
+                     vectorFilePath.c_str(), idFilePath.c_str());
+        return false;
+    }
+
+    SizeType val = static_cast<SizeType>(selected.size());
+    if (output->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val) ||
+        outputIDs->WriteBinary(sizeof(val), reinterpret_cast<char*>(&val)) != sizeof(val))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write head selection count.\n");
+        return false;
+    }
+
+    DimensionType dims = data.C();
+    if (output->WriteBinary(sizeof(dims), reinterpret_cast<char*>(&dims)) != sizeof(dims))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write head vector dimensions.\n");
+        return false;
+    }
+
+    DimensionType idDims = 1;
+    if (outputIDs->WriteBinary(sizeof(idDims), reinterpret_cast<char*>(&idDims)) != sizeof(idDims))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write head id dimensions.\n");
+        return false;
+    }
+
+    for (SizeType vid : selected)
+    {
+        uint64_t storedVid = static_cast<uint64_t>(vid);
+        if (outputIDs->WriteBinary(sizeof(storedVid), reinterpret_cast<char*>(&storedVid)) != sizeof(storedVid) ||
+            output->WriteBinary(sizeof(InternalDataType) * data.C(), reinterpret_cast<const char*>(data[vid])) !=
+                sizeof(InternalDataType) * data.C())
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write selected head vector %d.\n", vid);
+            return false;
+        }
+    }
+
+    return true;
+}
+}
+
 std::function<std::shared_ptr<Helper::DiskIO>(void)> f_createAsyncIO = []() -> std::shared_ptr<Helper::DiskIO> {
     return std::shared_ptr<Helper::DiskIO>(new Helper::AsyncFileIO());
 };
+
+template <typename T> void Index<T>::InitializeDefaultHeadBundle()
+{
+    m_headBundleNodes.clear();
+
+    HeadBundleNodeInfo nodeInfo;
+    nodeInfo.nodeId = 0;
+    nodeInfo.headIndexRelativePath = m_options.m_headIndexFolder;
+    if (m_index != nullptr) {
+        const SizeType sampleCount = m_index->GetNumSamples();
+        nodeInfo.headCount = sampleCount;
+        nodeInfo.postingCount = sampleCount;
+        nodeInfo.assignmentCount = sampleCount;
+    }
+    m_headBundleNodes.emplace_back(std::move(nodeInfo));
+}
+
+template <typename T> ErrorCode Index<T>::SaveHeadBundleManifest(const std::string& p_baseDir) const
+{
+    if (p_baseDir.empty()) {
+        return ErrorCode::Success;
+    }
+
+    std::vector<HeadBundleNodeInfo> nodes = m_headBundleNodes;
+    if (nodes.empty()) {
+        HeadBundleNodeInfo nodeInfo;
+        nodeInfo.nodeId = 0;
+        nodeInfo.headIndexRelativePath = m_options.m_headIndexFolder;
+        if (m_index != nullptr) {
+            const SizeType sampleCount = m_index->GetNumSamples();
+            nodeInfo.headCount = sampleCount;
+            nodeInfo.postingCount = sampleCount;
+            nodeInfo.assignmentCount = sampleCount;
+        }
+        nodes.emplace_back(std::move(nodeInfo));
+    }
+
+    std::string headDir = p_baseDir;
+    if (!headDir.empty() && *(headDir.rbegin()) != FolderSep) {
+        headDir += FolderSep;
+    }
+    headDir += m_options.m_headIndexFolder;
+    if (!direxists(headDir.c_str())) {
+        mkdir(headDir.c_str());
+    }
+
+    const std::string manifestPath = HeadBundleManifestPath(m_options, p_baseDir);
+    FILE* manifestFile = fopen(manifestPath.c_str(), "wb");
+    if (manifestFile == nullptr) {
+        return ErrorCode::FailedCreateFile;
+    }
+
+    HeadBundleManifestHeader header{};
+    header.magic = kHeadBundleManifestMagic;
+    header.version = kHeadBundleManifestVersion;
+    header.nodeCount = static_cast<std::int32_t>(nodes.size());
+
+    bool success = fwrite(&header, sizeof(header), 1, manifestFile) == 1;
+    for (const auto& nodeInfo : nodes)
+    {
+        if (!success) break;
+
+        const std::string& relativePath = nodeInfo.headIndexRelativePath;
+        if (relativePath.size() > static_cast<size_t>(std::numeric_limits<std::int32_t>::max())) {
+            success = false;
+            break;
+        }
+
+        HeadBundleManifestNodeRecordV2 record{};
+        record.nodeId = static_cast<std::int32_t>(nodeInfo.nodeId);
+        record.pathLength = static_cast<std::int32_t>(relativePath.size());
+        record.headOffset = static_cast<std::int64_t>(nodeInfo.headOffset);
+        record.headCount = static_cast<std::int64_t>(nodeInfo.headCount);
+        record.postingOffset = static_cast<std::int64_t>(nodeInfo.postingOffset);
+        record.postingCount = static_cast<std::int64_t>(nodeInfo.postingCount);
+        record.assignmentCount = static_cast<std::int64_t>(nodeInfo.assignmentCount);
+
+        success = fwrite(&record, sizeof(record), 1, manifestFile) == 1;
+        if (success && record.pathLength > 0) {
+            success = fwrite(relativePath.data(), 1, static_cast<size_t>(record.pathLength), manifestFile) ==
+                      static_cast<size_t>(record.pathLength);
+        }
+    }
+
+    fclose(manifestFile);
+    return success ? ErrorCode::Success : ErrorCode::Fail;
+}
+
+template <typename T> ErrorCode Index<T>::LoadHeadBundleManifest(const std::string& p_baseDir)
+{
+    m_headBundleNodes.clear();
+    if (p_baseDir.empty()) {
+        InitializeDefaultHeadBundle();
+        return ErrorCode::Success;
+    }
+
+    const std::string manifestPath = HeadBundleManifestPath(m_options, p_baseDir);
+    FILE* manifestFile = fopen(manifestPath.c_str(), "rb");
+    if (manifestFile == nullptr) {
+        InitializeDefaultHeadBundle();
+        return ErrorCode::Success;
+    }
+
+    HeadBundleManifestHeader header{};
+    bool success = fread(&header, sizeof(header), 1, manifestFile) == 1;
+    success = success && header.magic == kHeadBundleManifestMagic &&
+              header.version == kHeadBundleManifestVersion &&
+              header.nodeCount >= 0;
+
+    std::vector<HeadBundleNodeInfo> nodes;
+    if (success) {
+        nodes.reserve(static_cast<size_t>(header.nodeCount));
+    }
+
+    for (std::int32_t nodeIndex = 0; success && nodeIndex < header.nodeCount; ++nodeIndex)
+    {
+        HeadBundleManifestNodeRecordV2 record{};
+        success = fread(&record, sizeof(record), 1, manifestFile) == 1;
+        success = success && record.pathLength >= 0 && record.headOffset >= 0 && record.headCount >= 0 &&
+                  record.postingOffset >= 0 && record.postingCount >= 0 && record.assignmentCount >= 0;
+        if (!success) break;
+
+        HeadBundleNodeInfo nodeInfo;
+        nodeInfo.nodeId = static_cast<int>(record.nodeId);
+        nodeInfo.headOffset = static_cast<SizeType>(record.headOffset);
+        nodeInfo.headCount = static_cast<SizeType>(record.headCount);
+        nodeInfo.postingOffset = static_cast<SizeType>(record.postingOffset);
+        nodeInfo.postingCount = static_cast<SizeType>(record.postingCount);
+        nodeInfo.assignmentCount = static_cast<SizeType>(record.assignmentCount);
+
+        std::string relativePath(static_cast<size_t>(record.pathLength), '\0');
+        if (record.pathLength > 0) {
+            success = fread(&relativePath[0], 1, static_cast<size_t>(record.pathLength), manifestFile) ==
+                      static_cast<size_t>(record.pathLength);
+            if (!success) break;
+        }
+
+        nodeInfo.headIndexRelativePath = std::move(relativePath);
+        nodes.emplace_back(std::move(nodeInfo));
+    }
+
+    fclose(manifestFile);
+    if (!success || nodes.empty()) {
+        InitializeDefaultHeadBundle();
+        return ErrorCode::Success;
+    }
+
+    m_headBundleNodes = std::move(nodes);
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std::string& p_baseDir)
+{
+    std::lock_guard<std::mutex> lock(m_headBundleLoadLock);
+
+    m_headBundleBaseDir = p_baseDir;
+    m_loadedHeadBundleIndexes.clear();
+    m_headBundleLocalToGlobalHIDs.clear();
+    m_globalHeadVIDToLocalHID.clear();
+
+    if (!m_headBundleNodes.empty())
+    {
+        m_loadedHeadBundleIndexes.resize(m_headBundleNodes.size());
+        m_headBundleLocalToGlobalHIDs.resize(m_headBundleNodes.size());
+    }
+
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeId) const
+{
+    if (p_nodeId < 0 || p_nodeId >= static_cast<int>(m_headBundleNodes.size())) {
+        return ErrorCode::Fail;
+    }
+    if (m_index == nullptr) {
+        return ErrorCode::Fail;
+    }
+
+    const auto& nodeInfo = m_headBundleNodes[static_cast<size_t>(p_nodeId)];
+    if (nodeInfo.headCount == 0) {
+        return ErrorCode::Success;
+    }
+
+    std::lock_guard<std::mutex> lock(m_headBundleLoadLock);
+    auto& localToGlobalHIDs = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(p_nodeId)];
+
+    if (m_globalHeadVIDToLocalHID.empty())
+    {
+        if (m_index->HasHeadNodeMeta())
+        {
+            const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
+            m_globalHeadVIDToLocalHID.reserve(static_cast<size_t>(sampleCount) * 2 + 1);
+            for (SizeType localHid = 0; localHid < sampleCount; ++localHid)
+            {
+                SizeType globalVID = m_index->GetHeadNodeGlobalVID(localHid);
+                if (globalVID != MaxSize) {
+                    m_globalHeadVIDToLocalHID[globalVID] = localHid;
+                }
+            }
+        }
+        else if (m_vectorTranslateMap.R() > 0)
+        {
+            m_globalHeadVIDToLocalHID.reserve(static_cast<size_t>(m_vectorTranslateMap.R()) * 2 + 1);
+            for (SizeType localHid = 0; localHid < m_vectorTranslateMap.R(); ++localHid)
+            {
+                SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[localHid]));
+                if (globalVID != MaxSize) {
+                    m_globalHeadVIDToLocalHID[globalVID] = localHid;
+                }
+            }
+        }
+    }
+
+    const std::string nodeDir = JoinPath(m_headBundleBaseDir, nodeInfo.headIndexRelativePath);
+    if (localToGlobalHIDs.empty())
+    {
+        COMMON::Dataset<std::uint64_t> nodeHeadIDs;
+        nodeHeadIDs.SetName("HeadBundleNodeIDs");
+        if (nodeHeadIDs.Load(nodeDir + FolderSep + m_options.m_headIDFile,
+                             m_index->m_iDataBlockSize,
+                             m_index->m_iDataCapacity) != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                         "Failed to load head bundle IDs for node %d from %s\n",
+                         p_nodeId,
+                         nodeDir.c_str());
+            return ErrorCode::Fail;
+        }
+
+        localToGlobalHIDs.reserve(nodeHeadIDs.R());
+        for (SizeType localHid = 0; localHid < nodeHeadIDs.R(); ++localHid)
+        {
+            SizeType globalVID = static_cast<SizeType>(*(nodeHeadIDs[localHid]));
+            auto globalHidIt = m_globalHeadVIDToLocalHID.find(globalVID);
+            if (globalHidIt == m_globalHeadVIDToLocalHID.end())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "Head bundle node %d references global VID %d with no global HID mapping.\n",
+                             p_nodeId,
+                             globalVID);
+                localToGlobalHIDs.clear();
+                return ErrorCode::Fail;
+            }
+            localToGlobalHIDs.push_back(globalHidIt->second);
+        }
+    }
+
+    if (m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)] == nullptr)
+    {
+        std::shared_ptr<VectorIndex> nodeIndex;
+        if (VectorIndex::LoadIndex(nodeDir, nodeIndex) != ErrorCode::Success || nodeIndex == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                         "Failed to load head bundle node index %d from %s\n",
+                         p_nodeId,
+                         nodeDir.c_str());
+            return ErrorCode::Fail;
+        }
+
+        nodeIndex->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
+        nodeIndex->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+        if (nodeIndex->UpdateIndex() != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                         "Failed to update loaded head bundle node index %d from %s\n",
+                         p_nodeId,
+                         nodeDir.c_str());
+            return ErrorCode::Fail;
+        }
+        nodeIndex->SetReady(true);
+        m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)] = std::move(nodeIndex);
+    }
+
+    if (m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)] == nullptr ||
+        m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)]->GetNumSamples() != localToGlobalHIDs.size())
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "Head bundle node %d sample count mismatch: index=%d mapping=%d\n",
+                     p_nodeId,
+                     m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)] == nullptr
+                         ? -1
+                         : static_cast<int>(m_loadedHeadBundleIndexes[static_cast<size_t>(p_nodeId)]->GetNumSamples()),
+                     static_cast<int>(localToGlobalHIDs.size()));
+        return ErrorCode::Fail;
+    }
+
+    return ErrorCode::Success;
+}
 
 template <typename T> bool Index<T>::CheckHeadIndexType()
 {
@@ -126,6 +555,8 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
 
     m_vectorTranslateMap.Initialize(m_index->GetNumSamples(), 1, m_index->m_iDataBlockSize, m_index->m_iDataCapacity,
                                     p_indexBlobs.back().Data(), false);
+    InitializeDefaultHeadBundle();
+    InitializeHeadBundleRuntime(std::string());
 
     return ErrorCode::Success;
 }
@@ -214,6 +645,12 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
             return ErrorCode::Fail;
     }
 
+    const std::string bundleBaseDir = m_options.m_recovery ? m_options.m_persistentBufferPath : m_options.m_indexDirectory;
+    if (LoadHeadBundleManifest(bundleBaseDir) != ErrorCode::Success)
+        return ErrorCode::Fail;
+    if (InitializeHeadBundleRuntime(bundleBaseDir) != ErrorCode::Success)
+        return ErrorCode::Fail;
+
     return ErrorCode::Success;
 }
 
@@ -286,6 +723,9 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
     if ((ret = m_extraSearcher->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
         return ret;
+
+    if ((ret = SaveHeadBundleManifest(m_options.m_indexDirectory)) != ErrorCode::Success)
+        return ret;
     return ErrorCode::Success;
 }
 
@@ -298,8 +738,31 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
     SPTAG::VectorIndex::ResetThreadLocalPostingScanStats();
 
+    const auto* threadLocalSearchContext = SPTAG::VectorIndex::GetThreadLocalSearchContext();
+    static const std::vector<SizeType> kEmptyDirectPostingIDs;
+    static const std::function<bool(int)> kEmptyPostingFilter;
+    const std::vector<SizeType>& directPostingIDs = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_directPostingIDs
+        : kEmptyDirectPostingIDs;
+    const uint32_t* queryTags = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->QueryTags()
+        : nullptr;
+    const int numQueryTags = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->NumQueryTags()
+        : 0;
+    const float filterSelectivity = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_filterSelectivity
+        : 1.0f;
+    const std::function<bool(int)>& postingFilter = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_postingFilter
+        : kEmptyPostingFilter;
+    static const std::vector<int> kEmptySearchHeadBundleNodes;
+    const std::vector<int>& searchHeadBundleNodes = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_searchHeadBundleNodes
+        : kEmptySearchHeadBundleNodes;
+
     // ═══ Sparse tag fast path: skip graph search, read postings directly ═══
-    if (!m_directPostingIDs.empty() && m_extraSearcher != nullptr)
+    if (!directPostingIDs.empty() && m_extraSearcher != nullptr)
     {
         auto workSpace = m_workSpaceFactory->GetWorkSpace();
         if (!workSpace) {
@@ -308,14 +771,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         } else {
             m_extraSearcher->InitWorkSpace(workSpace.get(), true);
         }
-        workSpace->m_queryTags = m_queryTags;
-        workSpace->m_numQueryTags = m_numQueryTags;
+        workSpace->m_queryTags = queryTags;
+        workSpace->m_numQueryTags = numQueryTags;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
         workSpace->m_postingFilter = nullptr;  // no PS needed, we know exact postings
         workSpace->m_postingProbeStats.Reset();
 
-        const int directPostingCount = static_cast<int>(m_directPostingIDs.size());
+        const int directPostingCount = static_cast<int>(directPostingIDs.size());
         if (directPostingCount > m_options.m_searchInternalResultNum) {
             int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
                            + m_options.m_bufferLength) << PageSizeEx;
@@ -324,7 +787,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
         // Directly inject all target posting IDs for sparse brute-force.
         int maxPostings = directPostingCount;
-        for (SizeType pid : m_directPostingIDs) {
+        for (SizeType pid : directPostingIDs) {
             if ((int)workSpace->m_postingIDs.size() >= maxPostings) break;
             if (m_extraSearcher->CheckValidPosting(pid)) {
                 workSpace->m_postingIDs.emplace_back(pid);
@@ -347,13 +810,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             workSpace->m_postingProbeStats.m_matchedPostings);
 
         if (ret == ErrorCode::Success &&
-            m_queryTags != nullptr &&
-            m_numQueryTags > 0 &&
+            queryTags != nullptr &&
+            numQueryTags > 0 &&
             m_index != nullptr)
         {
             const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
             for (SizeType sampleId = 0; sampleId < sampleCount; ++sampleId) {
-                if (!m_index->HeadNodeMatchesAnyQueryTag(sampleId, m_queryTags, m_numQueryTags)) {
+                if (!m_index->HeadNodeMatchesAnyQueryTag(sampleId, queryTags, numQueryTags)) {
                     continue;
                 }
 
@@ -383,9 +846,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             }
             delete p_queryResults;
         }
-        m_directPostingIDs.clear();
-        m_queryTags = nullptr;
-        m_numQueryTags = 0;
         return ret;
     }
 
@@ -397,18 +857,36 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     // postings_for_recall ~= target_recall * topk / expected_matches_per_posting
     // postings_for_coverage ~= nprobe_base / selectivity^coverage_exponent
     // final postingTarget = max(base, postings_for_recall, postings_for_coverage)
-    // m_filterSelectivity is set by CoreInterface::SearchWithACL.
+    // filterSelectivity is supplied by the thread-local ACL context at tenant
+    // scope; for routed head-bundle queries we rescale it to candidate-node
+    // scope before deriving postingTarget.
     int nprobeBase = std::max(m_options.m_searchInternalResultNum, p_query.GetResultNum());
     int postingTarget = nprobeBase;
+    const bool adaptiveFilteredNprobeEnabled = m_options.m_enableAdaptiveFilteredNprobe;
 
-    if (m_filterSelectivity < 1.0f) {
-        float sel = m_filterSelectivity;
-        if (sel < 1e-6f) sel = 1e-6f;
+    std::vector<int> candidateNodes;
+    if (!searchHeadBundleNodes.empty() &&
+        m_headBundleNodes.size() > 1 &&
+        searchHeadBundleNodes.size() < m_headBundleNodes.size())
+    {
+        candidateNodes.reserve(searchHeadBundleNodes.size());
+        for (int nodeId : searchHeadBundleNodes)
+        {
+            if (nodeId < 0 || nodeId >= static_cast<int>(m_headBundleNodes.size())) {
+                continue;
+            }
+            if (m_headBundleNodes[static_cast<size_t>(nodeId)].headCount == 0 ||
+                m_headBundleNodes[static_cast<size_t>(nodeId)].postingCount == 0) {
+                continue;
+            }
+            candidateNodes.push_back(nodeId);
+        }
+    }
 
-        double tenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : m_index->GetNumSamples());
-        double postingCount = static_cast<double>(std::max<SizeType>(1, m_index->GetNumSamples()));
-        double avgPosting = tenantSize / postingCount;
-        if (avgPosting < 1.0) avgPosting = 1.0;
+    if (adaptiveFilteredNprobeEnabled && filterSelectivity < 1.0f) {
+        const double globalTenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : m_index->GetNumSamples());
+        const SizeType globalPostingCount = std::max<SizeType>(1, m_index->GetNumSamples());
+        const double globalAvgPosting = std::max(1.0, globalTenantSize / static_cast<double>(globalPostingCount));
 
         float recallTarget = m_options.m_filteredSearchTargetRecall;
         if (recallTarget < 0.01f) recallTarget = 0.01f;
@@ -421,19 +899,104 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         int filteredTopK = p_query.GetResultNum();
         if (filteredTopK <= 0) filteredTopK = 10;
 
-        double expectedMatchesPerPosting = avgPosting * static_cast<double>(sel);
-        if (expectedMatchesPerPosting < 1e-6) expectedMatchesPerPosting = 1e-6;
+        auto computeAdaptivePostingTargetForScope = [&](double scopeTenantSize,
+                                                        SizeType scopePostingCount,
+                                                        double scopeSelectivity) -> int {
+            if (scopeTenantSize <= 0.0 || scopePostingCount == 0) {
+                return nprobeBase;
+            }
 
-        int postingsForRecall = static_cast<int>(std::ceil(
-            (static_cast<double>(filteredTopK) * static_cast<double>(recallTarget)) /
-            expectedMatchesPerPosting));
+            double sel = scopeSelectivity;
+            if (sel < 1e-6) sel = 1e-6;
+            if (sel > 1.0) sel = 1.0;
 
-        double coverageDenominator = std::pow(static_cast<double>(sel), static_cast<double>(coverageExponent));
-        if (coverageDenominator < 1e-6) coverageDenominator = 1e-6;
-        int postingsForCoverage = static_cast<int>(std::ceil(static_cast<double>(nprobeBase) / coverageDenominator));
+            double postingCount = static_cast<double>(scopePostingCount);
+            double avgPosting = scopeTenantSize / postingCount;
+            if (avgPosting < 1.0) avgPosting = 1.0;
 
-        postingTarget = std::min(m_index->GetNumSamples(),
-                                 std::max(nprobeBase, std::max(postingsForRecall, postingsForCoverage)));
+            double expectedMatchesPerPosting = avgPosting * sel;
+            if (expectedMatchesPerPosting < 1e-6) expectedMatchesPerPosting = 1e-6;
+
+            int postingsForRecall = static_cast<int>(std::ceil(
+                (static_cast<double>(filteredTopK) * static_cast<double>(recallTarget)) /
+                expectedMatchesPerPosting));
+
+            double coverageDenominator = std::pow(sel, static_cast<double>(coverageExponent));
+            if (coverageDenominator < 1e-6) coverageDenominator = 1e-6;
+            int postingsForCoverage = static_cast<int>(std::ceil(static_cast<double>(nprobeBase) / coverageDenominator));
+
+            return std::min(static_cast<int>(scopePostingCount),
+                            std::max(nprobeBase, std::max(postingsForRecall, postingsForCoverage)));
+        };
+
+        SizeType postingCountCap = globalPostingCount;
+        double candidateTenantSize = globalTenantSize;
+        double aggregateSelectivity = static_cast<double>(filterSelectivity);
+        if (!candidateNodes.empty()) {
+            SizeType candidatePostingCount = 0;
+            double candidateAssignmentCount = 0.0;
+            for (int nodeId : candidateNodes)
+            {
+                const auto& nodeInfo = m_headBundleNodes[static_cast<size_t>(nodeId)];
+                candidatePostingCount += nodeInfo.postingCount;
+                candidateAssignmentCount += static_cast<double>(nodeInfo.assignmentCount);
+            }
+
+            if (candidatePostingCount > 0) {
+                postingCountCap = candidatePostingCount;
+                candidateTenantSize = (candidateAssignmentCount > 0.0)
+                    ? candidateAssignmentCount
+                    : globalAvgPosting * static_cast<double>(candidatePostingCount);
+
+                if (candidateTenantSize > 0.0 && globalTenantSize > 0.0) {
+                    aggregateSelectivity *= (globalTenantSize / candidateTenantSize);
+                }
+            }
+        }
+
+        int aggregatePostingTarget = computeAdaptivePostingTargetForScope(
+            candidateTenantSize,
+            postingCountCap,
+            aggregateSelectivity);
+
+        postingTarget = aggregatePostingTarget;
+
+        // For broad routed queries that span multiple bundle nodes, derive the
+        // total budget from the sum of child-node budgets instead of relying
+        // only on one aggregate local-selectivity estimate, then keep a
+        // configurable fraction after merge by trimming the tail budget.
+        if (candidateNodes.size() > 1) {
+            const double multiNodeBudgetKeepRatio = GetMultiNodeBudgetKeepRatio();
+            long long summedChildPostingTarget = 0;
+            for (int nodeId : candidateNodes)
+            {
+                const auto& nodeInfo = m_headBundleNodes[static_cast<size_t>(nodeId)];
+                if (nodeInfo.postingCount == 0) {
+                    continue;
+                }
+
+                double nodeTenantSize = (nodeInfo.assignmentCount > 0)
+                    ? static_cast<double>(nodeInfo.assignmentCount)
+                    : globalAvgPosting * static_cast<double>(nodeInfo.postingCount);
+                double nodeSelectivity = static_cast<double>(filterSelectivity);
+                if (nodeTenantSize > 0.0 && globalTenantSize > 0.0) {
+                    nodeSelectivity *= (globalTenantSize / nodeTenantSize);
+                }
+
+                summedChildPostingTarget += static_cast<long long>(computeAdaptivePostingTargetForScope(
+                    nodeTenantSize,
+                    nodeInfo.postingCount,
+                    nodeSelectivity));
+            }
+
+            if (summedChildPostingTarget > 0) {
+                int trimmedChildPostingTarget = static_cast<int>(std::ceil(
+                    static_cast<double>(summedChildPostingTarget) * multiNodeBudgetKeepRatio));
+                trimmedChildPostingTarget = std::max(nprobeBase, trimmedChildPostingTarget);
+                postingTarget = std::min(static_cast<int>(postingCountCap),
+                                         std::max(aggregatePostingTarget, trimmedChildPostingTarget));
+            }
+        }
     }
 
     // Graph search must return at least postingTarget candidates
@@ -447,10 +1010,86 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         p_queryResults =
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), graphResultNum);
 
-    // No graph-level filter — pure distance-based greedy navigation
     ErrorCode ret;
-    if ((ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
-        return ret;
+    bool usedHeadBundleGraphSearch = false;
+    if (!candidateNodes.empty())
+    {
+        bool canUseHeadBundle = true;
+        for (int nodeId : candidateNodes)
+        {
+            if (EnsureHeadBundleNodeLoaded(nodeId) != ErrorCode::Success)
+            {
+                canUseHeadBundle = false;
+                break;
+            }
+        }
+
+        if (canUseHeadBundle)
+        {
+            p_queryResults->Reset();
+            int scanned = 0;
+            for (int nodeId : candidateNodes)
+            {
+                const auto& nodeIndex = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
+                const auto& localToGlobalHIDs = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
+                if (nodeIndex == nullptr || localToGlobalHIDs.empty())
+                {
+                    canUseHeadBundle = false;
+                    break;
+                }
+
+                const int nodeGraphResultNum = std::min<int>(graphResultNum,
+                                                             static_cast<int>(localToGlobalHIDs.size()));
+                if (nodeGraphResultNum <= 0) {
+                    continue;
+                }
+
+                COMMON::QueryResultSet<T> nodeResults((const T*)p_query.GetTarget(), nodeGraphResultNum);
+                if ((ret = nodeIndex->SearchIndex(nodeResults)) != ErrorCode::Success)
+                {
+                    canUseHeadBundle = false;
+                    break;
+                }
+
+                scanned += nodeResults.GetScanned();
+                for (int resultId = 0; resultId < nodeResults.GetResultNum(); ++resultId)
+                {
+                    auto* nodeResult = nodeResults.GetResult(resultId);
+                    if (nodeResult == nullptr || nodeResult->VID == -1) {
+                        continue;
+                    }
+
+                    if (nodeResult->VID < 0 || nodeResult->VID >= static_cast<SizeType>(localToGlobalHIDs.size())) {
+                        continue;
+                    }
+
+                    p_queryResults->AddPoint(localToGlobalHIDs[static_cast<size_t>(nodeResult->VID)],
+                                             nodeResult->Dist);
+                }
+            }
+
+            if (canUseHeadBundle)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "Using routed head bundle graph search across %d nodes.\n",
+                             static_cast<int>(candidateNodes.size()));
+                p_queryResults->SortResult();
+                p_queryResults->SetScanned(scanned);
+                usedHeadBundleGraphSearch = true;
+            }
+            else
+            {
+                p_queryResults->Reset();
+            }
+        }
+    }
+
+    if (!usedHeadBundleGraphSearch)
+    {
+        // No graph-level filter — pure distance-based greedy navigation
+        if ((ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
+            return ret;
+    }
 
     if (m_extraSearcher != nullptr)
     {
@@ -473,15 +1112,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
 
         // Propagate posting-level PS pre-filter (applied in ExtraDynamicSearcher before MultiGet)
-        workSpace->m_postingFilter = m_postingFilter;
+        workSpace->m_postingFilter = postingFilter;
         // Propagate inline tag filter (for per-vector exact tag check in posting scan)
-        workSpace->m_queryTags = m_queryTags;
-        workSpace->m_numQueryTags = m_numQueryTags;
+        workSpace->m_queryTags = queryTags;
+        workSpace->m_numQueryTags = numQueryTags;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
         workSpace->m_postingProbeStats.Reset();
 
-        const bool hasTagFilter = m_queryTags != nullptr && m_numQueryTags > 0;
+        const bool hasTagFilter = queryTags != nullptr && numQueryTags > 0;
         auto translateHeadVID = [&](SizeType localHid) -> SizeType {
             if (m_index != nullptr && m_index->HasHeadNodeMeta()) {
                 SizeType metaVID = m_index->GetHeadNodeGlobalVID(localHid);
@@ -495,7 +1134,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             if (!hasTagFilter) return true;
             return m_index != nullptr &&
                    m_index->HasHeadNodeMeta() &&
-                   m_index->HeadNodeMatchesAnyQueryTag(localHid, m_queryTags, m_numQueryTags);
+                   m_index->HeadNodeMatchesAnyQueryTag(localHid, queryTags, numQueryTags);
         };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
@@ -1252,60 +1891,105 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Seleted Nodes: %u, about %.2lf%% of total.\n",
                  static_cast<unsigned int>(selected.size()), selected.size() * 100.0 / data.R());
 
+    m_pendingNodeHeadSelections.clear();
+    m_pendingHeadVectorOwners.clear();
+    if (!m_pendingPrimaryNodeVectorAssignments.empty())
+    {
+        std::vector<int> primaryOwner(data.R(), -1);
+        m_pendingNodeHeadSelections.assign(m_pendingPrimaryNodeVectorAssignments.size(), std::vector<SizeType>());
+        for (size_t nodeId = 0; nodeId < m_pendingPrimaryNodeVectorAssignments.size(); ++nodeId)
+        {
+            for (SizeType vectorId : m_pendingPrimaryNodeVectorAssignments[nodeId])
+            {
+                if (vectorId >= 0 && vectorId < data.R()) {
+                    primaryOwner[vectorId] = static_cast<int>(nodeId);
+                }
+            }
+        }
+
+        std::unordered_set<SizeType> selectedSet;
+        selectedSet.reserve(selected.size() * 2 + 1);
+        for (int vectorId : selected)
+        {
+            if (vectorId < 0 || vectorId >= data.R()) {
+                continue;
+            }
+
+            selectedSet.insert(static_cast<SizeType>(vectorId));
+            int ownerNode = primaryOwner[vectorId];
+            if (ownerNode >= 0 && ownerNode < static_cast<int>(m_pendingNodeHeadSelections.size()))
+            {
+                m_pendingNodeHeadSelections[static_cast<size_t>(ownerNode)].push_back(static_cast<SizeType>(vectorId));
+                m_pendingHeadVectorOwners[static_cast<SizeType>(vectorId)] = ownerNode;
+            }
+        }
+
+        for (size_t nodeId = 0; nodeId < m_pendingPrimaryNodeVectorAssignments.size(); ++nodeId)
+        {
+            if (!m_pendingNodeHeadSelections[nodeId].empty() || m_pendingPrimaryNodeVectorAssignments[nodeId].empty()) {
+                continue;
+            }
+
+            SizeType chosenVector = m_pendingPrimaryNodeVectorAssignments[nodeId].front();
+            for (SizeType candidateVector : m_pendingPrimaryNodeVectorAssignments[nodeId])
+            {
+                if (selectedSet.count(candidateVector) == 0)
+                {
+                    chosenVector = candidateVector;
+                    break;
+                }
+            }
+
+            if (selectedSet.insert(chosenVector).second) {
+                selected.push_back(static_cast<int>(chosenVector));
+            }
+            m_pendingNodeHeadSelections[nodeId].push_back(chosenVector);
+            m_pendingHeadVectorOwners[chosenVector] = static_cast<int>(nodeId);
+        }
+
+        std::sort(selected.begin(), selected.end());
+        selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+        for (auto& nodeHeads : m_pendingNodeHeadSelections)
+        {
+            std::sort(nodeHeads.begin(), nodeHeads.end());
+            nodeHeads.erase(std::unique(nodeHeads.begin(), nodeHeads.end()), nodeHeads.end());
+        }
+    }
+
     if (!m_options.m_noOutput)
     {
         std::sort(selected.begin(), selected.end());
-
-        std::shared_ptr<Helper::DiskIO> output = SPTAG::f_createIO(), outputIDs = SPTAG::f_createIO();
-        if (output == nullptr || outputIDs == nullptr ||
-            !output->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str(),
-                                std::ios::binary | std::ios::out) ||
-            !outputIDs->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
-                                   std::ios::binary | std::ios::out))
+        if (!WriteSelectedHeadFiles(data,
+                                    std::vector<SizeType>(selected.begin(), selected.end()),
+                                    m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile,
+                                    m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile))
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create output file:%s %s\n",
-                         (m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str(),
-                         (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
             return false;
         }
 
-        SizeType val = static_cast<SizeType>(selected.size());
-        if (output->WriteBinary(sizeof(val), reinterpret_cast<char *>(&val)) != sizeof(val))
+        if (!m_pendingNodeHeadSelections.empty())
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-            return false;
-        }
-        if (outputIDs->WriteBinary(sizeof(val), reinterpret_cast<char *>(&val)) != sizeof(val))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write outputID file!\n");
-            return false;
-        }
-        DimensionType dt = data.C();
-        if (output->WriteBinary(sizeof(dt), reinterpret_cast<char *>(&dt)) != sizeof(dt))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-            return false;
-        }
-        dt = 1;
-        if (outputIDs->WriteBinary(sizeof(dt), reinterpret_cast<char *>(&dt)) != sizeof(dt))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write outputID file!\n");
-            return false;
-        }
-        for (int i = 0; i < selected.size(); i++)
-        {
-            uint64_t vid = static_cast<uint64_t>(selected[i]);
-            if (outputIDs->WriteBinary(sizeof(vid), reinterpret_cast<char *>(&vid)) != sizeof(vid))
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
+            const std::string headRoot = m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+            if (!EnsureDirectory(headRoot)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create head bundle root directory %s\n", headRoot.c_str());
                 return false;
             }
 
-            if (output->WriteBinary(sizeof(InternalDataType) * data.C(), (char *)(data[vid])) !=
-                sizeof(InternalDataType) * data.C())
+            for (size_t nodeId = 0; nodeId < m_pendingNodeHeadSelections.size(); ++nodeId)
             {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write output file!\n");
-                return false;
+                const std::string nodeDir = HeadBundleNodeAbsolutePath(m_options, m_options.m_indexDirectory, static_cast<int>(nodeId));
+                if (!EnsureDirectory(nodeDir)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create head bundle node directory %s\n", nodeDir.c_str());
+                    return false;
+                }
+
+                if (!WriteSelectedHeadFiles(data,
+                                            m_pendingNodeHeadSelections[nodeId],
+                                            nodeDir + FolderSep + m_options.m_headVectorFile,
+                                            nodeDir + FolderSep + m_options.m_headIDFile))
+                {
+                    return false;
+                }
             }
         }
     }
@@ -1354,6 +2038,45 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     {
         auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
         auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+        auto buildHeadIndexFromFile = [&](const std::string& vectorFilePath, const std::string& saveDir) -> bool {
+            std::shared_ptr<Helper::ReaderOptions> localVectorOptions(
+                new Helper::ReaderOptions(valueType, dims, VectorFileType::DEFAULT));
+            auto localVectorReader = Helper::VectorSetReader::CreateInstance(localVectorOptions);
+            if (ErrorCode::Success != localVectorReader->LoadFile(vectorFilePath)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head vector file %s.\n", vectorFilePath.c_str());
+                return false;
+            }
+
+            auto localHeadIndex = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
+            if (localHeadIndex == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create node head index instance.\n");
+                return false;
+            }
+
+            localHeadIndex->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+            localHeadIndex->SetQuantizer(m_pQuantizer);
+            for (const auto& iter : m_headParameters)
+            {
+                localHeadIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
+            }
+
+            auto localHeadVectorSet = localVectorReader->GetVectorSet();
+            if (localHeadIndex->BuildIndex(localHeadVectorSet, nullptr, false, true, true) != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build node head index for %s.\n", saveDir.c_str());
+                return false;
+            }
+            if (!m_options.m_quantizerFilePath.empty()) {
+                localHeadIndex->SetQuantizerFileName(
+                    m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
+            }
+            if (localHeadIndex->SaveIndex(saveDir) != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save node head index to %s.\n", saveDir.c_str());
+                return false;
+            }
+            return true;
+        };
 
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
@@ -1395,6 +2118,43 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n",
                          (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
+        }
+
+        if (!m_pendingNodeHeadSelections.empty())
+        {
+            m_headBundleNodes.clear();
+            SizeType headOffset = 0;
+            SizeType postingOffset = 0;
+            for (size_t nodeId = 0; nodeId < m_pendingNodeHeadSelections.size(); ++nodeId)
+            {
+                HeadBundleNodeInfo nodeInfo;
+                nodeInfo.nodeId = static_cast<int>(nodeId);
+                nodeInfo.headIndexRelativePath = HeadBundleNodeRelativePath(m_options, static_cast<int>(nodeId));
+                nodeInfo.headOffset = headOffset;
+                nodeInfo.postingOffset = postingOffset;
+                nodeInfo.headCount = static_cast<SizeType>(m_pendingNodeHeadSelections[nodeId].size());
+                nodeInfo.postingCount = nodeInfo.headCount;
+                nodeInfo.assignmentCount = (nodeId < m_pendingNodeVectorAssignments.size())
+                    ? static_cast<SizeType>(m_pendingNodeVectorAssignments[nodeId].size())
+                    : nodeInfo.postingCount;
+
+                if (nodeInfo.headCount > 0)
+                {
+                    const std::string nodeDir = HeadBundleNodeAbsolutePath(m_options, m_options.m_indexDirectory, static_cast<int>(nodeId));
+                    const std::string nodeVectorFile = nodeDir + FolderSep + m_options.m_headVectorFile;
+                    if (!buildHeadIndexFromFile(nodeVectorFile, nodeDir)) {
+                        return ErrorCode::Fail;
+                    }
+                }
+
+                m_headBundleNodes.emplace_back(nodeInfo);
+                headOffset += nodeInfo.headCount;
+                postingOffset += nodeInfo.postingCount;
+            }
+        }
+        else
+        {
+            InitializeDefaultHeadBundle();
         }
     }
     auto t3 = std::chrono::high_resolution_clock::now();
@@ -1443,6 +2203,15 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             if (eds) {
                 int numVecs = (int)(m_pendingVectorTags.size() / m_pendingNumTagsPerVec);
                 eds->SetVectorTags(m_pendingVectorTags.data(), numVecs, m_pendingNumTagsPerVec);
+                if (!m_pendingNodeVectorAssignments.empty()) {
+                    eds->SetNodeVectorAssignments(m_pendingNodeVectorAssignments);
+                }
+                if (!m_pendingPrimaryNodeVectorAssignments.empty()) {
+                    eds->SetPrimaryNodeVectorAssignments(m_pendingPrimaryNodeVectorAssignments);
+                }
+                if (!m_pendingHeadVectorOwners.empty()) {
+                    eds->SetHeadVectorOwners(m_pendingHeadVectorOwners);
+                }
             }
         }
 
@@ -1518,6 +2287,21 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
         }
+    }
+
+    if (m_headBundleNodes.empty())
+    {
+        InitializeDefaultHeadBundle();
+    }
+    if (SaveHeadBundleManifest(m_options.m_indexDirectory) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save head bundle manifest.\n");
+        return ErrorCode::Fail;
+    }
+    if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to initialize head bundle runtime.\n");
+        return ErrorCode::Fail;
     }
 
     m_bReady = true;

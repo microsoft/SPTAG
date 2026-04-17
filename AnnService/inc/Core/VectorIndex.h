@@ -250,11 +250,59 @@ public:
             }
         };
 
+        struct ThreadLocalSearchContext {
+            bool m_active = false;
+            std::function<bool(int)> m_postingFilter;
+            std::vector<uint32_t> m_queryTags;
+            float m_filterSelectivity = 1.0f;
+            std::vector<SizeType> m_directPostingIDs;
+            std::vector<int> m_searchHeadBundleNodes;
+
+            void Reset()
+            {
+                m_active = false;
+                m_postingFilter = nullptr;
+                m_queryTags.clear();
+                m_filterSelectivity = 1.0f;
+                m_directPostingIDs.clear();
+                m_searchHeadBundleNodes.clear();
+            }
+
+            const uint32_t* QueryTags() const
+            {
+                return m_queryTags.empty() ? nullptr : m_queryTags.data();
+            }
+
+            int NumQueryTags() const
+            {
+                return static_cast<int>(m_queryTags.size());
+            }
+        };
+
+        class ThreadLocalSearchContextGuard {
+        public:
+            explicit ThreadLocalSearchContextGuard(ThreadLocalSearchContext p_context);
+            ~ThreadLocalSearchContextGuard();
+
+            ThreadLocalSearchContextGuard(const ThreadLocalSearchContextGuard&) = delete;
+            ThreadLocalSearchContextGuard& operator=(const ThreadLocalSearchContextGuard&) = delete;
+
+        private:
+            bool m_hadPrevious = false;
+            ThreadLocalSearchContext m_previous;
+        };
+
         static void ResetThreadLocalPostingScanStats();
 
         static void SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings);
 
         static PostingScanStats GetThreadLocalPostingScanStats();
+
+        static void SetThreadLocalSearchContext(ThreadLocalSearchContext p_context);
+
+        static void ResetThreadLocalSearchContext();
+
+        static const ThreadLocalSearchContext* GetThreadLocalSearchContext();
     
   private:
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
@@ -271,28 +319,6 @@ protected:
     std::shared_ptr<void> m_pMetaToVec;
 
 public:
-    // Posting-level pre-filter for ACL/tag filtering.
-    // Set before SearchIndex; copied to workspace's m_postingFilter.
-    std::function<bool(int)> m_postingFilter;
-
-    // Inline tag filter: query tags for per-vector exact check in posting scan
-    mutable const uint32_t* m_queryTags = nullptr;
-    mutable int m_numQueryTags = 0;
-
-    // Estimated vector-level selectivity for adaptive nprobe (0.0 to 1.0)
-    // Set by SearchWithACL before calling Search.
-    mutable float m_filterSelectivity = 1.0f;
-
-    // Head-level node filter for graph traversal.
-    // When set, only nodes passing this filter are added to graph search results.
-    // Non-matching nodes are still traversed (neighbors expanded) but don't occupy result slots.
-    // Used by SPANN to apply PS Bloom check during HeadIndex graph traversal.
-    std::function<bool(SizeType)> m_headNodeFilter;
-
-    // Direct posting IDs for sparse tag brute-force path.
-    // When non-empty, skip graph search entirely and read these postings directly.
-    mutable std::vector<SizeType> m_directPostingIDs;
-
     // Per-head-node metadata blob, indexed by local head sample id (hid).
     // Each record stores:
     //   [PostingBitmask PS][global VID][head-only flag][fixed tag array]

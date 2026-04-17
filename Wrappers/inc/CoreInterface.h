@@ -98,6 +98,12 @@ public:
     // Set per-vector tags for embedding in SPANN posting metadata
     void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec);
 
+    // Set build-time node->vector assignments for SPANN posting construction
+    void SetNodeVectorAssignments(const std::vector<std::vector<int>>& nodeVectorAssignments);
+
+    // Set build-time primary node ownership for SPANN head construction
+    void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int>>& primaryNodeVectorAssignments);
+
 private:
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
     
@@ -202,6 +208,19 @@ public:
     // Each entry uses the layout: uint32_t tag, int32_t vectorCount, int32_t postingCount.
     ByteArray GetTagRoutingStatsBlob(int p_tenantId) const;
 
+    // Build-time pivot planner cost estimator.
+    // Returns a UTF-8 JSON payload with all candidates and the selected best plan.
+    // p_tags layout: [p_numVectors * p_numTagsPerVec] uint32_t.
+    // p_levelWeightsCsv: comma-separated weights for each tag level, empty = uniform.
+    ByteArray EstimatePivotBuildPlan(ByteArray p_tags,
+                                     int p_numVectors,
+                                     int p_numTagsPerVec,
+                                     int p_maxNodes,
+                                     float p_recallTarget,
+                                     float p_lambdaRecall,
+                                     float p_estimatedRecall,
+                                     ByteArray p_levelWeightsCsv) const;
+
     // Set build/search parameters for all tenant indices
     void SetBuildParam(const char* p_name, const char* p_value, const char* p_section);
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
@@ -209,8 +228,20 @@ public:
     // Set HeadIndex LRU cache size limit (in bytes). 0 = unlimited.
     void SetHeadIndexCacheLimit(uint64_t p_bytesLimit);
 
-    // Get current HeadIndex cache usage (bytes)
+    // Set/get the on-disk -> loaded-memory safety factor used for cache accounting.
+    // Values are clamped to [1.0, 8.0].
+    void SetHeadIndexCacheSafetyFactor(double p_factor);
+    double GetHeadIndexCacheSafetyFactor() const;
+
+    // Get current estimated HeadIndex cache usage (bytes)
     uint64_t GetHeadIndexCacheUsage() const;
+
+    // Observe current process RSS in bytes. Returns 0 if unavailable on the platform.
+    uint64_t GetCurrentRSSBytes() const;
+
+    // Set/get process RSS high-water mark in bytes. 0 disables reject-on-high-water.
+    void SetRSSHighWaterMark(uint64_t p_bytesLimit);
+    uint64_t GetRSSHighWaterMark() const;
 
     // Last ACL search posting-level stats on the current thread.
     uint64_t GetLastPostingReadCount() const;
@@ -259,7 +290,8 @@ private:
     // LRU tracking: most-recently-used tenant IDs (front=LRU, back=MRU)
     std::list<int> m_lruList;
     std::unordered_map<int, std::list<int>::iterator> m_lruMap;
-    uint64_t m_loadedHeadIndexBytes = 0;  // current total loaded HeadIndex size
+    uint64_t m_loadedHeadIndexBytes = 0;  // current estimated total loaded HeadIndex size
+    std::map<int, uint64_t> m_tenantHeadIndexAccountedBytes;
 
     // Per-tenant sparse tag index: tag → [posting_ids] for low-selectivity tags
     std::map<int, std::shared_ptr<SPTAG::Cache::SparseTagIndex>> m_tenantSparseIdx;
@@ -274,6 +306,21 @@ private:
 
     // Exact per-tag routing stats computed by BuildSignatures.
     std::map<int, std::unordered_map<uint32_t, TagRoutingStats>> m_tenantTagRoutingStats;
+
+    // Build-time pivot plan selected by the estimator.
+    std::map<int, int> m_tenantPivotLevels;
+    std::map<int, int> m_tenantPivotNodeCounts;
+    std::map<int, std::vector<std::vector<uint32_t>>> m_tenantNodePivotTags;
+    std::map<int, std::vector<std::vector<int>>> m_tenantPlannedNodeVectors;
+    std::map<int, std::vector<std::vector<int>>> m_tenantPlannedPrimaryNodeVectors;
+
+    // Tag -> node routing index derived from the pivot plan.
+    // For levels above the pivot, one tag can map to multiple nodes.
+    // For pivot and deeper levels, one tag maps to a unique node.
+    std::map<int, std::unordered_map<uint32_t, std::vector<int>>> m_tenantTagToNodes;
+
+    // Head sample -> node assignment for the selected pivot partitioning.
+    std::map<int, std::vector<int>> m_tenantHeadNodeToNode;
 
     // Unified storage path (base directory for all tenants)
     std::string m_baseStoragePath;
@@ -329,6 +376,12 @@ private:
     // HeadIndex cache limit
     uint64_t m_headIndexCacheLimitBytes;
 
+    // Estimated loaded bytes = on-disk HeadIndex bytes * safety factor.
+    double m_headIndexCacheSafetyFactor;
+
+    // Process RSS high-water mark. 0 disables reject-on-high-water.
+    uint64_t m_rssHighWaterMarkBytes = 0;
+
     // Drop OS page cache for HeadIndex files on eviction (for benchmarking real IO)
     bool m_dropPageCacheOnEvict = false;
 
@@ -341,6 +394,8 @@ private:
     bool EnsureTenantCached(int p_tenantId);
     void TouchLRU(int p_tenantId);
     void EvictIfNeeded();
+    uint64_t EstimateTenantHeadIndexBytes(int p_tenantId) const;
+    bool EnsureTenantPivotIndexLoaded(int p_tenantId);
 
     bool EnsureTenantLoaded(int p_tenantId);
 

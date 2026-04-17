@@ -135,6 +135,7 @@ namespace SPTAG {
             float m_filteredSearchNprobeSafety;
             float m_filteredSearchTargetRecall;
             float m_filteredSearchCoverageExponent;
+            bool m_enableAdaptiveFilteredNprobe;
             int m_rerank;
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;
