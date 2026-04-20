@@ -2704,14 +2704,23 @@ namespace SPTAG::SPANN {
                                  std::vector<Helper::AsyncReadRequest>* reqs) {
             if (IsMultiChunk()) {
                 auto* tikv = GetTiKVDB();
-                tikv->DeletePosting(DBKey(headID));
-                auto ret = tikv->PutBaseChunk(DBKey(headID), posting, timeout, reqs);
-                if (ret == ErrorCode::Success) {
-                    int count = static_cast<int>(posting.size() / m_vectorInfoSize);
-                    tikv->SetPostingCount(DBKey(headID), count, timeout);
-                    if (m_postingCountCache) m_postingCountCache->Put(DBKey(headID), count);
+                auto delRet = tikv->DeletePosting(DBKey(headID));
+                if (delRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: DeletePosting failed for headID %d\n", headID);
+                    return delRet;
                 }
-                return ret;
+                auto ret = tikv->PutBaseChunk(DBKey(headID), posting, timeout, reqs);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: PutBaseChunk failed for headID %d\n", headID);
+                    return ret;
+                }
+                int count = static_cast<int>(posting.size() / m_vectorInfoSize);
+                auto countRet = tikv->SetPostingCount(DBKey(headID), count, timeout);
+                if (countRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "PutPostingToDB: SetPostingCount failed for headID %d (data written OK)\n", headID);
+                }
+                if (m_postingCountCache) m_postingCountCache->Put(DBKey(headID), count);
+                return ErrorCode::Success;
             }
             return db->Put(DBKey(headID), posting, timeout, reqs);
         }
@@ -2721,7 +2730,10 @@ namespace SPTAG::SPANN {
         ErrorCode DeletePostingFromDB(SizeType headID) {
             if (IsMultiChunk()) {
                 auto* tikv = GetTiKVDB();
-                tikv->DeletePostingCount(DBKey(headID));
+                auto countRet = tikv->DeletePostingCount(DBKey(headID));
+                if (countRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "DeletePostingFromDB: DeletePostingCount failed for headID %d\n", headID);
+                }
                 if (m_postingCountCache) m_postingCountCache->Remove(DBKey(headID));
                 return tikv->DeletePosting(DBKey(headID));
             }
@@ -2729,7 +2741,7 @@ namespace SPTAG::SPANN {
         }
 
         // Get the posting vector count, using local cache with TiKV fallback.
-        // Returns 0 if unknown (cache miss + TiKV miss).
+        // Returns 0 if unknown (cache miss + TiKV error/miss).
         int GetCachedPostingCount(SizeType headID) {
             if (!m_postingCountCache) return 0;
             SizeType dbKey = DBKey(headID);
@@ -2739,6 +2751,10 @@ namespace SPTAG::SPANN {
             auto* tikv = GetTiKVDB();
             if (!tikv) return 0;
             count = tikv->GetPostingCount(dbKey, std::chrono::microseconds(5000000));
+            if (count < 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "GetCachedPostingCount: TiKV error for headID %d, returning 0\n", headID);
+                return 0;
+            }
             m_postingCountCache->Put(dbKey, count);
             return count;
         }
