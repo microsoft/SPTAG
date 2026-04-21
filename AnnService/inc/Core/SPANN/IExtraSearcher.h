@@ -305,8 +305,6 @@ namespace SPTAG {
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
                 Options& p_opt, COMMON::Dataset<SizeType>& p_headtoLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) = 0;
-
-            virtual void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) = 0;
             
             virtual ErrorCode RefineIndex()
             {

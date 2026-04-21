@@ -72,6 +72,9 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
+            std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
+            std::atomic<int> m_workspaceCount = 0;
+
         public:
             Index()
             {
@@ -82,6 +85,30 @@ namespace SPTAG
             }
 
             ~Index() {}
+
+            void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) const
+            {
+                if (clear) {
+                    p_exWorkSpace->Clear(m_options.m_searchInternalResultNum, (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, true, m_options.m_enableDataCompression);
+                }
+                else {
+                    p_exWorkSpace->Initialize(m_options.m_maxCheck, m_options.m_hashExp, max(m_options.m_searchInternalResultNum, m_options.m_reassignK), (max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit) + m_options.m_bufferLength) << PageSizeEx, true, m_options.m_enableDataCompression);
+                    int wid = 0;
+                    if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FreeWorkSpaceIds is not initalized or the workspace number is not enough! Please increase iothread number.\n");
+                        p_exWorkSpace->m_diskRequests[0].m_status = -1;
+                        return;
+                    }
+                    for (auto & req : p_exWorkSpace->m_diskRequests)
+                    {
+                        req.m_status = wid;
+                    }
+                    p_exWorkSpace->m_callback = [m_freeWorkSpaceIds = m_freeWorkSpaceIds, wid] () {
+                        if (m_freeWorkSpaceIds) m_freeWorkSpaceIds->push(wid);
+                    };
+                }
+            }
 
             inline std::shared_ptr<VectorIndex> GetMemoryIndex() { return m_topIndex; }
             inline std::shared_ptr<IExtraSearcher> GetDiskIndex(int layer = 0) { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]; else return nullptr; }

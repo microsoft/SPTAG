@@ -125,7 +125,17 @@ template <typename T> ErrorCode Index<T>::LoadIndexDataFromMemory(const std::vec
         m_topGlobalToLocalID[globalID] = i;
     }
 
-    PrepareDB(m_db);
+    if (m_freeWorkSpaceIds == nullptr) {
+        m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
+        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
+                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        for (int i = 0; i < maxIOThreads; i++) {
+            m_freeWorkSpaceIds->push(i);
+        }
+        m_workspaceCount = maxIOThreads;
+    }
+
+    if (m_options.m_shareDB) PrepareDB(m_db);
     m_extraSearchers.resize(m_options.m_layers);
     for (int i = m_options.m_layers - 1; i >= 0; i--) {
         if (m_options.m_storage == Storage::STATIC)
@@ -193,7 +203,18 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
         SizeType globalID = *(m_topLocalToGlobalID[i]);
         m_topGlobalToLocalID[globalID] = i;
     }
-    PrepareDB(m_db);
+
+    if (m_freeWorkSpaceIds == nullptr) {
+        m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
+        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
+                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        for (int i = 0; i < maxIOThreads; i++) {
+            m_freeWorkSpaceIds->push(i);
+        }
+        m_workspaceCount = maxIOThreads;
+    }
+
+    if (m_options.m_shareDB) PrepareDB(m_db);
     m_extraSearchers.resize(m_options.m_layers);
     for (int i = m_options.m_layers - 1; i >= 0; i--) {
         if (m_options.m_storage == Storage::STATIC)
@@ -418,11 +439,11 @@ std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool
     if (!extraWorkspace)
     {
         extraWorkspace.reset(new ExtraWorkSpace());
-        m_extraSearchers.back()->InitWorkSpace(extraWorkspace.get(), false);
+        InitWorkSpace(extraWorkspace.get(), false);
     }
     else
     {
-        m_extraSearchers.back()->InitWorkSpace(extraWorkspace.get(), true);
+        InitWorkSpace(extraWorkspace.get(), true);
     }
     extraWorkspace->m_filterFunc = p_filterFunc;
     extraWorkspace->m_relaxedMono = false;
@@ -524,11 +545,11 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         if (!workSpace)
         {
             workSpace.reset(new ExtraWorkSpace());
-            m_extraSearchers.back()->InitWorkSpace(workSpace.get(), false);
+            InitWorkSpace(workSpace.get(), false);
         }
         else
         {
-            m_extraSearchers.back()->InitWorkSpace(workSpace.get(), true);
+            InitWorkSpace(workSpace.get(), true);
         }
         p_exWorkSpace = workSpace.get();
     }
@@ -678,11 +699,11 @@ ErrorCode Index<T>::DebugSearchDiskIndex(QueryResult &p_query, int p_subInternal
     if (!workSpace)
     {
         workSpace.reset(new ExtraWorkSpace());
-        m_extraSearchers.back()->InitWorkSpace(workSpace.get(), false);
+        InitWorkSpace(workSpace.get(), false);
     }
     else
     {
-        m_extraSearchers.back()->InitWorkSpace(workSpace.get(), true);
+        InitWorkSpace(workSpace.get(), true);
     }
     workSpace->m_deduper.clear();
 
@@ -1225,7 +1246,17 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         mkdir(m_options.m_persistentBufferPath.c_str());
     }
 
-    if (m_db == nullptr) PrepareDB(m_db);
+    if (m_freeWorkSpaceIds == nullptr) {
+        m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
+        int maxIOThreads = (m_options.m_storage == Storage::STATIC) ? max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) : max(m_options.m_ioThreads, (2 * max(m_options.m_searchThreadNum, m_options.m_iSSDNumberOfThreads) +
+                                    (m_options.m_layers + 1) * (m_options.m_insertThreadNum + m_options.m_reassignThreadNum + m_options.m_appendThreadNum)));
+        for (int i = 0; i < maxIOThreads; i++) {
+            m_freeWorkSpaceIds->push(i);
+        }
+        m_workspaceCount = maxIOThreads;
+    }
+
+    if (m_db == nullptr && m_options.m_shareDB) PrepareDB(m_db);
 
     int resumeLayer = m_options.m_resumeLayer;
 
@@ -1727,11 +1758,11 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     if (!workSpace)
     {
         workSpace.reset(new ExtraWorkSpace());
-        m_extraSearchers.back()->InitWorkSpace(workSpace.get(), false);
+        InitWorkSpace(workSpace.get(), false);
     }
     else
     {
-        m_extraSearchers.back()->InitWorkSpace(workSpace.get(), true);
+        InitWorkSpace(workSpace.get(), true);
     }
     workSpace->m_deduper.clear();
     workSpace->m_postingIDs.clear();
@@ -1765,11 +1796,11 @@ ErrorCode Index<T>::Check()
                 if (!workSpace)
                 {
                     workSpace.reset(new ExtraWorkSpace());
-                    m_extraSearchers[layer]->InitWorkSpace(workSpace.get(), false);
+                    InitWorkSpace(workSpace.get(), false);
                 }
                 else
                 {
-                    m_extraSearchers[layer]->InitWorkSpace(workSpace.get(), true);
+                    InitWorkSpace(workSpace.get(), true);
                 }
                 size_t i = 0;
                 while (true)
@@ -1857,8 +1888,6 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const void *p_vectors, Siz
 
 template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueIO>& db, int layer)
 {
-    if (!m_options.m_shareDB) return;
-
     if(m_options.m_storage == Storage::FILEIO) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseFileIO\n");
         db.reset(new FileIO(m_options, layer));

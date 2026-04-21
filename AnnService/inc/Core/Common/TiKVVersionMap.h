@@ -148,9 +148,10 @@ namespace SPTAG
                 return static_cast<uint8_t>(chunk[ChunkOffset(vid)]);
             }
 
-            // Read-modify-write a single byte. Returns the old value.
+            // Read-modify-write a single byte. Returns the old value via oldVal.
+            // Returns true on success, false if TiKV write failed.
             // Thread-safe: locks the chunk stripe to prevent concurrent overwrites.
-            uint8_t WriteVersionByte(SizeType vid, uint8_t newVal)
+            bool WriteVersionByte(SizeType vid, uint8_t newVal, uint8_t& oldVal)
             {
                 SizeType cid = ChunkId(vid);
                 int offset = ChunkOffset(vid);
@@ -160,10 +161,16 @@ namespace SPTAG
                     // Create new chunk, uninitialized (matching VersionLabel's 0xff)
                     chunk.assign(m_chunkSize, static_cast<char>(0xff));
                 }
-                uint8_t oldVal = static_cast<uint8_t>(chunk[offset]);
+                oldVal = static_cast<uint8_t>(chunk[offset]);
                 chunk[offset] = static_cast<char>(newVal);
-                WriteChunk(cid, chunk);
-                return oldVal;
+                auto ret = WriteChunk(cid, chunk);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVVersionMap::WriteVersionByte: WriteChunk failed vid=%d chunk=%d layer=%d\n",
+                        vid, cid, m_layer);
+                    return false;
+                }
+                return true;
             }
 
             void SaveCount()
@@ -296,7 +303,10 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Delete: invalid key %d (max %d)\n", key, m_count.load());
                     return false;
                 }
-                uint8_t oldVal = WriteVersionByte(key, 0xfe);
+                uint8_t oldVal;
+                if (!WriteVersionByte(key, 0xfe, oldVal)) {
+                    return false; // TiKV write failed, already logged
+                }
                 if (oldVal == 0xfe) {
                     if (key < 10) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "TiKVVersionMap::Delete: key %d already deleted (layer=%d, chunk=%d, offset=%d)\n",
@@ -323,7 +333,10 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::SetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return;
                 }
-                uint8_t oldVal = WriteVersionByte(key, version);
+                uint8_t oldVal;
+                if (!WriteVersionByte(key, version, oldVal)) {
+                    return; // TiKV write failed, already logged
+                }
                 if (oldVal == 0xfe && version != 0xfe) m_deleted--;
                 else if (oldVal != 0xfe && version == 0xfe) m_deleted++;
             }

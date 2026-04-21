@@ -175,29 +175,6 @@ namespace SPTAG
                 return m_available;
             }
 
-            void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
-            {
-                if (clear) {
-                    p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
-                }
-                else {
-                    p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
-                    int wid = 0;
-                    if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
-                    {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "FreeWorkSpaceIds is not initalized or the workspace number is not enough! Please increase iothread number.\n");
-                        wid = m_workspaceCount.fetch_add(1);
-                    }
-                    for (auto & req : p_exWorkSpace->m_diskRequests)
-                    {
-                        req.m_status = wid;
-                    }
-                    p_exWorkSpace->m_callback = [m_freeWorkSpaceIds = m_freeWorkSpaceIds, wid] () {
-                        if (m_freeWorkSpaceIds) m_freeWorkSpaceIds->push(wid);
-                    };
-                }
-            }
-
             virtual bool LoadIndex(Options& p_opt) override {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile + "_" + std::to_string(m_layer);
@@ -253,12 +230,6 @@ namespace SPTAG
                 Helper::AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
 #endif
 
-                m_freeWorkSpaceIds.reset(new Helper::Concurrent::ConcurrentQueue<int>());
-                int maxIOThreads = max(p_opt.m_searchThreadNum, p_opt.m_iSSDNumberOfThreads);
-                for (int i = 0; i < maxIOThreads; i++) {
-                    m_freeWorkSpaceIds->push(i);
-                }
-                m_workspaceCount = maxIOThreads;
                 m_available = true;
                 return true;
             }
@@ -1659,9 +1630,6 @@ namespace SPTAG
 
         private:
             bool m_available = false;
-
-            std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
-            std::atomic<int> m_workspaceCount = 0;
 
             std::string m_extraFullGraphFile;
 
