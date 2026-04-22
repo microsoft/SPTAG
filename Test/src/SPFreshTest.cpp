@@ -2092,6 +2092,7 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     int topK = iniReader.GetParameter("Benchmark", "TopK", 10);
     int numSearchThreads = iniReader.GetParameter("Benchmark", "NumSearchThreads", 8);
     int numInsertThreads = iniReader.GetParameter("Benchmark", "NumInsertThreads", 8);
+    int appendThreadNum = iniReader.GetParameter("Benchmark", "AppendThreadNum", 0);
     int numQueries = iniReader.GetParameter("Benchmark", "NumQueries", 1000);
     int layers = iniReader.GetParameter("Benchmark", "Layers", 1);
     DistCalcMethod distMethod = iniReader.GetParameter("Benchmark", "DistMethod", DistCalcMethod::L2);
@@ -2112,6 +2113,9 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     std::string tikvKeyPrefix = iniReader.GetParameter("Benchmark", "TiKVKeyPrefix", std::string(""));
     if (!tikvKeyPrefix.empty()) {
         ssdOverrides["TiKVKeyPrefix"] = tikvKeyPrefix;
+    }
+    if (appendThreadNum > 0) {
+        ssdOverrides["AppendThreadNum"] = std::to_string(appendThreadNum);
     }
 
     // Pass through any [BuildSSDIndex] section params from the ini as overrides

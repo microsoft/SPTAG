@@ -1288,7 +1288,15 @@ namespace SPTAG::SPANN {
                 auto reassignScanIOBegin = std::chrono::high_resolution_clock::now();
                 ErrorCode ret;
                 bool reassignReadOk = true;
-                {
+                if (IsMultiChunk()) {
+                    auto* tikvDB = GetTiKVDB();
+                    auto dbKeys = DBKeys(HeadPrevTopK);
+                    if ((ret = tikvDB->MultiScanPostings(*dbKeys, p_exWorkSpace->m_pageBuffers, m_hardLatencyLimit)) != ErrorCode::Success)
+                    {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "ReAssign skipped: couldn't scan nearby postings (non-fatal)\n");
+                        reassignReadOk = false;
+                    }
+                } else {
                     auto keys = DBKeys(HeadPrevTopK);
                     if ((ret = db->MultiGet(*keys, p_exWorkSpace->m_pageBuffers, m_hardLatencyLimit,
                                             &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success)
