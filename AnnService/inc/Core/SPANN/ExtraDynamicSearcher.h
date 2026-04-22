@@ -573,6 +573,8 @@ namespace SPTAG::SPANN {
                 SizeType newHeadVID = -1;
                 int first = 0;                
                 newPostingLists.resize(2);
+                newHeadsID.resize(2);
+                newHeadsVec.resize(2);
                 for (int k : ks) {
                     if (args.counts[k] == 0)	continue;
                     first = (k == 0) ? 0 : args.counts[0];
@@ -584,8 +586,8 @@ namespace SPTAG::SPANN {
                         //Serialize(ptr, localIndicesInsert[localIndices[first + j]], localIndicesInsertVersion[localIndices[first + j]], smallSample[localIndices[first + j]]);
                     }
                     if (!theSameHead && m_headIndex->ComputeDistance(args.centers + k * args._D, headVec->c_str()) < Epsilon) {
-                        newHeadsID.push_back(headID);
-                        newHeadsVec.push_back(headVec);
+                        newHeadsID[k] = headID;
+                        newHeadsVec[k] = headVec;
                         newHeadVID = headID;
                         theSameHead = true;
                         if (!hasHead && headj != -1) newPostingLists[k] += postingList.substr(headj * m_vectorInfoSize, m_vectorInfoSize);
@@ -603,14 +605,14 @@ namespace SPTAG::SPANN {
                         newHeadVID = *((SizeType*)(postingP + args.clusterIdx[k] * m_vectorInfoSize));
                         uint8_t version = *((uint8_t*)(postingP + args.clusterIdx[k] * m_vectorInfoSize + sizeof(SizeType)));
 
-                        newHeadsID.push_back(newHeadVID);
-                        newHeadsVec.push_back(std::make_shared<std::string>((char *)(args.centers + k * args._D), m_vectorDataSize));
+                        newHeadsID[k] = newHeadVID;
+                        newHeadsVec[k] = std::make_shared<std::string>((char *)(args.centers + k * args._D), m_vectorDataSize);
 
                         std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[newHeadVID], std::defer_lock);
                         if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID))
                         {
                             int retry = 0;
-                            while (!anotherLock.try_lock() && retry < 3)
+                            while (!anotherLock.try_lock() && retry < 10)
                             {
                                 //SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                 //             "Split: new head VID %lld is being locked. Wait for lock and do "
@@ -622,7 +624,7 @@ namespace SPTAG::SPANN {
                             if (!anotherLock.owns_lock())
                             {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                             "Split: new head VID %lld is being locked after 3 retries. Skip merging and return split failed...\n",
+                                             "Split: new head VID %lld is being locked after 10 retries. Skip merging and return split failed...\n",
                                              (std::int64_t)(newHeadVID));
                                 {
                                     std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
