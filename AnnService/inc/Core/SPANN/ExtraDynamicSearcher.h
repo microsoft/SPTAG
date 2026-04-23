@@ -26,6 +26,8 @@
 #include <cstring>
 #include <climits>
 #include <future>
+#include <limits>
+#include <mutex>
 #include <numeric>
 #include <utility>
 #include <unordered_map>
@@ -277,9 +279,52 @@ namespace SPTAG::SPANN {
 
         bool m_allDonePrinted = false;
 
+        std::mutex m_progressLogMutex;
+        std::chrono::steady_clock::time_point m_lastProgressLogTime = std::chrono::steady_clock::time_point::min();
+        size_t m_lastProgressLogQueueSize = std::numeric_limits<size_t>::max();
+        size_t m_lastProgressLogSplit = std::numeric_limits<size_t>::max();
+        size_t m_lastProgressLogMerge = std::numeric_limits<size_t>::max();
+        size_t m_lastProgressLogReassign = std::numeric_limits<size_t>::max();
+
         // Posting count cache for multi-chunk mode.
         // Tracks approximate vector count per posting to decide when to split.
         std::unique_ptr<PostingCountCache> m_postingCountCache;
+
+        bool ShouldLogProgress(size_t totalJobs, bool force = false) {
+            auto now = std::chrono::steady_clock::now();
+            std::lock_guard<std::mutex> lock(m_progressLogMutex);
+
+            size_t splitJobs = m_splitJobsInFlight.load();
+            size_t mergeJobs = m_mergeJobsInFlight.load();
+            size_t reassignJobs = m_reassignJobsInFlight.load();
+            bool queueChanged = (totalJobs != m_lastProgressLogQueueSize) ||
+                               (splitJobs != m_lastProgressLogSplit) ||
+                               (mergeJobs != m_lastProgressLogMerge) ||
+                               (reassignJobs != m_lastProgressLogReassign);
+
+            if (force) {
+                m_lastProgressLogTime = now;
+                m_lastProgressLogQueueSize = totalJobs;
+                m_lastProgressLogSplit = splitJobs;
+                m_lastProgressLogMerge = mergeJobs;
+                m_lastProgressLogReassign = reassignJobs;
+                return true;
+            }
+
+            bool enoughTimeElapsed =
+                (m_lastProgressLogTime == std::chrono::steady_clock::time_point::min()) ||
+                (std::chrono::duration_cast<std::chrono::seconds>(now - m_lastProgressLogTime).count() >= 5);
+
+            bool shouldLog = queueChanged && enoughTimeElapsed;
+            if (shouldLog) {
+                m_lastProgressLogTime = now;
+                m_lastProgressLogQueueSize = totalJobs;
+                m_lastProgressLogSplit = splitJobs;
+                m_lastProgressLogMerge = mergeJobs;
+                m_lastProgressLogReassign = reassignJobs;
+            }
+            return shouldLog;
+        }
 
     public:
         ExtraDynamicSearcher(SPANN::Options& p_opt, int layer, SPANN::Index<ValueType>* headIndex, std::shared_ptr<Helper::KeyValueIO> p_db) {
@@ -1209,6 +1254,14 @@ namespace SPTAG::SPANN {
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                 ValueType* vectorData = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
 
+                const SizeType maxVid = m_versionMap->Count();
+                if (vid < 0 || vid >= maxVid) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "CollectReAssign: skip invalid VID %d (max %d)\n",
+                                 vid, maxVid);
+                    return;
+                }
+
                 if (m_versionMap->Deleted(vid) || m_versionMap->GetVersion(vid) != version) return;
 
                 m_stat.m_reAssignNum++;
@@ -1250,6 +1303,8 @@ namespace SPTAG::SPANN {
                     SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                    const SizeType maxVid = m_versionMap->Count();
+                    if (vid < 0 || vid >= maxVid) continue;
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                         m_stat.m_reAssignScanNum++;
                         float dist = m_headIndex->ComputeDistance(newHeadsVec[i]->data(), vector);
@@ -1289,7 +1344,7 @@ namespace SPTAG::SPANN {
                 ErrorCode ret;
                 bool reassignReadOk = true;
                 if (IsMultiChunk()) {
-                    auto* tikvDB = GetTiKVDB();
+                    auto* tikvDB = this->GetTiKVDB();
                     auto dbKeys = DBKeys(HeadPrevTopK);
                     if ((ret = tikvDB->MultiScanPostings(*dbKeys, p_exWorkSpace->m_pageBuffers, m_hardLatencyLimit)) != ErrorCode::Success)
                     {
@@ -1321,6 +1376,8 @@ namespace SPTAG::SPANN {
                         SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
+                        const SizeType maxVid = m_versionMap->Count();
+                        if (vid < 0 || vid >= maxVid) continue;
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
                             m_stat.m_reAssignScanNum++;
                             float dist = m_headIndex->ComputeDistance(HeadPrevTopKVec[i]->data(), vector);
@@ -1542,6 +1599,13 @@ namespace SPTAG::SPANN {
         {
             SizeType VID = *((SizeType*)vectorInfo->c_str());
             uint8_t version = *((uint8_t*)(vectorInfo->c_str() + sizeof(VID)));
+            const SizeType maxVid = m_versionMap->Count();
+            if (VID < 0 || VID >= maxVid) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "Reassign: skip invalid VID %d (max %d)\n",
+                             VID, maxVid);
+                return ErrorCode::Success;
+            }
             // return;
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignID: %d, version: %d, current version: %d, headPrev: %d\n", VID, version, m_versionMap->GetVersion(VID), headPrev);
             if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) {
@@ -2570,7 +2634,7 @@ namespace SPTAG::SPANN {
 
             size_t totalJobs = m_splitThreadPool->jobsize();
             unsigned int runningJobs = static_cast<unsigned int>(m_splitThreadPool->runningJobs());
-            if (totalJobs > 0 && (totalJobs % 500 == 0 || totalJobs <= 10)) {
+            if (totalJobs > 0 && (totalJobs % 500 == 0 || totalJobs <= 10) && ShouldLogProgress(totalJobs)) {
                 size_t completed = m_totalSplitCompleted.load();
                 double avgSplitMs = completed > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completed) : 0;
                 double maxSplitMs = m_maxSplitTimeUs.load() / 1000.0;
@@ -2615,12 +2679,14 @@ namespace SPTAG::SPANN {
             size_t completedSplit = m_totalSplitCompleted.load();
             double avgSplitMs = completedSplit > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completedSplit) : 0;
             double maxSplitMs = m_maxSplitTimeUs.load() / 1000.0;
+            size_t totalJobs = m_splitThreadPool ? m_splitThreadPool->jobsize() : 0;
+            // if (!ShouldLogProgress(totalJobs)) return;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                          "layer %d pending queue:%zu split:%zu merge:%zu reassign:%zu running:%u | "
                          "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                          "total_completed split:%zu merge:%zu reassign:%zu | "
                          "split_latency avg:%.1fms max:%.1fms\n",
-                         m_layer, m_splitThreadPool ? m_splitThreadPool->jobsize() : 0,
+                         m_layer, totalJobs,
                          m_splitJobsInFlight.load(), m_mergeJobsInFlight.load(), m_reassignJobsInFlight.load(),
                          m_splitThreadPool ? static_cast<unsigned int>(m_splitThreadPool->runningJobs()) : 0,
                          m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
@@ -2742,7 +2808,7 @@ namespace SPTAG::SPANN {
                                    const std::chrono::microseconds& timeout,
                                    std::vector<Helper::AsyncReadRequest>* reqs) {
             if (IsMultiChunk()) {
-                return GetTiKVDB()->ScanPosting(DBKey(headID), posting, timeout);
+                return this->GetTiKVDB()->ScanPosting(DBKey(headID), posting, timeout);
             }
             return db->Get(DBKey(headID), posting, timeout, reqs);
         }
@@ -2754,7 +2820,7 @@ namespace SPTAG::SPANN {
                                  const std::chrono::microseconds& timeout,
                                  std::vector<Helper::AsyncReadRequest>* reqs) {
             if (IsMultiChunk()) {
-                auto* tikv = GetTiKVDB();
+                auto* tikv = this->GetTiKVDB();
                 auto delRet = tikv->DeletePosting(DBKey(headID));
                 if (delRet != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: DeletePosting failed for headID %d\n", headID);
@@ -2780,7 +2846,7 @@ namespace SPTAG::SPANN {
         // Also deletes the posting count key and invalidates local cache.
         ErrorCode DeletePostingFromDB(SizeType headID) {
             if (IsMultiChunk()) {
-                auto* tikv = GetTiKVDB();
+                auto* tikv = this->GetTiKVDB();
                 auto countRet = tikv->DeletePostingCount(DBKey(headID));
                 if (countRet != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "DeletePostingFromDB: DeletePostingCount failed for headID %d\n", headID);
@@ -2799,7 +2865,7 @@ namespace SPTAG::SPANN {
             auto [count, hit] = m_postingCountCache->Get(dbKey);
             if (hit) return count;
             // Cache miss: fetch from TiKV
-            auto* tikv = GetTiKVDB();
+            auto* tikv = this->GetTiKVDB();
             if (!tikv) return 0;
             count = tikv->GetPostingCount(dbKey, std::chrono::microseconds(5000000));
             if (count < 0) {
@@ -2816,7 +2882,7 @@ namespace SPTAG::SPANN {
                                             int appendNum, int oldCount,
                                             const std::chrono::microseconds& timeout,
                                             std::vector<Helper::AsyncReadRequest>* reqs) {
-            auto* tikv = GetTiKVDB();
+            auto* tikv = this->GetTiKVDB();
             if (!tikv) return ErrorCode::Fail;
             int newCount = oldCount + appendNum;
             auto ret = tikv->PutChunkAndCount(DBKey(headID), appendPosting, newCount, timeout, reqs);

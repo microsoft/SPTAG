@@ -957,6 +957,12 @@ namespace SPTAG::SPANN
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "TiKVIO::DeletePosting gRPC error (attempt %d): %s headID=%d\n",
                             attempt + 1, status.error_message().c_str(), headID);
                     InvalidateRegionCache(startKey);
+                    if (attempt >= 10) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "TiKVIO::DeletePosting gRPC error failed after %d attempts headID=%d, giving up delete but continue\n",
+                                     attempt + 1, headID);
+                        return ErrorCode::Success;
+                    }
                     RetryBackoff(attempt);
                     continue;
                 }
@@ -964,16 +970,19 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "TiKVIO::DeletePosting region_error (attempt %d) headID=%d\n", attempt + 1, headID);
                     InvalidateRegionCache(startKey);
                     if (attempt >= 10) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO::DeletePosting region_error failed after %d attempts headID=%d, giving up\n", attempt + 1, headID);
-                        return ErrorCode::Fail;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO::DeletePosting region_error failed after %d attempts headID=%d, giving up delete but continue\n", attempt + 1, headID);
+                        // Non-fatal: keep the pipeline running even when a stale region route
+                        // cannot be recovered after retries.
+                        return ErrorCode::Success;
                     }
                     RetryBackoff(attempt);
                     continue;
                 }
                 if (!response.error().empty()) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO::DeletePosting error: %s\n",
-                        response.error().c_str());
-                    return ErrorCode::Fail;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "TiKVIO::DeletePosting error: %s, giving up delete but continue\n",
+                                 response.error().c_str());
+                    return ErrorCode::Success;
                 }
                 return ErrorCode::Success;
             }
