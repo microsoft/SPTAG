@@ -391,6 +391,11 @@ namespace SPTAG::SPANN {
 
         virtual bool ContainSample(const SizeType idx) const override
         {
+            // Out-of-range or sentinel (-1) IDs are common in head-search
+            // result lists (unfilled slots). Treat them as "not contained"
+            // and avoid calling Deleted(), which would otherwise emit a
+            // spurious LL_Error log inside TiKVVersionMap.
+            if (idx < 0 || idx >= m_versionMap->Count()) return false;
             return !m_versionMap->Deleted(idx);
         }
 
@@ -1148,8 +1153,14 @@ namespace SPTAG::SPANN {
                     {
                         std::shared_ptr<std::string> vectorinfo =
                             std::make_shared<std::string>(m_vectorInfoSize, ' ');
+                        // deletedHeadVec is the full m_vectorInfoSize record
+                        // ([VID][version][vector]) read from the posting in
+                        // MergePostings (see line ~990). Serialize expects a
+                        // pointer to the raw m_vectorDataSize-byte vector, so
+                        // skip the m_metaDataSize prefix to avoid shifting the
+                        // vector bytes by 5 and corrupting the reassigned data.
                         Serialize(vectorinfo->data(), deletedHeadID, m_versionMap->GetVersion(deletedHeadID),
-                                    deletedHeadVec->data());
+                                    deletedHeadVec->data() + m_metaDataSize);
                         ReassignAsync(vectorinfo, -1);
                     }
                 }
@@ -1371,11 +1382,29 @@ namespace SPTAG::SPANN {
                 m_stat.m_reassignScanIOCost += elapsedMSeconds;
 
                 if (reassignReadOk) {
+                // IMPORTANT: snapshot each posting buffer into a local std::string
+                // BEFORE iterating. tryBatchReassign() below calls
+                // RNGSelection -> SearchHeadIndex -> SearchDiskIndex ->
+                // searcher->SearchIndex(p_exWorkSpace, ...) which performs its own
+                // MultiGet/MultiScanPostings into p_exWorkSpace->m_pageBuffers,
+                // overwriting (or reallocating) the very buffers we are scanning.
+                // Without this snapshot, the raw `postingP` pointer dangles or is
+                // mutated mid-loop, leading to records being interpreted as garbage
+                // (visible as invalid VIDs at the tail of single-chunk postings).
+                std::vector<std::string> nearbyPostings(HeadPrevTopK.size());
                 for (int i = 0; i < HeadPrevTopK.size(); i++)
                 {
                     auto &buffer = (p_exWorkSpace->m_pageBuffers[i]);
-                    size_t postVectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
-                    auto *postingP = buffer.GetBuffer();
+                    size_t bufBytes = buffer.GetAvailableSize();
+                    if (bufBytes > 0) {
+                        nearbyPostings[i].assign(reinterpret_cast<const char*>(buffer.GetBuffer()), bufBytes);
+                    }
+                }
+                for (int i = 0; i < HeadPrevTopK.size(); i++)
+                {
+                    auto& postingList = nearbyPostings[i];
+                    size_t postVectorNum = postingList.size() / m_vectorInfoSize;
+                    auto* postingP = reinterpret_cast<uint8_t*>(postingList.data());
                     for (int j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                         SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
@@ -1384,8 +1413,8 @@ namespace SPTAG::SPANN {
                         const SizeType maxVid = m_versionMap->Count();
                         if (vid < 0 || vid >= maxVid) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                         "CollectReAssign(nearby): skip invalid VID %d (max %d) in posting headID=%d\n",
-                                         vid, maxVid, HeadPrevTopK[i]);
+                                "CollectReAssign(nearby): skip invalid VID %d (max %d) in posting headID=%d\n",
+                                vid, maxVid, HeadPrevTopK[i]);
                             continue;
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
@@ -1568,6 +1597,17 @@ namespace SPTAG::SPANN {
                     std::string fullPosting;
                     auto getRet = db->Get(DBKey(headID), &fullPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests));
                     if (getRet != ErrorCode::Success) fullPosting.clear();
+                    // Diagnostic: detect stale/misaligned bytes in TiKV (e.g. residue
+                    // from a previous run with different m_vectorInfoSize, or a prior
+                    // multi-chunk layout sharing the same key prefix).
+                    if (getRet == ErrorCode::Success &&
+                        (fullPosting.size() % m_vectorInfoSize) != 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "Append: stale-aligned posting in TiKV headID=%lld size=%zu mod=%zu (m_vectorInfoSize=%d)\n",
+                            (std::int64_t)headID, fullPosting.size(),
+                            fullPosting.size() % (size_t)m_vectorInfoSize,
+                            m_vectorInfoSize);
+                    }
                     fullPosting.append(appendPosting);
                     postingSize = static_cast<int>(fullPosting.size());
                     if ((ret = db->Put(DBKey(headID), fullPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
