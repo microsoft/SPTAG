@@ -111,6 +111,56 @@ namespace SPTAG {
             // GC
             double m_garbageCost{ 0 };
 
+            // ----- Diagnostic instrumentation (Append RMW + Split lock) -----
+            // Histogram has 22 buckets covering log2 ranges:
+            //   bucket i = [2^i, 2^(i+1))   (units: microseconds for time, bytes for size)
+            //   i=0    : [1us, 2us)         /  [1B, 2B)
+            //   i=10   : [1ms, 2ms)         /  [1KB, 2KB)
+            //   i=20   : [1s,  2s)          /  [1MB, 2MB)
+            //   i=21   : [>=2s)             /  [>=2MB)   (tail bucket, no upper)
+            // Buckets are atomic so any thread can update without locking.
+            static constexpr int kHistBuckets = 22;
+            std::atomic_uint64_t m_appendLockWaitUs[kHistBuckets]{};   // A. lock contention
+            std::atomic_uint64_t m_appendGetUs[kHistBuckets]{};        // B. RMW Get latency (single-chunk)
+            std::atomic_uint64_t m_appendPutUs[kHistBuckets]{};        // B+C. RMW Put latency
+            std::atomic_uint64_t m_appendPostingBytes[kHistBuckets]{}; // RMW posting size after Get+append
+            std::atomic_uint64_t m_splitLockWaitUs[kHistBuckets]{};    // A. Split lock contention
+            std::atomic_uint64_t m_appendLockWaitTotalUs{ 0 };
+            std::atomic_uint64_t m_appendGetTotalUs{ 0 };
+            std::atomic_uint64_t m_appendPutTotalUs{ 0 };
+            std::atomic_uint64_t m_appendPostingBytesTotal{ 0 };
+            std::atomic_uint64_t m_splitLockWaitTotalUs{ 0 };
+            std::atomic_uint64_t m_appendRmwSampleCount{ 0 };          // # of RMWs that recorded above
+            std::atomic_uint64_t m_splitLockSampleCount{ 0 };
+
+            static int HistBucketOf(uint64_t v) {
+                if (v == 0) return 0;
+                int b = 0;
+                uint64_t x = v;
+                while (x > 1) { x >>= 1; ++b; }
+                if (b >= kHistBuckets) b = kHistBuckets - 1;
+                return b;
+            }
+            static void HistAdd(std::atomic_uint64_t* hist, uint64_t v) {
+                hist[HistBucketOf(v)].fetch_add(1, std::memory_order_relaxed);
+            }
+            static std::string FormatHist(const char* label, std::atomic_uint64_t* hist,
+                                          uint64_t totalSum, uint64_t sampleCount,
+                                          const char* unit) {
+                char buf[2048];
+                int n = snprintf(buf, sizeof(buf), "  %s: count=%lu avg=%.2f%s histo[bucket=count]:",
+                                 label, (unsigned long)sampleCount,
+                                 sampleCount ? (double)totalSum / sampleCount : 0.0, unit);
+                for (int i = 0; i < kHistBuckets && n < (int)sizeof(buf); ++i) {
+                    uint64_t c = hist[i].load(std::memory_order_relaxed);
+                    if (c == 0) continue;
+                    uint64_t lo = (i == 0) ? 0ULL : (1ULL << i);
+                    n += snprintf(buf + n, sizeof(buf) - n, " %lu%s+:%lu",
+                                  (unsigned long)lo, (i == kHistBuckets - 1) ? ">=" : "", (unsigned long)c);
+                }
+                return std::string(buf);
+            }
+
             void PrintStat(int finishedInsert, bool cost = false, bool reset = false) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After %d insertion, head vectors split %d times, head missing %d times, same head %d times, reassign %d times, reassign scan %ld times, garbage collection %d times, merge %d times\n",
                     finishedInsert, m_splitNum, m_headMiss.load(), m_theSameHeadNum, m_reAssignNum, m_reAssignScanNum, m_garbageNum, m_mergeNum);
@@ -129,6 +179,22 @@ namespace SPTAG {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_reAssignCost, m_reAssignCost / m_reAssignNum);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, Select TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_selectCost, m_selectCost / m_reAssignNum);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignNum: %d, ReassignAppend TotalCost: %.3lf us, PerCost: %.3lf us\n", m_reAssignNum, m_reAssignAppendCost, m_reAssignAppendCost / m_reAssignNum);
+                }
+
+                // Diagnostic histograms — independent of `cost` so they print every PrintStat
+                {
+                    uint64_t rmwN = m_appendRmwSampleCount.load();
+                    uint64_t splN = m_splitLockSampleCount.load();
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("AppendLockWait", m_appendLockWaitUs, m_appendLockWaitTotalUs.load(), rmwN, "us").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("AppendGetUs",    m_appendGetUs,      m_appendGetTotalUs.load(),     rmwN, "us").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("AppendPutUs",    m_appendPutUs,      m_appendPutTotalUs.load(),     rmwN, "us").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("AppendPostBytes",m_appendPostingBytes,m_appendPostingBytesTotal.load(), rmwN, "B").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("SplitLockWait",  m_splitLockWaitUs,  m_splitLockWaitTotalUs.load(),  splN, "us").c_str());
                 }
 
                 if (reset) {
