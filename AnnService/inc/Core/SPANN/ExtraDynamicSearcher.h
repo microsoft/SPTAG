@@ -259,7 +259,7 @@ namespace SPTAG::SPANN {
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
 
-        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, ValueType* data, ValueType* splitHeadVec, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead)
+        bool CheckIsNeedReassign(std::vector<std::shared_ptr<std::string>>& newHeadsVec, const ValueType* data, const ValueType* splitHeadVec, float_t headToSplitHeadDist, float_t currentHeadDist, bool isInSplitHead)
         {
             float_t splitHeadDist = m_headIndex->ComputeDistance(data, splitHeadVec);
 
@@ -585,7 +585,7 @@ namespace SPTAG::SPANN {
                     }
                     if (!theSameHead && m_headIndex->ComputeDistance(args.centers + k * args._D, headVec->c_str() + m_metaDataSize) < Epsilon) {
                         newHeadsID[k] = headID;
-                        newHeadsVec[k] = headVec->substr(m_metaDataSize, m_vectorDataSize);
+                        newHeadsVec[k] = std::make_shared<std::string>(headVec->c_str() + m_metaDataSize, m_vectorDataSize);
                         newHeadVID = headID;
                         theSameHead = true;
                         if (!hasHead) newPostingLists[k] += *headVec;
