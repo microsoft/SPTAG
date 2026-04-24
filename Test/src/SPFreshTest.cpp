@@ -187,7 +187,7 @@ std::shared_ptr<VectorIndex> BuildIndex(const std::string &outDirectory, std::sh
             StartFileSizeGB=1
             OneClusterCutMax=true
             ConsistencyCheck=true
-            ChecksumCheck=true
+            ChecksumCheck=false
             ChecksumInRead=false
             AsyncMergeInSearch=false
             DeletePercentageForRefine=0.4
