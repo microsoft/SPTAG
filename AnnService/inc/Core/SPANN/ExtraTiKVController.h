@@ -1739,17 +1739,27 @@ namespace SPTAG::SPANN
         // Hot path is lock-free: every thread caches a pinned Stub* per address in
         // thread_local storage. The global m_storeStubs map is only consulted on
         // first-touch (per-thread, per-address) and on epoch bump.
+        //
+        // The TLS cache is keyed by (TiKVIO*, address) so that multiple TiKVIO
+        // instances created on the same thread (e.g. rebuild flow) do not
+        // share dangling Stub* pointers from a previously destroyed instance.
         tikvpb::Tikv::Stub* GetOrCreateStub(const std::string& address) {
-            struct TlsEntry { uint64_t epoch; tikvpb::Tikv::Stub* stub; };
-            thread_local std::unordered_map<std::string, TlsEntry> tlsStubCache;
+            struct TlsEntry {
+                uint64_t epoch;
+                tikvpb::Tikv::Stub* stub;
+                std::shared_ptr<StubPool> poolKeepalive;  // keep underlying Stub alive
+            };
+            using PerInstance = std::unordered_map<std::string, TlsEntry>;
+            thread_local std::unordered_map<const void*, PerInstance> tlsStubCache;
 
+            PerInstance& perInstance = tlsStubCache[this];
             const uint64_t curEpoch = m_stubEpoch.load(std::memory_order_acquire);
-            auto tit = tlsStubCache.find(address);
-            if (tit != tlsStubCache.end() && tit->second.epoch == curEpoch) {
+            auto tit = perInstance.find(address);
+            if (tit != perInstance.end() && tit->second.epoch == curEpoch) {
                 return tit->second.stub;
             }
-            if (tit != tlsStubCache.end()) {
-                tlsStubCache.erase(tit);  // stale — refresh below
+            if (tit != perInstance.end()) {
+                perInstance.erase(tit);  // stale — refresh below
             }
 
             // Slow path: locate or create the global pool, then pin a stub for this thread.
@@ -1793,7 +1803,7 @@ namespace SPTAG::SPANN
             // Pick one stub from the pool for this thread (round-robin via the pool's
             // atomic counter — happens once per (thread, address) pair) and pin it.
             tikvpb::Tikv::Stub* stub = pool->GetNext();
-            tlsStubCache[address] = TlsEntry{curEpoch, stub};
+            perInstance[address] = TlsEntry{curEpoch, stub, pool};
             return stub;
         }
 
