@@ -135,7 +135,6 @@ namespace SPTAG
             p_exWorkSpace->m_offset++;\
             int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
-            if (p_exWorkSpace->m_filterFunc != nullptr && !p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(vectorID))) continue; \
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
@@ -539,8 +538,7 @@ namespace SPTAG
                 bool foundResult = false;
                 BasicResult* head = headResults.GetResult(p_exWorkSpace->m_ri);
                 while (!foundResult && p_exWorkSpace->m_pi < p_exWorkSpace->m_postingIDs.size()) {
-                    if (head && head->VID != -1 && p_exWorkSpace->m_ri <= p_exWorkSpace->m_pi &&
-                       (p_exWorkSpace->m_filterFunc == nullptr || p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(head->VID)))) {
+                    if (head && head->VID != -1 && p_exWorkSpace->m_ri <= p_exWorkSpace->m_pi) {
                         queryResults.AddPoint(head->VID, head->Dist);
                         head = headResults.GetResult(++p_exWorkSpace->m_ri);
                         foundResult = true;
@@ -556,8 +554,7 @@ namespace SPTAG
                     }
                     ProcessPostingOffset();
                 }
-                if (!foundResult && head && head->VID != -1 &&
-                (p_exWorkSpace->m_filterFunc == nullptr || p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(head->VID)))) {
+                if (!foundResult && head && head->VID != -1) {
                     queryResults.AddPoint(head->VID, head->Dist);
                     head = headResults.GetResult(++p_exWorkSpace->m_ri);
                     foundResult = true;

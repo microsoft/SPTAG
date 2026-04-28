@@ -1900,12 +1900,11 @@ namespace SPTAG::SPANN {
             auto readEnd = std::chrono::high_resolution_clock::now();
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
 
-            const bool hasMetadataFilter = p_exWorkSpace->m_filterFunc != nullptr;
             const bool hasInlineTagFilter =
                 m_tagBytesPerVec > 0 &&
                 p_exWorkSpace->m_queryTags != nullptr &&
                 p_exWorkSpace->m_numQueryTags > 0;
-            const bool trackPostingStats = hasMetadataFilter || hasInlineTagFilter;
+            const bool trackPostingStats = hasInlineTagFilter;
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
             if (trackPostingStats) {
@@ -1936,12 +1935,6 @@ namespace SPTAG::SPANN {
                         continue;
                     }
 
-                    bool metadataMatch = true;
-                    if (hasMetadataFilter) {
-                        const VectorIndex* filterSrc = p_exWorkSpace->m_pFilterSource ? p_exWorkSpace->m_pFilterSource : p_index.get();
-                        metadataMatch = p_exWorkSpace->m_filterFunc(filterSrc->GetMetadata(vectorID));
-                    }
-
                     bool tagMatch = true;
                     if (hasInlineTagFilter) {
                         tagMatch = false;
@@ -1953,16 +1946,11 @@ namespace SPTAG::SPANN {
                         }
                     }
 
-                    if (metadataMatch && tagMatch) {
+                    if (tagMatch) {
                         postingHasExactMatch = true;
                     }
 
                     if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
-                        listElements--;
-                        continue;
-                    }
-                    // Multi-attribute filter: skip vectors whose metadata doesn't match
-                    if (!metadataMatch) {
                         listElements--;
                         continue;
                     }
@@ -2034,8 +2022,7 @@ namespace SPTAG::SPANN {
             BasicResult* head = headResults.GetResult(p_exWorkSpace->m_ri);
             while (!foundResult && p_exWorkSpace->m_pi < p_exWorkSpace->m_postingIDs.size()) {
                 if (head && head->VID != -1 && p_exWorkSpace->m_ri <= p_exWorkSpace->m_pi) {
-                    if (!m_versionMap->Deleted(head->VID) && !p_exWorkSpace->m_deduper.CheckAndSet(head->VID) &&
-                    (p_exWorkSpace->m_filterFunc == nullptr || p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(head->VID)))) {
+                    if (!m_versionMap->Deleted(head->VID) && !p_exWorkSpace->m_deduper.CheckAndSet(head->VID)) {
                         queryResults.AddPoint(head->VID, head->Dist);
                         foundResult = true;
                     }
@@ -2053,7 +2040,6 @@ namespace SPTAG::SPANN {
                     if (vectorID >= m_versionMap->Count()) return ErrorCode::Key_OverFlow;
                     if (m_versionMap->Deleted(vectorID)) continue;
                     if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
-                    if (p_exWorkSpace->m_filterFunc != nullptr && !p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(vectorID))) continue;
 
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
@@ -2066,8 +2052,7 @@ namespace SPTAG::SPANN {
                 }
             }
             while (!foundResult && head && head->VID != -1) {
-                if (!m_versionMap->Deleted(head->VID) && !p_exWorkSpace->m_deduper.CheckAndSet(head->VID) &&
-                (p_exWorkSpace->m_filterFunc == nullptr || p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(head->VID)))) {
+                if (!m_versionMap->Deleted(head->VID) && !p_exWorkSpace->m_deduper.CheckAndSet(head->VID)) {
                     queryResults.AddPoint(head->VID, head->Dist);
                     foundResult = true;
                 }
