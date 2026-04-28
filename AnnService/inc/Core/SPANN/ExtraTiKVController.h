@@ -1344,6 +1344,10 @@ namespace SPTAG::SPANN
         };
         mutable std::mutex m_storeMutex;
         std::unordered_map<std::string, std::shared_ptr<StubPool>> m_storeStubs;
+        // Bumped whenever an entry in m_storeStubs is invalidated (currently never;
+        // reserved for future PD topology changes). Threads compare this against a
+        // thread-local cached value to know when to refresh their TLS stub map.
+        std::atomic<uint64_t> m_stubEpoch{0};
 
         // Store address cache: store_id -> address
         mutable std::mutex m_storeAddrMutex;
@@ -1732,40 +1736,65 @@ namespace SPTAG::SPANN
         }
 
         // ---- Get or create a gRPC stub pool for a TiKV store ----
+        // Hot path is lock-free: every thread caches a pinned Stub* per address in
+        // thread_local storage. The global m_storeStubs map is only consulted on
+        // first-touch (per-thread, per-address) and on epoch bump.
         tikvpb::Tikv::Stub* GetOrCreateStub(const std::string& address) {
+            struct TlsEntry { uint64_t epoch; tikvpb::Tikv::Stub* stub; };
+            thread_local std::unordered_map<std::string, TlsEntry> tlsStubCache;
+
+            const uint64_t curEpoch = m_stubEpoch.load(std::memory_order_acquire);
+            auto tit = tlsStubCache.find(address);
+            if (tit != tlsStubCache.end() && tit->second.epoch == curEpoch) {
+                return tit->second.stub;
+            }
+            if (tit != tlsStubCache.end()) {
+                tlsStubCache.erase(tit);  // stale — refresh below
+            }
+
+            // Slow path: locate or create the global pool, then pin a stub for this thread.
+            std::shared_ptr<StubPool> pool;
             {
                 std::lock_guard<std::mutex> lock(m_storeMutex);
                 auto it = m_storeStubs.find(address);
                 if (it != m_storeStubs.end()) {
-                    return it->second->GetNext();
+                    pool = it->second;
                 }
             }
 
-            // Create a pool of stubs with separate channels
-            auto pool = std::make_shared<StubPool>();
-            pool->stubs.reserve(kStubPoolSize);
-            for (int i = 0; i < kStubPoolSize; i++) {
-                grpc::ChannelArguments args;
-                args.SetMaxReceiveMessageSize(64 * 1024 * 1024); // 64MB
-                args.SetMaxSendMessageSize(64 * 1024 * 1024);    // 64MB
-                auto channel = grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), args);
-                auto stub = tikvpb::Tikv::NewStub(channel);
-                if (!stub) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO: Failed to create stub for %s\n", address.c_str());
-                    return nullptr;
+            if (!pool) {
+                // Create a pool of stubs with separate channels
+                pool = std::make_shared<StubPool>();
+                pool->stubs.reserve(kStubPoolSize);
+                for (int i = 0; i < kStubPoolSize; i++) {
+                    grpc::ChannelArguments args;
+                    args.SetMaxReceiveMessageSize(64 * 1024 * 1024); // 64MB
+                    args.SetMaxSendMessageSize(64 * 1024 * 1024);    // 64MB
+                    auto channel = grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), args);
+                    auto stub = tikvpb::Tikv::NewStub(channel);
+                    if (!stub) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO: Failed to create stub for %s\n", address.c_str());
+                        return nullptr;
+                    }
+                    pool->stubs.push_back(std::move(stub));
                 }
-                pool->stubs.push_back(std::move(stub));
+
+                std::lock_guard<std::mutex> lock(m_storeMutex);
+                // Double-check after acquiring lock — another thread may have won the race
+                auto it = m_storeStubs.find(address);
+                if (it != m_storeStubs.end()) {
+                    pool = it->second;
+                } else {
+                    m_storeStubs[address] = pool;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Created %d stubs for TiKV store at %s\n", kStubPoolSize, address.c_str());
+                }
             }
 
-            std::lock_guard<std::mutex> lock(m_storeMutex);
-            // Double-check after acquiring lock
-            auto it = m_storeStubs.find(address);
-            if (it != m_storeStubs.end()) {
-                return it->second->GetNext();
-            }
-            m_storeStubs[address] = pool;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Created %d stubs for TiKV store at %s\n", kStubPoolSize, address.c_str());
-            return pool->GetNext();
+            // Pick one stub from the pool for this thread (round-robin via the pool's
+            // atomic counter — happens once per (thread, address) pair) and pin it.
+            tikvpb::Tikv::Stub* stub = pool->GetNext();
+            tlsStubCache[address] = TlsEntry{curEpoch, stub};
+            return stub;
         }
 
         // ---- Vector search protocol encoding/decoding ----
