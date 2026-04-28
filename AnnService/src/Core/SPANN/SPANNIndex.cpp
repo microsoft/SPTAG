@@ -921,12 +921,20 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 (static_cast<double>(filteredTopK) * static_cast<double>(recallTarget)) /
                 expectedMatchesPerPosting));
 
-            double coverageDenominator = std::pow(sel, static_cast<double>(coverageExponent));
-            if (coverageDenominator < 1e-6) coverageDenominator = 1e-6;
-            int postingsForCoverage = static_cast<int>(std::ceil(static_cast<double>(nprobeBase) / coverageDenominator));
+            int target = std::max(nprobeBase, postingsForRecall);
 
-            return std::min(static_cast<int>(scopePostingCount),
-                            std::max(nprobeBase, std::max(postingsForRecall, postingsForCoverage)));
+            // Optional coverage term: only when explicitly enabled (exponent > 0).
+            // The 1/sel^exp scaling has no theoretical basis and tends to dominate
+            // postingsForRecall for low-sel queries, so it is opt-in.
+            if (coverageExponent > 1e-6f) {
+                double coverageDenominator = std::pow(sel, static_cast<double>(coverageExponent));
+                if (coverageDenominator < 1e-6) coverageDenominator = 1e-6;
+                int postingsForCoverage = static_cast<int>(std::ceil(
+                    static_cast<double>(nprobeBase) / coverageDenominator));
+                target = std::max(target, postingsForCoverage);
+            }
+
+            return std::min(static_cast<int>(scopePostingCount), target);
         };
 
         SizeType postingCountCap = globalPostingCount;
@@ -997,6 +1005,20 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                                          std::max(aggregatePostingTarget, trimmedChildPostingTarget));
             }
         }
+    }
+
+    if (m_options.m_logAdaptiveNprobe && adaptiveFilteredNprobeEnabled) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "AdaptiveNprobe: sel=%.4g topK=%d recallTarget=%.3g coverageExp=%.3g "
+            "nprobeBase=%d nodes=%zu cap=%d -> postingTarget=%d\n",
+            static_cast<double>(filterSelectivity),
+            p_query.GetResultNum(),
+            static_cast<double>(m_options.m_filteredSearchTargetRecall),
+            static_cast<double>(m_options.m_filteredSearchCoverageExponent),
+            nprobeBase,
+            candidateNodes.size(),
+            static_cast<int>(m_index->GetNumSamples()),
+            postingTarget);
     }
 
     // Graph search must return at least postingTarget candidates

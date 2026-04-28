@@ -3628,10 +3628,19 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 
         if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && searchContext.m_filterSelectivity >= 1.0f) {
             int passCount = 0;
-            for (SizeType pid = 0; pid < memoryIndex->GetHeadNodeMetaSampleCount(); ++pid) {
+            SizeType totalHeads = memoryIndex->GetHeadNodeMetaSampleCount();
+            for (SizeType pid = 0; pid < totalHeads; ++pid) {
                 if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
             }
-            float fallbackVectorSel = (float)passCount / (float)tenantSize2;
+            // FIX: divide by total head count (same units), not tenantSize.
+            // passCount/tenantSize mixed head-count and vector-count units, so the
+            // fallback always reported pathologically small selectivity (~1/avgPosting).
+            // passCount/totalHeads is the fraction of heads that *may* match — a
+            // sane proxy for vector selectivity when tag distribution across
+            // postings is roughly uniform.
+            float fallbackVectorSel = (totalHeads > 0)
+                ? static_cast<float>(passCount) / static_cast<float>(totalHeads)
+                : 1.0f;
             searchContext.m_filterSelectivity = std::clamp(fallbackVectorSel, 1e-6f, 1.0f);
         }
     }
