@@ -1736,18 +1736,21 @@ namespace SPTAG::SPANN
         }
 
         // ---- Get or create a gRPC stub pool for a TiKV store ----
-        // Hot path is lock-free: every thread caches a pinned Stub* per address in
-        // thread_local storage. The global m_storeStubs map is only consulted on
-        // first-touch (per-thread, per-address) and on epoch bump.
+        // Hot path is lock-free: every thread caches a shared_ptr<StubPool> per
+        // address in thread_local storage and still round-robins across the pool's
+        // 48 stubs on every call (preserving channel fan-out). The global
+        // m_storeStubs map is only consulted on first-touch (per-thread,
+        // per-address) and on epoch bump.
         //
         // The TLS cache is keyed by (TiKVIO*, address) so that multiple TiKVIO
-        // instances created on the same thread (e.g. rebuild flow) do not
-        // share dangling Stub* pointers from a previously destroyed instance.
+        // instances created on the same thread (e.g. the rebuild flow) do not
+        // share dangling pool pointers from a previously destroyed instance.
+        // The cached shared_ptr<StubPool> also keeps the underlying gRPC
+        // channels alive past instance destruction in case the address is reused.
         tikvpb::Tikv::Stub* GetOrCreateStub(const std::string& address) {
             struct TlsEntry {
                 uint64_t epoch;
-                tikvpb::Tikv::Stub* stub;
-                std::shared_ptr<StubPool> poolKeepalive;  // keep underlying Stub alive
+                std::shared_ptr<StubPool> pool;
             };
             using PerInstance = std::unordered_map<std::string, TlsEntry>;
             thread_local std::unordered_map<const void*, PerInstance> tlsStubCache;
@@ -1756,13 +1759,13 @@ namespace SPTAG::SPANN
             const uint64_t curEpoch = m_stubEpoch.load(std::memory_order_acquire);
             auto tit = perInstance.find(address);
             if (tit != perInstance.end() && tit->second.epoch == curEpoch) {
-                return tit->second.stub;
+                return tit->second.pool->GetNext();
             }
             if (tit != perInstance.end()) {
                 perInstance.erase(tit);  // stale — refresh below
             }
 
-            // Slow path: locate or create the global pool, then pin a stub for this thread.
+            // Slow path: locate or create the global pool, then cache it for this thread.
             std::shared_ptr<StubPool> pool;
             {
                 std::lock_guard<std::mutex> lock(m_storeMutex);
@@ -1800,11 +1803,8 @@ namespace SPTAG::SPANN
                 }
             }
 
-            // Pick one stub from the pool for this thread (round-robin via the pool's
-            // atomic counter — happens once per (thread, address) pair) and pin it.
-            tikvpb::Tikv::Stub* stub = pool->GetNext();
-            perInstance[address] = TlsEntry{curEpoch, stub, pool};
-            return stub;
+            perInstance[address] = TlsEntry{curEpoch, pool};
+            return pool->GetNext();
         }
 
         // ---- Vector search protocol encoding/decoding ----
