@@ -275,6 +275,7 @@ std::shared_ptr<VectorIndex> BuildLargeIndex(const std::string &outDirectory, st
             SplitFactor=0
             SplitThreshold=0
             Ratio=0.2
+            ParallelBKTBuild=true
 
         [BuildHead]
             isExecute=true
@@ -319,6 +320,7 @@ std::shared_ptr<VectorIndex> BuildLargeIndex(const std::string &outDirectory, st
             DeletePercentageForRefine=0.4
             AsyncAppendQueueSize=0
             AllowZeroReplica=false
+            ShareDB=true            
             Layers=)" + std::to_string(layers) + R"(
         )";
 
@@ -675,7 +677,7 @@ ErrorCode QuantizeVectors(const std::shared_ptr<COMMON::IQuantizer>& quantizer,
 template <typename T>
 void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, const std::string &truthPath,
                   DistCalcMethod distMethod, const std::string &indexPath, int dimension, int baseVectorCount,
-                  int insertVectorCount, int deleteVectorCount, int batches, int topK, int numSearchThreads, int numInsertThreads, int numQueries,
+                  int insertVectorCount, int deleteVectorCount, int batches, int topK, int numSearchThreads, int numInsertThreads, int numSearchDuringInsertThreads, int numQueries,
                   const std::string &outputFile = "output.json", const bool rebuild = true, const int resume = -1,
                   const std::string &quantizerFilePath = std::string(""), int quantizedDim = 0, int layers = 1,
                   const std::map<std::string, std::string>& ssdOverrides = {},
@@ -945,7 +947,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                     std::shared_ptr<MetadataSet> addmetaset = TestUtils::TestDataGenerator<T>::LoadMetadataSet(paddmeta, paddmetaidx, insertStart, insertBatchSize);
                     start = std::chrono::high_resolution_clock::now();
                     InsertVectors<T>(static_cast<SPANN::Index<T> *>(cloneIndex.get()), numInsertThreads, insertBatchSize,
-                                     addset, addmetaset, numSearchThreads, queryset, numQueries, SearchK, &jsonFile, 0);
+                                     addset, addmetaset, numSearchDuringInsertThreads, queryset, numQueries, SearchK, &jsonFile, 0);
                     end = std::chrono::high_resolution_clock::now();
                 }
                 seconds =
@@ -2093,6 +2095,7 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     int numSearchThreads = iniReader.GetParameter("Benchmark", "NumSearchThreads", 8);
     int numInsertThreads = iniReader.GetParameter("Benchmark", "NumInsertThreads", 8);
     int appendThreadNum = iniReader.GetParameter("Benchmark", "AppendThreadNum", 0);
+    int numSearchDuringInsertThreads = iniReader.GetParameter("Benchmark", "NumSearchDuringInsertThreads", 1);
     int numQueries = iniReader.GetParameter("Benchmark", "NumQueries", 1000);
     int layers = iniReader.GetParameter("Benchmark", "Layers", 1);
     DistCalcMethod distMethod = iniReader.GetParameter("Benchmark", "DistMethod", DistCalcMethod::L2);
@@ -2144,6 +2147,7 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     BOOST_TEST_MESSAGE("Top-K: " << topK);
     BOOST_TEST_MESSAGE("SearchThreads: " << numSearchThreads);
     BOOST_TEST_MESSAGE("InsertThreads: " << numInsertThreads);
+    BOOST_TEST_MESSAGE("SearchDuringInsertThreads: " << numSearchDuringInsertThreads);
     BOOST_TEST_MESSAGE("Queries: " << numQueries);
     BOOST_TEST_MESSAGE("Layers: " << layers);
     BOOST_TEST_MESSAGE("DistMethod: " << Helper::Convert::ConvertToString(distMethod));
@@ -2162,19 +2166,19 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     if (valueType == VectorValueType::Float)
     {
         RunBenchmark<float>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                    insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numQueries, outputFile, 
+                    insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries, outputFile, 
                     rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
     }
     else if (valueType == VectorValueType::Int8)
     {
         RunBenchmark<std::int8_t>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                      insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numQueries,
+                      insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries,
                       outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
     }
     else if (valueType == VectorValueType::UInt8)
     {
         RunBenchmark<std::uint8_t>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                       insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numQueries,
+                       insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries,
                        outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
     }
 

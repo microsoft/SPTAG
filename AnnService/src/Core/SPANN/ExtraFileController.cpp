@@ -25,7 +25,7 @@ bool FileIO::BlockController::Initialize(SPANN::Options &p_opt, int p_layer)
 #ifndef _MSC_VER
             O_RDWR | O_DIRECT, numblocks, 2, 2,
             max(p_opt.m_ioThreads, (2 * max(p_opt.m_searchThreadNum, p_opt.m_iSSDNumberOfThreads) +
-                                    p_opt.m_insertThreadNum + p_opt.m_reassignThreadNum + p_opt.m_appendThreadNum)),
+                                    (p_opt.m_layers + 1) * (p_opt.m_insertThreadNum + p_opt.m_reassignThreadNum + p_opt.m_appendThreadNum))),
             ((std::uint64_t)p_opt.m_startFileSize) << 30
 #else
             GENERIC_READ | GENERIC_WRITE, numblocks, 2, 2,

@@ -101,7 +101,7 @@
         },
         {
           "name": "LD_PRELOAD",
-          "value": "/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so"
+          "value": "/usr/lib/gcc/x86_64-linux-gnu/13/libasan.so"
         },
         {
           "name": "PCI_ALLOWED",
@@ -170,7 +170,7 @@
         },
         {
           "name": "LD_PRELOAD",
-          "value": "/usr/lib/gcc/x86_64-linux-gnu/11/libasan.so"
+          "value": "/usr/lib/gcc/x86_64-linux-gnu/13/libasan.so"
         },
         {
           "name": "PCI_ALLOWED",
