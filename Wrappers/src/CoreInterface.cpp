@@ -3,6 +3,11 @@
 
 #include "inc/CoreInterface.h"
 #include "inc/Helper/StringConvert.h"
+#include "inc/Helper/TenantPrefixedKeyValueIO.h"
+#include "inc/Core/SPANN/Index.h"
+#ifdef ROCKSDB
+#include "inc/Core/SPANN/ExtraRocksDBController.h"
+#endif
 
 #include <fcntl.h>
 #include <sys/types.h>
@@ -1366,6 +1371,27 @@ void AnnIndex::SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int
     spannIdx->SetPrimaryNodeVectorAssignments(convertedAssignments);
 }
 
+bool AnnIndex::SetSharedDB(std::shared_ptr<SPTAG::Helper::KeyValueIO> p_db)
+{
+    if (m_index == nullptr)
+    {
+        if (m_algoType == SPTAG::IndexAlgoType::Undefined ||
+            m_inputValueType == SPTAG::VectorValueType::Undefined)
+            return false;
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+        if (m_index == nullptr) return false;
+    }
+    if (m_algoType != SPTAG::IndexAlgoType::SPANN) return false;
+    if (m_inputValueType == SPTAG::VectorValueType::Float)
+    {
+        auto spann = std::dynamic_pointer_cast<SPTAG::SPANN::Index<float>>(m_index);
+        if (spann == nullptr) return false;
+        spann->SetSharedDB(std::move(p_db));
+        return true;
+    }
+    return false;
+}
+
 void AnnIndex::UpdateIndex()
 {
     m_index->UpdateIndex();
@@ -1570,6 +1596,155 @@ TenantIndexManager::~TenantIndexManager()
     m_tenantPlannedPrimaryNodeVectors.clear();
     m_tenantTagToNodes.clear();
     m_tenantHeadNodeToNode.clear();
+
+    // Shut the shared RocksDB down only after every tenant index (which holds
+    // a TenantPrefixedKeyValueIO referencing the shared DB through a
+    // shared_ptr) has been released.
+    if (m_sharedDB)
+    {
+        m_sharedDB->ShutDown();
+        m_sharedDB.reset();
+    }
+}
+
+bool TenantIndexManager::EnsureSharedDB()
+{
+#ifndef ROCKSDB
+    fprintf(stderr, "[ERROR] TenantIndexManager: shared RocksDB requested but binary built without ROCKSDB.\n");
+    return false;
+#else
+    std::lock_guard<std::mutex> lk(m_sharedDBMutex);
+    if (m_sharedDB) return true;
+    std::string base = m_baseStoragePath.empty() ? std::string("./tenant_index") : m_baseStoragePath;
+    EnsureDir(base);
+    if (m_baseStoragePath.empty()) m_baseStoragePath = base;
+
+    // Single shared DB at <baseDir>/rocksdb_shared_0/. The trailing _0 mirrors
+    // PrepareDB()'s per-layer suffix; only layer 0 is exercised today.
+    std::string dbPath = base + "/rocksdb_shared_0";
+    std::shared_ptr<SPTAG::SPANN::RocksDBIO> db;
+    try
+    {
+        db = std::make_shared<SPTAG::SPANN::RocksDBIO>(
+            dbPath.c_str(), m_useDirectIO, m_enableWAL, /*recovery=*/false);
+    }
+    catch (...)
+    {
+        fprintf(stderr, "[ERROR] TenantIndexManager: failed to open shared RocksDB at %s\n", dbPath.c_str());
+        return false;
+    }
+    if (!db || !db->Available())
+    {
+        fprintf(stderr, "[ERROR] TenantIndexManager: shared RocksDB unavailable at %s\n", dbPath.c_str());
+        return false;
+    }
+    m_sharedDB = db;
+    fprintf(stderr, "[INFO] TenantIndexManager: opened shared RocksDB at %s\n", dbPath.c_str());
+    return true;
+#endif
+}
+
+bool TenantIndexManager::InjectSharedDB(const std::shared_ptr<AnnIndex>& p_idx, int p_internalId)
+{
+    if (!p_idx) return false;
+    if (!m_sharedDB)
+    {
+        fprintf(stderr, "[ERROR] TenantIndexManager: shared DB not initialised before InjectSharedDB.\n");
+        return false;
+    }
+    auto wrapper = std::make_shared<SPTAG::Helper::TenantPrefixedKeyValueIO>(m_sharedDB, p_internalId);
+    if (!p_idx->SetSharedDB(wrapper))
+    {
+        fprintf(stderr, "[ERROR] TenantIndexManager: tenant %d index is not SPANN<Float>; cannot share DB.\n", p_internalId);
+        return false;
+    }
+    return true;
+}
+
+std::shared_ptr<AnnIndex> TenantIndexManager::LoadSpannWithSharedDB(const std::string& p_folder, int p_internalId)
+{
+    using namespace SPTAG;
+
+    std::string folderPath = p_folder;
+    if (!folderPath.empty() && folderPath.back() != FolderSep) folderPath += FolderSep;
+
+    Helper::IniReader iniReader;
+    {
+        auto fp = SPTAG::f_createIO();
+        if (fp == nullptr || !fp->Initialize((folderPath + "indexloader.ini").c_str(), std::ios::in))
+            return nullptr;
+        if (ErrorCode::Success != iniReader.LoadIni(fp)) return nullptr;
+    }
+
+    IndexAlgoType algoType = iniReader.GetParameter("Index", "IndexAlgoType", IndexAlgoType::Undefined);
+    VectorValueType valueType = iniReader.GetParameter("Index", "ValueType", VectorValueType::Undefined);
+    std::shared_ptr<VectorIndex> vecIndex = VectorIndex::CreateInstance(algoType, valueType);
+    if (vecIndex == nullptr) return nullptr;
+
+    if (vecIndex->LoadIndexConfig(iniReader) != ErrorCode::Success) return nullptr;
+
+    if (algoType == IndexAlgoType::SPANN)
+    {
+        vecIndex->SetParameter("IndexDirectory", p_folder.c_str(), "Base");
+        // Disable lazy per-tenant DB creation; the searcher must use m_externalDB.
+        vecIndex->SetParameter("ShareDB", "true", "BuildSSDIndex");
+        if (!EnsureSharedDB()) return nullptr;
+        if (valueType == VectorValueType::Float)
+        {
+            auto spann = std::dynamic_pointer_cast<SPTAG::SPANN::Index<float>>(vecIndex);
+            if (!spann) return nullptr;
+            auto wrapper = std::make_shared<SPTAG::Helper::TenantPrefixedKeyValueIO>(m_sharedDB, p_internalId);
+            spann->SetSharedDB(wrapper);
+        }
+        else
+        {
+            return nullptr;
+        }
+    }
+
+    auto indexfiles = vecIndex->GetIndexFiles();
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        indexfiles->push_back("metadata.bin");
+        indexfiles->push_back("metadataIndex.bin");
+    }
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        indexfiles->push_back("quantizer.bin");
+    }
+
+    std::vector<std::shared_ptr<Helper::DiskIO>> handles;
+    for (std::string& f : *indexfiles)
+    {
+        auto ptr = SPTAG::f_createIO();
+        if (ptr == nullptr || !ptr->Initialize((folderPath + f).c_str(),
+                                                std::ios::binary | std::ios::in))
+        {
+            ptr = nullptr;
+        }
+        handles.push_back(std::move(ptr));
+    }
+
+    if (vecIndex->LoadIndexData(handles) != ErrorCode::Success) return nullptr;
+
+    size_t metaStart = vecIndex->GetIndexFiles()->size();
+    if (iniReader.DoesSectionExist("MetaData"))
+    {
+        vecIndex->SetMetadata(new SPTAG::MemMetadataSet(handles[metaStart], handles[metaStart + 1],
+                                                        vecIndex->m_iDataBlockSize, vecIndex->m_iDataCapacity,
+                                                        vecIndex->m_iMetaRecordSize));
+        if (!(vecIndex->GetMetadata()->Available())) return nullptr;
+        if (iniReader.GetParameter("MetaData", "MetaDataToVectorIndex", std::string()) == "true")
+            vecIndex->BuildMetaMapping();
+        metaStart += 2;
+    }
+    if (iniReader.DoesSectionExist("Quantizer"))
+    {
+        vecIndex->SetQuantizer(SPTAG::COMMON::IQuantizer::LoadIQuantizer(handles[metaStart]));
+        if (!vecIndex->m_pQuantizer) return nullptr;
+    }
+    vecIndex->SetReady(true);
+    return std::make_shared<AnnIndex>(AnnIndex(vecIndex));
 }
 
 bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata, SizeType p_vectorNum,
@@ -1816,6 +1991,16 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             }
             if (primaryPlanIt != m_tenantPlannedPrimaryNodeVectors.end() && !primaryPlanIt->second.empty()) {
                 tenantIndex->SetPrimaryNodeVectorAssignments(primaryPlanIt->second);
+            }
+
+            // Shared RocksDB: when enabled, inject a tenant-prefixed wrapper
+            // BEFORE Build so SPANN's ExtraDynamicSearcher reuses the shared
+            // store instead of opening a per-tenant RocksDB.
+            if (m_storageBackend == "ROCKSDBIO" && m_useSharedDB)
+            {
+                tenantIndex->SetBuildParam("ShareDB", "true", "BuildSSDIndex");
+                if (!EnsureSharedDB()) return false;
+                if (!InjectSharedDB(tenantIndex, tenantId)) return false;
             }
 
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
@@ -2299,6 +2484,18 @@ bool TenantIndexManager::SaveAll(const char* p_baseDir)
         return false;
     }
 
+    // Checkpoint the shared RocksDB into <baseDir>/rocksdb_shared_0/ when
+    // saving to a directory other than where the live DB lives. RocksDB
+    // persists in place, so same-dir saves are a no-op.
+    if (m_useSharedDB && m_sharedDB)
+    {
+        if (m_sharedDB->Checkpoint(std::string(p_baseDir)) != SPTAG::ErrorCode::Success)
+        {
+            fprintf(stderr, "[ERROR] TenantIndexManager::SaveAll: failed to checkpoint shared RocksDB to %s\n", p_baseDir);
+            return false;
+        }
+    }
+
     // Write manifest for all tenants
     std::string manifestPath = m_baseStoragePath + "/manifest.txt";
     FILE* manifestFile = fopen(manifestPath.c_str(), "w");
@@ -2711,12 +2908,27 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
     }
 
     AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
-    if (!loadedIndex.ReadyToServe())
+    (void)loadedIndex;
+    std::shared_ptr<AnnIndex> indexPtr;
+    if (indexType == TenantIndexType::SPANN && m_storageBackend == "ROCKSDBIO" && m_useSharedDB)
     {
-        fprintf(stderr, "[ERROR] Failed to load tenant %d from %s\n", p_tenantId, loadPath.c_str());
-        return false;
+        indexPtr = LoadSpannWithSharedDB(loadPath, p_tenantId);
+        if (indexPtr == nullptr || !indexPtr->ReadyToServe())
+        {
+            fprintf(stderr, "[ERROR] Failed to load tenant %d (shared-DB) from %s\n", p_tenantId, loadPath.c_str());
+            return false;
+        }
     }
-
+    else
+    {
+        AnnIndex tmp = AnnIndex::Load(loadPath.c_str());
+        if (!tmp.ReadyToServe())
+        {
+            fprintf(stderr, "[ERROR] Failed to load tenant %d from %s\n", p_tenantId, loadPath.c_str());
+            return false;
+        }
+        indexPtr = std::make_shared<AnnIndex>(tmp);
+    }
     if (m_rssHighWaterMarkBytes > 0)
     {
         uint64_t currentRSSBytes = GetCurrentProcessRSSBytes();
@@ -2731,7 +2943,6 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         }
     }
 
-    auto indexPtr = std::make_shared<AnnIndex>(loadedIndex);
     for (const auto& pendingParam : m_pendingSearchParams)
     {
         indexPtr->SetSearchParam(std::get<0>(pendingParam).c_str(),

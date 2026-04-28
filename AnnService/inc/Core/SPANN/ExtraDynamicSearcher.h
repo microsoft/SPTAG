@@ -253,10 +253,15 @@ namespace SPTAG::SPANN {
             } 
             else if (p_opt.m_storage == Storage::ROCKSDBIO) {
 #ifdef ROCKSDB
-                std::string indexDir = (p_opt.m_recovery)? p_opt.m_persistentBufferPath + FolderSep: p_opt.m_indexDirectory + FolderSep;
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:dbPath:%s\n", (indexDir + p_opt.m_KVFile).c_str());
-                db.reset(new RocksDBIO((indexDir + p_opt.m_KVFile).c_str(), p_opt.m_useDirectIO, p_opt.m_enableWAL, p_opt.m_recovery));
+                if (p_opt.m_shareDB && p_opt.m_externalDB) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseSharedRocksDB\n");
+                    db = p_opt.m_externalDB;
+                } else {
+                    std::string indexDir = (p_opt.m_recovery)? p_opt.m_persistentBufferPath + FolderSep: p_opt.m_indexDirectory + FolderSep;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseKV\n");
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:dbPath:%s\n", (indexDir + p_opt.m_KVFile).c_str());
+                    db.reset(new RocksDBIO((indexDir + p_opt.m_KVFile).c_str(), p_opt.m_useDirectIO, p_opt.m_enableWAL, p_opt.m_recovery));
+                }
 #else
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ExtraDynamicSearcher:RocksDB unsupport! Use -DROCKSDB to enable RocksDB when doing cmake.\n");
                 return;

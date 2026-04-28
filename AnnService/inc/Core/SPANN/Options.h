@@ -7,6 +7,8 @@
 #include "inc/Core/Common.h"
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
+#include "inc/Helper/KeyValueIO.h"
+#include <memory>
 #include <string>
 
 namespace SPTAG {
@@ -206,6 +208,15 @@ namespace SPTAG {
             int m_headBatch;
             int m_asyncAppendQueueSize;
             bool m_allowZeroReplica;
+
+            // ShareDB: when true, ExtraDynamicSearcher will use the externally-provided
+            // m_externalDB (typically a Helper::TenantPrefixedKeyValueIO wrapping a
+            // shared RocksDB instance) instead of allocating its own per-tenant
+            // RocksDBIO. The flag is exposed via the parameter system; m_externalDB
+            // is a runtime-only handle set programmatically (e.g., by
+            // SPANN::Index::SetSharedDB or by TenantIndexManager).
+            bool m_shareDB;
+            std::shared_ptr<Helper::KeyValueIO> m_externalDB;
 
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \

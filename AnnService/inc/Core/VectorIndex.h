@@ -304,9 +304,11 @@ public:
 
         static const ThreadLocalSearchContext* GetThreadLocalSearchContext();
     
-  private:
+    // Public to allow TenantIndexManager to perform a custom load flow that
+    // injects a shared KeyValueIO between LoadIndexConfig and LoadIndexData.
     ErrorCode LoadIndexConfig(Helper::IniReader& p_reader);
 
+  private:
     ErrorCode SaveIndexConfig(std::shared_ptr<Helper::DiskIO> p_configOut);
 
 protected:

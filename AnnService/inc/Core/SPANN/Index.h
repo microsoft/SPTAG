@@ -127,6 +127,13 @@ namespace SPTAG
                 m_pendingPrimaryNodeVectorAssignments = primaryNodeVectorAssignments;
             }
 
+            // Shared-DB hook: when set BEFORE BuildIndex / LoadIndex, the
+            // ExtraDynamicSearcher will reuse this KeyValueIO instead of opening
+            // its own RocksDB. Wrap with Helper::TenantPrefixedKeyValueIO when
+            // multiplexing several tenants over a single physical store.
+            void SetSharedDB(std::shared_ptr<Helper::KeyValueIO> p_db) { m_options.m_externalDB = std::move(p_db); }
+            std::shared_ptr<Helper::KeyValueIO> GetSharedDB() const { return m_options.m_externalDB; }
+
             inline SizeType GetNumSamples() const { return m_versionMap.Count(); }
             inline DimensionType GetFeatureDim() const { return m_index->GetFeatureDim(); }
             inline SizeType GetValueSize() const { return m_options.m_dim * sizeof(T); }

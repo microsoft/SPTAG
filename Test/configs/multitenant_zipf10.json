@@ -1,0 +1,82 @@
+{
+  "_comment": "10-tenant Zipf workload reference. Used by multi-tenant SPANN benchmarks running through TenantIndexManager + shared RocksDB.",
+
+  "dataset": {
+    "vector_path":     "/home/v-mochengli/dataset/sift/sift_base.fvecs",
+    "query_path":      "/home/v-mochengli/dataset/sift/sift_query.fvecs",
+    "truth_path":      "/home/v-mochengli/dataset/sift/sift_groundtruth.ivecs",
+    "value_type":      "Float",
+    "dim":             128,
+    "dist":            "L2",
+    "base_vector_count": 1000000
+  },
+
+  "index": {
+    "base_dir":  "/home/v-mochengli/SPTAGIndex/multitenant_sift_zipf10",
+    "storage":   "ROCKSDBIO",
+    "share_db":  true,
+    "use_tenant_index_manager": true,
+    "cache_capacity_bytes":     1073741824,
+    "_comment_storage": "share_db=true routes all tenants through one rocksdb_shared_0/ dir using TenantPrefixedKeyValueIO."
+  },
+
+  "tenants": {
+    "count":    10,
+    "split":    "zipf",
+    "zipf_alpha": 1.0,
+    "seed":     42,
+    "_comment_split": "Sizes are computed as N_i = round(total / (i^alpha * H_N)), then assigned contiguous slices of the base vectors. Set 'sizes' below to override the formula.",
+    "sizes": [
+      341417, 170709, 113806, 85354, 68283,
+      56903, 48774, 42677, 37935, 34142
+    ],
+    "size_total_check": 1000000,
+    "_comment_sizes": "Listed sizes were generated with alpha=1.0 over N=10. They sum to ~1.004M (rounding). Adjust the last tenant or rescale to land exactly on base_vector_count."
+  },
+
+  "build": {
+    "select_head_ratio":  0.16,
+    "bkt_kmeans_k":       32,
+    "bkt_number":         1,
+    "replica_count":      8,
+    "posting_page_limit": 96,
+    "internal_result_num": 32,
+    "num_threads":        8,
+    "layers":             1,
+    "adaptive_layers":    false,
+    "top_layer_max_size": 50000,
+    "max_layers":         4,
+    "_comment_layers": "Layers=1 until the upstream layer>0 SelectHead bug is fixed (see checkpoint 009).",
+    "size_aware_overrides": {
+      "enable": true,
+      "min_replica_count":   1,
+      "max_replica_count":   8,
+      "min_bkt_kmeans_k":    8,
+      "min_posting_page_limit": 4,
+      "max_posting_page_limit": 96,
+      "_comment": "Clamp ReplicaCount to <= head_count/2, BKTKmeansK to <= head_count, and pick PostingPageLimit so postings fill ~1 page on average. Prevents long-tail tenants from being over-built (see Zipf analysis)."
+    }
+  },
+
+  "search": {
+    "num_queries":              100,
+    "queries_per_tenant_mode":  "shared",
+    "topk":                     10,
+    "max_check":                8192,
+    "internal_result_num":      32,
+    "search_internal_result_num": 32,
+    "search_posting_page_limit":  96,
+    "latency_limit_ms":         2000,
+    "num_search_threads":       8,
+    "_comment_queries_per_tenant": "shared = same query set against every tenant (cheap). per-tenant = sample fresh queries from each tenant's slice."
+  },
+
+  "metrics": {
+    "report_per_tenant_recall": true,
+    "report_per_tenant_qps":    true,
+    "report_build_time_breakdown": true,
+    "report_rocksdb_size":      true,
+    "report_head_index_size":   true,
+    "report_cache_hits":        true
+  }
+}

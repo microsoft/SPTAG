@@ -223,4 +223,6 @@ DefineSSDParameter(m_centeringToZero, bool, false, "CenteringToZero")
 // Iterative
 DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch") // Mutable
 
+DefineSSDParameter(m_shareDB, bool, false, "ShareDB")
+
 #endif

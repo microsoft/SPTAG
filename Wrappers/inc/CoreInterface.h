@@ -71,6 +71,12 @@ public:
 
     bool ReadyToServe() const;
 
+    // Inject a shared KeyValueIO (e.g., a Helper::TenantPrefixedKeyValueIO around
+    // a shared RocksDB) into the underlying SPANN index. Must be called BEFORE
+    // Build/Load. Returns true if the underlying index is SPANN<Float> and the
+    // injection succeeded.
+    bool SetSharedDB(std::shared_ptr<SPTAG::Helper::KeyValueIO> p_db);
+
     void UpdateIndex();
 
     bool Save(const char* p_saveFile) const;
@@ -104,9 +110,11 @@ public:
     // Set build-time primary node ownership for SPANN head construction
     void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int>>& primaryNodeVectorAssignments);
 
-private:
+    // Wrap an already-built/loaded VectorIndex (used internally and by
+    // TenantIndexManager when injecting a shared RocksDB during load).
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
-    
+
+private:
     std::shared_ptr<SPTAG::VectorIndex> m_index;
 
     size_t m_inputVectorSize;
@@ -276,6 +284,13 @@ public:
     // Set posting storage backend: "FILEIO" (default) or "ROCKSDBIO"
     void SetStorageBackend(const char* backend) { m_storageBackend = std::string(backend); }
 
+    // Toggle the shared-RocksDB code path. When true (and storage backend is
+    // ROCKSDBIO), all SPANN tenants are routed through a single shared
+    // RocksDB instance via Helper::TenantPrefixedKeyValueIO. Default false.
+    void SetUseSharedDB(bool p_use) { m_useSharedDB = p_use; }
+    void SetUseDirectIO(bool p_use) { m_useDirectIO = p_use; }
+    void SetEnableWAL(bool p_enable) { m_enableWAL = p_enable; }
+
 private:
     DimensionType m_dimension;
     SPTAG::IndexAlgoType m_algoType;
@@ -342,6 +357,27 @@ private:
 
     // Posting storage backend
     std::string m_storageBackend = "FILEIO";
+
+    // --- Shared RocksDB (multi-tenant) ---
+    // When m_useSharedDB is true and m_storageBackend == "ROCKSDBIO", every
+    // SPANN tenant is wired to a single shared RocksDB via a per-tenant
+    // Helper::TenantPrefixedKeyValueIO wrapper. Lifetime of the underlying
+    // RocksDB is owned by the manager.
+    bool m_useSharedDB = false;
+    bool m_useDirectIO = false;
+    bool m_enableWAL = false;
+    std::shared_ptr<SPTAG::Helper::KeyValueIO> m_sharedDB;
+    mutable std::mutex m_sharedDBMutex;
+
+    bool EnsureSharedDB();
+    bool InjectSharedDB(const std::shared_ptr<AnnIndex>& p_idx, int p_internalId);
+
+    // Load a tenant SPANN index from disk while injecting the shared
+    // RocksDB BEFORE LoadIndexData (so SPANN's ExtraDynamicSearcher uses the
+    // shared store instead of opening its own per-tenant DB). Returns the
+    // loaded index wrapped in AnnIndex on success, or an empty AnnIndex on
+    // failure.
+    std::shared_ptr<AnnIndex> LoadSpannWithSharedDB(const std::string& p_folder, int p_internalId);
 
     // --- Per-tenant index strategy ---
     std::map<int, TenantIndexType> m_tenantIndexTypes;
