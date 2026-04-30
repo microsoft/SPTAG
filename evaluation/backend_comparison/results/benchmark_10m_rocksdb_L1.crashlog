@@ -1,0 +1,473 @@
+[1] Using AVX2 InstructionSet!
+Running 1 test case...
+	Suite: Main
+	Suite: SPFreshTest
+		Case: BenchmarkFromConfig
+[1;36;49mRunning benchmark with config: /home/superbench/zhangt/SPTAG/evaluation/backend_comparison/benchmark_10m_rocksdb_L1.ini[0;39;49m
+[1;36;49m=== Benchmark Configuration ===[0;39;49m
+[1;36;49mVector Path: /mnt_ssd/data/sift1b/bigann_base.u8bin[0;39;49m
+[1;36;49mQuery Path: /mnt_ssd/data/sift1b/query.10K.u8bin[0;39;49m
+[1;36;49mBase Vectors: 9000000[0;39;49m
+[1;36;49mInsert Vectors: 1000000[0;39;49m
+[1;36;49mDimension: 128[0;39;49m
+[1;36;49mBatch Number: 10[0;39;49m
+[1;36;49mTop-K: 5[0;39;49m
+[1;36;49mSearchThreads: 4[0;39;49m
+[1;36;49mInsertThreads: 16[0;39;49m
+[1;36;49mSearchDuringInsertThreads: 1[0;39;49m
+[1;36;49mQueries: 200[0;39;49m
+[1;36;49mLayers: 1[0;39;49m
+[1;36;49mDistMethod: L2[0;39;49m
+[1;36;49mOutput File: /home/superbench/zhangt/SPTAG/evaluation/backend_comparison/results/benchmark_10m_rocksdb_L1.json[0;39;49m
+[1] Load Vector(9000000,128)
+[1] Load 9000000 vectors start from 0
+[1] Load Vector(200,128)
+[1] Load 200 vectors start from 0
+[1] Load Vector(1000000,128)
+[1] Load 1000000 vectors start from 9000000
+[1] Load Vector(200,128)
+[1] Generating groundtruth for batch 0, range [0, 9000000)
+[1]   Round 1/1: vectors [0, 9000000)
+[1] Load Vector(9000000,128)
+[1] Generating groundtruth for batch 1, range [0, 9100000)
+[1]   Round 1/1: vectors [0, 9100000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(100000,128)
+[1] Generating groundtruth for batch 2, range [0, 9200000)
+[1]   Round 1/1: vectors [0, 9200000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(200000,128)
+[1] Generating groundtruth for batch 3, range [0, 9300000)
+[1]   Round 1/1: vectors [0, 9300000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(300000,128)
+[1] Generating groundtruth for batch 4, range [0, 9400000)
+[1]   Round 1/1: vectors [0, 9400000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(400000,128)
+[1] Generating groundtruth for batch 5, range [0, 9500000)
+[1]   Round 1/1: vectors [0, 9500000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(500000,128)
+[1] Generating groundtruth for batch 6, range [0, 9600000)
+[1]   Round 1/1: vectors [0, 9600000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(600000,128)
+[1] Generating groundtruth for batch 7, range [0, 9700000)
+[1]   Round 1/1: vectors [0, 9700000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(700000,128)
+[1] Generating groundtruth for batch 8, range [0, 9800000)
+[1]   Round 1/1: vectors [0, 9800000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(800000,128)
+[1] Generating groundtruth for batch 9, range [0, 9900000)
+[1]   Round 1/1: vectors [0, 9900000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(900000,128)
+[1] Generating groundtruth for batch 10, range [0, 10000000)
+[1]   Round 1/1: vectors [0, 10000000)
+[1] Load Vector(9000000,128)
+[1] Load Vector(1000000,128)
+[1;36;49m
+=== Building Index ===[0;39;49m
+[1] Setting Dim with value 128
+[1] Setting DistCalcMethod with value L2
+[1] Setting IndexAlgoType with value BKT
+[1] Setting IndexDirectory with value /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index
+[1] Setting ValueType with value UInt8
+[1] Setting VectorPath with value perftest_vector.bin.UInt8_9000000_128
+[1] Setting isExecute with value true
+[1] Setting NumberOfThreads with value 96
+[1] Setting ParallelBKTBuild with value true
+[1] Setting Ratio with value 0.2
+[1] Setting SelectHeadType with value BKT
+[1] Setting SelectThreshold with value 0
+[1] Setting SplitFactor with value 0
+[1] Setting SplitThreshold with value 0
+[1] Setting isExecute with value true
+[1] Setting AllowZeroReplica with value false
+[1] Setting AppendThreadNum with value 16
+[1] Setting AsyncAppendQueueSize with value 0
+[1] Setting AsyncMergeInSearch with value false
+[1] Setting BufferLength with value 4
+[1] Setting BuildSsdIndex with value true
+[1] Setting ChecksumCheck with value false
+[1] Setting ChecksumInRead with value false
+[1] Setting ConsistencyCheck with value false
+[1] Setting DeletePercentageForRefine with value 0.4
+[1] Setting DisableReassign with value false
+[1] Setting ExcludeHead with value false
+[1] Setting InPlace with value true
+[1] Setting InsertThreadNum with value 1
+[1] Setting InternalResultNum with value 64
+[1] Setting isExecute with value true
+[1] Setting LatencyLimit with value 50.0
+[1] Setting Layers with value 1
+[1] Setting MergeThreshold with value 10
+[1] Setting NumberOfThreads with value 96
+[1] Setting OneClusterCutMax with value true
+[1] Setting PostingPageLimit with value 4
+[1] Setting ReassignK with value 64
+[1] Setting ReassignThreadNum with value 0
+[1] Setting ResultNum with value 10
+[1] Setting Sampling with value 4
+[1] Setting SearchDuringUpdate with value true
+[1] Setting SearchInternalResultNum with value 64
+[1] Setting SearchPostingPageLimit with value 4
+[1] Setting SearchThreadNum with value 4
+[1] Setting ShareDB with value true
+[1] Setting SpdkBatchSize with value 64
+[1] Setting StartFileSizeGB with value 1
+[1] Setting SteadyState with value true
+[1] Setting Storage with value FILEIO
+[1] Setting TmpDir with value tmpdir
+[1] Setting Update with value true
+[1] Setting ParallelBKTBuild with value true
+[1] Setting Storage with value ROCKSDBIO
+[1] Setting AppendThreadNum with value 48
+[1] Setting AsyncMergeInSearch with value true
+[1] Setting LatencyLimit with value 100
+[1] Setting UseMultiChunkPosting with value false
+[1] Setting VersionCacheMaxChunks with value 100000
+[1] Setting VersionCacheTTLMs with value 0
+[1] Load Vector(9000000,128)
+[1] SPANNIndex:UseKV
+[1] SPANNIndex:dbPath:/mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/rocksdb_0
+[1] SPFresh: New Rocksdb: /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/rocksdb_0
+[1] Layer 0 build: skip loading localToGlobalID from /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/SPTAGHeadVectorIDs.bin
+[1] Begin Select Head...
+[1] Load Vector(9000000,128)
+[1] Begin initial data (9000000,128)...
+[1] Begin Adjust Parameters...
+[1] Set SelectThreshold to 5
+[1] Set SplitThreshold to 10
+[1] Set SplitFactor to 5
+[1] Start generating BKT.
+[1] Start invoking BuildTrees.
+[1] BKTKmeansK: 32, BKTLeafSize: 8, Samples: 1000, BKTLambdaFactor:-1.000000 TreeNumber: 1, ThreadNum: 96, ParallelBuild: True.
+[1] Using PARALLEL BKTree build with 96 threads.
+[1] Lambda:min(65025,58.7405) Max:474332 Min:91832 Avg:281250.000000 Std/Avg:0.373130 Dist:1118512742400.000000 NonZero/Total:32/32
+[1] Lambda:min(6502.5,69.0704) Max:578031 Min:148938 Avg:281250.000000 Std/Avg:0.367063 Dist:1116495937536.000000 NonZero/Total:32/32
+[1] Lambda:min(650.25,96.5306) Max:464067 Min:141307 Avg:281250.000000 Std/Avg:0.296507 Dist:1117369663488.000000 NonZero/Total:32/32
+[1] Lambda:min(65.025,84.039) Max:428531 Min:155557 Avg:281250.000000 Std/Avg:0.277999 Dist:1122998681600.000000 NonZero/Total:32/32
+[1] Lambda:min(6.5025,57.8226) Max:590024 Min:153457 Avg:281250.000000 Std/Avg:0.367921 Dist:1118769512448.000000 NonZero/Total:32/32
+[1] Lambda:min(0.65025,86.9885) Max:539259 Min:139404 Avg:281250.000000 Std/Avg:0.332454 Dist:1121943945216.000000 NonZero/Total:32/32
+[1] Lambda:min(0.065025,77.7097) Max:578447 Min:113746 Avg:281250.000000 Std/Avg:0.405206 Dist:1110649733120.000000 NonZero/Total:32/32
+[1] Best Lambda Factor:1.000000
+[1] Start to build BKTree 1 (parallel)
+[1] Processing level 0 with 1 nodes...
+[1] Processing level 1 with 32 nodes...
+[1] Processing level 2 with 1024 nodes...
+[1] Processing level 3 with 32708 nodes...
+[1] Processing level 4 with 758300 nodes...
+[1] Processing level 5 with 954642 nodes...
+[1] Processing level 6 with 313441 nodes...
+[1] Processing level 7 with 34713 nodes...
+[1] Processing level 8 with 4167 nodes...
+[1] Processing level 9 with 1191 nodes...
+[1] Processing level 10 with 432 nodes...
+[1] Processing level 11 with 177 nodes...
+[1] Processing level 12 with 70 nodes...
+[1] Processing level 13 with 26 nodes...
+[1] Processing level 14 with 5 nodes...
+[1] Processing level 15 with 1 nodes...
+[1] 1 BKTree built (parallel), 9000002 9000000
+[1] End invoking BuildTrees.
+[1] Invoking BuildTrees used time: 2.62 minutes (about 0.04 hours).
+[1] Finish generating BKT.
+[1] Start selecting nodes...Select Head Dynamically...
+[1] Select Threshold: 2, Split Threshold: 7, diff: 6.30%.
+[1] Select Threshold: 2, Split Threshold: 8, diff: 2.58%.
+[1] Select Threshold: 2, Split Threshold: 9, diff: -0.23%.
+[1] Select Threshold: 3, Split Threshold: 7, diff: 4.97%.
+[1] Select Threshold: 3, Split Threshold: 8, diff: 1.26%.
+[1] Select Threshold: 3, Split Threshold: 9, diff: -1.52%.
+[1] Select Threshold: 4, Split Threshold: 7, diff: 4.11%.
+[1] Select Threshold: 4, Split Threshold: 8, diff: 0.33%.
+[1] Select Threshold: 4, Split Threshold: 9, diff: -2.49%.
+[1] Select Threshold: 5, Split Threshold: 7, diff: 3.90%.
+[1] Select Threshold: 5, Split Threshold: 8, diff: -0.12%.
+[1] Final Select Threshold: 5, Split Threshold: 8.
+[1] Seleted Nodes: 1789471, about 19.88% of total.
+[1] Total used time: 2.68 minutes (about 0.04 hours).
+[1] select head time: 162.00s
+[1] Begin Build Head...
+[1] Setting DistCalcMethod with value L2
+[1] Setting ParallelBKTBuild with value true
+[1] Setting ParallelBKTBuild with value true
+[1] Setting NumberOfThreads with value 96
+[1] Setting AddCountForRebuild with value 10000
+[1] Load Vector(1789471,128)
+[1] Begin build index...
+[1] Using PARALLEL BKTree build with 96 threads.
+[1] Start to build BKTree 1 (parallel)
+[1] Processing level 0 with 1 nodes...
+[1] Processing level 1 with 32 nodes...
+[1] Processing level 2 with 1024 nodes...
+[1] Processing level 3 with 32543 nodes...
+[1] Processing level 4 with 301198 nodes...
+[1] Processing level 5 with 3782 nodes...
+[1] Processing level 6 with 119 nodes...
+[1] Processing level 7 with 4 nodes...
+[1] 1 BKTree built (parallel), 1789473 1789471
+[1] Build Tree time (s): 8
+[1] build RNG graph!
+[1] Parallel TpTree Partition begin
+[1] Finish Getting Leaves for Tree 0
+[1] Finish Getting Leaves for Tree 1
+[1] Finish Getting Leaves for Tree 2
+[1] Finish Getting Leaves for Tree 3
+[1] Finish Getting Leaves for Tree 4
+[1] Finish Getting Leaves for Tree 5
+[1] Finish Getting Leaves for Tree 6
+[1] Finish Getting Leaves for Tree 7
+[1] Finish Getting Leaves for Tree 8
+[1] Finish Getting Leaves for Tree 9
+[1] Finish Getting Leaves for Tree 10
+[1] Finish Getting Leaves for Tree 11
+[1] Finish Getting Leaves for Tree 12
+[1] Finish Getting Leaves for Tree 13
+[1] Finish Getting Leaves for Tree 14
+[1] Finish Getting Leaves for Tree 15
+[1] Finish Getting Leaves for Tree 16
+[1] Finish Getting Leaves for Tree 17
+[1] Finish Getting Leaves for Tree 18
+[1] Finish Getting Leaves for Tree 19
+[1] Finish Getting Leaves for Tree 21
+[1] Finish Getting Leaves for Tree 22
+[1] Finish Getting Leaves for Tree 23
+[1] Finish Getting Leaves for Tree 25
+[1] Finish Getting Leaves for Tree 24
+[1] Finish Getting Leaves for Tree 20
+[1] Finish Getting Leaves for Tree 26
+[1] Finish Getting Leaves for Tree 28
+[1] Finish Getting Leaves for Tree 27
+[1] Finish Getting Leaves for Tree 30
+[1] Finish Getting Leaves for Tree 29
+[1] Finish Getting Leaves for Tree 31
+[1] Parallel TpTree Partition done
+[1] Build TPTree time (s): 12
+[1] Total leaf tasks across 32 trees: 41803
+[1] Processing leaf tasks 0%
+[1] Process TPTree time (s): 16
+[1] BuildInitKNNGraph time (s): 29
+[1] Refine 0 0%
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[4] Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=3 NewPoolSize=131071
+[1] Refine RNG time (s): 573 Graph Acc: 0.997656
+[1] Refine 1 0%
+[1] Refine RNG time (s): 229 Graph Acc: 0.998438
+[1] BuildGraph time (s): 833
+[1] Build Graph time (s): 833
+[1] SaveIndex(/mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/HeadIndex) begin...ready:1 GetNumSamples():1789471 GetNumDeleted():0
+[1] Save Vector (1789471,128) Finish!
+[1] Save BKT (1,1789473) Finish!
+[1] Save RNG (1789471,32) Finish!
+[1] Save DeleteID (1789471,1) Finish!
+[1] Setting TreeFilePath with value tree.bin
+[1] Setting GraphFilePath with value graph.bin
+[1] Setting VectorFilePath with value vectors.bin
+[1] Setting DeleteVectorFilePath with value deletes.bin
+[1] Setting EnableBfs with value 0
+[1] Setting BKTNumber with value 1
+[1] Setting BKTKmeansK with value 32
+[1] Setting BKTLeafSize with value 8
+[1] Setting Samples with value 1000
+[1] Setting BKTLambdaFactor with value 100.000000
+[1] Setting ParallelBKTBuild with value true
+[1] Setting TPTNumber with value 32
+[1] Setting TPTLeafSize with value 2000
+[1] Setting NumTopDimensionTpTreeSplit with value 5
+[1] Setting NeighborhoodSize with value 32
+[1] Setting GraphNeighborhoodScale with value 2.000000
+[1] Setting GraphCEFScale with value 2.000000
+[1] Setting RefineIterations with value 2
+[1] Setting EnableRebuild with value 0
+[1] Setting CEF with value 1000
+[1] Setting AddCEF with value 500
+[1] Setting MaxCheckForRefineGraph with value 8192
+[1] Setting RNGFactor with value 1.000000
+[1] Setting GPUGraphType with value 2
+[1] Setting GPURefineSteps with value 0
+[1] Setting GPURefineDepth with value 30
+[1] Setting GPULeafSize with value 500
+[1] Setting HeadNumGPUs with value 1
+[1] Setting TPTBalanceFactor with value 2
+[1] Setting NumberOfThreads with value 96
+[1] Setting DistCalcMethod with value L2
+[1] Setting DeletePercentageForRefine with value 0.400000
+[1] Setting AddCountForRebuild with value 10000
+[1] Setting MaxCheck with value 8192
+[1] Setting ThresholdOfNumberOfContinuousNoBetterPropagation with value 3
+[1] Setting NumberOfInitialDynamicPivots with value 50
+[1] Setting NumberOfOtherDynamicPivots with value 4
+[1] Setting HashTableExponent with value 2
+[1] Setting DataBlockSize with value 1048576
+[1] Setting DataCapacity with value 2147483647
+[1] Setting MetaRecordSize with value 10
+[1] Load Vector (1789471,128) Finish!
+[1] Load BKT (1,1789473) Finish!
+[1] Load RNG (1789471,32) Finish!
+[1] Load DeleteID (1789471,1) Finish!
+[1] select head time: 162.00s build head time: 842.00s
+[1] Begin Build SSDIndex...
+[1] Setting NumberOfThreads with value 96
+[1] Setting MaxCheck with value 4096
+[1] Setting HashTableExponent with value 4
+[1] Setting index with posting page limit:4
+[1] Using local in-memory VersionMap (layer=0)
+[1] Posting size limit: 123, search limit: 100.000000, merge threshold: 10
+[1] Load Data (1789471,1) Finish!
+[1] Load Vector(9000000,128)
+[1] Build SSD Index.
+[1] Full vector count:9000000 Edge bytes:12 selection size:72000000, capacity size:72000000
+[1] Preparation done, start candidate searching.
+[1] Load Vector(9000000,128)
+[1] Batch 0 vector(0,9000000) loaded with 9000000 vectors (72000000) HeadIndex acc @64:0.985469.
+[1] Searching replicas ended. RNG failed count: 179530351
+[1] Batch 0 finished!
+[1] Searching replicas ended. Search Time: 1.47 mins
+[1] Time to sort selections:16.89 sec.
+[1] Posting size limit: 123
+[1] Before Posting Cut:
+[1] Replica Count Dist: 0, 0
+[1] Replica Count Dist: 1, 8899
+[1] Replica Count Dist: 2, 35108
+[1] Replica Count Dist: 3, 84034
+[1] Replica Count Dist: 4, 156640
+[1] Replica Count Dist: 5, 245985
+[1] Replica Count Dist: 6, 343065
+[1] Replica Count Dist: 7, 435405
+[1] Replica Count Dist: 8, 7690864
+[1] After Posting Cut:
+[1] Replica Count Dist: 0, 0
+[1] Replica Count Dist: 1, 8899
+[1] Replica Count Dist: 2, 35108
+[1] Replica Count Dist: 3, 84034
+[1] Replica Count Dist: 4, 156641
+[1] Replica Count Dist: 5, 245984
+[1] Replica Count Dist: 6, 343067
+[1] Replica Count Dist: 7, 435437
+[1] Replica Count Dist: 8, 7690830
+[1] Posting cut original:68803658 relax:68820802
+[1] Posting cut overflowHeadCount:2 droppedReplicaCount:37 zeroReplicaCount:0
+[1] Time to perform posting cut:0.14 sec.
+[1] Load Vector(9000000,128)
+[1] SPFresh: initialize versionMap
+[1] SPFresh: Writing values to DB
+[1] Save Data To /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/SPTAGHeadVectorIDs.bin
+[1] Save Data (1789471,1) Finish!
+[1] SPFresh: save versionMap
+[1] Save versionLabelID To /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/DeletedIDs.bin_0
+[1] Save versionLabelID (9000000,1) Finish!
+[1] Total used time: 2.07 minutes (about 0.03 hours).
+[1] DataBlockSize: 1048576, Capacity: 2147483647
+[1] Load versionLabelID From /mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index/DeletedIDs.bin_0
+[1] Load versionLabelID (9000000,1) Finish!
+[1] Current vector num: 9000000.
+[1] SPFresh: initialize thread pools, append: 48, reassign 0
+[1] SPFresh: finish initialization
+[1] select head time: 162.00s build head time: 842.00s build ssd time: 126.00s
+[1] Load MetaIndex(9000000) Meta(61888890)
+[1;36;49mIndex built successfully with 9000000 vectors[0;39;49m
+[1] Load Vector(200,128)
+[1] Load Vector(4400,5)
+[1;36;49m
+=== Benchmark 0: Query Before Insertions (Round 1) ===[0;39;49m
+[1;36;49m  Queries: 200[0;39;49m
+[1;36;49m  Mean Latency: 2.47141 ms[0;39;49m
+[1;36;49m  P50 Latency:  2.287 ms[0;39;49m
+[1;36;49m  P90 Latency:  2.799 ms[0;39;49m
+[1;36;49m  P95 Latency:  3.522 ms[0;39;49m
+[1;36;49m  P99 Latency:  9.384 ms[0;39;49m
+[1;36;49m  Min Latency:  1.447 ms[0;39;49m
+[1;36;49m  Max Latency:  9.75 ms[0;39;49m
+[1;36;49m  QPS:          1599.22[0;39;49m
+[1;36;49mChecking for truth file: /mnt_ssd/data/sift1b/bigann_truth.bin[0;39;49m
+[1] Recall 5@5 = 0.9610
+[1;36;49m  Recall5@5 = 96.1%[0;39;49m
+[1;36;49m  (Evaluated on 200 queries against base vectors)[0;39;49m
+[1;36;49m  Queries: 200[0;39;49m
+[1;36;49m  Mean Latency: 2.27019 ms[0;39;49m
+[1;36;49m  P50 Latency:  2.232 ms[0;39;49m
+[1;36;49m  P90 Latency:  2.778 ms[0;39;49m
+[1;36;49m  P95 Latency:  2.886 ms[0;39;49m
+[1;36;49m  P99 Latency:  3.593 ms[0;39;49m
+[1;36;49m  Min Latency:  1.501 ms[0;39;49m
+[1;36;49m  Max Latency:  3.658 ms[0;39;49m
+[1;36;49m  QPS:          1735.52[0;39;49m
+[1;36;49mChecking for truth file: /mnt_ssd/data/sift1b/bigann_truth.bin[0;39;49m
+[1] Recall 5@5 = 0.9610
+[1;36;49m  Recall5@5 = 96.1%[0;39;49m
+[1;36;49m  (Evaluated on 200 queries against base vectors)[0;39;49m
+[1;36;49m
+=== Benchmark 0b: Query Before Insertions (Round 2) ===[0;39;49m
+[1;36;49m  Queries: 200[0;39;49m
+[1;36;49m  Mean Latency: 2.41054 ms[0;39;49m
+[1;36;49m  P50 Latency:  2.412 ms[0;39;49m
+[1;36;49m  P90 Latency:  2.711 ms[0;39;49m
+[1;36;49m  P95 Latency:  2.827 ms[0;39;49m
+[1;36;49m  P99 Latency:  4.026 ms[0;39;49m
+[1;36;49m  Min Latency:  1.635 ms[0;39;49m
+[1;36;49m  Max Latency:  4.096 ms[0;39;49m
+[1;36;49m  QPS:          1640.61[0;39;49m
+[1;36;49mChecking for truth file: /mnt_ssd/data/sift1b/bigann_truth.bin[0;39;49m
+[1] Recall 5@5 = 0.9610
+[1;36;49m  Recall5@5 = 96.1%[0;39;49m
+[1;36;49m  (Evaluated on 200 queries against base vectors)[0;39;49m
+
+===== SEGFAULT (signal 11) =====
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0x1fc61a)[0x5d70b35f061a]
+/lib/x86_64-linux-gnu/libc.so.6(+0x4251f)[0x12175644251f]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0xc0a027)[0x5d70b3ffe027]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0xb87541)[0x5d70b3f7b541]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0x1c6108)[0x5d70b35ba108]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0x51b369)[0x5d70b390f369]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0x51d152)[0x5d70b3911152]
+/home/superbench/zhangt/SPTAG/evaluation/backend_comparison/../../Release/SPTAGTest(+0x4621fd)[0x5d70b38561fd]
+/lib/x86_64-linux-gnu/libstdc++.so.6(+0xdc252)[0x1217568dc252]
+/lib/x86_64-linux-gnu/libc.so.6(+0x94ac2)[0x121756494ac2]
+/lib/x86_64-linux-gnu/libc.so.6(+0x1268bf)[0x1217565268bf]
+===== END BACKTRACE =====

@@ -1,0 +1,57 @@
+## TiKV configuration for SPTAG 1B backend comparison benchmark
+## Single-node, 1 PD + 1 TiKV, max-replicas=1
+## Optimized for large-value KV store (posting lists)
+
+[server]
+grpc-concurrency = 8
+
+[storage]
+# Unified block cache shared across all column families
+[storage.block-cache]
+capacity = "30GB"
+
+[raftstore]
+# Single replica — minimize raft overhead
+apply-pool-size = 2
+store-pool-size = 2
+# Larger region for fewer splits with big values
+region-max-size = "512MB"
+region-split-size = "384MB"
+
+[rocksdb]
+max-sub-compactions = 4
+max-background-jobs = 8
+rate-bytes-per-sec = "0B"
+bytes-per-sync = "1MB"
+
+[rocksdb.defaultcf]
+compression-per-level = ["no", "no", "lz4", "lz4", "lz4", "zstd", "zstd"]
+write-buffer-size = "128MB"
+max-write-buffer-number = 5
+min-write-buffer-number-to-merge = 1
+level0-file-num-compaction-trigger = 4
+level0-slowdown-writes-trigger = 20
+level0-stop-writes-trigger = 36
+max-bytes-for-level-base = "512MB"
+target-file-size-base = "64MB"
+
+[rocksdb.defaultcf.titan]
+# Titan (blob store) — TiKV's equivalent of RocksDB BlobDB
+# SPTAG posting lists are large values, ideal for Titan
+enabled = true
+min-blob-size = "1KB"
+blob-file-compression = "lz4"
+discardable-ratio = 0.5
+
+[rocksdb.writecf]
+write-buffer-size = "128MB"
+max-write-buffer-number = 5
+
+[raftdb]
+# Minimal settings — single replica, raft DB is lightweight
+max-background-jobs = 2
+max-sub-compactions = 1
+
+[raftdb.defaultcf]
+write-buffer-size = "64MB"
+max-write-buffer-number = 3

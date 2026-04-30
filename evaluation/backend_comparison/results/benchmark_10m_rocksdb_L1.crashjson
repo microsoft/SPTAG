@@ -1,0 +1,39 @@
+{
+  "timestamp": "2026-04-30T02:26:10",
+  "config": {
+    "vectorPath": "/mnt_ssd/data/sift1b/bigann_base.u8bin",
+    "queryPath": "/mnt_ssd/data/sift1b/query.10K.u8bin",
+    "truthPath": "/mnt_ssd/data/sift1b/bigann_truth.bin",
+    "indexPath": "/mnt_ssd/data/proidx_10m_rocksdb_L1/spann_index",
+    "quantizerPath": "",
+    "ValueType": "UInt8",
+    "dimension": 128,
+    "baseVectorCount": 9000000,
+    "insertVectorCount": 1000000,
+    "DeleteVectorCount": 0,
+    "BatchNum": 10,
+    "topK": 5,
+    "numQueries": 200,
+    "numSearchThreads": 4,
+    "numInsertThreads": 16,
+    "layers": 1,
+    "DistMethod": "L2"
+  },
+  "results": {
+    "build timeSeconds": 1131.5330,
+    "benchmark0_query_before_insert": {
+      "numQueries": 200,
+      "meanLatency": 2.2702,
+      "p50": 2.2320,
+      "p90": 2.7780,
+      "p95": 2.8860,
+      "p99": 3.5930,
+      "minLatency": 1.5010,
+      "maxLatency": 3.6580,
+      "qps": 1735.5236,
+      "recall": {
+        "recallAtK": 0.9610,
+        "k": 5,
+        "numQueries": 200
+      }
+    },
