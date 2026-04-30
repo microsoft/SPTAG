@@ -29,6 +29,73 @@
 
 namespace SPTAG::SPANN
 {
+    // Simple sharded LRU cache for posting vector counts.
+    // Thread-safe: each shard has its own mutex.
+    class PostingCountCache {
+    public:
+        PostingCountCache(size_t capacity = 100000, int shards = 16)
+            : m_shards(shards), m_capacity(std::max(capacity / shards, (size_t)1)) {
+            m_data.resize(shards);
+            m_mutexes = std::make_unique<std::mutex[]>(shards);
+        }
+
+        // Returns (count, true) on hit, (0, false) on miss.
+        std::pair<int, bool> Get(SizeType headID) {
+            int s = Shard(headID);
+            std::lock_guard<std::mutex> lock(m_mutexes[s]);
+            auto& shard = m_data[s];
+            auto it = shard.map.find(headID);
+            if (it == shard.map.end()) return {0, false};
+            // Move to front (most recently used)
+            shard.order.splice(shard.order.begin(), shard.order, it->second);
+            return {it->second->second, true};
+        }
+
+        void Put(SizeType headID, int count) {
+            int s = Shard(headID);
+            std::lock_guard<std::mutex> lock(m_mutexes[s]);
+            auto& shard = m_data[s];
+            auto it = shard.map.find(headID);
+            if (it != shard.map.end()) {
+                it->second->second = count;
+                shard.order.splice(shard.order.begin(), shard.order, it->second);
+                return;
+            }
+            // Evict if full
+            if (shard.map.size() >= m_capacity) {
+                auto& back = shard.order.back();
+                shard.map.erase(back.first);
+                shard.order.pop_back();
+            }
+            shard.order.emplace_front(headID, count);
+            shard.map[headID] = shard.order.begin();
+        }
+
+        void Remove(SizeType headID) {
+            int s = Shard(headID);
+            std::lock_guard<std::mutex> lock(m_mutexes[s]);
+            auto& shard = m_data[s];
+            auto it = shard.map.find(headID);
+            if (it != shard.map.end()) {
+                shard.order.erase(it->second);
+                shard.map.erase(it);
+            }
+        }
+
+    private:
+        int Shard(SizeType headID) const { return static_cast<unsigned>(headID) % m_shards; }
+
+        struct ShardData {
+            std::list<std::pair<SizeType, int>> order; // front = MRU
+            std::unordered_map<SizeType, std::list<std::pair<SizeType, int>>::iterator> map;
+        };
+
+        int m_shards;
+        size_t m_capacity; // per shard
+        std::vector<ShardData> m_data;
+        std::unique_ptr<std::mutex[]> m_mutexes;
+    };
+
     /// TiKVIO implements the KeyValueIO interface by communicating with a TiKV
     /// cluster via its RawKV gRPC API.
     ///
@@ -45,8 +112,8 @@ namespace SPTAG::SPANN
     class TiKVIO : public Helper::KeyValueIO
     {
     public:
-        TiKVIO(const std::string& pdAddresses, const std::string& keyPrefix)
-            : m_keyPrefix(keyPrefix)
+        TiKVIO(const std::string& pdAddresses, const std::string& keyPrefix, bool useMultiChunkPosting)
+            : m_keyPrefix(keyPrefix), m_useMultiChunkPosting(useMultiChunkPosting)
         {
             // Parse comma-separated PD addresses and try to connect.
             std::istringstream ss(pdAddresses);
@@ -126,6 +193,11 @@ namespace SPTAG::SPANN
                 return;
             }
 
+            // Initialize posting count cache for multi-chunk mode
+            if (m_useMultiChunkPosting) {
+                m_postingCountCache = std::make_unique<PostingCountCache>(100000, 16);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "PostingCountCache initialized (capacity=100000, shards=16)\n");
+            }
             m_available = true;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Initialized with key prefix '%s'\n", m_keyPrefix.c_str());
         }
@@ -201,6 +273,9 @@ namespace SPTAG::SPANN
                       const std::chrono::microseconds& timeout,
                       std::vector<Helper::AsyncReadRequest>* reqs) override
         {
+            if (m_useMultiChunkPosting) {
+                return ScanPosting(key, value, timeout);
+            }
             std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
             return Get(k, value, timeout, reqs);
         }
@@ -256,7 +331,27 @@ namespace SPTAG::SPANN
         ErrorCode Put(const SizeType key, const std::string& value,
                       const std::chrono::microseconds& timeout,
                       std::vector<Helper::AsyncReadRequest>* reqs) override
-        {
+        {          
+            if (m_useMultiChunkPosting) {
+                auto delRet = DeletePosting(key);
+                if (delRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: DeletePosting failed for key %d\n", key);
+                    return delRet;
+                }
+                auto ret = PutBaseChunk(key, value, timeout, reqs);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: PutBaseChunk failed for key %d\n", key);
+                    return ret;
+                }
+                int count = static_cast<int>(value.size());
+                auto countRet = SetPostingCount(key, count, timeout);
+                if (countRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "PutPostingToDB: SetPostingCount failed for key %d (data written OK)\n", key);
+                }
+                if (m_postingCountCache) m_postingCountCache->Put(key, count);
+                return ErrorCode::Success;
+            }
+            
             std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
             return Put(k, value, timeout, reqs);
         }
@@ -264,6 +359,15 @@ namespace SPTAG::SPANN
         // ---- Delete operations ----
 
         ErrorCode Delete(SizeType key) override {
+            if (m_useMultiChunkPosting) {
+                auto countRet = DeletePostingCount(key);
+                if (countRet != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "DeletePostingFromDB: DeletePostingCount failed for headID %d\n", key);
+                }
+                if (m_postingCountCache) m_postingCountCache->Remove(key);
+                return DeletePosting(key);
+            }
+
             std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
             std::string prefixedKey = MakePrefixedKey(k);
 
@@ -366,18 +470,40 @@ namespace SPTAG::SPANN
                 return ErrorCode::Fail;
             }
 
-            std::string existingValue;
-            auto ret = Get(key, &existingValue, timeout, reqs);
-            if (ret != ErrorCode::Success) {
-                // Key doesn't exist yet, just put the new value.
-                size = static_cast<int>(value.size());
-                return Put(key, value, timeout, reqs);
-            }
+            if (m_useMultiChunkPosting) {
+                auto [count, hit] = m_postingCountCache->Get(key);
+                if (!hit) {
+                    count = GetPostingCount(key, std::chrono::microseconds(5000000));
+                    if (count < 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "GetCachedPostingCount: TiKV error for headID %d, returning 0\n", key);
+                        return ErrorCode::Posting_SizeError;
+                    }
+                    m_postingCountCache->Put(key, count);
+                }
+                { static std::atomic<int> _logOnce{0}; if (_logOnce.fetch_add(1) == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[PATH] Append using MULTI-CHUNK AppendChunk path\n"); }
 
-            // Append the new value to existing
-            existingValue.append(value);
-            size = static_cast<int>(existingValue.size());
-            return Put(key, existingValue, timeout, reqs);
+                int newCount = count + value.size();
+                auto ret =PutChunkAndCount(key, value, newCount, timeout, reqs);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MultiChunkAppend failed for %lld!\n", (std::int64_t)key);
+                    return ret;
+                }
+                if (m_postingCountCache) m_postingCountCache->Put(key, newCount);
+                size = newCount;
+            } else {
+                { static std::atomic<int> _logOnce{0}; if (_logOnce.fetch_add(1) == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[PATH] Append using SINGLE-KEY Get+Put path (no multi-chunk)\n"); }
+                std::string fullPosting;
+                auto ret = Get(key, &fullPosting, MaxTimeout, reqs);
+                if (ret != ErrorCode::Success) fullPosting.clear();
+
+                fullPosting.append(value);
+                size = static_cast<int>(fullPosting.size());
+                if ((ret = Put(key, fullPosting, MaxTimeout, reqs)) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge failed for %lld! Posting Size:%d\n", (std::int64_t)key, size);
+                    return ret;
+                }
+            }
+            return ErrorCode::Success;
         }
 
         // ---- MultiGet operations ----
@@ -389,7 +515,11 @@ namespace SPTAG::SPANN
                            std::vector<Helper::PageBuffer<std::uint8_t>>& values,
                            const std::chrono::microseconds& timeout,
                            std::vector<Helper::AsyncReadRequest>* reqs) override
-        {
+        { 
+            if (m_useMultiChunkPosting) {
+                return MultiScanPostings(keys, values, timeout);
+            }
+
             if (keys.empty()) return ErrorCode::Success;
 
             // Build prefixed keys and initialize all values as empty
@@ -422,7 +552,7 @@ namespace SPTAG::SPANN
             std::mutex resultMutex;
 
             for (auto& [gkey, rg] : regionGroups) {
-                futures.push_back(std::async(std::launch::async, [&, &gkey, &rg]() {
+                futures.push_back(std::async(std::launch::async, [&]() {
                     auto& group = rg.keys;
                     auto* stub = GetOrCreateStub(gkey.leaderAddr);
                     if (!stub) return;
@@ -652,7 +782,7 @@ namespace SPTAG::SPANN
 
             for (auto& [gkey, rg] : regionGroups) {
                 futures.push_back(std::async(std::launch::async,
-                    [&, &gkey, &rg]() -> std::vector<CoprocessorResult> {
+                    [&]() -> std::vector<CoprocessorResult> {
                     auto& group = rg.keys;
                     auto* stub = GetOrCreateStub(gkey.leaderAddr);
                     if (!stub) return {};
@@ -1365,6 +1495,11 @@ namespace SPTAG::SPANN
         // Scan state
         std::vector<std::pair<std::string, std::string>> m_scanResults;
         size_t m_scanIndex = 0;
+
+        // Posting count cache for multi-chunk mode.
+        // Tracks approximate vector count per posting to decide when to split.
+        bool m_useMultiChunkPosting = false;
+        std::unique_ptr<PostingCountCache> m_postingCountCache;
 
         // ---- Helper: build a prefixed key ----
         std::string MakePrefixedKey(const std::string& key) const {

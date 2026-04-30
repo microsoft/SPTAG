@@ -44,7 +44,7 @@ static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& tes
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     std::string prefix = "vmtest_" + testName + "_" + std::to_string(now) + "_";
 
-    auto db = std::make_shared<SPTAG::SPANN::TiKVIO>(std::string(pdAddr), prefix);
+    auto db = std::make_shared<SPTAG::SPANN::TiKVIO>(std::string(pdAddr), prefix, false);
     auto vm = std::make_unique<TiKVVersionMap>();
     vm->SetDB(db);
     vm->SetLayer(0);

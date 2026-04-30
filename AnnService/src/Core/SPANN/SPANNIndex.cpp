@@ -1917,9 +1917,9 @@ template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueI
     else if (m_options.m_storage == Storage::TIKVIO) {
 #ifdef TIKV
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseTiKV\n");
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:PD addresses:%s, prefix:%s\n",
-                     m_options.m_tikvPDAddresses.c_str(), m_options.m_tikvKeyPrefix.c_str());
-        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:PD addresses:%s, prefix:%s, useMultiChunkPosting:%s\n",
+                     m_options.m_tikvPDAddresses.c_str(), m_options.m_tikvKeyPrefix.c_str(), m_options.m_useMultiChunkPosting ? "true" : "false");
+        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix, m_options.m_useMultiChunkPosting));
 #else
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPANNIndex:TiKV unsupport! Use -DTIKV to enable TiKV when doing cmake.\n");
         return;
