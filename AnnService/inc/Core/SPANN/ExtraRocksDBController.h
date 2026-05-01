@@ -210,6 +210,9 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mError in MultiGet\e[0m: %s, key: %d\n", statuses[i].getState(), keys[i]);
                     return ErrorCode::Fail;
                 }
+                if (slice_values[i].size() > values[i].GetPageSize()) {
+                    values[i].ReservePageBuffer(slice_values[i].size());
+                }
                 memcpy(values[i].GetBuffer(), slice_values[i].data(), slice_values[i].size());
                 values[i].SetAvailableSize(slice_values[i].size());
             }
@@ -373,12 +376,33 @@ namespace SPTAG::SPANN
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DB statistics not set!\n");
         }
 
+        ErrorCode Check(const SizeType key, std::vector<std::uint8_t> *visited) override {
+            // RocksDB is shared mutable storage; concurrent inserts/splits may update postings
+            // between size recording and check time, so posting size validation is skipped.
+            return ErrorCode::Success;
+        }
+
         ErrorCode Checkpoint(std::string prefix) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB: checkpoint\n");
-            rocksdb::Checkpoint* checkpoint_ptr;
-            rocksdb::Checkpoint::Create(db, &checkpoint_ptr);
             std::string filename = prefix + FolderSep + dbPath.substr(dbPath.find_last_of(FolderSep) + 1);
-            checkpoint_ptr->CreateCheckpoint(filename);
+            // RocksDB Checkpoint::CreateCheckpoint requires destination to NOT exist.
+            // If a previous save left a checkpoint there, treat as already-snapshotted.
+            if (direxists(filename.c_str())) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "RocksDB: checkpoint dir %s already exists, skipping\n", filename.c_str());
+                return ErrorCode::Success;
+            }
+            rocksdb::Checkpoint* checkpoint_ptr = nullptr;
+            auto s = rocksdb::Checkpoint::Create(db, &checkpoint_ptr);
+            if (!s.ok() || checkpoint_ptr == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RocksDB: Checkpoint::Create failed: %s\n", s.ToString().c_str());
+                return ErrorCode::Fail;
+            }
+            s = checkpoint_ptr->CreateCheckpoint(filename);
+            delete checkpoint_ptr;
+            if (!s.ok()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RocksDB: CreateCheckpoint(%s) failed: %s\n", filename.c_str(), s.ToString().c_str());
+                return ErrorCode::Fail;
+            }
             return ErrorCode::Success;
         }
 

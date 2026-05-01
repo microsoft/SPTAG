@@ -2488,6 +2488,39 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
             m_versionMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer));
 
+            // Rewrite m_headVectorFile so its row count matches m_headIDFile. BuildSSDIndex's
+            // zero-replica refill may add new heads to p_headIndex (m_pSamples grows) after
+            // SelectHead wrote the original headvectorfile, leaving counts inconsistent and
+            // breaking the next layer's BuildIndexInternalLayer ("Empty localToGlobal for
+            // non-leaf layer!"). Use DefaultVectorReader's expected layout:
+            // [SizeType R][DimensionType C][value-type bytes: R*C*sizeof(T)] contiguous.
+            {
+                std::string headVectorPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_headVectorFile;
+                auto vout = SPTAG::f_createIO();
+                if (vout == nullptr || !vout->Initialize(headVectorPath.c_str(), std::ios::binary | std::ios::out)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "Failed to open headvectorfile %s for refresh\n", headVectorPath.c_str());
+                } else {
+                    SizeType R = p_headIndex->GetNumSamples();
+                    DimensionType C = p_headIndex->GetFeatureDim();
+                    size_t perVecBytes = (size_t)C * GetValueTypeSize(p_headIndex->GetVectorValueType());
+                    bool ok = (vout->WriteBinary(sizeof(SizeType), reinterpret_cast<char*>(&R)) == sizeof(SizeType));
+                    ok = ok && (vout->WriteBinary(sizeof(DimensionType), reinterpret_cast<char*>(&C)) == sizeof(DimensionType));
+                    for (SizeType i = 0; ok && i < R; ++i) {
+                        const void* v = p_headIndex->GetSample(i);
+                        ok = (vout->WriteBinary(perVecBytes, reinterpret_cast<const char*>(v)) == perVecBytes);
+                    }
+                    if (!ok) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                     "Failed mid-write while refreshing headvectorfile %s\n", headVectorPath.c_str());
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                     "Refreshed headvectorfile %s (%d,%d) to match headIDFile\n",
+                                     headVectorPath.c_str(), R, C);
+                    }
+                }
+            }
+
             auto t5 = std::chrono::high_resolution_clock::now();
             double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t5 - t1).count();
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n", elapsedSeconds / 60.0, elapsedSeconds / 3600.0);

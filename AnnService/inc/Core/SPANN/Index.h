@@ -173,6 +173,23 @@ namespace SPTAG
             ErrorCode SaveConfig(std::shared_ptr<Helper::DiskIO> p_configout);
             ErrorCode SaveIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
 
+            // Override: hardlink-snapshot each layer's extra searcher (RocksDB Checkpoint)
+            // into the destination folder before VectorIndex::SaveIndex copies files.
+            ErrorCode RelocateExtraStorage(const std::string& p_folderPath) override
+            {
+                for (auto& searcher : m_extraSearchers) {
+                    if (!searcher) continue;
+                    ErrorCode ret = searcher->Checkpoint(p_folderPath);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "RelocateExtraStorage: extra searcher Checkpoint(%s) failed (code=%d)\n",
+                                     p_folderPath.c_str(), (int)ret);
+                        return ret;
+                    }
+                }
+                return ErrorCode::Success;
+            }
+
             ErrorCode LoadConfig(Helper::IniReader& p_reader);
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);

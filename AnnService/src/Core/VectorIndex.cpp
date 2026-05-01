@@ -124,11 +124,31 @@ bool copydirectory(const fs::path &sourceDir, const fs::path &destinationDir)
             }
             else
             {
-                // If it's a file, copy it directly
+                // If destination already has the file (e.g., RocksDB Checkpoint already
+                // populated it via hardlinks), skip; the source may also disappear at any
+                // moment due to RocksDB blob/SST GC, so tolerate per-file failures.
+                if (fs::exists(destinationPath)) {
+                    continue;
+                }
+                std::error_code ec;
+                fs::copy(currentPath, destinationPath,
+                         fs::copy_options::overwrite_existing, ec);
+                if (ec) {
+                    if (ec == std::errc::no_such_file_or_directory) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                     "Skipping vanished source file (concurrent GC?): %s\n",
+                                     currentPath.string().c_str());
+                        continue;
+                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Filesystem error copying %s -> %s: %s\n",
+                                 currentPath.string().c_str(),
+                                 destinationPath.string().c_str(),
+                                 ec.message().c_str());
+                    return false;
+                }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying file: %s to %s\n", currentPath.string().c_str(),
                              destinationPath.string().c_str());
-                // Use copy_options::overwrite_existing to replace files if they exist in destination
-                fs::copy(currentPath, destinationPath, fs::copy_options::overwrite_existing);
             }
         }
     }
@@ -396,7 +416,23 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath)
     {
         std::string oldFolder = GetParameter("IndexDirectory", "Base");
         ErrorCode ret = SaveIndex(oldFolder);
-        if (ret != ErrorCode::Success || !copydirectory(oldFolder, p_folderPath))
+        if (ret != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SaveIndex(%s) failed before relocate (code=%d)\n",
+                         oldFolder.c_str(), (int)ret);
+            return ErrorCode::Fail;
+        }
+        // Snapshot extra storage (e.g., RocksDB) into the destination via a race-safe
+        // hardlink checkpoint, BEFORE doing the file-system copy. Without this, blob/SST
+        // GC may delete a file between fs::directory_iterator listing and fs::copy,
+        // breaking the snapshot's MANIFEST consistency.
+        if (!direxists(p_folderPath.c_str())) {
+            mkdir(p_folderPath.c_str());
+        }
+        if (RelocateExtraStorage(p_folderPath) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RelocateExtraStorage to %s failed!\n", p_folderPath.c_str());
+            return ErrorCode::Fail;
+        }
+        if (!copydirectory(oldFolder, p_folderPath))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n",
                          p_folderPath.c_str());
@@ -1007,7 +1043,14 @@ std::shared_ptr<VectorIndex> VectorIndex::Clone(std::string p_clone)
     {
         std::string indexFolder = GetParameter("IndexDirectory", "Base");
         ret = SaveIndex(indexFolder);
-        if (!copydirectory(indexFolder, p_clone))
+        if (ret == ErrorCode::Success) {
+            // Hardlink-checkpoint extra storage into clone before file copy (race-safe)
+            if (!direxists(p_clone.c_str())) {
+                mkdir(p_clone.c_str());
+            }
+            ret = RelocateExtraStorage(p_clone);
+        }
+        if (ret != ErrorCode::Success || !copydirectory(indexFolder, p_clone))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to copy index directory contents to %s!\n",
                          p_clone.c_str());

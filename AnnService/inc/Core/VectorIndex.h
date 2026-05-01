@@ -90,6 +90,12 @@ public:
 
     virtual ErrorCode SaveIndex(const std::string& p_folderPath);
 
+    // Relocate extra storage (e.g., RocksDB DB dir) to a destination folder using a
+    // backend-specific snapshot mechanism (RocksDB Checkpoint hardlinks). Default no-op.
+    // Called by SaveIndex before copydirectory so file copying can race-safely skip the
+    // already-snapshotted subdirs.
+    virtual ErrorCode RelocateExtraStorage(const std::string& p_folderPath) { return ErrorCode::Success; }
+
     virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
