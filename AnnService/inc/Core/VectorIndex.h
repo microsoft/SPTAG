@@ -112,6 +112,13 @@ public:
 
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
+    // Optional: dump per-sample DFS/BFS preorder positions for trace/instrumentation.
+    // Default no-op for non-tree indices.
+    virtual void GetSampleOrdering(std::vector<SizeType>& dfsPos, std::vector<SizeType>& bfsPos) const {
+        dfsPos.clear();
+        bfsPos.clear();
+    }
+
     virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);
 
     static void SortSelections(std::vector<Edge>* selections);

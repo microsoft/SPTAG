@@ -21,11 +21,14 @@
 #include "ExtraFileController.h"
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <map>
 #include <cmath>
 #include <cstring>
 #include <climits>
 #include <future>
+#include <mutex>
 #include <numeric>
 #include <utility>
 #include <unordered_map>
@@ -298,6 +301,13 @@ namespace SPTAG::SPANN {
         // Posting count cache for multi-chunk mode.
         // Tracks approximate vector count per posting to decide when to split.
         std::unique_ptr<PostingCountCache> m_postingCountCache;
+
+        // BKT-DFS permutation (π): maps head globalVID -> packed permID in [0, m_permSize).
+        // When set, DBKey(globalVID) uses base + perm[globalVID] for known heads, and
+        // base + m_permSize + globalVID for unknown heads (split-created), guaranteeing
+        // no collision between permuted and unpermuted ranges.
+        std::shared_ptr<std::unordered_map<SizeType, SizeType>> m_perm;
+        SizeType m_permSize{0};
 
     public:
         ExtraDynamicSearcher(SPANN::Options& p_opt, int layer, SPANN::Index<ValueType>* headIndex, std::shared_ptr<Helper::KeyValueIO> p_db) {
@@ -1646,6 +1656,11 @@ namespace SPTAG::SPANN {
             } else if (m_opt->m_storage == Storage::TIKVIO) {
                 m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
+                // Load BKT-DFS permutation (π) if present; absent → identity DBKey (legacy).
+                const char* disablePerm = std::getenv("SPTAG_DISABLE_PERM");
+                if (!(disablePerm && disablePerm[0] == '1')) {
+                    LoadPermutation();
+                }
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
                 	m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
@@ -1809,6 +1824,25 @@ namespace SPTAG::SPANN {
             else remainLimit = m_hardLatencyLimit;
 
             auto readStart = std::chrono::high_resolution_clock::now();
+            // Instrumentation: dump per-query head VIDs (one query per line, space-separated).
+            // Triggered by env var SPTAG_TRACE_HEADS=<path-prefix>.
+            {
+                static const char* s_tracePath = std::getenv("SPTAG_TRACE_HEADS");
+                if (s_tracePath != nullptr && s_tracePath[0] != '\0') {
+                    static std::mutex s_traceMu;
+                    static std::ofstream s_traceOut(std::string(s_tracePath) + ".queries.tsv",
+                                                   std::ios::out | std::ios::app);
+                    if (s_traceOut.is_open()) {
+                        std::lock_guard<std::mutex> lk(s_traceMu);
+                        const auto& ids = p_exWorkSpace->m_postingIDs;
+                        for (size_t i = 0; i < ids.size(); i++) {
+                            if (i) s_traceOut << ' ';
+                            s_traceOut << ids[i];
+                        }
+                        s_traceOut << '\n';
+                    }
+                }
+            }
             if (m_opt->m_useMultiChunkPosting && m_opt->m_storage == Storage::TIKVIO) {
                 // Multi-chunk: scan all chunks per posting and concatenate
                 auto* tikvDB = dynamic_cast<TiKVIO*>(db.get());
@@ -2341,6 +2375,59 @@ namespace SPTAG::SPANN {
                     p_headGlobaltoLocal[*(p_headToLocal[i])] = i;
                 } 
             }
+            // BKT-DFS permutation (π): build and persist before any TiKV writes,
+            // so DBKey() applies cluster-locality keys throughout the build.
+            // Triggered when storage is TiKV; opt-out via env SPTAG_DISABLE_PERM=1.
+            // Optional trace dump: SPTAG_TRACE_HEADS=<path-prefix> writes <prefix>.heads.tsv.
+            if (m_opt->m_storage == Storage::TIKVIO) {
+                const char* disablePerm = std::getenv("SPTAG_DISABLE_PERM");
+                bool buildPerm = !(disablePerm && disablePerm[0] == '1');
+                if (buildPerm) {
+                    std::vector<SizeType> dfsPos, bfsPos;
+                    p_headIndex->GetSampleOrdering(dfsPos, bfsPos);
+                    SizeType numHeads = (SizeType)p_headToLocal.R();
+                    if ((SizeType)dfsPos.size() != numHeads) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "BKT-DFS perm: ordering size mismatch (dfsPos=%zu vs heads=%d). Disabling perm.\n",
+                                     dfsPos.size(), (int)numHeads);
+                    } else {
+                        m_perm = std::make_shared<std::unordered_map<SizeType, SizeType>>();
+                        m_perm->reserve(static_cast<size_t>(numHeads) * 2);
+                        m_permSize = numHeads;
+                        for (SizeType i = 0; i < numHeads; i++) {
+                            SizeType globalVID = *(p_headToLocal[i]);
+                            (*m_perm)[globalVID] = dfsPos[i];
+                        }
+                        if (!SavePermutation()) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                         "BKT-DFS perm: failed to persist; in-memory perm still active for build.\n");
+                        }
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                     "BKT-DFS perm: built and persisted %d entries (layer=%d).\n",
+                                     (int)numHeads, m_layer);
+                    }
+                }
+                const char* tracePathEnv = std::getenv("SPTAG_TRACE_HEADS");
+                if (tracePathEnv != nullptr && tracePathEnv[0] != '\0') {
+                    std::vector<SizeType> dfsPos, bfsPos;
+                    p_headIndex->GetSampleOrdering(dfsPos, bfsPos);
+                    std::string headsPath = std::string(tracePathEnv) + ".heads.tsv";
+                    std::ofstream of(headsPath);
+                    if (of.is_open()) {
+                        of << "linearIdx\tglobalVID\tdfsPos\tbfsPos\n";
+                        SizeType numHeads = (SizeType)p_headToLocal.R();
+                        for (SizeType i = 0; i < numHeads; i++) {
+                            SizeType globalVID = *(p_headToLocal[i]);
+                            SizeType d = (i < (SizeType)dfsPos.size()) ? dfsPos[i] : (SizeType)-1;
+                            SizeType b = (i < (SizeType)bfsPos.size()) ? bfsPos[i] : (SizeType)-1;
+                            of << i << "\t" << globalVID << "\t" << d << "\t" << b << "\n";
+                        }
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                     "Trace: dumped %d head metadata rows to %s\n",
+                                     (int)numHeads, headsPath.c_str());
+                    }
+                }
+            }
             if (ErrorCode::Success != WriteDownAllPostingToDB(p_headIndex, selections, fullVectors, postingListSize, p_headToLocal, p_localToGlobal)) return false;
 
             if (m_opt->m_update && !m_opt->m_allowZeroReplica && zeroReplicaCount > 0)
@@ -2791,7 +2878,87 @@ namespace SPTAG::SPANN {
         }
 
         inline SizeType DBKey(SizeType postingID) {
-            return m_opt->m_maxID * m_layer + postingID;
+            SizeType base = m_opt->m_maxID * m_layer;
+            if (m_perm) {
+                auto it = m_perm->find(postingID);
+                if (it != m_perm->end()) return base + it->second;
+                // Unmapped (e.g., split-created): place in disjoint range to avoid
+                // collision with permuted heads in [0, m_permSize).
+                return base + m_permSize + postingID;
+            }
+            return base + postingID;
+        }
+
+        // π persistence: <indexDir>/headPermutation_<layer>.bin
+        // Layout: [uint64 magic][uint32 version][uint32 numEntries][SizeType keys...][SizeType vals...]
+        std::string PermutationPath() const {
+            return m_opt->m_indexDirectory + FolderSep + "headPermutation_" + std::to_string(m_layer) + ".bin";
+        }
+
+        bool SavePermutation() {
+            if (!m_perm) return false;
+            const std::string path = PermutationPath();
+            std::ofstream of(path, std::ios::binary | std::ios::out | std::ios::trunc);
+            if (!of.is_open()) return false;
+            const uint64_t magic = 0x504552504D4131ULL; // 'PERPMA1'
+            const uint32_t version = 1;
+            const uint32_t count = static_cast<uint32_t>(m_perm->size());
+            of.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+            of.write(reinterpret_cast<const char*>(&version), sizeof(version));
+            of.write(reinterpret_cast<const char*>(&count), sizeof(count));
+            std::vector<SizeType> keys;
+            std::vector<SizeType> vals;
+            keys.reserve(count);
+            vals.reserve(count);
+            for (const auto& kv : *m_perm) {
+                keys.push_back(kv.first);
+                vals.push_back(kv.second);
+            }
+            of.write(reinterpret_cast<const char*>(keys.data()), sizeof(SizeType) * keys.size());
+            of.write(reinterpret_cast<const char*>(vals.data()), sizeof(SizeType) * vals.size());
+            of.close();
+            return of.good();
+        }
+
+        bool LoadPermutation() {
+            const std::string path = PermutationPath();
+            std::ifstream f(path, std::ios::binary | std::ios::in);
+            if (!f.is_open()) {
+                m_perm.reset();
+                m_permSize = 0;
+                return false;
+            }
+            uint64_t magic = 0;
+            uint32_t version = 0, count = 0;
+            f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+            f.read(reinterpret_cast<char*>(&version), sizeof(version));
+            f.read(reinterpret_cast<char*>(&count), sizeof(count));
+            if (!f.good() || magic != 0x504552504D4131ULL || version != 1) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "BKT-DFS perm: invalid header in %s; ignoring.\n", path.c_str());
+                m_perm.reset();
+                m_permSize = 0;
+                return false;
+            }
+            std::vector<SizeType> keys(count), vals(count);
+            f.read(reinterpret_cast<char*>(keys.data()), sizeof(SizeType) * count);
+            f.read(reinterpret_cast<char*>(vals.data()), sizeof(SizeType) * count);
+            if (!f.good() && !f.eof()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "BKT-DFS perm: short read in %s; ignoring.\n", path.c_str());
+                m_perm.reset();
+                m_permSize = 0;
+                return false;
+            }
+            m_perm = std::make_shared<std::unordered_map<SizeType, SizeType>>();
+            m_perm->reserve(static_cast<size_t>(count) * 2);
+            for (uint32_t i = 0; i < count; i++) {
+                (*m_perm)[keys[i]] = vals[i];
+            }
+            m_permSize = count;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "BKT-DFS perm: loaded %u entries from %s.\n", count, path.c_str());
+            return true;
         }
 
         inline std::shared_ptr<std::vector<SizeType>> DBKeys(std::vector<SizeType>& postingIDs) {

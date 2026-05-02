@@ -20,6 +20,8 @@
 #include <cmath>
 #include <climits>
 #include <future>
+#include <deque>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -127,7 +129,18 @@ namespace SPTAG::SPANN
             }
 
             m_available = true;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Initialized with key prefix '%s'\n", m_keyPrefix.c_str());
+            // Reusable thread pool for fan-out RPC parallelism. Sized to keep gRPC
+            // channels saturated without paying std::async's per-call thread spawn cost.
+            // 64 is well above kStubPoolSize=48 (so all channels can be in-flight) and
+            // well below kernel limits even at 96 query threads × 30 region groups.
+            int poolSize = 64;
+            const char* envPool = std::getenv("SPTAG_TIKV_FANOUT_THREADS");
+            if (envPool && *envPool) {
+                int v = std::atoi(envPool);
+                if (v > 0 && v <= 1024) poolSize = v;
+            }
+            m_fanOutPool.Start(poolSize);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Initialized with key prefix '%s' (fanout pool=%d)\n", m_keyPrefix.c_str(), poolSize);
         }
 
         ~TiKVIO() override {
@@ -136,6 +149,7 @@ namespace SPTAG::SPANN
 
         void ShutDown() override {
             m_available = false;
+            m_fanOutPool.Stop();
             std::lock_guard<std::mutex> lock(m_storeMutex);
             m_storeStubs.clear();
             m_pdStub.reset();
@@ -196,7 +210,7 @@ namespace SPTAG::SPANN
                       const std::chrono::microseconds& timeout,
                       std::vector<Helper::AsyncReadRequest>* reqs) override
         {
-            std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
+            std::string k = EncodeIntKey(key);
             return Get(k, value, timeout, reqs);
         }
 
@@ -247,14 +261,14 @@ namespace SPTAG::SPANN
                       const std::chrono::microseconds& timeout,
                       std::vector<Helper::AsyncReadRequest>* reqs) override
         {
-            std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
+            std::string k = EncodeIntKey(key);
             return Put(k, value, timeout, reqs);
         }
 
         // ---- Delete operations ----
 
         ErrorCode Delete(SizeType key) override {
-            std::string k(reinterpret_cast<const char*>(&key), sizeof(SizeType));
+            std::string k = EncodeIntKey(key);
             std::string prefixedKey = MakePrefixedKey(k);
 
             auto stub = GetStubForKey(prefixedKey);
@@ -282,8 +296,8 @@ namespace SPTAG::SPANN
         }
 
         ErrorCode DeleteRange(SizeType start, SizeType end) override {
-            std::string startKey(reinterpret_cast<const char*>(&start), sizeof(SizeType));
-            std::string endKey(reinterpret_cast<const char*>(&end), sizeof(SizeType));
+            std::string startKey = EncodeIntKey(start);
+            std::string endKey = EncodeIntKey(end);
             std::string prefixedStart = MakePrefixedKey(startKey);
             std::string prefixedEnd = MakePrefixedKey(endKey);
 
@@ -355,8 +369,7 @@ namespace SPTAG::SPANN
             // Build prefixed keys and initialize all values as empty
             std::vector<std::string> prefixedKeys(keys.size());
             for (size_t i = 0; i < keys.size(); i++) {
-                std::string k(reinterpret_cast<const char*>(&keys[i]), sizeof(SizeType));
-                prefixedKeys[i] = MakePrefixedKey(k);
+                prefixedKeys[i] = MakePrefixedKey(EncodeIntKey(keys[i]));
                 values[i].SetAvailableSize(0);
             }
 
@@ -379,10 +392,10 @@ namespace SPTAG::SPANN
 
             // Send RawBatchGet per region group (in parallel via futures)
             std::vector<std::future<void>> futures;
-            std::mutex resultMutex;
 
-            for (auto& [gkey, rg] : regionGroups) {
-                futures.push_back(std::async(std::launch::async, [&, &gkey, &rg]() {
+            // Single-region fast path: skip thread-pool submit (saves task enqueue +
+            // wakeup + future-wait roundtrip when all keys land in one region group).
+            auto runRegionFetch = [&](const RegionGroupKey& gkey, RegionGroup& rg) {
                     auto& group = rg.keys;
                     auto* stub = GetOrCreateStub(gkey.leaderAddr);
                     if (!stub) return;
@@ -410,7 +423,7 @@ namespace SPTAG::SPANN
                             std::string val;
                             auto ret = Get(keys[idx], &val, timeout, reqs);
                             if (ret == ErrorCode::Success && !val.empty()) {
-                                std::lock_guard<std::mutex> lock(resultMutex);
+                                // Disjoint indices across region groups -> no lock needed.
                                 if (val.size() > values[idx].GetPageSize()) {
                                     values[idx].ReservePageBuffer(val.size());
                                 }
@@ -423,6 +436,7 @@ namespace SPTAG::SPANN
 
                     // Build a map from prefixed key -> response value
                     std::unordered_map<std::string, std::string> resultMap;
+                    resultMap.reserve(response.pairs_size());
                     for (int p = 0; p < response.pairs_size(); p++) {
                         const auto& pair = response.pairs(p);
                         if (!pair.has_error() && !pair.value().empty()) {
@@ -430,8 +444,7 @@ namespace SPTAG::SPANN
                         }
                     }
 
-                    // Copy results to output buffers
-                    std::lock_guard<std::mutex> lock(resultMutex);
+                    // Copy results to output buffers (disjoint indices -> no lock).
                     for (auto& [idx, pkey] : group) {
                         auto it = resultMap.find(pkey);
                         if (it != resultMap.end()) {
@@ -444,12 +457,17 @@ namespace SPTAG::SPANN
                         }
                         // else: remains empty (SetAvailableSize(0)), tolerating missing keys
                     }
-                }));
-            }
+            };
 
-            // Wait for all region batch gets to complete
-            for (auto& f : futures) {
-                f.get();
+            if (regionGroups.size() <= 1) {
+                for (auto& [gkey, rg] : regionGroups) runRegionFetch(gkey, rg);
+            } else {
+                for (auto& [gkey, rg] : regionGroups) {
+                    futures.push_back(m_fanOutPool.Submit([&, &gkey, &rg]() {
+                        runRegionFetch(gkey, rg);
+                    }));
+                }
+                for (auto& f : futures) f.get();
             }
 
             return ErrorCode::Success;
@@ -550,7 +568,7 @@ namespace SPTAG::SPANN
             // Convert SizeType keys to strings and delegate
             std::vector<std::string> strKeys(keys.size());
             for (size_t i = 0; i < keys.size(); i++) {
-                strKeys[i] = std::string(reinterpret_cast<const char*>(&keys[i]), sizeof(SizeType));
+                strKeys[i] = EncodeIntKey(keys[i]);
             }
             return MultiGet(strKeys, values, timeout, reqs);
         }
@@ -584,8 +602,7 @@ namespace SPTAG::SPANN
             // Build prefixed keys for all posting IDs
             std::vector<std::string> prefixedKeys(postingIDs.size());
             for (size_t i = 0; i < postingIDs.size(); i++) {
-                std::string k(reinterpret_cast<const char*>(&postingIDs[i]), sizeof(SizeType));
-                prefixedKeys[i] = MakePrefixedKey(k);
+                prefixedKeys[i] = MakePrefixedKey(EncodeIntKey(postingIDs[i]));
             }
 
             // Group keys by (leader address, region id)
@@ -606,14 +623,17 @@ namespace SPTAG::SPANN
             }
 
             // Send RawCoprocessor per region group in parallel
-            std::vector<std::future<std::vector<CoprocessorResult>>> futures;
+            std::vector<std::future<void>> futures;
+            std::vector<std::vector<CoprocessorResult>> partial(regionGroups.size());
+            size_t slot = 0;
 
             for (auto& [gkey, rg] : regionGroups) {
-                futures.push_back(std::async(std::launch::async,
-                    [&, &gkey, &rg]() -> std::vector<CoprocessorResult> {
+                size_t mySlot = slot++;
+                futures.push_back(m_fanOutPool.Submit(
+                    [&, &gkey, &rg, mySlot]() {
                     auto& group = rg.keys;
                     auto* stub = GetOrCreateStub(gkey.leaderAddr);
-                    if (!stub) return {};
+                    if (!stub) return;
 
                     // Encode the vector search request
                     std::string requestData = EncodeVectorSearchRequest(
@@ -640,30 +660,30 @@ namespace SPTAG::SPANN
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "TiKVIO::CoprocessorSearch gRPC error: %s\n",
                             status.error_message().c_str());
-                        return {};
+                        return;
                     }
                     if (response.has_region_error()) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "TiKVIO::CoprocessorSearch region error\n");
                         InvalidateRegionCache(group[0].second);
-                        return {};
+                        return;
                     }
                     if (!response.error().empty()) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "TiKVIO::CoprocessorSearch error: %s\n",
                             response.error().c_str());
-                        return {};
+                        return;
                     }
 
-                    return DecodeVectorSearchResponse(response.data());
+                    partial[mySlot] = DecodeVectorSearchResponse(response.data());
                 }));
             }
 
             // Merge results from all regions
             results.clear();
-            for (auto& f : futures) {
-                auto regionResults = f.get();
-                results.insert(results.end(), regionResults.begin(), regionResults.end());
+            for (auto& f : futures) f.get();
+            for (auto& v : partial) {
+                results.insert(results.end(), v.begin(), v.end());
             }
 
             // Sort by distance and truncate to topN
@@ -689,7 +709,7 @@ namespace SPTAG::SPANN
         // Build the chunk-aware prefixed key for a headID.
         // suffix == "" → base key; suffix == 8-byte ts → chunk key.
         std::string MakeChunkKey(SizeType headID, const std::string& suffix = "") const {
-            std::string raw(reinterpret_cast<const char*>(&headID), sizeof(SizeType));
+            std::string raw = EncodeIntKey(headID);
             std::string result;
             result.reserve(m_keyPrefix.size() + 1 + sizeof(SizeType) + 1 + suffix.size());
             result.append(m_keyPrefix);
@@ -797,7 +817,7 @@ namespace SPTAG::SPANN
             std::string endKey;
             {
                 // endKey = prefix_headID\x01 — one past the delimiter byte
-                std::string raw(reinterpret_cast<const char*>(&headID), sizeof(SizeType));
+                std::string raw = EncodeIntKey(headID);
                 endKey.reserve(m_keyPrefix.size() + 1 + sizeof(SizeType) + 1);
                 endKey.append(m_keyPrefix);
                 endKey.push_back('_');
@@ -856,7 +876,7 @@ namespace SPTAG::SPANN
             std::string startKey = MakeChunkKey(headID); // prefix_headID\x00
             std::string endKey;
             {
-                std::string raw(reinterpret_cast<const char*>(&headID), sizeof(SizeType));
+                std::string raw = EncodeIntKey(headID);
                 endKey.reserve(m_keyPrefix.size() + 1 + sizeof(SizeType) + 1);
                 endKey.append(m_keyPrefix);
                 endKey.push_back('_');
@@ -897,7 +917,7 @@ namespace SPTAG::SPANN
         // Isolated from chunk keys (\x00..\x01 range).
 
         std::string MakeCountKey(SizeType headID) const {
-            std::string raw(reinterpret_cast<const char*>(&headID), sizeof(SizeType));
+            std::string raw = EncodeIntKey(headID);
             std::string result;
             result.reserve(m_keyPrefix.size() + 1 + sizeof(SizeType) + 1);
             result.append(m_keyPrefix);
@@ -1063,7 +1083,7 @@ namespace SPTAG::SPANN
 
             std::vector<std::future<void>> futures;
             for (size_t i = 0; i < headIDs.size(); i++) {
-                futures.push_back(std::async(std::launch::async, [&, i]() {
+                futures.push_back(m_fanOutPool.Submit([&, i]() {
                     std::string posting;
                     auto ret = ScanPosting(headIDs[i], &posting, timeout);
                     if (ret == ErrorCode::Success && !posting.empty()) {
@@ -1163,6 +1183,72 @@ namespace SPTAG::SPANN
         }
 
     private:
+        // Lightweight reusable thread pool for fan-out RPC calls inside MultiGet /
+        // CoprocessorSearch / batched ScanPosting. Replaces std::async(std::launch::async),
+        // which spawns a new thread per call. With 96 query threads each issuing 30+
+        // region-group RPCs, the per-call thread spawn cost dominates query latency.
+        class FanOutPool {
+        public:
+            FanOutPool() = default;
+            ~FanOutPool() { Stop(); }
+            void Start(int n) {
+                std::lock_guard<std::mutex> lk(m_mtx);
+                if (!m_workers.empty()) return;
+                m_stopped = false;
+                m_workers.reserve(n);
+                for (int i = 0; i < n; i++) {
+                    m_workers.emplace_back([this]{
+                        for (;;) {
+                            std::function<void()> task;
+                            {
+                                std::unique_lock<std::mutex> lk(m_mtx);
+                                m_cv.wait(lk, [this]{ return m_stopped || !m_tasks.empty(); });
+                                if (m_stopped && m_tasks.empty()) return;
+                                task = std::move(m_tasks.front());
+                                m_tasks.pop_front();
+                            }
+                            try { task(); } catch (...) {}
+                        }
+                    });
+                }
+            }
+            void Stop() {
+                {
+                    std::lock_guard<std::mutex> lk(m_mtx);
+                    if (m_stopped && m_workers.empty()) return;
+                    m_stopped = true;
+                }
+                m_cv.notify_all();
+                for (auto& t : m_workers) if (t.joinable()) t.join();
+                std::lock_guard<std::mutex> lk(m_mtx);
+                m_workers.clear();
+                m_tasks.clear();
+            }
+            template <class F>
+            std::future<void> Submit(F&& f) {
+                auto pkg = std::make_shared<std::packaged_task<void()>>(std::forward<F>(f));
+                auto fut = pkg->get_future();
+                {
+                    std::lock_guard<std::mutex> lk(m_mtx);
+                    if (m_stopped) {
+                        // Fallback: run inline on submitter thread to keep correctness.
+                        (*pkg)();
+                        return fut;
+                    }
+                    m_tasks.emplace_back([pkg]{ (*pkg)(); });
+                }
+                m_cv.notify_one();
+                return fut;
+            }
+        private:
+            std::mutex m_mtx;
+            std::condition_variable m_cv;
+            std::deque<std::function<void()>> m_tasks;
+            std::vector<std::thread> m_workers;
+            bool m_stopped = false;
+        };
+        mutable FanOutPool m_fanOutPool;
+
         std::string m_keyPrefix;
         std::vector<std::string> m_pdAddresses;
         std::unique_ptr<pdpb::PD::Stub> m_pdStub;
@@ -1210,6 +1296,26 @@ namespace SPTAG::SPANN
             result.push_back('_');
             result.append(key);
             return result;
+        }
+
+        // ---- Helper: encode a SizeType key as big-endian bytes ----
+        // BE encoding alone previously regressed QPS by ~20% (480 vs 600 QPS) because
+        // SelectHead assigned head IDs in scan order, not cluster order, so a query's
+        // 64 head IDs were scattered across the keyspace. Combined with the BKT-DFS
+        // permutation π at DBKey() level, BE encoding now translates numerical cluster
+        // locality into lexical TiKV region locality, dropping per-query fan-out from
+        // ~35 regions to ~8 (4× reduction) at 50 regions.
+        // Format: 4 bytes, MSB first. Compare lexically == compare numerically (for
+        // non-negative values, which all DBKey outputs are by construction since
+        // base = m_maxID * m_layer >= 0 and permID/postingID >= 0).
+        static inline std::string EncodeIntKey(SizeType v) {
+            uint32_t u = static_cast<uint32_t>(v);
+            std::string s(sizeof(SizeType), '\0');
+            s[0] = static_cast<char>((u >> 24) & 0xFF);
+            s[1] = static_cast<char>((u >> 16) & 0xFF);
+            s[2] = static_cast<char>((u >>  8) & 0xFF);
+            s[3] = static_cast<char>( u        & 0xFF);
+            return s;
         }
 
         // ---- Helper: RawPut with retry for an already-prefixed key ----

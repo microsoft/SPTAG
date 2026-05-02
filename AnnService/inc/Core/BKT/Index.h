@@ -152,6 +152,10 @@ namespace SPTAG
             }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx); }
+
+            inline void GetSampleOrdering(std::vector<SizeType>& dfsPos, std::vector<SizeType>& bfsPos) const override {
+                m_pTrees.DumpDFSAndBFSOrder(GetNumSamples(), dfsPos, bfsPos);
+            }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {

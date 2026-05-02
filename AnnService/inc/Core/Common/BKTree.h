@@ -551,6 +551,60 @@ break;
 
             inline const std::unordered_map<SizeType, SizeType>& GetSampleMap() const { return m_pSampleCenterMap; }
 
+            // Dump per-sample DFS/BFS preorder positions across all trees (first-occurrence wins).
+            // dfsPos/bfsPos are sized to numSamples; samples not visited get assigned trailing positions.
+            // Synthetic root centerid (>= numSamples) and tail markers (-1) are skipped.
+            void DumpDFSAndBFSOrder(SizeType numSamples, std::vector<SizeType>& dfsPos, std::vector<SizeType>& bfsPos) const {
+                dfsPos.assign(numSamples, (SizeType)-1);
+                bfsPos.assign(numSamples, (SizeType)-1);
+                SizeType dfsK = 0, bfsK = 0;
+                for (int t = 0; t < m_iTreeNumber && t < (int)m_pTreeStart.size(); t++) {
+                    SizeType root = m_pTreeStart[t];
+                    if (root >= (SizeType)m_pTreeRoots.size()) continue;
+                    // DFS preorder using stack
+                    std::vector<SizeType> stack;
+                    stack.push_back(root);
+                    while (!stack.empty()) {
+                        SizeType nodeIdx = stack.back();
+                        stack.pop_back();
+                        if (nodeIdx < 0 || nodeIdx >= (SizeType)m_pTreeRoots.size()) continue;
+                        const BKTNode& node = m_pTreeRoots[nodeIdx];
+                        SizeType cid = node.centerid;
+                        if (cid >= 0 && cid < numSamples && dfsPos[cid] == (SizeType)-1) {
+                            dfsPos[cid] = dfsK++;
+                        }
+                        if (node.childStart >= 0 && node.childEnd > node.childStart) {
+                            for (SizeType c = node.childEnd - 1; c >= node.childStart; --c) {
+                                stack.push_back(c);
+                            }
+                        }
+                    }
+                    // BFS preorder using queue
+                    std::vector<SizeType> queue;
+                    size_t qhead = 0;
+                    queue.push_back(root);
+                    while (qhead < queue.size()) {
+                        SizeType nodeIdx = queue[qhead++];
+                        if (nodeIdx < 0 || nodeIdx >= (SizeType)m_pTreeRoots.size()) continue;
+                        const BKTNode& node = m_pTreeRoots[nodeIdx];
+                        SizeType cid = node.centerid;
+                        if (cid >= 0 && cid < numSamples && bfsPos[cid] == (SizeType)-1) {
+                            bfsPos[cid] = bfsK++;
+                        }
+                        if (node.childStart >= 0 && node.childEnd > node.childStart) {
+                            for (SizeType c = node.childStart; c < node.childEnd; ++c) {
+                                queue.push_back(c);
+                            }
+                        }
+                    }
+                }
+                // Assign any unvisited samples to trailing positions
+                for (SizeType i = 0; i < numSamples; i++) {
+                    if (dfsPos[i] == (SizeType)-1) dfsPos[i] = dfsK++;
+                    if (bfsPos[i] == (SizeType)-1) bfsPos[i] = bfsK++;
+                }
+            }
+
             inline void SwapTree(BKTree& newTrees)
             {
                 m_pTreeRoots.swap(newTrees.m_pTreeRoots);
