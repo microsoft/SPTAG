@@ -8,22 +8,55 @@ Workload: each run does
 2. Pre-insert search (`Benchmark 0`, 2 rounds)
 3. **`Benchmark 1`**: 10 batches, each inserts `InsertVectorCount/10` vectors and runs search concurrently — measures insert throughput + search-during-update QPS / latency / recall
 
-| Scale | Backend | Layers | Node | Status | Build (s) | Pre-insert QPS | Pre-insert recall | Insert tput (vec/s) | Search-during-insert QPS | Search-during-insert recall |
-|-------|---------|--------|------|--------|-----------|----------------|-------------------|---------------------|--------------------------|------------------------------|
-| 10M   | TiKV    | L1     | 0.7  | ✅ done | 924.0 | 578.5 | 0.9520 | 937.8 | 507.7 | 0.9531 |
-| 10M   | RocksDB | L1     | 0.9  | 🔄 rerun | — | — | — | — | — | — |
-| 100M  | TiKV    | L1     | 0.7  | 🟡 running | — | — | — | — | — | — |
-| 100M  | RocksDB | L1     | 0.9  | pending | — | — | — | — | — | — |
-| 10M   | TiKV    | L2     | TBD  | pending | — | — | — | — | — | — |
-| 10M   | RocksDB | L2     | TBD  | pending | — | — | — | — | — | — |
-| 100M  | TiKV    | L2     | TBD  | pending | — | — | — | — | — | — |
-| 100M  | RocksDB | L2     | TBD  | pending | — | — | — | — | — | — |
-| 1B    | TiKV    | L1     | TBD  | pending | — | — | — | — | — | — |
-| 1B    | TiKV    | L2     | TBD  | pending | — | — | — | — | — | — |
-| 1B    | RocksDB | L1     | TBD  | pending | — | — | — | — | — | — |
-| 1B    | RocksDB | L2     | TBD  | pending | — | — | — | — | — | — |
+All latencies in **ms**. Pre-insert columns: search-only baseline. Insert columns: 10-batch averages of insert throughput + concurrent search. p50 / p99 are batch-mean of per-batch percentiles.
 
-(All numbers use binary `a33f31e` unless noted. Avg insert throughput / search QPS / recall are means across the 10 insert batches.)
+| Scale | Backend | Layers | Node | Status | Build (s) | Pre-insert QPS | Pre p50 | Pre p99 | Pre recall | Insert tput (vec/s) | Search-during-insert QPS | SDI p50 | SDI p99 | SDI recall |
+|-------|---------|--------|------|--------|-----------|----------------|---------|---------|------------|---------------------|--------------------------|---------|---------|------------|
+| 1M    | RocksDB | L1     | 0.9  | ✅ done                               | 42.4    | 2365.2 | 1.70  | 3.17  | 0.9890 | 3894.1 | 2241.0 | 1.81  | 3.08  | 0.9878 |
+| 10M   | TiKV    | L1     | 0.7  | ✅ done                               | 924.0   | 578.5  | 6.88  | 9.89  | 0.9520 | 937.8  | 507.7  | 7.80  | 11.49 | 0.9531 |
+| 10M   | TiKV    | L1     | 0.9  | ✅ done                               | 952.9   | 404.1  | 9.62  | 15.18 | 0.9630 | 997.7  | 489.8  | 8.09  | 11.36 | 0.9619 |
+| 10M   | TiKV    | L2     | 0.7  | ✅ done                               | 978.6   | 260.7  | 15.24 | 21.46 | 0.9510 | 175.0  | 199.9  | 19.89 | 24.52 | 0.9535 |
+| 10M   | RocksDB | L1     | 0.9  | ✅ done (after MultiGet/SaveIndex fixes) | 836.8 | 1778.4 | 2.28  | 3.95  | 0.9680 | 3627.7 | 1470.5 | 2.74  | 4.13  | 0.9680 |
+| 10M   | RocksDB | L2     | 0.9  | ✅ done                               | 828.5   | 1328.1 | 3.06  | 4.27  | 0.9630 | 2277.7 | 989.8  | 4.09  | 5.50  | 0.9636 |
+| 100M  | TiKV    | L1     | 0.7  | ✅ done                               | 11280.4 | 217.1  | 18.17 | 27.54 | 0.9220 | 866.7  | 226.8  | 17.61 | 23.72 | 0.9204 |
+| 100M  | RocksDB | L1     | 0.9  | ✅ done                               | 10090.9 | 1746.0 | 2.26  | 4.08  | 0.9170 | 7635.8 | 1358.0 | 2.88  | 4.64  | 0.9218 |
+| 100M  | TiKV    | L2     | 0.7  | 🟡 running (~86% Sent, build phase)   | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+| 100M  | RocksDB | L2     | 0.9  | 🟡 running                            | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+| 1B    | TiKV    | L1     | TBD  | pending                               | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+| 1B    | TiKV    | L2     | TBD  | pending                               | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+| 1B    | RocksDB | L1     | TBD  | pending                               | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+| 1B    | RocksDB | L2     | TBD  | pending                               | —       | —      | —     | —     | —      | —      | —      | —     | —     | —      |
+
+(All numbers use binary `a33f31e` unless noted; **10M RocksDB L1 row** uses post-fix binary built 2026-04-30 with MultiGet bounds check + SaveIndex hardlink-checkpoint patches. Avg insert throughput / search QPS / recall / latency percentiles are means across the 10 insert batches. 1M RocksDB above uses the post-revert build linked against RocksDB 7.6 submodule pin.)
+
+## BE+π Optimization (TiKV only)
+
+Two-part fix landed in `a184213` ("BKT-DFS permutation π + big-endian keys + fan-out pool"):
+
+1. **π (BKT-DFS permutation)** — at BuildIndex, walk the BKT tree in DFS order to produce a bijection on head IDs so cluster-adjacent heads land at adjacent integer keys. Persisted to `headPermutation_<layer>.bin`.
+2. **BE-encoded keys** — `EncodeIntKey()` switched LE→BE so numerical adjacency = lexical adjacency = TiKV region adjacency.
+3. **Reusable fan-out thread pool** in `RawBatchGet` — groups MultiGet by region.
+
+Either alone fails: π without BE → π's locality scrambles by least-significant byte; BE without π → IDs aren't clustered. Together a query's ~64 head IDs hit a small handful of regions instead of fanning out to all 100+.
+
+| Scale / Layers | Baseline (Titan-tuned) | **BE+π peak** | RocksDB | Lift over baseline | Ratio vs RocksDB |
+|---|---|---|---|---|---|
+| 10M L1   | 654 QPS, recall 0.947  | **1036 QPS, recall 0.956**, p50 3.87ms p99 5.14ms | 1778 QPS | **1.58×** | **59%** ✅ |
+| 10M L2   | 261 QPS, recall 0.951  | **555.6 QPS, recall 0.945**, p50 7.08ms p99 8.95ms | 1225 QPS | **2.13×** | **45%** ✅ |
+| 100M L1  | 217 QPS, recall 0.922  | **742.1 QPS, recall 0.914** (R2b 740.7 stable)    | 1746 QPS | **3.42×** | **42.5%** ✅ |
+| 100M L2  | 116 QPS, recall 0.893  | **312.5 QPS, recall 0.906** (R2b 308.2 stable)    | — (broken)   | **2.69×** | n/a |
+| 1B  L1   | —                      | pending                                            | —        | —     | —    |
+| 1B  L2   | —                      | pending                                            | —        | —     | —    |
+
+**Insert-phase (search-during-insert) QPS (BE+π):**
+
+| Scale | Pre-insert | Batch 1 (after +1/10) | Batch 2 | Batch 5 | Batch 9 | Notes |
+|---|---|---|---|---|---|---|
+| 10M L2  | 555.6 | 330.7 | 327.2 | — | — | bench2 ~325 stable, recall 0.945–0.947 |
+| 100M L1 | 742.1 | 657.7 | 574.5 | 599.4 | 567.7 | 10 batches in flight; peak ratio of RocksDB batch1 (1358) ≈ 48% |
+| 100M L2 | 312.5 | running | — | — | — | just entered bench1 |
+
+(Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row currently has only pre-insert measurement because the run focused on bench0 verification; insert-phase rerun pending.)
 
 ## How to refresh
 
