@@ -50,13 +50,13 @@ Either alone fails: π without BE → π's locality scrambles by least-significa
 
 **Insert-phase (search-during-insert) QPS (BE+π):**
 
-| Scale | Pre-insert | Batch 1 (after +1/10) | Batch 2 | Batch 5 | Batch 9 | Notes |
+| Scale | Pre-insert | Avg insert tput (vec/s) | Avg SDI QPS | Avg SDI recall | RocksDB SDI QPS | Ratio |
 |---|---|---|---|---|---|---|
-| 10M L2  | 555.6 | 330.7 | 327.2 | — | — | bench2 ~325 stable, recall 0.945–0.947 |
-| 100M L1 | 742.1 | 657.7 | 574.5 | 599.4 | 567.7 | 10 batches in flight; peak ratio of RocksDB batch1 (1358) ≈ 48% |
-| 100M L2 | 312.5 | running | — | — | — | just entered bench1 |
+| 10M L2  | 555.6 | 236.6   | 322.9 | 0.947 | 989.8  | 33%  |
+| 100M L1 | 742.1 | 790.8   | 596.2 | 0.918 | 1358.0 | **44%** ✅ |
+| 100M L2 | 312.5 | running | —     | —     | —      | —    |
 
-(Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row currently has only pre-insert measurement because the run focused on bench0 verification; insert-phase rerun pending.)
+(10 batches × `InsertVectorCount/10`. Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row currently has only pre-insert measurement because that run focused on bench0 verification; insert-phase rerun pending.)
 
 ## How to refresh
 
