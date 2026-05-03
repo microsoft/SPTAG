@@ -584,7 +584,7 @@ namespace SPTAG::SPANN
         };
 
         ErrorCode CoprocessorSearch(
-            const std::vector<SizeType>& postingIDs,
+            const std::vector<SizeType>& dbKeys,
             const uint8_t* queryVector,
             int dim,
             int valueType,       // 0=UInt8, 1=Int8, 3=Float32
@@ -593,16 +593,20 @@ namespace SPTAG::SPANN
             const std::chrono::microseconds& timeout,
             std::vector<CoprocessorResult>& results)
         {
-            if (postingIDs.empty()) return ErrorCode::Success;
+            if (dbKeys.empty()) return ErrorCode::Success;
 
             // Determine vector data size
             int valueSize = (valueType == 3) ? 4 : 1;
             int queryVecBytes = dim * valueSize;
 
-            // Build prefixed keys for all posting IDs
-            std::vector<std::string> prefixedKeys(postingIDs.size());
-            for (size_t i = 0; i < postingIDs.size(); i++) {
-                prefixedKeys[i] = MakePrefixedKey(EncodeIntKey(postingIDs[i]));
+            // Build prefixed keys directly from caller-supplied DB keys.
+            // The caller (SearchIndexWithCoprocessor) is responsible for
+            // applying any logical-to-physical mapping (e.g. BKT-DFS
+            // permutation π) before passing keys here, mirroring the
+            // non-coproc path's use of DBKeys(postingIDs).
+            std::vector<std::string> prefixedKeys(dbKeys.size());
+            for (size_t i = 0; i < dbKeys.size(); i++) {
+                prefixedKeys[i] = MakePrefixedKey(EncodeIntKey(dbKeys[i]));
             }
 
             // Group keys by (leader address, region id)
@@ -1753,7 +1757,9 @@ namespace SPTAG::SPANN
                 return results;
             }
 
-            if (data.size() < 12 + numResults * 12) return results;
+            // v1 result is 12 bytes per entry: i64 vid + f32 dist.
+            constexpr size_t kResultBytes = 12;
+            if (data.size() < 12 + numResults * kResultBytes) return results;
 
             results.reserve(numResults);
             for (uint32_t i = 0; i < numResults; i++) {

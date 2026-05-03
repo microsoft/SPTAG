@@ -1993,8 +1993,12 @@ namespace SPTAG::SPANN {
             auto readStart = std::chrono::high_resolution_clock::now();
 
             std::vector<TiKVIO::CoprocessorResult> coprResults;
+            // Translate logical posting IDs to physical DB keys (matches
+            // the non-coproc path's `db->MultiGet(*DBKeys(postingIDs))`),
+            // so BKT-DFS permutation π is applied correctly.
+            auto dbKeys = DBKeys(p_exWorkSpace->m_postingIDs);
             auto ret = tikvDB->CoprocessorSearch(
-                p_exWorkSpace->m_postingIDs,
+                *dbKeys,
                 reinterpret_cast<const uint8_t*>(queryResults.GetQuantizedTarget()),
                 m_opt->m_dim,
                 valueType,
@@ -2011,14 +2015,20 @@ namespace SPTAG::SPANN {
                 return ErrorCode::DiskIOFail;
             }
 
-            // Process results: dedup, skip per-entry version check for TiKV mode
+            // Mirror the non-coproc TiKV path (line 1889 sets
+            // !isTiKV-only deletion check, so the inline path skips per-entry
+            // version filtering for TiKV mode and only filters deleted VIDs
+            // in a post-step). Do the same here: dedup + AddPoint inline,
+            // then run a single batch deletion check on the surviving heap.
             for (auto& cr : coprResults) {
+                if (cr.vectorID < 0) continue;
                 if (p_exWorkSpace->m_deduper.CheckAndSet(cr.vectorID)) continue;
                 queryResults.AddPoint(cr.vectorID, cr.distance);
                 listElements++;
             }
 
-            // Post-heap batch version check for TiKV mode
+            // Post-heap batch deletion check (matches the non-coproc path
+            // at lines 1916-1950): replace deleted VIDs with sentinel.
             {
                 int K = queryResults.GetResultNum();
                 int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
