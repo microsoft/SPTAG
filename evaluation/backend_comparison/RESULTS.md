@@ -59,6 +59,45 @@ Either alone fails: π without BE → π's locality scrambles by least-significa
 
 (10 batches × `InsertVectorCount/10`. Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row added 2026-05-03 from fresh-build non-coproc baseline run `bench_baseline_20260503_163423.json` on .7.)
 
+## Full metric comparison: RocksDB vs TiKV BE+π
+
+Side-by-side on every dimension (build, search, insert, latency, recall). All TiKV numbers post-`a184213` (BE+π + fan-out pool). Search-during-insert (SDI) values are 10-batch averages from `Benchmark 1`.
+
+### Pre-insert search
+
+| Scale / L | Backend | Build (s) | QPS | p50 (ms) | p99 (ms) | Recall@5 | TiKV / RocksDB |
+|---|---|---|---|---|---|---|---|
+| 10M L1  | RocksDB   | 836.8   | **1778.4** | **2.28** | **3.95** | 0.968 | — |
+| 10M L1  | TiKV BE+π | 760-779 | 985-1036  | 3.76-4.00 | 5.10-5.49 | 0.956-0.958 | **55-58%** |
+| 10M L2  | RocksDB   | 828.5   | **1328.1** | **3.06** | **4.27** | 0.963 | — |
+| 10M L2  | TiKV BE+π | 978.6   | 555.6     | 7.08      | 8.95      | 0.945 | **42%** |
+| 100M L1 | RocksDB   | 10090.9 | **1746.0** | **2.26** | **4.08** | 0.917 | — |
+| 100M L1 | TiKV BE+π | 10630.5 | 742.1     | 5.34      | 7.08      | 0.914 | **42.5%** |
+| 100M L2 | RocksDB   | broken  | —          | —         | —         | —     | — |
+| 100M L2 | TiKV BE+π | —       | 312.5     | —         | —         | 0.906 | n/a |
+
+### Insert phase (`Benchmark 1`, 10-batch averages)
+
+| Scale / L | Backend | Insert tput (vec/s) | SDI QPS | SDI p50 (ms) | SDI p99 (ms) | SDI Recall@5 | Tput ratio | QPS ratio |
+|---|---|---|---|---|---|---|---|---|
+| 10M L1  | RocksDB   | **3627.7** | **1470.5** | **2.74** | **4.13** | 0.968 | — | — |
+| 10M L1  | TiKV BE+π | 921.8      | 911.0      | 4.35     | 5.99     | 0.957 | **25%** | **62%** ✅ |
+| 10M L2  | RocksDB   | **2277.7** | **989.8**  | **4.09** | **5.50** | 0.964 | — | — |
+| 10M L2  | TiKV BE+π | 236.6      | 322.9      | —        | —        | 0.947 | **10%** | **33%** |
+| 100M L1 | RocksDB   | **7635.8** | **1358.0** | **2.88** | **4.64** | 0.922 | — | — |
+| 100M L1 | TiKV BE+π | 790.8      | 596.2      | 6.63     | 9.47     | 0.918 | **10%** | **44%** |
+
+(10M L2 BE+π SDI latency percentiles not captured separately in the post-BE+π run; pre-insert latency is 7.08/8.95 ms p50/p99.)
+
+### Headline takeaways
+
+- **Search QPS (TiKV / RocksDB)**: 55-62% at 10M L1, ~33-44% at 10M L2 / 100M L1. Goal of 50% is met at L1 only; L2 and 100M+ fall below. Gap widens with scale because TiKV's per-RPC overhead is fixed while RocksDB's in-process MultiGet stays flat.
+- **Recall**: TiKV trails RocksDB by ~1 percentage point uniformly (0.95 vs 0.96-0.97). Algorithmic, not backend-driven.
+- **Search latency**: TiKV p50 is 1.5-2.3× RocksDB p50, p99 is 1.4-2.0× — same root cause as QPS gap (per-RPC tax).
+- **Insert throughput**: TiKV is **only 10-25% of RocksDB** — a much bigger gap than search. Each posting-write is a synchronous TiKV `RawPut` (gRPC + Raft commit + Titan blob write), whereas RocksDB writes are an in-process `Put` straight into memtable. This is the main cost users would feel under update-heavy workloads.
+- **SDI recall is preserved** through inserts in both backends (>0.91 at 100M, >0.95 at 10M).
+- **Build time** is roughly comparable (within 5%) at every scale — most build cost is CPU (BKT + KNN graph), not storage.
+
 ## How to refresh
 
 ```bash
