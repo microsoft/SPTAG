@@ -52,11 +52,12 @@ Either alone fails: π without BE → π's locality scrambles by least-significa
 
 | Scale | Pre-insert | Avg insert tput (vec/s) | Avg SDI QPS | Avg SDI recall | RocksDB SDI QPS | Ratio |
 |---|---|---|---|---|---|---|
+| 10M L1  | 985   | **921.8** | **911.0** | **0.9566** | 1470.5 | **62%** ✅ |
 | 10M L2  | 555.6 | 236.6   | 322.9 | 0.947 | 989.8  | 33%  |
 | 100M L1 | 742.1 | 790.8   | 596.2 | 0.918 | 1358.0 | **44%** ✅ |
 | 100M L2 | 312.5 | running | —     | —     | —      | —    |
 
-(10 batches × `InsertVectorCount/10`. Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row currently has only pre-insert measurement because that run focused on bench0 verification; insert-phase rerun pending.)
+(10 batches × `InsertVectorCount/10`. Pre-insert columns are the higher of bench0 R2 / bench0b. 10M L1 BE+π row added 2026-05-03 from fresh-build non-coproc baseline run `bench_baseline_20260503_163423.json` on .7.)
 
 ## How to refresh
 
