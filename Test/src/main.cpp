@@ -7,6 +7,7 @@
 
 #include <boost/test/tree/visitor.hpp>
 #include <string>
+#include <absl/synchronization/mutex.h>
 
 using namespace boost::unit_test;
 
@@ -31,6 +32,12 @@ struct GlobalFixture
 {
     GlobalFixture()
     {
+        // [PERF] Disable absl::Mutex deadlock detector. Default mode (kReport)
+        // adds GraphCycles bookkeeping under a global spinlock on every Lock();
+        // observed to consume ~12% CPU under high worker-thread parallelism in
+        // gRPC client paths (perf-recorded 2026-05-06).
+        absl::SetMutexDeadlockDetectionMode(absl::OnDeadlockCycle::kIgnore);
+
         SPTAGVisitor visitor;
         traverse_test_tree(framework::master_test_suite(), visitor, false);
     }

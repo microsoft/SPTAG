@@ -131,7 +131,13 @@ namespace SPTAG::SPANN {
             }
 
             void exec(void* p_workSpace, IAbortOperation* p_abort) override {
+                auto _rsBegin = std::chrono::high_resolution_clock::now();
                 ErrorCode ret = m_extraIndex->Reassign((ExtraWorkSpace*)p_workSpace, m_vectorInfo, m_headPrev);
+                auto _rsEnd = std::chrono::high_resolution_clock::now();
+                uint64_t _rsUs = std::chrono::duration_cast<std::chrono::microseconds>(_rsEnd - _rsBegin).count();
+                IndexStats::HistAdd(m_extraIndex->m_stat.m_reassignJobLatencyUs, _rsUs);
+                m_extraIndex->m_stat.m_reassignJobLatencyTotalUs.fetch_add(_rsUs, std::memory_order_relaxed);
+                m_extraIndex->m_stat.m_reassignJobSampleCount.fetch_add(1, std::memory_order_relaxed);
                 if (ret != ErrorCode::Success)
                     m_extraIndex->m_asyncStatus = ret;
                 m_extraIndex->m_reassignJobsInFlight--;
@@ -1085,8 +1091,10 @@ namespace SPTAG::SPANN {
                         if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
                         float origin_dist = m_headIndex->ComputeDistance(deletedHeadVec->data() + m_metaDataSize, vector);
                         float current_dist = m_headIndex->ComputeDistance(nextHeadVec->data() + m_metaDataSize, vector);
-                        if (current_dist > origin_dist)
+                        if (current_dist > origin_dist) {
+                            m_stat.m_reassignSubmittedFromMerge.fetch_add(1, std::memory_order_relaxed);
                             ReassignAsync(std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), nextHeadID);
+                        }
                     }
                 }
 
@@ -1339,6 +1347,7 @@ namespace SPTAG::SPANN {
             if (batchReassignCount > 0) {
                 m_totalReassignSubmitted += batchReassignCount;
                 m_totalReassignCompleted += batchReassignCount;
+                m_stat.m_reassignSubmittedFromSplitBatch.fetch_add(batchReassignCount, std::memory_order_relaxed);
             }
             return ErrorCode::Success;
         }
@@ -1486,6 +1495,7 @@ namespace SPTAG::SPANN {
                 // if (m_postingSizes.GetSize(headID) > 120) {
                 //     GetDBStats();
                 // }
+                m_stat.m_appendTriggeredSplit.fetch_add(1, std::memory_order_relaxed);
                 if (!reassignThreshold) SplitAsync(headID, postingSize);
                 else Split(p_exWorkSpace, headID);
             }
@@ -1541,7 +1551,13 @@ namespace SPTAG::SPANN {
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
                 for (int i = 0; i < replicaCount && m_versionMap->GetVersion(VID) == version; i++) {
                     //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
-                    ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 3);
+                    // [FIX H3] use reassignThreshold=0 so that an oversized
+                    // target posting triggers SplitAsync (not a synchronous
+                    // Split on this worker thread). This matches the
+                    // CollectReAssign batch path and avoids a single merge-
+                    // path reassign blocking a worker for the full duration
+                    // of a Split (observed up to tens of seconds).
+                    ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 0);
                     if (ErrorCode::Success != tmp) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
                         return tmp;
@@ -2536,6 +2552,28 @@ namespace SPTAG::SPANN {
 
             size_t totalJobs = m_splitThreadPool->jobsize();
             unsigned int runningJobs = static_cast<unsigned int>(m_splitThreadPool->runningJobs());
+
+            // [DIAG] sample worker pool queue depth (throttled to 1 per 50ms via CAS).
+            // AllFinished is hot — checked in tight wait loops — so we MUST throttle to
+            // avoid (a) histogram atomic contention and (b) flooding samples that would
+            // drown out true depth distribution.
+            {
+                using clk = std::chrono::steady_clock;
+                uint64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    clk::now().time_since_epoch()).count();
+                uint64_t prev = m_stat.m_queueDepthLastSampleUs.load(std::memory_order_relaxed);
+                if (nowUs - prev >= 50000ULL) { // 50 ms
+                    if (m_stat.m_queueDepthLastSampleUs.compare_exchange_strong(
+                            prev, nowUs, std::memory_order_relaxed)) {
+                        IndexStats::HistAdd(m_stat.m_queueDepthHist,  (uint64_t)totalJobs);
+                        IndexStats::HistAdd(m_stat.m_runningJobsHist, (uint64_t)runningJobs);
+                        m_stat.m_queueDepthTotal.fetch_add((uint64_t)totalJobs,    std::memory_order_relaxed);
+                        m_stat.m_runningJobsTotal.fetch_add((uint64_t)runningJobs, std::memory_order_relaxed);
+                        m_stat.m_queueDepthSampleCount.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+
             if (totalJobs > 0 && (totalJobs % 500 == 0 || totalJobs <= 10) && ShouldLogProgress(totalJobs)) {
                 size_t completed = m_totalSplitCompleted.load();
                 double avgSplitMs = completed > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completed) : 0;
@@ -2581,6 +2619,27 @@ namespace SPTAG::SPANN {
                                 IndexStats::FormatHist("AppendPostBytes",m_stat.m_appendPostingBytes,m_stat.m_appendPostingBytesTotal.load(), rmwN, "B").c_str());
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
                                 IndexStats::FormatHist("SplitLockWait",  m_stat.m_splitLockWaitUs,  m_stat.m_splitLockWaitTotalUs.load(),  splN, "us").c_str());
+                            uint64_t reassignN = m_stat.m_reassignJobSampleCount.load();
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("ReassignJobUs",  m_stat.m_reassignJobLatencyUs, m_stat.m_reassignJobLatencyTotalUs.load(), reassignN, "us").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "[DIAG] layer %d ReassignSrc fromMerge=%lu fromSplitBatch=%lu (cumulative)\n",
+                                m_layer,
+                                (unsigned long)m_stat.m_reassignSubmittedFromMerge.load(),
+                                (unsigned long)m_stat.m_reassignSubmittedFromSplitBatch.load());
+                            uint64_t qN = m_stat.m_queueDepthSampleCount.load();
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("PoolQueueDepth", m_stat.m_queueDepthHist, m_stat.m_queueDepthTotal.load(), qN, "jobs").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("PoolRunning",    m_stat.m_runningJobsHist, m_stat.m_runningJobsTotal.load(), qN, "wkrs").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("AppendPreBytes", m_stat.m_appendPreBytes, m_stat.m_appendPreBytesTotal.load(), rmwN, "B").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "[DIAG] layer %d AppendOutcome triggeredSplit=%lu nearThreshold(>=80%%)=%lu / RMWs=%lu (cumulative)\n",
+                                m_layer,
+                                (unsigned long)m_stat.m_appendTriggeredSplit.load(),
+                                (unsigned long)m_stat.m_appendNearThreshold.load(),
+                                (unsigned long)rmwN);
                         }
                     }
                     m_allDonePrinted = true;
