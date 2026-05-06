@@ -133,6 +133,73 @@ namespace SPTAG {
             std::atomic_uint64_t m_appendRmwSampleCount{ 0 };          // # of RMWs that recorded above
             std::atomic_uint64_t m_splitLockSampleCount{ 0 };
 
+            // Reassign job latency: one ReassignAsyncJob.exec() = RNGSelection + replicaCount*Append
+            // Submitted via MergePostings reassign path (per-vector ReassignAsync).
+            // Batched reassigns from CollectReAssign go through Append directly and are
+            // already covered by m_appendGetUs / m_appendPutUs above.
+            std::atomic_uint64_t m_reassignJobLatencyUs[kHistBuckets]{};
+            std::atomic_uint64_t m_reassignJobLatencyTotalUs{ 0 };
+            std::atomic_uint64_t m_reassignJobSampleCount{ 0 };
+
+            // Per-source reassign submission counters (cumulative).
+            //   from_merge   : ReassignAsync invoked inside MergePostings
+            //   from_split   : Append calls inside CollectReAssign batched path (per-vector count)
+            std::atomic_uint64_t m_reassignSubmittedFromMerge{ 0 };
+            std::atomic_uint64_t m_reassignSubmittedFromSplitBatch{ 0 };
+
+            // Worker thread pool queue depth — sampled (throttled to 1 per 50ms) at AllFinished entry.
+            //   m_queueDepth   : total pending jobs in m_splitThreadPool->jobsize()
+            //   m_runningJobs  : currently executing jobs (workers busy)
+            std::atomic_uint64_t m_queueDepthHist[kHistBuckets]{};
+            std::atomic_uint64_t m_runningJobsHist[kHistBuckets]{};
+            std::atomic_uint64_t m_queueDepthTotal{ 0 };
+            std::atomic_uint64_t m_runningJobsTotal{ 0 };
+            std::atomic_uint64_t m_queueDepthSampleCount{ 0 };
+            // Last-sample timestamp (us since epoch) for throttling — atomic CAS to avoid herd.
+            std::atomic<uint64_t> m_queueDepthLastSampleUs{ 0 };
+
+            // Pre-append posting size: distribution of posting size as observed AT the moment
+            // an Append RMW reads it. Together with m_appendPostingBytes (post-append) this
+            // reveals how many RMWs are working on near-threshold postings (the "split feedback
+            // loop" smoking gun explaining why incremental insert is so much slower than offline
+            // build of the same final size).
+            std::atomic_uint64_t m_appendPreBytes[kHistBuckets]{};
+            std::atomic_uint64_t m_appendPreBytesTotal{ 0 };
+            // Cumulative counters: how many RMWs ended up triggering a SplitAsync, and
+            // how many were already at >=80% of m_postingSizeLimit when read ("near-threshold").
+            std::atomic_uint64_t m_appendTriggeredSplit{ 0 };
+            std::atomic_uint64_t m_appendNearThreshold{ 0 };
+            // [SAFETY] How many Append RMWs aborted because the TiKV Get returned
+            // a real failure (NOT NotFound). Before the fix these were silently
+            // turned into empty postings and re-Put, permanently overwriting any
+            // existing vectors under that head. Should stay at 0 in healthy runs.
+            std::atomic_uint64_t m_appendGetFail{ 0 };
+
+            // [DIAG-MC] Multi-chunk path histograms (storage=TIKVIO + UseMultiChunkPosting=true).
+            // The single-key histograms above (m_appendGetUs/m_appendPutUs/...) stay at 0
+            // in MC mode because the MC branch in Append() does NOT do Get+Put. These
+            // separate histograms instrument the MC-specific RPCs so we can see which
+            // call dominates worker time.
+            //   m_mcAppendUs            : AppendChunkAndUpdateCount() end-to-end (lock-held; PutChunkAndCount RPC)
+            //   m_mcGetCountMissUs      : GetCachedPostingCount() TiKV fallback latency (cache miss only)
+            //   m_mcSplitDelUs          : Split's DeletePosting (DeleteRange over chunk span)
+            //   m_mcSplitPutBaseUs      : Split's PutBaseChunk
+            //   m_mcSplitSetCountUs     : Split's SetPostingCount
+            std::atomic_uint64_t m_mcAppendUs[kHistBuckets]{};
+            std::atomic_uint64_t m_mcGetCountMissUs[kHistBuckets]{};
+            std::atomic_uint64_t m_mcSplitDelUs[kHistBuckets]{};
+            std::atomic_uint64_t m_mcSplitPutBaseUs[kHistBuckets]{};
+            std::atomic_uint64_t m_mcSplitSetCountUs[kHistBuckets]{};
+            std::atomic_uint64_t m_mcAppendTotalUs{ 0 };
+            std::atomic_uint64_t m_mcGetCountMissTotalUs{ 0 };
+            std::atomic_uint64_t m_mcSplitDelTotalUs{ 0 };
+            std::atomic_uint64_t m_mcSplitPutBaseTotalUs{ 0 };
+            std::atomic_uint64_t m_mcSplitSetCountTotalUs{ 0 };
+            std::atomic_uint64_t m_mcAppendSampleCount{ 0 };
+            std::atomic_uint64_t m_mcGetCountCacheHit{ 0 };
+            std::atomic_uint64_t m_mcGetCountCacheMiss{ 0 };
+            std::atomic_uint64_t m_mcSplitWriteSampleCount{ 0 };  // # of MC PutPostingToDB invocations
+
             static int HistBucketOf(uint64_t v) {
                 if (v == 0) return 0;
                 int b = 0;
@@ -195,6 +262,51 @@ namespace SPTAG {
                         FormatHist("AppendPostBytes",m_appendPostingBytes,m_appendPostingBytesTotal.load(), rmwN, "B").c_str());
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
                         FormatHist("SplitLockWait",  m_splitLockWaitUs,  m_splitLockWaitTotalUs.load(),  splN, "us").c_str());
+                    uint64_t reassignN = m_reassignJobSampleCount.load();
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("ReassignJobUs",  m_reassignJobLatencyUs, m_reassignJobLatencyTotalUs.load(), reassignN, "us").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "[DIAG] ReassignSrc fromMerge=%lu fromSplitBatch=%lu (cumulative)\n",
+                        (unsigned long)m_reassignSubmittedFromMerge.load(),
+                        (unsigned long)m_reassignSubmittedFromSplitBatch.load());
+                    uint64_t qN = m_queueDepthSampleCount.load();
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("PoolQueueDepth", m_queueDepthHist, m_queueDepthTotal.load(), qN, "jobs").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("PoolRunning",    m_runningJobsHist, m_runningJobsTotal.load(), qN, "wkrs").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] %s\n",
+                        FormatHist("AppendPreBytes", m_appendPreBytes, m_appendPreBytesTotal.load(), rmwN, "B").c_str());
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "[DIAG] AppendOutcome triggeredSplit=%lu nearThreshold(>=80%%)=%lu / RMWs=%lu (cumulative)\n",
+                        (unsigned long)m_appendTriggeredSplit.load(),
+                        (unsigned long)m_appendNearThreshold.load(),
+                        (unsigned long)rmwN);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "[DIAG] AppendGetFail=%lu (cumulative; non-zero means TiKV Get failed and the RMW was correctly aborted to avoid data loss)\n",
+                        (unsigned long)m_appendGetFail.load());
+
+                    // [DIAG-MC] Multi-chunk path histograms (only populated when MC is enabled)
+                    {
+                        uint64_t mcN  = m_mcAppendSampleCount.load();
+                        uint64_t mcS  = m_mcSplitWriteSampleCount.load();
+                        uint64_t mcGM = m_mcGetCountCacheMiss.load();
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG-MC] %s\n",
+                            FormatHist("MCAppendUs",       m_mcAppendUs,       m_mcAppendTotalUs.load(),       mcN, "us").c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG-MC] %s\n",
+                            FormatHist("MCGetCountMissUs", m_mcGetCountMissUs, m_mcGetCountMissTotalUs.load(), mcGM,"us").c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG-MC] %s\n",
+                            FormatHist("MCSplitDelUs",     m_mcSplitDelUs,     m_mcSplitDelTotalUs.load(),     mcS, "us").c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG-MC] %s\n",
+                            FormatHist("MCSplitPutBaseUs", m_mcSplitPutBaseUs, m_mcSplitPutBaseTotalUs.load(), mcS, "us").c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG-MC] %s\n",
+                            FormatHist("MCSplitSetCountUs",m_mcSplitSetCountUs,m_mcSplitSetCountTotalUs.load(),mcS, "us").c_str());
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                            "[DIAG-MC] CountCache hit=%lu miss=%lu (miss_ratio=%.4f)\n",
+                            (unsigned long)m_mcGetCountCacheHit.load(),
+                            (unsigned long)mcGM,
+                            (m_mcGetCountCacheHit.load() + mcGM) ?
+                                (double)mcGM / (m_mcGetCountCacheHit.load() + mcGM) : 0.0);
+                    }
                 }
 
                 if (reset) {

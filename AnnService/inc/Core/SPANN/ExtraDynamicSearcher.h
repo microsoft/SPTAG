@@ -200,7 +200,13 @@ namespace SPTAG::SPANN {
             }
 
             void exec(void* p_workSpace, IAbortOperation* p_abort) override {
+                auto _rsBegin = std::chrono::high_resolution_clock::now();
                 ErrorCode ret = m_extraIndex->Reassign((ExtraWorkSpace*)p_workSpace, m_vectorInfo, m_headPrev);
+                auto _rsEnd = std::chrono::high_resolution_clock::now();
+                uint64_t _rsUs = std::chrono::duration_cast<std::chrono::microseconds>(_rsEnd - _rsBegin).count();
+                IndexStats::HistAdd(m_extraIndex->m_stat.m_reassignJobLatencyUs, _rsUs);
+                m_extraIndex->m_stat.m_reassignJobLatencyTotalUs.fetch_add(_rsUs, std::memory_order_relaxed);
+                m_extraIndex->m_stat.m_reassignJobSampleCount.fetch_add(1, std::memory_order_relaxed);
                 if (ret != ErrorCode::Success)
                     m_extraIndex->m_asyncStatus = ret;
                 m_extraIndex->m_reassignJobsInFlight--;
@@ -1161,8 +1167,10 @@ namespace SPTAG::SPANN {
                         if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
                         float origin_dist = m_headIndex->ComputeDistance(deletedHeadVec->data() + m_metaDataSize, vector);
                         float current_dist = m_headIndex->ComputeDistance(nextHeadVec->data() + m_metaDataSize, vector);
-                        if (current_dist > origin_dist)
+                        if (current_dist > origin_dist) {
+                            m_stat.m_reassignSubmittedFromMerge.fetch_add(1, std::memory_order_relaxed);
                             ReassignAsync(std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize), nextHeadID);
+                        }
                     }
 
                     if (!m_versionMap->Deleted(deletedHeadID))
@@ -1177,6 +1185,7 @@ namespace SPTAG::SPANN {
                         // vector bytes by 5 and corrupting the reassigned data.
                         Serialize(vectorinfo->data(), deletedHeadID, m_versionMap->GetVersion(deletedHeadID),
                                     deletedHeadVec->data() + m_metaDataSize);
+                        m_stat.m_reassignSubmittedFromMerge.fetch_add(1, std::memory_order_relaxed);
                         ReassignAsync(vectorinfo, -1);
                     }
                 }
@@ -1460,6 +1469,7 @@ namespace SPTAG::SPANN {
             if (batchReassignCount > 0) {
                 m_totalReassignSubmitted += batchReassignCount;
                 m_totalReassignCompleted += batchReassignCount;
+                m_stat.m_reassignSubmittedFromSplitBatch.fetch_add(batchReassignCount, std::memory_order_relaxed);
             }
             return ErrorCode::Success;
         }
@@ -1582,7 +1592,19 @@ namespace SPTAG::SPANN {
                 // For multi-chunk mode, also check the posting count cache/TiKV
                 // since m_splitList only has entries for postings pending split.
                 if (IsMultiChunk() && postingSize == 0) {
-                    postingSize = GetCachedPostingCount(headID);
+                    int cnt = GetCachedPostingCount(headID);
+                    if (cnt < 0) {
+                        // [FIX] Count is currently unknown (TiKV error). Aborting the
+                        // RMW is far safer than calling AppendChunkAndUpdateCount with
+                        // oldCount=0, which would PutChunkAndCount(newCount=appendNum)
+                        // and corrupt the existing (larger) count value in TiKV.
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "Append: posting count unknown for headID=%lld; aborting RMW to avoid count corruption\n",
+                            (std::int64_t)headID);
+                        m_stat.m_appendGetFail.fetch_add(1, std::memory_order_relaxed);
+                        return ErrorCode::Fail;
+                    }
+                    postingSize = cnt;
                 }
                 if (!splitPending && postingSize + appendNum > (m_postingSizeLimit + m_bufferSizeLimit)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "After appending, the number of vectors in %lld exceeds the postingsize + buffersize (%d + %d)! Do split now...\n", (std::int64_t)headID, m_postingSizeLimit, m_bufferSizeLimit);
@@ -1604,9 +1626,18 @@ namespace SPTAG::SPANN {
                 if (IsMultiChunk()) {
                     { static std::atomic<int> _logOnce{0}; if (_logOnce.fetch_add(1) == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[PATH] Append using MULTI-CHUNK AppendChunk path\n"); }
                     // Multi-chunk path: write chunk + update count in one BatchPut RPC.
+                    auto _mcBegin = std::chrono::high_resolution_clock::now();
                     ret = AppendChunkAndUpdateCount(headID, appendPosting, appendNum,
                                                     postingSize, MaxTimeout,
                                                     &(p_exWorkSpace->m_diskRequests));
+                    auto _mcEnd = std::chrono::high_resolution_clock::now();
+                    uint64_t _mcUs = std::chrono::duration_cast<std::chrono::microseconds>(_mcEnd - _mcBegin).count();
+                    IndexStats::HistAdd(m_stat.m_mcAppendUs, _mcUs);
+                    m_stat.m_mcAppendTotalUs.fetch_add(_mcUs, std::memory_order_relaxed);
+                    m_stat.m_mcAppendSampleCount.fetch_add(1, std::memory_order_relaxed);
+                    // Lock wait is path-agnostic; reuse the single-key histogram.
+                    IndexStats::HistAdd(m_stat.m_appendLockWaitUs, _lockWaitUs);
+                    m_stat.m_appendLockWaitTotalUs.fetch_add(_lockWaitUs, std::memory_order_relaxed);
                     if (ret != ErrorCode::Success) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MultiChunkAppend failed for %lld!\n", (std::int64_t)headID);
                         return ret;
@@ -1620,7 +1651,24 @@ namespace SPTAG::SPANN {
                     auto getRet = db->Get(DBKey(headID), &fullPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests));
                     auto _getEnd = std::chrono::high_resolution_clock::now();
                     uint64_t _getUs = std::chrono::duration_cast<std::chrono::microseconds>(_getEnd - _getBegin).count();
-                    if (getRet != ErrorCode::Success) fullPosting.clear();
+                    // [FIX] Only treat "key absent" (NotFound) as legitimately empty
+                    // posting (e.g. first write to this head). A real RPC/region
+                    // failure (Fail) must NOT be silently turned into an empty
+                    // posting, otherwise the subsequent Put would overwrite the
+                    // existing TiKV value with only the new appendPosting,
+                    // permanently losing every vector previously stored under this
+                    // head.
+                    if (getRet == ErrorCode::Key_NotFound) {
+                        fullPosting.clear();
+                    } else if (getRet != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "Append: TiKV Get failed for headID=%lld (err=%d); aborting RMW to avoid data loss\n",
+                            (std::int64_t)headID, (int)getRet);
+                        m_stat.m_appendGetFail.fetch_add(1, std::memory_order_relaxed);
+                        return getRet;
+                    }
+                    // [DIAG] capture pre-append size BEFORE we mutate fullPosting
+                    uint64_t _preBytes = (uint64_t)fullPosting.size();
                     // Diagnostic: detect stale/misaligned bytes in TiKV (e.g. residue
                     // from a previous run with different m_vectorInfoSize, or a prior
                     // multi-chunk layout sharing the same key prefix).
@@ -1653,6 +1701,15 @@ namespace SPTAG::SPANN {
                     m_stat.m_appendPutTotalUs.fetch_add(_putUs, std::memory_order_relaxed);
                     m_stat.m_appendPostingBytesTotal.fetch_add((uint64_t)fullPosting.size(), std::memory_order_relaxed);
                     m_stat.m_appendRmwSampleCount.fetch_add(1, std::memory_order_relaxed);
+                    // [DIAG] pre-append size + near-threshold tag (>=80% of split limit)
+                    IndexStats::HistAdd(m_stat.m_appendPreBytes, _preBytes);
+                    m_stat.m_appendPreBytesTotal.fetch_add(_preBytes, std::memory_order_relaxed);
+                    {
+                        uint64_t _limitBytes = (uint64_t)m_postingSizeLimit * (uint64_t)m_vectorInfoSize;
+                        if (_limitBytes && _preBytes * 5 >= _limitBytes * 4) {
+                            m_stat.m_appendNearThreshold.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
                 }
                 auto appendIOEnd = std::chrono::high_resolution_clock::now();
                 appendIOSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
@@ -1666,6 +1723,7 @@ namespace SPTAG::SPANN {
                 // if (m_postingSizes.GetSize(headID) > 120) {
                 //     GetDBStats();
                 // }
+                m_stat.m_appendTriggeredSplit.fetch_add(1, std::memory_order_relaxed);
                 if (!reassignThreshold) SplitAsync(headID, postingSize);
                 else Split(p_exWorkSpace, headID, !m_opt->m_disableReassign);
             }
@@ -1721,7 +1779,13 @@ namespace SPTAG::SPANN {
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
                 for (int i = 0; i < replicaCount && m_versionMap->GetVersion(VID) == version; i++) {
                     //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
-                    ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 3);
+                    // [FIX H3] use reassignThreshold=0 so that an oversized
+                    // target posting triggers SplitAsync (not a synchronous
+                    // Split on this worker thread). This matches the
+                    // CollectReAssign batch path and avoids a single merge-
+                    // path reassign blocking a worker for the full duration
+                    // of a Split (observed up to tens of seconds).
+                    ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 0);
                     if (ErrorCode::Success != tmp) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
                         return tmp;
@@ -2722,6 +2786,28 @@ namespace SPTAG::SPANN {
 
             size_t totalJobs = m_splitThreadPool->jobsize();
             unsigned int runningJobs = static_cast<unsigned int>(m_splitThreadPool->runningJobs());
+
+            // [DIAG] sample worker pool queue depth (throttled to 1 per 50ms via CAS).
+            // AllFinished is hot — checked in tight wait loops — so we MUST throttle to
+            // avoid (a) histogram atomic contention and (b) flooding samples that would
+            // drown out true depth distribution.
+            {
+                using clk = std::chrono::steady_clock;
+                uint64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                    clk::now().time_since_epoch()).count();
+                uint64_t prev = m_stat.m_queueDepthLastSampleUs.load(std::memory_order_relaxed);
+                if (nowUs - prev >= 50000ULL) { // 50 ms
+                    if (m_stat.m_queueDepthLastSampleUs.compare_exchange_strong(
+                            prev, nowUs, std::memory_order_relaxed)) {
+                        IndexStats::HistAdd(m_stat.m_queueDepthHist,  (uint64_t)totalJobs);
+                        IndexStats::HistAdd(m_stat.m_runningJobsHist, (uint64_t)runningJobs);
+                        m_stat.m_queueDepthTotal.fetch_add((uint64_t)totalJobs,    std::memory_order_relaxed);
+                        m_stat.m_runningJobsTotal.fetch_add((uint64_t)runningJobs, std::memory_order_relaxed);
+                        m_stat.m_queueDepthSampleCount.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+
             if (totalJobs > 0 && (totalJobs % 500 == 0 || totalJobs <= 10) && ShouldLogProgress(totalJobs)) {
                 size_t completed = m_totalSplitCompleted.load();
                 double avgSplitMs = completed > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completed) : 0;
@@ -2767,6 +2853,27 @@ namespace SPTAG::SPANN {
                                 IndexStats::FormatHist("AppendPostBytes",m_stat.m_appendPostingBytes,m_stat.m_appendPostingBytesTotal.load(), rmwN, "B").c_str());
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
                                 IndexStats::FormatHist("SplitLockWait",  m_stat.m_splitLockWaitUs,  m_stat.m_splitLockWaitTotalUs.load(),  splN, "us").c_str());
+                            uint64_t reassignN = m_stat.m_reassignJobSampleCount.load();
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("ReassignJobUs",  m_stat.m_reassignJobLatencyUs, m_stat.m_reassignJobLatencyTotalUs.load(), reassignN, "us").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "[DIAG] layer %d ReassignSrc fromMerge=%lu fromSplitBatch=%lu (cumulative)\n",
+                                m_layer,
+                                (unsigned long)m_stat.m_reassignSubmittedFromMerge.load(),
+                                (unsigned long)m_stat.m_reassignSubmittedFromSplitBatch.load());
+                            uint64_t qN = m_stat.m_queueDepthSampleCount.load();
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("PoolQueueDepth", m_stat.m_queueDepthHist, m_stat.m_queueDepthTotal.load(), qN, "jobs").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("PoolRunning",    m_stat.m_runningJobsHist, m_stat.m_runningJobsTotal.load(), qN, "wkrs").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[DIAG] layer %d %s\n", m_layer,
+                                IndexStats::FormatHist("AppendPreBytes", m_stat.m_appendPreBytes, m_stat.m_appendPreBytesTotal.load(), rmwN, "B").c_str());
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "[DIAG] layer %d AppendOutcome triggeredSplit=%lu nearThreshold(>=80%%)=%lu / RMWs=%lu (cumulative)\n",
+                                m_layer,
+                                (unsigned long)m_stat.m_appendTriggeredSplit.load(),
+                                (unsigned long)m_stat.m_appendNearThreshold.load(),
+                                (unsigned long)rmwN);
                         }
                     }
                     m_allDonePrinted = true;
@@ -2924,20 +3031,44 @@ namespace SPTAG::SPANN {
                                  std::vector<Helper::AsyncReadRequest>* reqs) {
             if (IsMultiChunk()) {
                 auto* tikv = this->GetTiKVDB();
+                auto _t0 = std::chrono::high_resolution_clock::now();
                 auto delRet = tikv->DeletePosting(DBKey(headID));
+                auto _t1 = std::chrono::high_resolution_clock::now();
+                uint64_t _delUs = std::chrono::duration_cast<std::chrono::microseconds>(_t1 - _t0).count();
+                IndexStats::HistAdd(m_stat.m_mcSplitDelUs, _delUs);
+                m_stat.m_mcSplitDelTotalUs.fetch_add(_delUs, std::memory_order_relaxed);
                 if (delRet != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: DeletePosting failed for headID %d\n", headID);
                     return delRet;
                 }
                 auto ret = tikv->PutBaseChunk(DBKey(headID), posting, timeout, reqs);
+                auto _t2 = std::chrono::high_resolution_clock::now();
+                uint64_t _putUs = std::chrono::duration_cast<std::chrono::microseconds>(_t2 - _t1).count();
+                IndexStats::HistAdd(m_stat.m_mcSplitPutBaseUs, _putUs);
+                m_stat.m_mcSplitPutBaseTotalUs.fetch_add(_putUs, std::memory_order_relaxed);
                 if (ret != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: PutBaseChunk failed for headID %d\n", headID);
                     return ret;
                 }
                 int count = static_cast<int>(posting.size() / m_vectorInfoSize);
                 auto countRet = tikv->SetPostingCount(DBKey(headID), count, timeout);
+                auto _t3 = std::chrono::high_resolution_clock::now();
+                uint64_t _scUs = std::chrono::duration_cast<std::chrono::microseconds>(_t3 - _t2).count();
+                IndexStats::HistAdd(m_stat.m_mcSplitSetCountUs, _scUs);
+                m_stat.m_mcSplitSetCountTotalUs.fetch_add(_scUs, std::memory_order_relaxed);
+                m_stat.m_mcSplitWriteSampleCount.fetch_add(1, std::memory_order_relaxed);
                 if (countRet != ErrorCode::Success) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "PutPostingToDB: SetPostingCount failed for headID %d (data written OK)\n", headID);
+                    // [FIX] If SetPostingCount failed, do NOT update the local cache:
+                    // doing so would create a divergence where the cache reports the
+                    // new count while TiKV still holds the old value. After cache
+                    // eviction or process restart any reader (e.g. split decision)
+                    // would silently see the stale TiKV count.
+                    // Also propagate the failure so the caller can decide whether to
+                    // retry rather than silently treating the compaction as committed.
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "PutPostingToDB: SetPostingCount failed for headID %d (data written; count is stale in TiKV)\n", headID);
+                    if (m_postingCountCache) m_postingCountCache->Remove(DBKey(headID));
+                    return countRet;
                 }
                 if (m_postingCountCache) m_postingCountCache->Put(DBKey(headID), count);
                 return ErrorCode::Success;
@@ -2961,19 +3092,38 @@ namespace SPTAG::SPANN {
         }
 
         // Get the posting vector count, using local cache with TiKV fallback.
-        // Returns 0 if unknown (cache miss + TiKV error/miss).
+        // Returns count >= 0 on success (including 0 for legitimately-empty posting),
+        // or -1 if the count is currently unknown (TiKV error). Callers MUST treat
+        // -1 as "do not proceed with operations that depend on count" -- in
+        // particular, the Append RMW path must NOT pass an unknown count to
+        // AppendChunkAndUpdateCount, which would write
+        //     newCount = 0 + appendNum
+        // and overwrite the (correct, larger) count value already stored in TiKV.
         int GetCachedPostingCount(SizeType headID) {
             if (!m_postingCountCache) return 0;
             SizeType dbKey = DBKey(headID);
             auto [count, hit] = m_postingCountCache->Get(dbKey);
-            if (hit) return count;
+            if (hit) {
+                m_stat.m_mcGetCountCacheHit.fetch_add(1, std::memory_order_relaxed);
+                return count;
+            }
             // Cache miss: fetch from TiKV
             auto* tikv = this->GetTiKVDB();
             if (!tikv) return 0;
+            auto _gcBegin = std::chrono::high_resolution_clock::now();
             count = tikv->GetPostingCount(dbKey, std::chrono::microseconds(5000000));
+            auto _gcEnd = std::chrono::high_resolution_clock::now();
+            uint64_t _gcUs = std::chrono::duration_cast<std::chrono::microseconds>(_gcEnd - _gcBegin).count();
+            IndexStats::HistAdd(m_stat.m_mcGetCountMissUs, _gcUs);
+            m_stat.m_mcGetCountMissTotalUs.fetch_add(_gcUs, std::memory_order_relaxed);
+            m_stat.m_mcGetCountCacheMiss.fetch_add(1, std::memory_order_relaxed);
             if (count < 0) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "GetCachedPostingCount: TiKV error for headID %d, returning 0\n", headID);
-                return 0;
+                // [FIX] Distinguish a true TiKV error from a legitimate 0 count.
+                // Returning 0 here would mislead the Append RMW into writing
+                // newCount=appendNum and silently truncating the posting count
+                // in TiKV (data drift). Return -1 sentinel; callers handle it.
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "GetCachedPostingCount: TiKV error for headID %d, returning -1 (unknown)\n", headID);
+                return -1;
             }
             m_postingCountCache->Put(dbKey, count);
             return count;

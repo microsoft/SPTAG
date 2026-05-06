@@ -189,7 +189,11 @@ namespace SPTAG::SPANN
                     return ErrorCode::Fail;
                 }
                 if (response.not_found()) {
-                    return ErrorCode::Fail;
+                    // [FIX] Distinguish a true "key absent" from an RPC/region failure.
+                    // Callers (e.g. Append RMW) MUST be able to tell these apart
+                    // to avoid overwriting an existing posting with an empty
+                    // value when a transient Get failure was misread as "empty".
+                    return ErrorCode::Key_NotFound;
                 }
 
                 *value = response.value();
