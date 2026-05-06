@@ -771,6 +771,10 @@ namespace SPTAG::SPANN {
                             for (int j = 0; j < newPostVectorNum; j++, postingK += m_vectorInfoSize)
                             {
                                 SizeType VID = *((SizeType *)(postingK));
+                                uint8_t version = *(postingK + sizeof(SizeType));
+
+                                if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version)
+                                    continue;
 
                                 if (vectorIdSet.find(VID) != vectorIdSet.end())
                                     continue;
@@ -780,7 +784,7 @@ namespace SPTAG::SPANN {
                                 currentLength++;
                             }
 
-                            if (currentLength > (m_postingSizeLimit + m_bufferSizeLimit))
+                            if (currentLength > (m_postingSizeLimit + m_bufferSizeLimit) && m_opt->m_storage == Storage::FILEIO)
                             {
                                 /*
                                 SPTAGLIB_LOG(
