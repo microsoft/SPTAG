@@ -446,6 +446,7 @@ std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool
         InitWorkSpace(extraWorkspace.get(), true);
     }
     extraWorkspace->m_filterFunc = p_filterFunc;
+    extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     extraWorkspace->m_relaxedMono = false;
     extraWorkspace->m_loadedPostingNum = 0;
     extraWorkspace->m_deduper.clear();
@@ -552,6 +553,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
             InitWorkSpace(workSpace.get(), true);
         }
         p_exWorkSpace = workSpace.get();
+        p_exWorkSpace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     }
 
     COMMON::OptHashPosVector resultDedup;
@@ -565,7 +567,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
         resultDedup.CheckAndSet(res->VID);
         if (j < m_options.m_searchInternalResultNum) *(localResults.GetResult(j++)) = *res;
-        if (m_extraSearchers[p_tolayer]->ContainSample(res->VID)) {
+        if (m_extraSearchers[p_tolayer]->ContainSample(res->VID, p_exWorkSpace->m_versionReadPolicy)) {
             if (k < i) {
                 *(p_queryResults->GetResult(k++)) = *res;
                 res->VID = -1;
@@ -597,7 +599,7 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
             if (resultDedup.CheckAndSet(res->VID)) continue;
-            if (!m_extraSearchers[p_tolayer]->ContainSample(res->VID)) continue;
+            if (!m_extraSearchers[p_tolayer]->ContainSample(res->VID, p_exWorkSpace->m_versionReadPolicy)) continue;
             p_queryResults->AddPoint(res->VID, res->Dist, res->Vec);
         }
         localResults.Reset();

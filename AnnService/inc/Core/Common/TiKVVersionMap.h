@@ -136,11 +136,12 @@ namespace SPTAG
                 return data;
             }
 
-            // Read a single byte for a VID using cache. Returns 0xfe on error/miss.
-            uint8_t ReadVersionByte(SizeType vid) const
+            // Read a single byte for a VID. Returns 0xfe on error/miss.
+            uint8_t ReadVersionByte(SizeType vid, VersionReadPolicy policy = VersionReadPolicy::UseCache) const
             {
                 SizeType cid = ChunkId(vid);
-                std::string chunk = ReadChunkCached(cid);
+                std::string chunk = (policy == VersionReadPolicy::BypassCacheNoFill) ?
+                    ReadChunk(cid) : ReadChunkCached(cid);
                 if (chunk.empty() || (int)chunk.size() <= ChunkOffset(vid)) {
                     return 0xfe;
                 }
@@ -288,11 +289,16 @@ namespace SPTAG
 
             bool Deleted(const SizeType& key) const override
             {
+                return Deleted(key, VersionReadPolicy::UseCache);
+            }
+
+            bool Deleted(const SizeType& key, VersionReadPolicy policy) const override
+            {
                 if (key < 0 || key >= m_count.load()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Deleted: invalid key %d (max %d)\n", key, m_count.load());
                     return true;
                 }
-                return ReadVersionByte(key) == 0xfe;
+                return ReadVersionByte(key, policy) == 0xfe;
             }
 
             bool Delete(const SizeType& key) override
@@ -318,11 +324,16 @@ namespace SPTAG
 
             uint8_t GetVersion(const SizeType& key) override
             {
+                return GetVersion(key, VersionReadPolicy::UseCache);
+            }
+
+            uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) override
+            {
                 if (key < 0 || key >= m_count.load()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::GetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return 0xfe;
                 }
-                return ReadVersionByte(key);
+                return ReadVersionByte(key, policy);
             }
 
             void SetVersion(const SizeType& key, const uint8_t& version) override
@@ -446,11 +457,17 @@ namespace SPTAG
             /// Checks cache first, only fetches misses from TiKV via BatchGet.
             void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
             {
+                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
+            }
+
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy) override
+            {
                 versions.resize(vids.size());
                 if (vids.empty()) return;
 
                 SizeType count = m_count.load();
-                bool cacheEnabled = (m_cacheMaxChunks > 0);
+                bool bypassCache = (policy == VersionReadPolicy::BypassCacheNoFill);
+                bool cacheEnabled = (m_cacheMaxChunks > 0 && !bypassCache);
 
                 // Group VIDs by chunk
                 std::unordered_map<SizeType, std::vector<size_t>> chunkToIndices;
@@ -512,7 +529,7 @@ namespace SPTAG
                                      m_layer, missingChunks, static_cast<int>(missChunkIds.size()), missChunkIds[0]);
                     }
 
-                    // Update LRU cache with fetched chunks (exclusive lock)
+                    // Update LRU cache with fetched chunks (exclusive lock). Bypass reads never fill cache.
                     if (cacheEnabled && !fetchedChunks.empty()) {
                         std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
                         for (auto& [cid, data] : fetchedChunks) {

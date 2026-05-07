@@ -400,12 +400,17 @@ namespace SPTAG::SPANN {
 
         virtual bool ContainSample(const SizeType idx) const override
         {
+            return ContainSample(idx, COMMON::VersionReadPolicy::UseCache);
+        }
+
+        virtual bool ContainSample(const SizeType idx, COMMON::VersionReadPolicy policy) const override
+        {
             // Out-of-range or sentinel (-1) IDs are common in head-search
             // result lists (unfilled slots). Treat them as "not contained"
             // and avoid calling Deleted(), which would otherwise emit a
             // spurious LL_Error log inside TiKVVersionMap.
             if (idx < 0 || idx >= m_versionMap->Count()) return false;
-            return !m_versionMap->Deleted(idx);
+            return !m_versionMap->Deleted(idx, policy);
         }
 
         virtual SizeType GetNumDeleted() const override
@@ -2103,7 +2108,7 @@ namespace SPTAG::SPANN {
 
                 // Batch check versions
                 std::vector<uint8_t> versions;
-                m_versionMap->BatchGetVersions(candidateVIDs, versions);
+                m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
 
                 // Filter: rebuild results without deleted entries
                 // We mark deleted entries with MaxDist so they sort to the end
@@ -2204,7 +2209,7 @@ namespace SPTAG::SPANN {
                 }
 
                 std::vector<uint8_t> versions;
-                m_versionMap->BatchGetVersions(candidateVIDs, versions);
+                m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
 
                 int vidIdx = 0;
                 for (int i = 0; i < fetchCount && i < queryResults.GetResultNum(); i++) {

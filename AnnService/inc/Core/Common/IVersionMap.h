@@ -15,6 +15,12 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        enum class VersionReadPolicy
+        {
+            UseCache,
+            BypassCacheNoFill
+        };
+
         /// Abstract interface for version map, allowing both local (in-memory)
         /// and distributed (TiKV-backed) implementations.
         class IVersionMap
@@ -31,9 +37,11 @@ namespace SPTAG
             virtual std::uint64_t BufferSize() const = 0;
 
             virtual bool Deleted(const SizeType& key) const = 0;
+            virtual bool Deleted(const SizeType& key, VersionReadPolicy policy) const { return Deleted(key); }
             virtual bool Delete(const SizeType& key) = 0;
 
             virtual uint8_t GetVersion(const SizeType& key) = 0;
+            virtual uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) { return GetVersion(key); }
             virtual void SetVersion(const SizeType& key, const uint8_t& version) = 0;
             /// Increment the version of a VID.
             /// @param expectedOld If not 0xff, the caller asserts the current version should be this value.
@@ -56,12 +64,17 @@ namespace SPTAG
             /// Default implementation does per-VID lookup.
             virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions)
             {
+                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
+            }
+
+            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy)
+            {
                 versions.resize(vids.size());
                 for (size_t i = 0; i < vids.size(); i++) {
                     if (vids[i] < 0 || vids[i] >= Count()) {
                         versions[i] = 0xfe;
                     } else {
-                        versions[i] = GetVersion(vids[i]);
+                        versions[i] = GetVersion(vids[i], policy);
                     }
                 }
             }

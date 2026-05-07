@@ -7,6 +7,7 @@
 #include "Options.h"
 
 #include "inc/Core/VectorIndex.h"
+#include "inc/Core/Common/IVersionMap.h"
 #include "inc/Core/Common/VersionLabel.h"
 #include "inc/Helper/AsyncFileReader.h"
 #include "inc/Helper/VectorSetReader.h"
@@ -401,6 +402,7 @@ namespace SPTAG {
                 m_deduper.Init(p_maxCheck, p_hashExp);
                 Clear(p_internalResultNum, p_maxPages, p_blockIO, enableDataCompression);
                 m_relaxedMono = false;
+                m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
             }
 
             void Initialize(va_list& arg) {
@@ -467,6 +469,7 @@ namespace SPTAG {
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
+                m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
             }
 
             std::vector<SizeType> m_postingIDs;
@@ -494,6 +497,8 @@ namespace SPTAG {
             bool m_loadPosting = false;
 
             bool m_relaxedMono = false;
+
+            COMMON::VersionReadPolicy m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
 
             int m_loadedPostingNum = 0;
 
@@ -545,6 +550,11 @@ namespace SPTAG {
             virtual bool ContainSample(const SizeType idx) const
             {
                 return true;
+            }
+
+            virtual bool ContainSample(const SizeType idx, COMMON::VersionReadPolicy policy) const
+            {
+                return ContainSample(idx);
             }
 
             virtual SizeType GetNumDeleted() const
