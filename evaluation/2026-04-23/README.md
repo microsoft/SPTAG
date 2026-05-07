@@ -1,4 +1,4 @@
-# Evaluation 2026-04-23 — SPFresh + TiKV (SIFT1B, 10× insert, multi-chunk)
+# Evaluation 2026-04-23 — SPFresh + TiKV (SIFT1B, 10× insert, single-key posting)
 
 This run measures SPANN/SPFresh insert + concurrent search performance against a
 3-node local TiKV cluster, using the SIFT1B dataset (1M base + 10M inserts in
@@ -230,10 +230,15 @@ docker stop $(docker ps -q --filter name=tikv-)   # stop cluster
 | `NumInsertThreads` | 16 | threads driving `AddIndex` calls |
 | `NumSearchDuringInsertThreads` | 1 | concurrent search threads while inserting (continuous loop, ~1s sleep per query) |
 | `NumQueries` | 200 | size of the rotating query pool (in-insert search loops over it) |
-| `Storage` / `TiKVPDAddresses` / `TiKVKeyPrefix` | TIKVIO / 127.0.0.1:23791-3 / spfresh | TiKV backend wiring |
+| `Storage` / `TiKVPDAddresses` / `TiKVKeyPrefix` | TIKVIO / 127.0.0.1:23791-3 / spfresh_sift1b | TiKV backend wiring |
 | `Layers` | 2 | SPANN multi-layer head |
-| `BuildSSDIndex.UseMultiChunkPosting` | true | enables multi-chunk posting list layout |
+| `BuildSSDIndex.UseMultiChunkPosting` | false | uses single-key posting list layout |
+| `BuildSSDIndex.PostingPageLimit` | 8 | posting page limit; runtime posting size limit is logged as 246 vectors |
+| `BuildSSDIndex.PostingCountCacheCapacity` | 1_000_000 | posting count cache capacity |
+| `BuildSSDIndex.DistributedVersionMap` | true | uses TiKV-backed distributed version map |
+| `BuildSSDIndex.ReassignK` | 64 | split/reassign target fanout knob |
 | `BuildSSDIndex.AsyncMergeInSearch` | true | async merge during search |
+| `BuildSSDIndex.VersionCacheMaxChunks` | 100_000 | enables version chunk cache when greater than 0 |
 | `BuildSSDIndex.LatencyLimit` | 100 | ms latency cap fed to SPANN |
 
 ## 5. Output JSON structure (per batch)

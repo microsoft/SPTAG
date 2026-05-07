@@ -2,21 +2,22 @@
 
 Date: 2026-05-07
 
-Scope: analysis of the live benchmark run `benchmark_20260507_032733.log` and `evaluation/2026-04-23/output.json`. At collection time the process was still running (`PID 3779889`), and `output.json` contained three completed batches. Batch 4 observations are treated as live trend only, not completed-batch results.
+Scope: analysis of the live benchmark run `benchmark_20260507_032733.log` and `evaluation/2026-04-23/output.json`. At the latest collection time, `output.json` contained five completed batches and the log had started batch 6. Batch 6 is not included because it had not completed.
 
 ## 1. Executive Summary
 
-The first three completed batches show stable search quality and latency, but insert throughput drops materially after batch 2. The strongest evidence points to layer0 split/reassign amplification, not TiKV single-operation latency.
+The first five completed batches show stable search quality and post-batch latency, but insert throughput keeps dropping as layer0 split/reassign work grows. The strongest evidence still points to layer0 split/reassign amplification. TiKV latency rises as the request volume grows, but TiKV health signals do not show write stall or compaction backlog.
 
 Key conclusions:
 
-- Insert throughput drops from `579.4 vec/s` in batch 1 to `401.3 vec/s` in batch 3, a `30.75%` drop.
-- Post-batch search is stable: mean latency moves only from `7.06 ms` to `7.58 ms`, and recall remains `0.977-0.982`.
-- During-insert search latency worsens: mean latency grows from `7.14 ms` to `10.75 ms`, a `50.65%` increase. This indicates insert maintenance work is contending with search.
-- TiKV raw operation averages are low: raw get `0.159-0.170 ms`, raw put `0.466-0.576 ms`, raw batch get `0.169-0.187 ms` across the three TiKV nodes.
+- Insert throughput drops from `579.4 vec/s` in batch 1 to `256.7 vec/s` in batch 5, a `55.69%` drop.
+- Post-batch search remains usable: mean latency moves from `7.06 ms` to `8.73 ms`, and recall remains `0.977-0.982`.
+- During-insert search latency is higher than batch 1 but not monotonic: mean latency is `7.14 ms` in batch 1, peaks at `10.75 ms` in batch 3, and is `9.07 ms` in batch 5.
+- TiKV raw operation averages have increased versus the earlier three-batch read: raw get `0.310-0.452 ms`, raw put `0.799-0.945 ms`, raw batch get `0.292-0.405 ms` across the three TiKV nodes.
 - TiKV pressure signals are clean: write stall is `0`, pending compaction is `0`, stores are `Up`, and `slow_score=1`.
-- DIAG shows layer0 split/reassign explosion by batch 3: `82,888` splits and `4,108,434` reassign submissions, with split max latency `6.59 s`.
-- `BatchSplitPostingVectors avg=247.23`, while runtime posting size limit is `246`, so postings are splitting almost exactly at the configured page limit.
+- DIAG shows layer0 split/reassign explosion by batch 5: `402,015` splits and `11,851,068` reassign submissions, with split max latency `7.59 s`.
+- `BatchSplitPostingVectors avg` stays at about `247.2` in batches 3-5, while runtime posting size limit is `246`, so postings are splitting almost exactly at the configured page limit.
+- Layer1 starts to show pressure in later batches: batch 4 has `1` layer1 split and batch 5 has `27` layer1 splits with `2,306` layer1 reassign submissions.
 
 ## 2. Runtime Configuration Evidence
 
@@ -47,32 +48,34 @@ Interpretation: this run is the single-key posting path, not the multi-chunk Raw
 
 ## 3. Completed Batch Metrics
 
-Source: `evaluation/2026-04-23/output.json`, completed batch entries 1-3.
+Source: `evaluation/2026-04-23/output.json`, completed batch entries 1-5.
 
 | Batch | Loaded vectors | Insert time (s) | Insert throughput (vec/s) | During-insert mean (ms) | During p95 (ms) | During p99 (ms) | Post-search mean (ms) | Post p95 (ms) | Post p99 (ms) | Post QPS | Recall@5 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 | 1,000,000 | 1,725.9071 | 579.4055 | 7.1368 | 8.5670 | 35.2620 | 7.0611 | 8.4010 | 8.7490 | 562.4550 | 0.9770 |
 | 2 | 2,000,000 | 1,793.2889 | 557.6346 | 8.3366 | 9.9530 | 39.0620 | 7.1031 | 9.0230 | 9.6070 | 560.4235 | 0.9820 |
 | 3 | 3,000,000 | 2,492.2107 | 401.2502 | 10.7519 | 15.0000 | 38.9840 | 7.5841 | 9.2200 | 9.6530 | 525.6794 | 0.9820 |
+| 4 | 4,000,000 | 3,371.4475 | 296.6085 | 10.0975 | 12.6910 | 34.8000 | 7.8953 | 10.1240 | 11.1430 | 502.8613 | 0.9790 |
+| 5 | 5,000,000 | 3,895.7402 | 256.6906 | 9.0705 | 13.9000 | 36.2240 | 8.7304 | 9.9100 | 10.4390 | 455.4906 | 0.9770 |
 
 Derived changes:
 
-| Metric | Batch 1 -> Batch 3 |
+| Metric | Batch 1 -> Batch 5 |
 | --- | ---: |
-| Insert throughput | `-30.75%` |
-| Insert time | `+44.40%` |
-| During-insert mean latency | `+50.65%` |
-| Post-search mean latency | `+7.41%` |
-| Post-search QPS | `-6.54%` |
+| Insert throughput | `-55.69%` |
+| Insert time | `+125.72%` |
+| During-insert mean latency | `+27.09%` |
+| Post-search mean latency | `+23.64%` |
+| Post-search QPS | `-19.02%` |
 
-Interpretation: search after each batch remains healthy; insertion is the part that deteriorates.
+Interpretation: insertion is the part that deteriorates sharply. Search after each batch degrades only mildly by comparison, and recall remains stable.
 
 ## 3.1 Vector / Head Counts After Each Completed Batch
 
 There are three different count concepts in the logs and checkpoint files:
 
 - `SaveIndex(... GetNumSamples())` / `Current Vector Num` is the layer0 data-vector universe exposed by `Index::GetNumSamples()`, i.e. total inserted data vectors.
-- `Save Vector (40428,128)` is the saved in-memory top `HeadIndex` vector count.
+- `Save Vector (...,128)` is the saved in-memory top `HeadIndex` vector count.
 - `SPTAGHeadVectorIDs.bin_layer0` / `SPTAGHeadVectors.bin_layer0` represent the layer0 head-vector set used as the input universe for the next layer. From file size, this is `200,928` rows in the available saved snapshots.
 
 Directly observed checkpoint counts:
@@ -82,24 +85,18 @@ Directly observed checkpoint counts:
 | 1 | `spann_index_0` | `2,000,000` | `0` | `40,428` | not available now; copied from base |
 | 2 | `spann_index_1` | `3,000,000` | `0` | `40,428` | not available now; copied from previous checkpoint |
 | 3 | `spann_index_2` | `4,000,000` | `0` | `40,428` | `200,928` |
+| 4 | `spann_index_3` | `5,000,000` | `0` | `40,429` | not printed in log |
+| 5 | `spann_index_4` | `6,000,000` | `0` | `40,445` | not printed in log |
 
-Available saved snapshot file-size checks:
-
-| Snapshot | `SPTAGHeadVectorIDs.bin_layer0` rows | `SPTAGHeadVectors.bin_layer0` rows | `SPTAGHeadVectorIDs.bin` rows |
-| --- | ---: | ---: | ---: |
-| `spann_index` | `200,928` | `200,928` | `40,428` |
-| `spann_index_2` | `200,928` | `200,928` | `40,428` |
-| `spann_index_3` | `200,928` | `200,928` | `40,428` |
-
-Important limitation: the current log does not directly print dynamic `GetNumSamples(1)` or `GetHeadIndexMapping(1).size()` after each batch. Therefore, if "layer-1 vector count" means the dynamic layer1 extra-searcher contained-vector/sample count after split-time `AddHeadIndex(..., tolayer=1)`, that exact per-batch value cannot be reliably reconstructed from the existing logs. The next run should log `GetNumSamples(layer)` and contained head count for every layer at checkpoint time.
+Important limitation: this running process does not include the later checkpoint instrumentation that prints dynamic `GetNumSamples(layer)` and `GetHeadIndexMapping(layer).size()`. Therefore, if "layer-1 vector count" means the dynamic layer1 extra-searcher contained-vector/sample count after split-time `AddHeadIndex(..., tolayer=1)`, that exact per-batch value cannot be reliably reconstructed from this log. The next run should use the new checkpoint layer stats to capture it directly.
 
 ## 4. DIAG Evidence
 
 ### 4.1 Per-Batch Split / Reassign Counts
 
-Counter semantics check: the per-batch values below were extracted by segmenting the log from `========== BATCH n/10` to `Checkpoint saved: batch n/10`, then taking the last `total_submitted` line for each layer inside that segment. In all three completed segments, the first layer0 and layer1 `total_submitted` lines start from `split=0` and `reassign=0`, so these are per-batch counters, not global cumulative counters.
+Counter semantics check: the per-batch values below were extracted by segmenting the log from `========== BATCH n/10` to `Checkpoint saved: batch n/10`, then taking the last `total_submitted` line for each layer inside that segment. These are per-batch counters, not global cumulative counters.
 
-Important metric granularity note: `total_submitted reassign` is the comparable per-batch reassign submission/record counter available in every batch progress block. `ReassignJobUs count` is a full-DIAG histogram count of grouped reassign jobs; it is emitted for batch 3 but not consistently emitted for batch 1/2 checkpoints, so it should not be used for the three-batch comparison.
+Important metric granularity note: `total_submitted reassign` is the comparable per-batch reassign submission/record counter available in every batch progress block. `ReassignJobUs count` is a full-DIAG histogram count of grouped reassign jobs; it is emitted in the full DIAG blocks but not consistently emitted for every checkpoint, so it should not be used as the primary cross-batch comparison metric.
 
 | Batch | Layer | Log segment | First split/reassign | Final split | Final reassign | Reassign / split | Split avg (ms) | Split max (ms) |
 | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -109,6 +106,10 @@ Important metric granularity note: `total_submitted reassign` is the comparable 
 | 2 | 1 | lines `1529-2613` | `0 / 0` | `0` | `0` | N/A | `0.0` | `0.0` |
 | 3 | 0 | lines `2614-3919` | `0 / 0` | `82,888` | `4,108,434` | `49.57` | `83.2` | `6,587.5` |
 | 3 | 1 | lines `2614-3919` | `0 / 0` | `0` | `0` | N/A | `0.0` | `0.0` |
+| 4 | 0 | lines `3920-5194` | `0 / 0` | `260,914` | `8,878,868` | `34.03` | `64.9` | `9,820.7` |
+| 4 | 1 | lines `3920-5194` | `0 / 0` | `1` | `68` | `68.00` | `181.0` | `181.0` |
+| 5 | 0 | lines `5195-6355` | `0 / 0` | `402,015` | `11,851,068` | `29.48` | `59.9` | `7,585.4` |
+| 5 | 1 | lines `5195-6355` | `0 / 0` | `27` | `2,306` | `85.41` | `92.9` | `350.1` |
 
 Layer0 split/reassign growth across completed batches:
 
@@ -116,11 +117,13 @@ Layer0 split/reassign growth across completed batches:
 | --- | ---: | ---: |
 | Batch 1 -> Batch 2 | `15.69x` | `10.29x` |
 | Batch 2 -> Batch 3 | `9.34x` | `5.86x` |
-| Batch 1 -> Batch 3 | `146.45x` | `60.27x` |
+| Batch 3 -> Batch 4 | `3.15x` | `2.16x` |
+| Batch 4 -> Batch 5 | `1.54x` | `1.33x` |
+| Batch 1 -> Batch 5 | `710.27x` | `173.85x` |
 
-Layer1 note: layer1 had `reassign=1600` in batch 1, then `0` split and `0` reassign in batch 2 and batch 3. There were no layer1 splits in the completed three batches. The insert maintenance explosion is therefore concentrated in layer0.
+Layer1 note: layer1 had `reassign=1600` in batch 1, then stayed quiet in batches 2-3. It starts showing pressure in batch 4 (`1` split, `68` reassign) and batch 5 (`27` splits, `2,306` reassign). The maintenance explosion is still dominated by layer0, but the later batches show early upward propagation.
 
-Interpretation: the absolute reassign-per-split ratio decreases from batch 1 to batch 3, but the split count grows so aggressively that total reassign submissions still increase from `68,168` to `4,108,434`. The clearest per-batch evidence is split growth and total reassign growth.
+Interpretation: the absolute reassign-per-split ratio decreases from batch 1 to batch 5, but the split count grows so aggressively that total reassign submissions still increase from `68,168` to `11,851,068`. The clearest per-batch evidence is split growth and total reassign growth.
 
 ### 4.2 Initial Load Baseline
 
@@ -141,76 +144,41 @@ After initial load, layer0 did not split:
 
 This phase had some append IO but no split cascade.
 
-### 4.3 Batch 2 End Progress
+### 4.3 Batch 3-5 Complete Layer0 DIAG
 
-The log does not print the full layer0 DIAG block at batch 2 checkpoint, but the final progress line before checkpoint shows:
+Batches 3-5 emit full layer0 DIAG blocks, which show both the posting-full trigger and the reassign fanout getting worse:
 
-| Batch 2 layer0 progress item | Value |
-| --- | ---: |
-| split | `8,878` |
-| reassign | `701,471` |
-| append | `1,194` |
-| split avg latency | `119.8 ms` |
-| split max latency | `3,420.4 ms` |
-| barrier wait | `0.000001 s` |
-
-### 4.4 Batch 3 Complete DIAG
-
-Batch 3 emits the full layer0 DIAG block:
-
-| DIAG item | Value |
-| --- | ---: |
-| layer0 split | `82,888` |
-| layer0 reassign | `4,108,434` |
-| layer0 append | `2,432` |
-| split avg latency | `83.2 ms` |
-| split max latency | `6,587.5 ms` |
-| `AppendLockWait` avg | `1553.38 us` |
-| `AppendGetUs` avg | `764.32 us` |
-| `AppendPutUs` avg | `991.24 us` |
-| `AppendPostBytes` avg | `19,723.48 B` |
-| `SplitLockWait` count / avg | `82,888 / 32.20 us` |
-| `ReassignJobUs` count / avg | `296 / 82,247.46 us` |
-| `ReassignSrc fromSplitBatch` | `4,108,138` |
-| `PoolQueueDepth` avg | `0.00 jobs` |
-| `PoolRunning` avg | `1.43 workers` |
-| `BatchBarrierWait` | `0.301145 s` |
+| Batch | Append count | AppendGet avg | AppendPut avg | AppendPostBytes avg | SplitLockWait avg | ReassignJobUs count / avg | Barrier wait |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | `2,432` | `764.32 us` | `991.24 us` | `19,723.48 B` | `32.20 us` | `296 / 82,247.46 us` | `0.301145 s` |
+| 4 | `5,207` | `1204.60 us` | `1438.07 us` | `23,991.37 B` | `52.47 us` | `808 / 111,757.51 us` | `1.043934 s` |
+| 5 | `1,602` | `1065.85 us` | `1315.21 us` | `24,007.99 B` | `71.87 us` | `64 / 96,055.75 us` | `2.990529 s` |
 
 Batch split fanout details:
 
-| Split fanout item | Count | Average |
-| --- | ---: | ---: |
-| `BatchSplitPostingVectors` | `16,023` | `247.23 vectors` |
-| `BatchSplitNewHeads` | `16,023` | `0.98 heads` |
-| `BatchSplitReassignVectors` | `16,023` | `36.80 vectors` |
-| `BatchSplitReassignRecords` | `16,023` | `256.39 records` |
-| `BatchSplitReassignTargetHeads` | `16,023` | `180.40 heads` |
+| Batch | Fanout count | PostingVectors avg | NewHeads avg | ReassignVectors avg | ReassignRecords avg | ReassignTargetHeads avg |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | `16,023` | `247.23` | `0.98` | `36.80` | `256.39` | `180.40` |
+| 4 | `27,662` | `247.19` | `0.99` | `44.43` | `320.95` | `218.66` |
+| 5 | `32,419` | `247.20` | `1.00` | `49.87` | `365.56` | `243.14` |
 
-Important ratios:
+Interpretation: the expensive part is not append get/put latency itself. The expensive part is that postings keep splitting at the configured limit, and each split fans out reassign work to an increasing number of target heads.
 
-| Ratio | Value |
-| --- | ---: |
-| Batch3 reassign / split | `49.57` |
-| Batch3 split vs batch2 split | `9.34x` |
-| Batch3 reassign vs batch2 reassign | `5.86x` |
+### 4.4 Async / TiKV Path DIAG
 
-Interpretation: the expensive part is not append get/put latency itself. The expensive part is that split generates a very large amount of reassign work, and each split touches many target heads.
+Layer0 async DIAG across batches 3-5:
 
-### 4.5 Async / TiKV Path DIAG
-
-Batch 3 async DIAG:
-
-| Async DIAG item | Waits | Avg latency | Avg batch |
-| --- | ---: | ---: | ---: |
-| `MultiGetPageBuffer` | `2,404,753` | `1239.84 us` | `50.53` |
-| `MultiGetString` | `46` | `992.67 us` | `1.00` |
-| `AddIndexSingleKeyGet` | `1,030,540` | `651.30 us` | `10.18` |
-| `AddIndexSingleKeyPut` | `1,030,540` | `1048.96 us` | `10.18` |
+| Batch | `MultiGetPageBuffer` waits / avg / avgBatch | `AddIndexSingleKeyGet` waits / avg / avgBatch | `AddIndexSingleKeyPut` waits / avg / avgBatch | `MultiGetString` waits / avg |
+| ---: | ---: | ---: | ---: | ---: |
+| 3 | `2,404,753 / 1239.84 us / 50.53` | `1,030,540 / 651.30 us / 10.18` | `1,030,540 / 1048.96 us / 10.18` | `46 / 992.67 us` |
+| 4 | `3,717,001 / 2094.73 us / 50.55` | `1,053,993 / 1171.80 us / 13.08` | `1,053,993 / 1629.35 us / 13.08` | `39 / 970.67 us` |
+| 5 | `4,439,836 / 2491.87 us / 50.57` | `1,063,577 / 1498.07 us / 14.69` | `1,063,577 / 1969.97 us / 14.69` | `68 / 770.26 us` |
 
 Interpretation:
 
-- Single-key get/put waits are around `0.65-1.05 ms`, which is not high enough to explain the throughput collapse by itself.
-- `MultiGetString waits=46` is the version-cache miss path. Only 46 waits means version cache is working; version-map miss is not the bottleneck.
+- Single-key get/put waits rise materially by batch 5, which means TiKV is paying for the amplified maintenance workload.
+- The request volume and waits rise together with split/reassign fanout, so TiKV looks like the cost sink rather than the root amplifier.
+- `MultiGetString` remains tiny compared with page-buffer and single-key get/put waits, so version-cache miss reads are not the main bottleneck.
 - All `[DIAG-MC]` counters are zero, confirming the run is not using the multi-chunk posting path.
 
 ## 5. TiKV / PD Evidence
@@ -219,17 +187,17 @@ TiKV raw gRPC metrics are cumulative since TiKV start, so they are not exact per
 
 | TiKV status port | raw_get count | raw_get avg (ms) | raw_put count | raw_put avg (ms) | raw_batch_get count | raw_batch_get avg (ms) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20181 | 11,818,819 | 0.170 | 11,938,123 | 0.576 | 100,713,295 | 0.178 |
-| 20182 | 10,617,756 | 0.164 | 13,429,524 | 0.521 | 97,512,889 | 0.169 |
-| 20183 | 12,075,564 | 0.159 | 16,002,220 | 0.466 | 91,922,612 | 0.187 |
+| 20181 | 30,849,851 | 0.310 | 30,984,948 | 0.799 | 280,523,105 | 0.292 |
+| 20182 | 23,838,387 | 0.382 | 31,707,978 | 0.817 | 282,892,883 | 0.313 |
+| 20183 | 26,851,648 | 0.452 | 30,801,025 | 0.945 | 294,365,155 | 0.405 |
 
 PD store distribution at collection time:
 
 | Store ID | Address | State | Leaders | Regions | slow_score | region_size |
 | ---: | --- | --- | ---: | ---: | ---: | ---: |
-| 4 | `127.0.0.1:20163` | Up | 56 | 56 | 1 | 2390 |
-| 5 | `127.0.0.1:20161` | Up | 41 | 41 | 1 | 2173 |
-| 1 | `127.0.0.1:20162` | Up | 46 | 46 | 1 | 3895 |
+| 1 | `127.0.0.1:20162` | Up | 47 | 47 | 1 | not sampled |
+| 4 | `127.0.0.1:20163` | Up | 55 | 55 | 1 | not sampled |
+| 5 | `127.0.0.1:20161` | Up | 44 | 44 | 1 | not sampled |
 
 Pressure/error signals:
 
@@ -240,20 +208,20 @@ Pressure/error signals:
 | `tikv_scheduler_pending_compaction_bytes` | `0` on all nodes |
 | `region_error` log lines | `35` |
 | gRPC/final failure log lines | `0` |
-| `Split: new head VID ... already exists` lines | `956` at latest read, including live batch 4 |
+| `Split: new head VID ... already exists` lines | batch counts: `16`, `204`, `392`, `351`, `241` for batches 1-5 |
 
-Interpretation: TiKV is doing work, but there is no visible write-stall, compaction, or retry-failure signal. Region errors are recoverable and do not dominate the run.
+Interpretation: TiKV is doing much more work and cumulative raw operation averages are higher than in the earlier three-batch read. However, there is still no visible write-stall, compaction, or retry-failure signal. The evidence is consistent with TiKV being loaded by amplified SPFresh maintenance traffic rather than TiKV independently stalling.
 
 ## 6. Root Cause Assessment
 
 The evidence chain is:
 
 1. Runtime posting size limit is `246` vectors.
-2. Batch3 `BatchSplitPostingVectors avg=247.23`, almost exactly the limit.
-3. Batch3 split count reaches `82,888` and reassign submissions reach `4,108,434`.
-4. Batch3 `BatchSplitReassignTargetHeads avg=180.40`, so each split fans out to many heads.
-5. TiKV single get/put waits stay near `0.65-1.05 ms`, and TiKV stall/compaction signals are zero.
-6. Search after the batch remains stable, while insertion throughput drops sharply.
+2. Batches 3-5 have `BatchSplitPostingVectors avg` around `247.2`, almost exactly the limit.
+3. Batch5 split count reaches `402,015` and reassign submissions reach `11,851,068`.
+4. `BatchSplitReassignTargetHeads avg` rises from `180.40` in batch 3 to `243.14` in batch 5, so each split fans out to more heads over time.
+5. TiKV single get/put waits rise by batch 5, but TiKV stall/compaction signals are still zero.
+6. Search after the batch remains stable enough, while insertion throughput drops sharply.
 
 Therefore, the likely bottleneck is SPFresh layer0 maintenance amplification: frequent split at the posting limit followed by high-fanout reassign. TiKV is a participant in the cost because every split/reassign causes many single-key RMWs, but the root amplifier is the application-level split/reassign policy and posting threshold.
 
@@ -267,10 +235,10 @@ Evidence already present in this run:
 
 | Claim | Evidence | Strength |
 | --- | --- | --- |
-| Postings are splitting near full | Runtime posting size limit is `246`; batch3 `BatchSplitPostingVectors avg=247.23` | Strong |
-| Splits explode with batch number | Layer0 split count grows `566 -> 8,878 -> 82,888` across completed batches | Strong |
-| Split creates large reassign fanout | Batch3 `BatchSplitReassignRecords avg=256.39`, `BatchSplitReassignTargetHeads avg=180.40` | Strong |
-| Head/posting growth is not proportional to split count | Top `Save Vector` remains `40,428` after batches 1-3 while layer0 split reaches `82,888` in batch3 | Moderate |
+| Postings are splitting near full | Runtime posting size limit is `246`; batch3-5 `BatchSplitPostingVectors avg` is about `247.2` | Strong |
+| Splits explode with batch number | Layer0 split count grows `566 -> 8,878 -> 82,888 -> 260,914 -> 402,015` across completed batches | Strong |
+| Split creates large reassign fanout | Batch5 `BatchSplitReassignRecords avg=365.56`, `BatchSplitReassignTargetHeads avg=243.14` | Strong |
+| Head/posting growth is not proportional to split count | Top `Save Vector` grows only `40,428 -> 40,445` by batch5 while layer0 split reaches `402,015` in batch5 | Moderate |
 | Split often targets an already-existing head | `Split: new head VID ... already exists in head index. Do merging...` appears frequently | Strong as a path signal, not yet a complete rate |
 
 Existing-head merge log count by segment at latest read:
@@ -280,7 +248,8 @@ Existing-head merge log count by segment at latest read:
 | Batch 1 | `16` |
 | Batch 2 | `204` |
 | Batch 3 | `392` |
-| Batch 4 live | `345` |
+| Batch 4 | `351` |
+| Batch 5 | `241` |
 
 Code-path evidence:
 
@@ -297,28 +266,14 @@ Checkpoint layer stats: batch X/Y layer=N samples=... deleted=... headMapping=..
 
 The next run should use these two lines to test the hypothesis directly. The expected confirmation pattern is: high `BatchSplitPostingVectors` near `246`, high `existingHeadMerge` and possibly non-zero `existingHeadResplit`, high reassign target-head fanout, but relatively slow growth in `headMapping` compared with split count.
 
-## 7. Live Batch 4 Note
-
-Batch 4 was running during collection. It should not be mixed with completed-batch metrics, but it reinforces the same trend. By `26%` progress in batch 4, layer0 had already reached:
-
-| Batch4 live progress | Value |
-| --- | ---: |
-| split | `45,562` |
-| reassign | `1,789,450` |
-| append | `4,420` |
-| split avg latency | `74.4 ms` |
-| split max latency | `9,820.7 ms` |
-
-This suggests split/reassign pressure continues and may worsen in later batches.
-
-## 8. Recommended Next Checks / Experiments
+## 7. Recommended Next Checks / Experiments
 
 1. Run an A/B test with larger `PostingPageLimit`, for example `16` or `32`, keeping other settings fixed. If this diagnosis is correct, split count and reassign count should fall sharply.
-2. Run a second A/B with lower `ReassignK` than `64`. The most suspicious DIAG value is `BatchSplitReassignTargetHeads avg=180.40`; reducing reassign fanout should directly reduce single-key RMW count.
+2. Run a second A/B with lower `ReassignK` than `64`. The most suspicious DIAG value is `BatchSplitReassignTargetHeads avg=243.14` by batch 5; reducing reassign fanout should directly reduce single-key RMW count.
 3. Capture TiKV counter deltas over a fixed window instead of cumulative counters. The current TiKV numbers are healthy, but delta sampling would quantify write/read QPS during the slow part.
-4. Emit full layer0 DIAG after every batch, not only batch3. Batch2 has progress counters but not the full split fanout block, which makes cross-batch comparison less precise.
+4. Emit full layer0 and layer1 DIAG after every batch. The later layer1 activity is still small, but batch 5 shows it is no longer zero.
 5. Use the newly added checkpoint layer stats and `SplitHeadPath` DIAG counters in the next run to compare head mapping growth against split/new-head/existing-head-merge counts.
 
-## 9. Bottom Line
+## 8. Bottom Line
 
-Search quality and post-batch latency are fine. Version cache is working. TiKV looks healthy. The insert slowdown is best explained by layer0 split/reassign amplification caused by postings hitting the `246` vector limit and then fanning out reassign work to many target heads.
+Search quality and post-batch latency are still acceptable after five batches. Version cache is working. TiKV is busier and raw operation averages have risen, but TiKV still looks healthy from stall/compaction/store-state signals. The insert slowdown is best explained by layer0 split/reassign amplification caused by postings hitting the `246` vector limit and then fanning out reassign work to many target heads. Batch 4-5 add one new warning: layer1 is starting to participate, so the same maintenance pressure may propagate upward in later batches.
