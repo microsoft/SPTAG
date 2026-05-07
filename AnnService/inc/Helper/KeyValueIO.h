@@ -34,6 +34,20 @@ namespace SPTAG
 
             virtual ErrorCode Put(const SizeType key, const std::string& value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) = 0;
 
+            // Batched writes/deletes. Default implementations return Undefined so that
+            // backends without native batching (RocksDB, FileIO) can ignore them.
+            // TiKVIO overrides these to issue a single batched RPC per region group,
+            // which dramatically reduces the number of synchronous gRPC round-trips
+            // when callers (e.g. SPANN AddIndex Phase 2 / PutPostingToDB) want to
+            // commit several keys at once.
+            virtual ErrorCode MultiPut(const std::vector<std::string>& keys,
+                                       const std::vector<std::string>& values,
+                                       const std::chrono::microseconds& timeout,
+                                       std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }
+
+            virtual ErrorCode MultiDelete(const std::vector<std::string>& keys,
+                                          const std::chrono::microseconds& timeout) { return ErrorCode::Undefined; }
+
             virtual ErrorCode Merge(const SizeType key, const std::string &value,
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;

@@ -522,9 +522,21 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         *benchmarkData << "        \"maxLatency\": " << maxLat << ",\n";
         *benchmarkData << "        \"qps\": " << qps << ",\n";
     }
+    auto barrierStart = std::chrono::high_resolution_clock::now();
+    size_t barrierPolls = 0;
     while (!p_index->AllFinished())
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        barrierPolls++;
+    }
+    auto barrierEnd = std::chrono::high_resolution_clock::now();
+    double barrierSeconds = std::chrono::duration_cast<std::chrono::microseconds>(barrierEnd - barrierStart).count() / 1000000.0;
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "[DIAG] BatchBarrierWait seconds=%.6f polls=%zu\n",
+                 barrierSeconds, barrierPolls);
+    if (benchmarkData != nullptr)
+    {
+        *benchmarkData << "        \"batch barrier waitSeconds\": " << barrierSeconds << ",\n";
     }
 }
 
@@ -633,6 +645,30 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
     benchmarkData << prefix << "        \"numQueries\": " << numQueries << "\n";
     benchmarkData << prefix << "      }\n";
     benchmarkData << prefix << "    }";
+}
+
+template <typename T>
+void LogCheckpointLayerStats(const std::shared_ptr<VectorIndex>& index, int layers, int currentBatch, int totalBatches)
+{
+    auto spannIndex = std::dynamic_pointer_cast<SPANN::Index<T>>(index);
+    if (!spannIndex) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "Checkpoint layer stats: batch %d/%d unable to cast index for layer stats\n",
+                     currentBatch, totalBatches);
+        return;
+    }
+
+    for (int layer = 0; layer <= layers; layer++) {
+        std::vector<SizeType> headMapping;
+        ErrorCode mappingRet = spannIndex->GetHeadIndexMapping(layer, headMapping);
+        long long headMappingSize = mappingRet == ErrorCode::Success ? static_cast<long long>(headMapping.size()) : -1;
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "Checkpoint layer stats: batch %d/%d layer=%d samples=%lld deleted=%lld headMapping=%lld\n",
+                     currentBatch, totalBatches, layer,
+                     static_cast<long long>(spannIndex->GetNumSamples(layer)),
+                     static_cast<long long>(spannIndex->GetNumDeleted(layer)),
+                     headMappingSize);
+    }
 }
 
 ErrorCode QuantizeVectors(const std::shared_ptr<COMMON::IQuantizer>& quantizer,
@@ -1036,6 +1072,11 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                 seconds = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000000.0f;
                 BOOST_TEST_MESSAGE("  Save Time: " << seconds << " seconds");
                 BOOST_TEST_MESSAGE("  Save completed successfully");
+
+                if (enableQuantization)
+                    LogCheckpointLayerStats<uint8_t>(cloneIndex, layers, iter + 1, batches);
+                else
+                    LogCheckpointLayerStats<T>(cloneIndex, layers, iter + 1, batches);
 
                 // Write checkpoint file after successful save
                 {

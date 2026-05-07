@@ -116,12 +116,12 @@ namespace SPTAG {
 
             // Multi-chunk posting (append-only writes for TiKV)
             bool m_useMultiChunkPosting;
+            int m_postingCountCacheCapacity;
 
             // Distributed VersionMap
             bool m_distributedVersionMap;
             int m_versionChunkSize;
             float m_oversampleFactor;
-            int m_versionCacheTTLMs;
             int m_versionCacheMaxChunks;
 
             // GPU building

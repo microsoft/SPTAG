@@ -175,6 +175,29 @@ namespace SPTAG {
             // existing vectors under that head. Should stay at 0 in healthy runs.
             std::atomic_uint64_t m_appendGetFail{ 0 };
 
+            // Per-batch split/reassign diagnostics. These are reset after each
+            // ALL DONE boundary so every log line describes the just-finished
+            // insert batch for that layer.
+            std::atomic_uint64_t m_splitPostingVectors[kHistBuckets]{};
+            std::atomic_uint64_t m_splitNewHeadCount[kHistBuckets]{};
+            std::atomic_uint64_t m_splitReassignVectors[kHistBuckets]{};
+            std::atomic_uint64_t m_splitReassignRecords[kHistBuckets]{};
+            std::atomic_uint64_t m_splitReassignTargetHeads[kHistBuckets]{};
+            std::atomic_uint64_t m_splitPostingVectorsTotal{ 0 };
+            std::atomic_uint64_t m_splitNewHeadCountTotal{ 0 };
+            std::atomic_uint64_t m_splitReassignVectorsTotal{ 0 };
+            std::atomic_uint64_t m_splitReassignRecordsTotal{ 0 };
+            std::atomic_uint64_t m_splitReassignTargetHeadsTotal{ 0 };
+            std::atomic_uint64_t m_splitPostingVectorSampleCount{ 0 };
+            std::atomic_uint64_t m_splitNewHeadSampleCount{ 0 };
+            std::atomic_uint64_t m_splitReassignSampleCount{ 0 };
+            std::atomic_uint64_t m_splitReassignRecordSampleCount{ 0 };
+            std::atomic_uint64_t m_splitReassignTargetHeadSampleCount{ 0 };
+            std::atomic_uint64_t m_splitSameHeadCount{ 0 };
+            std::atomic_uint64_t m_splitExistingHeadMergeCount{ 0 };
+            std::atomic_uint64_t m_splitExistingHeadMergeResplitCount{ 0 };
+            std::atomic_uint64_t m_splitCreatedNewHeadCount{ 0 };
+
             // [DIAG-MC] Multi-chunk path histograms (storage=TIKVIO + UseMultiChunkPosting=true).
             // The single-key histograms above (m_appendGetUs/m_appendPutUs/...) stay at 0
             // in MC mode because the MC branch in Append() does NOT do Get+Put. These
@@ -220,6 +243,31 @@ namespace SPTAG {
                                  sampleCount ? (double)totalSum / sampleCount : 0.0, unit);
                 for (int i = 0; i < kHistBuckets && n < (int)sizeof(buf); ++i) {
                     uint64_t c = hist[i].load(std::memory_order_relaxed);
+                    if (c == 0) continue;
+                    uint64_t lo = (i == 0) ? 0ULL : (1ULL << i);
+                    n += snprintf(buf + n, sizeof(buf) - n, " %lu%s+:%lu",
+                                  (unsigned long)lo, (i == kHistBuckets - 1) ? ">=" : "", (unsigned long)c);
+                }
+                return std::string(buf);
+            }
+
+            static std::string FormatHistAndReset(const char* label, std::atomic_uint64_t* hist,
+                                                  std::atomic_uint64_t& totalSum,
+                                                  std::atomic_uint64_t& sampleCount,
+                                                  const char* unit) {
+                uint64_t counts[kHistBuckets];
+                for (int i = 0; i < kHistBuckets; ++i) {
+                    counts[i] = hist[i].exchange(0, std::memory_order_relaxed);
+                }
+                uint64_t total = totalSum.exchange(0, std::memory_order_relaxed);
+                uint64_t samples = sampleCount.exchange(0, std::memory_order_relaxed);
+
+                char buf[2048];
+                int n = snprintf(buf, sizeof(buf), "  %s: count=%lu avg=%.2f%s histo[bucket=count]:",
+                                 label, (unsigned long)samples,
+                                 samples ? (double)total / samples : 0.0, unit);
+                for (int i = 0; i < kHistBuckets && n < (int)sizeof(buf); ++i) {
+                    uint64_t c = counts[i];
                     if (c == 0) continue;
                     uint64_t lo = (i == 0) ? 0ULL : (1ULL << i);
                     n += snprintf(buf + n, sizeof(buf) - n, " %lu%s+:%lu",

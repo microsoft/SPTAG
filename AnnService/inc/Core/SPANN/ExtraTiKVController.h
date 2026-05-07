@@ -21,6 +21,7 @@
 #include <climits>
 #include <future>
 #include <mutex>
+#include <condition_variable>
 #include <shared_mutex>
 #include <unordered_map>
 #include <sstream>
@@ -45,6 +46,265 @@ namespace SPTAG::SPANN
     class TiKVIO : public Helper::KeyValueIO
     {
     public:
+        // ---- Async (gRPC CompletionQueue) infrastructure ----
+        //
+        // For high-fan-out scenarios (e.g. SPFresh AddIndex Phase 2 issuing
+        // 12-30 BatchPut RPCs per call) we want to avoid spawning a fresh OS
+        // thread per RPC. Instead, all async RPCs share ONE CompletionQueue
+        // serviced by a single background pump thread. The caller blocks on
+        // an AsyncBatch wait-group that counts down as completions arrive.
+        //
+        // Lifetime: cq + pump are created lazily on first Async* call (after
+        // the TiKVIO is fully constructed) and torn down in ShutDown().
+
+        class AsyncBatch {
+        public:
+            // Initialize the wait-group with the EXACT number of RPCs that will
+            // be submitted before any Wait() can race with completions. Caller
+            // must Add(n) once up-front, then submit n RPCs each tagged with
+            // this batch.
+            void Add(int n) { m_pending.fetch_add(n, std::memory_order_relaxed); }
+
+            // Called by the pump thread when a tagged RPC completes.
+            // ok=false means the RPC was cancelled / cq shutdown / status not OK
+            // / region_error / response.error non-empty (caller decides which).
+            void Done(bool ok) {
+                if (!ok) m_failures.fetch_add(1, std::memory_order_relaxed);
+                if (m_pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    std::lock_guard<std::mutex> lk(m_mu);
+                    m_cv.notify_all();
+                }
+            }
+
+            // Block the calling thread until every submitted RPC has signalled.
+            void Wait() {
+                std::unique_lock<std::mutex> lk(m_mu);
+                m_cv.wait(lk, [&] { return m_pending.load(std::memory_order_acquire) == 0; });
+            }
+
+            int Failures() const { return m_failures.load(std::memory_order_acquire); }
+
+        private:
+            std::atomic<int> m_pending{0};
+            std::atomic<int> m_failures{0};
+            std::mutex m_mu;
+            std::condition_variable m_cv;
+        };
+
+        enum class AsyncWaitKind : int {
+            MultiGetPageBuffer = 0,
+            MultiGetString,
+            MultiScanPostings,
+            CountBatchGet,
+            AddIndexMultiChunk,
+            CollectReAssignMultiChunk,
+            AddIndexSingleKeyGet,
+            AddIndexSingleKeyPut,
+            Count
+        };
+
+        void RecordAsyncWait(AsyncWaitKind kind, uint64_t batchSize, uint64_t waitUs) {
+            int k = static_cast<int>(kind);
+            if (k < 0 || k >= static_cast<int>(AsyncWaitKind::Count)) return;
+            m_asyncWaitUs[k][AsyncWaitHistBucketOf(waitUs)].fetch_add(1, std::memory_order_relaxed);
+            m_asyncWaitTotalUs[k].fetch_add(waitUs, std::memory_order_relaxed);
+            m_asyncWaitBatchTotal[k].fetch_add(batchSize, std::memory_order_relaxed);
+            m_asyncWaitSampleCount[k].fetch_add(1, std::memory_order_relaxed);
+        }
+
+        void LogAsyncWaitStatsAndReset(int layer) {
+            for (int k = 0; k < static_cast<int>(AsyncWaitKind::Count); k++) {
+                uint64_t samples = m_asyncWaitSampleCount[k].exchange(0, std::memory_order_relaxed);
+                uint64_t totalUs = m_asyncWaitTotalUs[k].exchange(0, std::memory_order_relaxed);
+                uint64_t totalBatch = m_asyncWaitBatchTotal[k].exchange(0, std::memory_order_relaxed);
+                uint64_t counts[kAsyncWaitHistBuckets];
+                for (int i = 0; i < kAsyncWaitHistBuckets; i++) {
+                    counts[i] = m_asyncWaitUs[k][i].exchange(0, std::memory_order_relaxed);
+                }
+                if (samples == 0) continue;
+
+                char buf[2048];
+                int n = snprintf(buf, sizeof(buf),
+                    "[DIAG-ASYNC] layer %d %s waits=%lu avg=%.2fus avgBatch=%.2f histo[bucket=count]:",
+                    layer, AsyncWaitKindName(static_cast<AsyncWaitKind>(k)),
+                    (unsigned long)samples,
+                    samples ? static_cast<double>(totalUs) / samples : 0.0,
+                    samples ? static_cast<double>(totalBatch) / samples : 0.0);
+                for (int i = 0; i < kAsyncWaitHistBuckets && n < static_cast<int>(sizeof(buf)); i++) {
+                    uint64_t c = counts[i];
+                    if (c == 0) continue;
+                    uint64_t lo = (i == 0) ? 0ULL : (1ULL << i);
+                    n += snprintf(buf + n, sizeof(buf) - n, " %lu%s+:%lu",
+                                  (unsigned long)lo,
+                                  (i == kAsyncWaitHistBuckets - 1) ? ">=" : "",
+                                  (unsigned long)c);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", buf);
+            }
+        }
+
+        // Per-RPC heap-allocated tag base. Concrete tag types embed their own
+        // grpc::ClientContext / request / response / status / Reader, then
+        // implement OnComplete() to interpret the response and signal the
+        // batch. The pump thread does:  raw_tag->OnComplete(ok); delete raw_tag;
+        struct AsyncTagBase {
+            std::shared_ptr<AsyncBatch> batch;
+            std::atomic<int>* result_slot = nullptr;   // optional
+            std::string keyForCacheInvalidation;
+            TiKVIO* owner = nullptr;
+            virtual ~AsyncTagBase() = default;
+            // Returns true on success (response was OK and parseable).
+            // ok=false comes from the cq itself (cancel / shutdown / network).
+            virtual bool OnComplete(bool ok) = 0;
+        };
+
+        // BatchPut tag (used by AsyncRawBatchPut / AsyncAppendChunkAndUpdateCount).
+        struct AsyncBatchPutTag : AsyncTagBase {
+            grpc::ClientContext ctx;
+            kvrpcpb::RawBatchPutRequest request;
+            kvrpcpb::RawBatchPutResponse response;
+            grpc::Status status;
+            std::unique_ptr<grpc::ClientAsyncResponseReader<kvrpcpb::RawBatchPutResponse>> rpc;
+            bool OnComplete(bool ok) override {
+                if (!ok || !status.ok()) return false;
+                if (response.has_region_error()) {
+                    if (owner) owner->InvalidateRegionCache(keyForCacheInvalidation);
+                    return false;
+                }
+                return response.error().empty();
+            }
+        };
+
+        // Single-key Get tag (used by AsyncRawGet for SPFresh single-key path).
+        // out_value is filled iff the RPC succeeded AND the key was found.
+        // not_found is reported as success with out_value->empty() AND out_found=false.
+        struct AsyncGetTag : AsyncTagBase {
+            grpc::ClientContext ctx;
+            kvrpcpb::RawGetRequest request;
+            kvrpcpb::RawGetResponse response;
+            grpc::Status status;
+            std::unique_ptr<grpc::ClientAsyncResponseReader<kvrpcpb::RawGetResponse>> rpc;
+            std::string* out_value = nullptr;
+            std::atomic<bool>* out_found = nullptr;     // optional
+            bool OnComplete(bool ok) override {
+                if (!ok || !status.ok()) return false;
+                if (response.has_region_error()) {
+                    if (owner) owner->InvalidateRegionCache(keyForCacheInvalidation);
+                    return false;
+                }
+                if (!response.error().empty()) return false;
+                if (response.not_found()) {
+                    if (out_found) out_found->store(false, std::memory_order_release);
+                    if (out_value) out_value->clear();
+                    return true;
+                }
+                if (out_value) *out_value = response.value();
+                if (out_found) out_found->store(true, std::memory_order_release);
+                return true;
+            }
+        };
+
+        // Single-key Put tag (used by AsyncRawPut).
+        struct AsyncPutTag : AsyncTagBase {
+            grpc::ClientContext ctx;
+            kvrpcpb::RawPutRequest request;
+            kvrpcpb::RawPutResponse response;
+            grpc::Status status;
+            std::unique_ptr<grpc::ClientAsyncResponseReader<kvrpcpb::RawPutResponse>> rpc;
+            bool OnComplete(bool ok) override {
+                if (!ok || !status.ok()) return false;
+                if (response.has_region_error()) {
+                    if (owner) owner->InvalidateRegionCache(keyForCacheInvalidation);
+                    return false;
+                }
+                return response.error().empty();
+            }
+        };
+
+        // Region-group BatchGet tag. Results are written into out_values by
+        // original caller index; missing keys remain empty and are considered
+        // successful. The caller handles sync fallback for failed groups after
+        // AsyncBatch::Wait().
+        struct AsyncBatchGetTag : AsyncTagBase {
+            grpc::ClientContext ctx;
+            kvrpcpb::RawBatchGetRequest request;
+            kvrpcpb::RawBatchGetResponse response;
+            grpc::Status status;
+            std::unique_ptr<grpc::ClientAsyncResponseReader<kvrpcpb::RawBatchGetResponse>> rpc;
+            std::vector<std::pair<size_t, std::string>> keys;
+            std::vector<std::string>* out_values = nullptr;
+            bool OnComplete(bool ok) override {
+                if (!ok || !status.ok()) return false;
+                if (response.has_region_error()) {
+                    if (owner) {
+                        for (auto& kv : keys) owner->InvalidateRegionCache(kv.second);
+                    }
+                    return false;
+                }
+
+                std::unordered_map<std::string, std::string> resultMap;
+                resultMap.reserve(static_cast<size_t>(response.pairs_size()));
+                bool hasPairError = false;
+                for (int i = 0; i < response.pairs_size(); i++) {
+                    const auto& pair = response.pairs(i);
+                    if (pair.has_error()) {
+                        hasPairError = true;
+                        if (owner) owner->InvalidateRegionCache(pair.key());
+                        continue;
+                    }
+                    if (!pair.value().empty()) {
+                        resultMap[pair.key()] = pair.value();
+                    }
+                }
+                if (hasPairError) return false;
+                if (out_values) {
+                    for (auto& kv : keys) {
+                        auto it = resultMap.find(kv.second);
+                        if (it != resultMap.end()) {
+                            (*out_values)[kv.first] = std::move(it->second);
+                        }
+                    }
+                }
+                return true;
+            }
+        };
+
+        // One-page RawScan tag. MultiScanPostings issues pages in rounds so the
+        // CQ pump never performs a long scan loop or synchronous retry itself.
+        struct AsyncScanPageTag : AsyncTagBase {
+            grpc::ClientContext ctx;
+            kvrpcpb::RawScanRequest request;
+            kvrpcpb::RawScanResponse response;
+            grpc::Status status;
+            std::unique_ptr<grpc::ClientAsyncResponseReader<kvrpcpb::RawScanResponse>> rpc;
+            std::string* out_posting = nullptr;
+            std::string* out_next_cursor = nullptr;
+            std::atomic<int>* out_count = nullptr;
+            std::atomic<bool>* out_more = nullptr;
+            bool OnComplete(bool ok) override {
+                if (!ok || !status.ok()) return false;
+                if (response.has_region_error()) {
+                    if (owner) owner->InvalidateRegionCache(keyForCacheInvalidation);
+                    return false;
+                }
+
+                int count = response.kvs_size();
+                if (out_posting) {
+                    for (int i = 0; i < count; i++) {
+                        out_posting->append(response.kvs(i).value());
+                    }
+                }
+                if (out_count) out_count->store(count, std::memory_order_release);
+                bool more = count >= 1024;
+                if (out_more) out_more->store(more, std::memory_order_release);
+                if (more && out_next_cursor && count > 0) {
+                    *out_next_cursor = response.kvs(count - 1).key();
+                    out_next_cursor->push_back('\x00');
+                }
+                return true;
+            }
+        };
+
         TiKVIO(const std::string& pdAddresses, const std::string& keyPrefix)
             : m_keyPrefix(keyPrefix)
         {
@@ -128,6 +388,12 @@ namespace SPTAG::SPANN
 
             m_available = true;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Initialized with key prefix '%s'\n", m_keyPrefix.c_str());
+
+            // Start the async-RPC pump thread now that the object is fully
+            // initialized. Single thread services a single CompletionQueue
+            // shared by every Async* call below.
+            m_asyncPumpRunning.store(true, std::memory_order_release);
+            m_asyncPumpThread = std::thread([this]() { AsyncPumpLoop(); });
         }
 
         ~TiKVIO() override {
@@ -135,6 +401,14 @@ namespace SPTAG::SPANN
         }
 
         void ShutDown() override {
+            // Tear down the async pump first so no new completions race with
+            // stub destruction. Order: stop accepting new ops -> Shutdown cq
+            // (drains in-flight tags as cancelled) -> join pump -> drop stubs.
+            bool wasRunning = m_asyncPumpRunning.exchange(false, std::memory_order_acq_rel);
+            if (wasRunning) {
+                m_asyncCq.Shutdown();
+                if (m_asyncPumpThread.joinable()) m_asyncPumpThread.join();
+            }
             m_available = false;
             std::lock_guard<std::mutex> lock(m_storeMutex);
             m_storeStubs.clear();
@@ -396,7 +670,12 @@ namespace SPTAG::SPANN
         {
             if (keys.empty()) return ErrorCode::Success;
 
-            // Build prefixed keys and initialize all values as empty
+            struct PendingRegionGroup {
+                std::string leaderAddr;
+                RegionInfo region{};
+                std::vector<std::pair<size_t, std::string>> keys;
+            };
+
             std::vector<std::string> prefixedKeys(keys.size());
             for (size_t i = 0; i < keys.size(); i++) {
                 std::string k(reinterpret_cast<const char*>(&keys[i]), sizeof(SizeType));
@@ -404,10 +683,9 @@ namespace SPTAG::SPANN
                 values[i].SetAvailableSize(0);
             }
 
-            // Group keys by (leader address, region id)
             std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
             for (size_t i = 0; i < prefixedKeys.size(); i++) {
-                RegionInfo region;
+                RegionInfo region{};
                 std::string addr;
                 uint64_t rid = 0;
                 if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
@@ -421,84 +699,60 @@ namespace SPTAG::SPANN
                 g.keys.push_back({i, prefixedKeys[i]});
             }
 
-            // Send RawBatchGet per region group (in parallel via futures)
-            std::vector<std::future<void>> futures;
-            std::mutex resultMutex;
-
-            for (auto& [gkey, rg] : regionGroups) {
-                futures.push_back(std::async(std::launch::async, [&, &gkey, &rg]() {
-                    auto& group = rg.keys;
-                    auto* stub = GetOrCreateStub(gkey.leaderAddr);
-                    if (!stub) return;
-
-                    kvrpcpb::RawBatchGetRequest request;
-                    SetContextFromRegion(request.mutable_context(), rg.region);
-                    for (auto& [idx, pkey] : group) {
-                        request.add_keys(pkey);
-                    }
-
-                    kvrpcpb::RawBatchGetResponse response;
-                    grpc::ClientContext ctx;
-                    SetDeadline(ctx, timeout);
-
-                    auto status = stub->RawBatchGet(&ctx, request, &response);
-                    if (!status.ok() || (status.ok() && response.has_region_error())) {
-                        // Region error or gRPC failure: invalidate cache and fallback to individual gets
-                        // (Get has its own region error retry logic)
-                        if (status.ok() && response.has_region_error()) {
-                            for (auto& [idx, pkey] : group) {
-                                InvalidateRegionCache(pkey);
-                            }
-                        }
-                        for (auto& [idx, pkey] : group) {
-                            std::string val;
-                            auto ret = Get(keys[idx], &val, timeout, reqs);
-                            if (ret == ErrorCode::Success && !val.empty()) {
-                                std::lock_guard<std::mutex> lock(resultMutex);
-                                if (val.size() > values[idx].GetPageSize()) {
-                                    values[idx].ReservePageBuffer(val.size());
-                                }
-                                memcpy(values[idx].GetBuffer(), val.data(), val.size());
-                                values[idx].SetAvailableSize(static_cast<int>(val.size()));
-                            }
-                        }
-                        return;
-                    }
-
-                    // Build a map from prefixed key -> response value
-                    std::unordered_map<std::string, std::string> resultMap;
-                    for (int p = 0; p < response.pairs_size(); p++) {
-                        const auto& pair = response.pairs(p);
-                        if (!pair.has_error() && !pair.value().empty()) {
-                            resultMap[pair.key()] = pair.value();
-                        }
-                    }
-
-                    // Copy results to output buffers
-                    std::lock_guard<std::mutex> lock(resultMutex);
-                    for (auto& [idx, pkey] : group) {
-                        auto it = resultMap.find(pkey);
-                        if (it != resultMap.end()) {
-                            const auto& val = it->second;
-                            if (val.size() > values[idx].GetPageSize()) {
-                                values[idx].ReservePageBuffer(val.size());
-                            }
-                            memcpy(values[idx].GetBuffer(), val.data(), val.size());
-                            values[idx].SetAvailableSize(static_cast<int>(val.size()));
-                        }
-                        // else: remains empty (SetAvailableSize(0)), tolerating missing keys
-                    }
-                }));
+            std::vector<PendingRegionGroup> groups;
+            groups.reserve(regionGroups.size());
+            for (auto& kv : regionGroups) {
+                PendingRegionGroup g;
+                g.leaderAddr = kv.first.leaderAddr;
+                g.region = kv.second.region;
+                g.keys = kv.second.keys;
+                groups.push_back(std::move(g));
             }
 
-            // Wait for all region batch gets to complete
-            for (auto& f : futures) {
-                f.get();
+            std::vector<std::string> tmpValues(keys.size());
+            auto batch = std::make_shared<AsyncBatch>();
+            batch->Add(static_cast<int>(groups.size()));
+            std::vector<std::atomic<int>> okFlags(groups.size());
+            for (auto& f : okFlags) f.store(0, std::memory_order_relaxed);
+
+            for (size_t i = 0; i < groups.size(); i++) {
+                kvrpcpb::Context context;
+                SetContextFromRegion(&context, groups[i].region);
+                AsyncRawBatchGetPrefixed(groups[i].leaderAddr, context, groups[i].keys,
+                                         &tmpValues, batch, &okFlags[i], timeout);
+            }
+            auto waitBegin = std::chrono::high_resolution_clock::now();
+            batch->Wait();
+            RecordAsyncWait(AsyncWaitKind::MultiGetPageBuffer, groups.size(),
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - waitBegin).count()));
+
+            int failCount = 0;
+            for (size_t i = 0; i < groups.size(); i++) {
+                if (okFlags[i].load(std::memory_order_acquire) == 1) continue;
+                for (auto& [idx, pkey] : groups[i].keys) {
+                    InvalidateRegionCache(pkey);
+                    std::string val;
+                    auto ret = Get(keys[idx], &val, timeout, reqs);
+                    if (ret == ErrorCode::Success) {
+                        tmpValues[idx] = std::move(val);
+                    } else if (ret != ErrorCode::Key_NotFound) {
+                        failCount++;
+                    }
+                }
             }
 
-            // Check if any keys that should have values came back empty due to errors
-            // (not-found is tolerable, but gRPC/region errors are not)
-            return ErrorCode::Success;
+            for (size_t i = 0; i < tmpValues.size(); i++) {
+                const auto& val = tmpValues[i];
+                if (val.empty()) continue;
+                if (val.size() > values[i].GetPageSize()) {
+                    values[i].ReservePageBuffer(val.size());
+                }
+                memcpy(values[i].GetBuffer(), val.data(), val.size());
+                values[i].SetAvailableSize(static_cast<int>(val.size()));
+            }
+
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
         }
 
         ErrorCode MultiGet(const std::vector<std::string>& keys,
@@ -508,19 +762,21 @@ namespace SPTAG::SPANN
         {
             if (keys.empty()) return ErrorCode::Success;
 
-            // Build prefixed keys
+            struct PendingRegionGroup {
+                std::string leaderAddr;
+                RegionInfo region{};
+                std::vector<std::pair<size_t, std::string>> keys;
+            };
+
             std::vector<std::string> prefixedKeys(keys.size());
             for (size_t i = 0; i < keys.size(); i++) {
                 prefixedKeys[i] = MakePrefixedKey(keys[i]);
             }
+            values->assign(keys.size(), std::string());
 
-            // Initialize output with empty strings
-            values->resize(keys.size());
-
-            // Group by (leader address, region id)
             std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
             for (size_t i = 0; i < prefixedKeys.size(); i++) {
-                RegionInfo region;
+                RegionInfo region{};
                 std::string addr;
                 uint64_t rid = 0;
                 if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
@@ -534,56 +790,49 @@ namespace SPTAG::SPANN
                 g.keys.push_back({i, prefixedKeys[i]});
             }
 
-            for (auto& [gkey, rg] : regionGroups) {
-                auto& group = rg.keys;
-                auto* stub = GetOrCreateStub(gkey.leaderAddr);
-                if (!stub) continue;
+            std::vector<PendingRegionGroup> groups;
+            groups.reserve(regionGroups.size());
+            for (auto& kv : regionGroups) {
+                PendingRegionGroup g;
+                g.leaderAddr = kv.first.leaderAddr;
+                g.region = kv.second.region;
+                g.keys = kv.second.keys;
+                groups.push_back(std::move(g));
+            }
 
-                kvrpcpb::RawBatchGetRequest request;
-                SetContextFromRegion(request.mutable_context(), rg.region);
-                for (auto& [idx, pkey] : group) {
-                    request.add_keys(pkey);
-                }
+            auto batch = std::make_shared<AsyncBatch>();
+            batch->Add(static_cast<int>(groups.size()));
+            std::vector<std::atomic<int>> okFlags(groups.size());
+            for (auto& f : okFlags) f.store(0, std::memory_order_relaxed);
 
-                kvrpcpb::RawBatchGetResponse response;
-                grpc::ClientContext ctx;
-                SetDeadline(ctx, timeout);
+            for (size_t i = 0; i < groups.size(); i++) {
+                kvrpcpb::Context context;
+                SetContextFromRegion(&context, groups[i].region);
+                AsyncRawBatchGetPrefixed(groups[i].leaderAddr, context, groups[i].keys,
+                                         values, batch, &okFlags[i], timeout);
+            }
+            auto waitBegin = std::chrono::high_resolution_clock::now();
+            batch->Wait();
+            RecordAsyncWait(AsyncWaitKind::MultiGetString, groups.size(),
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - waitBegin).count()));
 
-                auto status = stub->RawBatchGet(&ctx, request, &response);
-                if (!status.ok() || (status.ok() && response.has_region_error())) {
-                    // Region error or gRPC failure: invalidate cache and fallback to individual gets
-                    // (Get has its own region error retry logic)
-                    if (status.ok() && response.has_region_error()) {
-                        for (auto& [idx, pkey] : group) {
-                            InvalidateRegionCache(pkey);
-                        }
-                    }
-                    for (auto& [idx, pkey] : group) {
-                        std::string val;
-                        if (Get(keys[idx], &val, timeout, reqs) == ErrorCode::Success) {
-                            (*values)[idx] = std::move(val);
-                        }
-                    }
-                    continue;
-                }
-
-                std::unordered_map<std::string, std::string> resultMap;
-                for (int p = 0; p < response.pairs_size(); p++) {
-                    const auto& pair = response.pairs(p);
-                    if (!pair.has_error() && !pair.value().empty()) {
-                        resultMap[pair.key()] = pair.value();
-                    }
-                }
-
-                for (auto& [idx, pkey] : group) {
-                    auto it = resultMap.find(pkey);
-                    if (it != resultMap.end()) {
-                        (*values)[idx] = std::move(it->second);
+            int failCount = 0;
+            for (size_t i = 0; i < groups.size(); i++) {
+                if (okFlags[i].load(std::memory_order_acquire) == 1) continue;
+                for (auto& [idx, pkey] : groups[i].keys) {
+                    InvalidateRegionCache(pkey);
+                    std::string val;
+                    auto ret = Get(keys[idx], &val, timeout, reqs);
+                    if (ret == ErrorCode::Success) {
+                        (*values)[idx] = std::move(val);
+                    } else if (ret != ErrorCode::Key_NotFound) {
+                        failCount++;
                     }
                 }
             }
 
-            return ErrorCode::Success;
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
         }
 
         ErrorCode MultiGet(const std::vector<SizeType>& keys,
@@ -599,6 +848,223 @@ namespace SPTAG::SPANN
                 strKeys[i] = std::string(reinterpret_cast<const char*>(&keys[i]), sizeof(SizeType));
             }
             return MultiGet(strKeys, values, timeout, reqs);
+        }
+
+        // ---- MultiPut / MultiDelete operations ----
+        // Group keys by (leader address, region id) and issue one RawBatchPut /
+        // RawBatchDelete per region. Region groups run in parallel via std::async,
+        // mirroring the MultiGet implementation. On region/RPC error we
+        // invalidate the region cache and fall back to per-key Put/Delete which
+        // each have their own retry loop. The caller blocks on all futures.
+        //
+        // The keys passed in are RAW caller keys (not yet prefixed with
+        // m_keyPrefix). Inputs containing keys already constructed by helpers
+        // such as MakeChunkKey/MakeCountKey (which already include the prefix)
+        // must use the *Prefixed variants below.
+
+        ErrorCode MultiPut(const std::vector<std::string>& keys,
+                           const std::vector<std::string>& values,
+                           const std::chrono::microseconds& timeout,
+                           std::vector<Helper::AsyncReadRequest>* reqs) override
+        {
+            if (keys.empty()) return ErrorCode::Success;
+            if (keys.size() != values.size()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVIO::MultiPut size mismatch: keys=%zu values=%zu\n",
+                    keys.size(), values.size());
+                return ErrorCode::Fail;
+            }
+            std::vector<std::string> prefixedKeys(keys.size());
+            for (size_t i = 0; i < keys.size(); i++) {
+                prefixedKeys[i] = MakePrefixedKey(keys[i]);
+            }
+            return MultiPutPrefixed(prefixedKeys, values, timeout, reqs);
+        }
+
+        ErrorCode MultiDelete(const std::vector<std::string>& keys,
+                              const std::chrono::microseconds& timeout) override
+        {
+            if (keys.empty()) return ErrorCode::Success;
+            std::vector<std::string> prefixedKeys(keys.size());
+            for (size_t i = 0; i < keys.size(); i++) {
+                prefixedKeys[i] = MakePrefixedKey(keys[i]);
+            }
+            return MultiDeletePrefixed(prefixedKeys, timeout);
+        }
+
+        // Variants that accept already-prefixed keys (used by chunk/count helpers
+        // that produce keys via MakeChunkKey / MakeCountKey).
+        ErrorCode MultiPutPrefixed(const std::vector<std::string>& prefixedKeys,
+                                   const std::vector<std::string>& values,
+                                   const std::chrono::microseconds& timeout,
+                                   std::vector<Helper::AsyncReadRequest>* reqs)
+        {
+            if (prefixedKeys.empty()) return ErrorCode::Success;
+
+            std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
+            for (size_t i = 0; i < prefixedKeys.size(); i++) {
+                RegionInfo region;
+                std::string addr;
+                uint64_t rid = 0;
+                if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
+                    addr = region.leaderAddr;
+                    rid = region.regionId;
+                } else {
+                    addr = GetAnyStoreAddress();
+                }
+                auto& g = regionGroups[{addr, rid}];
+                if (g.keys.empty()) g.region = region;
+                g.keys.push_back({i, prefixedKeys[i]});
+            }
+
+            std::atomic<int> failCount{0};
+            std::vector<std::future<void>> futures;
+            futures.reserve(regionGroups.size());
+
+            for (auto& kv : regionGroups) {
+                auto* gkey = &kv.first;
+                auto* rg = &kv.second;
+                futures.push_back(std::async(std::launch::async,
+                                             [this, gkey, rg, &prefixedKeys, &values, &timeout, &failCount]() {
+                    auto& group = rg->keys;
+                    auto* stub = GetOrCreateStub(gkey->leaderAddr);
+                    bool needFallback = false;
+
+                    if (stub) {
+                        kvrpcpb::RawBatchPutRequest request;
+                        SetContextFromRegion(request.mutable_context(), rg->region);
+                        for (auto& [idx, pkey] : group) {
+                            auto* p = request.add_pairs();
+                            p->set_key(pkey);
+                            p->set_value(values[idx]);
+                        }
+                        kvrpcpb::RawBatchPutResponse response;
+                        grpc::ClientContext ctx;
+                        SetDeadline(ctx, timeout);
+                        auto status = stub->RawBatchPut(&ctx, request, &response);
+                        if (!status.ok() || response.has_region_error() || !response.error().empty()) {
+                            for (auto& [idx, pkey] : group) InvalidateRegionCache(pkey);
+                            needFallback = true;
+                        }
+                    } else {
+                        needFallback = true;
+                    }
+
+                    if (needFallback) {
+                        // Per-key Put has its own retry loop and will refresh
+                        // region routing on each attempt. Reuse the existing
+                        // RawPutWithRetry helper for already-prefixed keys.
+                        for (auto& [idx, pkey] : group) {
+                            auto ret = RawPutWithRetry(pkey, values[idx], timeout);
+                            if (ret != ErrorCode::Success) {
+                                failCount.fetch_add(1, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }));
+            }
+            for (auto& f : futures) f.get();
+            return failCount.load() == 0 ? ErrorCode::Success : ErrorCode::Fail;
+        }
+
+        ErrorCode MultiDeletePrefixed(const std::vector<std::string>& prefixedKeys,
+                                      const std::chrono::microseconds& timeout)
+        {
+            if (prefixedKeys.empty()) return ErrorCode::Success;
+
+            std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
+            for (size_t i = 0; i < prefixedKeys.size(); i++) {
+                RegionInfo region;
+                std::string addr;
+                uint64_t rid = 0;
+                if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
+                    addr = region.leaderAddr;
+                    rid = region.regionId;
+                } else {
+                    addr = GetAnyStoreAddress();
+                }
+                auto& g = regionGroups[{addr, rid}];
+                if (g.keys.empty()) g.region = region;
+                g.keys.push_back({i, prefixedKeys[i]});
+            }
+
+            std::atomic<int> failCount{0};
+            std::vector<std::future<void>> futures;
+            futures.reserve(regionGroups.size());
+
+            for (auto& kv : regionGroups) {
+                auto* gkey = &kv.first;
+                auto* rg = &kv.second;
+                futures.push_back(std::async(std::launch::async,
+                                             [this, gkey, rg, &timeout, &failCount]() {
+                    auto& group = rg->keys;
+                    auto* stub = GetOrCreateStub(gkey->leaderAddr);
+                    bool needFallback = false;
+
+                    if (stub) {
+                        kvrpcpb::RawBatchDeleteRequest request;
+                        SetContextFromRegion(request.mutable_context(), rg->region);
+                        for (auto& [idx, pkey] : group) {
+                            request.add_keys(pkey);
+                        }
+                        kvrpcpb::RawBatchDeleteResponse response;
+                        grpc::ClientContext ctx;
+                        SetDeadline(ctx, timeout);
+                        auto status = stub->RawBatchDelete(&ctx, request, &response);
+                        if (!status.ok() || response.has_region_error() || !response.error().empty()) {
+                            for (auto& [idx, pkey] : group) InvalidateRegionCache(pkey);
+                            needFallback = true;
+                        }
+                    } else {
+                        needFallback = true;
+                    }
+
+                    if (needFallback) {
+                        for (auto& [idx, pkey] : group) {
+                            auto ret = DeletePrefixed(pkey, timeout);
+                            if (ret != ErrorCode::Success) {
+                                failCount.fetch_add(1, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }));
+            }
+            for (auto& f : futures) f.get();
+            return failCount.load() == 0 ? ErrorCode::Success : ErrorCode::Fail;
+        }
+
+        // Low-level Delete on an already-prefixed key (for MultiDelete fallback).
+        // The public Delete() builds its own prefix; we need a variant that
+        // accepts pre-prefixed keys produced by MakeChunkKey/MakeCountKey.
+        // (For Put we already have RawPutWithRetry; no need to duplicate.)
+        ErrorCode DeletePrefixed(const std::string& prefixedKey,
+                                 const std::chrono::microseconds& timeout)
+        {
+            for (int attempt = 0; ; attempt++) {
+                auto stub = GetStubForKey(prefixedKey);
+                if (!stub) { RetryBackoff(attempt); continue; }
+                kvrpcpb::RawDeleteRequest request;
+                request.set_key(prefixedKey);
+                SetContext(request.mutable_context(), prefixedKey);
+                kvrpcpb::RawDeleteResponse response;
+                grpc::ClientContext ctx;
+                SetDeadline(ctx, timeout);
+                auto status = stub->RawDelete(&ctx, request, &response);
+                if (!status.ok()) {
+                    InvalidateRegionCache(prefixedKey);
+                    if (attempt >= 10) return ErrorCode::Fail;
+                    RetryBackoff(attempt);
+                    continue;
+                }
+                if (response.has_region_error()) {
+                    InvalidateRegionCache(prefixedKey);
+                    if (attempt >= 10) return ErrorCode::Fail;
+                    RetryBackoff(attempt);
+                    continue;
+                }
+                if (!response.error().empty()) return ErrorCode::Fail;
+                return ErrorCode::Success;
+            }
         }
 
         // ---- Coprocessor vector search ----
@@ -654,9 +1120,13 @@ namespace SPTAG::SPANN
             // Send RawCoprocessor per region group in parallel
             std::vector<std::future<std::vector<CoprocessorResult>>> futures;
 
-            for (auto& [gkey, rg] : regionGroups) {
+            for (auto& kv : regionGroups) {
+                RegionGroupKey gkey = kv.first;
+                RegionGroup rg = kv.second;
                 futures.push_back(std::async(std::launch::async,
-                    [&, &gkey, &rg]() -> std::vector<CoprocessorResult> {
+                    [this, gkey = std::move(gkey), rg = std::move(rg), queryVector,
+                     queryVecBytes, dim, topN, valueType, metaDataSize,
+                     timeout]() mutable -> std::vector<CoprocessorResult> {
                     auto& group = rg.keys;
                     auto* stub = GetOrCreateStub(gkey.leaderAddr);
                     if (!stub) return {};
@@ -1050,6 +1520,100 @@ namespace SPTAG::SPANN
             }
         }
 
+        ErrorCode AsyncGetPostingCounts(const std::vector<SizeType>& headIDs,
+                                        std::vector<int>* counts,
+                                        const std::chrono::microseconds& timeout)
+        {
+            if (!counts) return ErrorCode::Fail;
+            counts->assign(headIDs.size(), -1);
+            if (headIDs.empty()) return ErrorCode::Success;
+
+            struct PendingRegionGroup {
+                std::string leaderAddr;
+                RegionInfo region{};
+                std::vector<std::pair<size_t, std::string>> keys;
+            };
+
+            std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
+            for (size_t i = 0; i < headIDs.size(); i++) {
+                std::string key = MakeCountKey(headIDs[i]);
+                RegionInfo region{};
+                std::string addr;
+                uint64_t rid = 0;
+                if (FindRegionForKey(key, region) && !region.leaderAddr.empty()) {
+                    addr = region.leaderAddr;
+                    rid = region.regionId;
+                } else {
+                    addr = GetAnyStoreAddress();
+                }
+                auto& group = regionGroups[{addr, rid}];
+                if (group.keys.empty()) group.region = region;
+                group.keys.push_back({i, key});
+            }
+
+            std::vector<PendingRegionGroup> groups;
+            groups.reserve(regionGroups.size());
+            for (auto& kv : regionGroups) {
+                PendingRegionGroup group;
+                group.leaderAddr = kv.first.leaderAddr;
+                group.region = kv.second.region;
+                group.keys = kv.second.keys;
+                groups.push_back(std::move(group));
+            }
+
+            std::vector<std::string> values(headIDs.size());
+            auto batch = std::make_shared<AsyncBatch>();
+            batch->Add(static_cast<int>(groups.size()));
+            std::vector<std::atomic<int>> okFlags(groups.size());
+            for (auto& flag : okFlags) flag.store(0, std::memory_order_relaxed);
+
+            for (size_t i = 0; i < groups.size(); i++) {
+                kvrpcpb::Context context;
+                SetContextFromRegion(&context, groups[i].region);
+                AsyncRawBatchGetPrefixed(groups[i].leaderAddr, context, groups[i].keys,
+                                         &values, batch, &okFlags[i], timeout);
+            }
+            auto waitBegin = std::chrono::high_resolution_clock::now();
+            batch->Wait();
+            RecordAsyncWait(AsyncWaitKind::CountBatchGet, headIDs.size(),
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - waitBegin).count()));
+
+            int failCount = 0;
+            for (size_t i = 0; i < groups.size(); i++) {
+                if (okFlags[i].load(std::memory_order_acquire) == 1) {
+                    for (auto& kv : groups[i].keys) {
+                        (*counts)[kv.first] = 0;
+                    }
+                    continue;
+                }
+                for (auto& kv : groups[i].keys) {
+                    size_t idx = kv.first;
+                    InvalidateRegionCache(kv.second);
+                    int count = GetPostingCount(headIDs[idx], timeout);
+                    if (count < 0) {
+                        failCount++;
+                    } else {
+                        (*counts)[idx] = count;
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < values.size(); i++) {
+                if (values[i].empty()) continue;
+                if (values[i].size() < sizeof(int32_t)) {
+                    (*counts)[i] = -1;
+                    failCount++;
+                    continue;
+                }
+                int32_t count = 0;
+                memcpy(&count, values[i].data(), sizeof(int32_t));
+                (*counts)[i] = count;
+            }
+
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
+        }
+
         // Write posting count to TiKV.
         ErrorCode SetPostingCount(SizeType headID, int count,
                                   const std::chrono::microseconds& timeout) {
@@ -1208,6 +1772,73 @@ namespace SPTAG::SPANN
             return ErrorCode::Success;
         }
 
+        // Same as PutChunkAndCount but writes the BASE chunk (no timestamp suffix).
+        // Used by PutPostingToDB compaction path: replaces (overwrites) the base
+        // chunk and updates the count in a single RawBatchPut RPC. Saves one
+        // round trip vs separate PutBaseChunk + SetPostingCount.
+        ErrorCode PutBaseChunkAndCount(SizeType headID,
+                                       const std::string& chunkValue,
+                                       int newCount,
+                                       const std::chrono::microseconds& timeout,
+                                       std::vector<Helper::AsyncReadRequest>* reqs) {
+            std::string chunkKey = MakeChunkKey(headID); // base key, no suffix
+            std::string countKey = MakeCountKey(headID);
+            std::string countValue(reinterpret_cast<const char*>(&newCount), sizeof(int32_t));
+
+            {
+                auto stub = GetStubForKey(chunkKey);
+                if (stub) {
+                    kvrpcpb::RawBatchPutRequest request;
+                    SetContext(request.mutable_context(), chunkKey);
+
+                    auto* p1 = request.add_pairs();
+                    p1->set_key(chunkKey);
+                    p1->set_value(chunkValue);
+
+                    auto* p2 = request.add_pairs();
+                    p2->set_key(countKey);
+                    p2->set_value(countValue);
+
+                    kvrpcpb::RawBatchPutResponse response;
+                    grpc::ClientContext ctx;
+                    SetDeadline(ctx, timeout);
+
+                    auto status = stub->RawBatchPut(&ctx, request, &response);
+                    if (status.ok() && !response.has_region_error() && response.error().empty()) {
+                        return ErrorCode::Success;
+                    }
+                    if (!status.ok()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "TiKVIO::PutBaseChunkAndCount BatchPut gRPC error headID=%d: %s, falling back\n",
+                            headID, status.error_message().c_str());
+                    } else if (response.has_region_error()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                            "TiKVIO::PutBaseChunkAndCount BatchPut region_error headID=%d, falling back\n", headID);
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVIO::PutBaseChunkAndCount error: %s\n", response.error().c_str());
+                    }
+                    InvalidateRegionCache(chunkKey);
+                    InvalidateRegionCache(countKey);
+                }
+            }
+
+            // Fallback: write chunk and count separately.
+            auto ret1 = RawPutWithRetry(chunkKey, chunkValue, timeout);
+            if (ret1 != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "TiKVIO::PutBaseChunkAndCount fallback: PutBaseChunk failed headID=%d\n", headID);
+                return ret1;
+            }
+            auto ret2 = RawPutWithRetry(countKey, countValue, timeout);
+            if (ret2 != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "TiKVIO::PutBaseChunkAndCount fallback: PutCount failed headID=%d\n", headID);
+                return ret2;
+            }
+            return ErrorCode::Success;
+        }
+
         // Multi-posting scan: read multiple postings in parallel.
         // Used by SearchIndex to replace MultiGet when multi-chunk is enabled.
         ErrorCode MultiScanPostings(const std::vector<SizeType>& headIDs,
@@ -1216,37 +1847,99 @@ namespace SPTAG::SPANN
         {
             if (headIDs.empty()) return ErrorCode::Success;
 
-            std::atomic<int> failCount(0);
-            std::vector<std::future<void>> futures;
-            for (size_t i = 0; i < headIDs.size(); i++) {
-                futures.push_back(std::async(std::launch::async, [&, i]() {
-                    std::string posting;
-                    auto ret = ScanPosting(headIDs[i], &posting, timeout);
-                    // On actual gRPC error (not VectorNotFound), retry with generous timeout
-                    if (ret == ErrorCode::Fail) {
-                        auto retryTimeout = std::chrono::microseconds(10000000); // 10s
-                        ret = ScanPosting(headIDs[i], &posting, retryTimeout);
-                    }
-                    if (ret == ErrorCode::Success && !posting.empty()) {
-                        if (posting.size() > values[i].GetPageSize()) {
-                            values[i].ReservePageBuffer(posting.size());
-                        }
-                        memcpy(values[i].GetBuffer(), posting.data(), posting.size());
-                        values[i].SetAvailableSize(static_cast<int>(posting.size()));
-                    } else {
-                        values[i].SetAvailableSize(0);
+            size_t n = headIDs.size();
+            std::vector<std::string> postings(n);
+            std::vector<std::string> cursors(n);
+            std::vector<std::string> nextCursors(n);
+            std::vector<std::string> endKeys(n);
+            std::vector<char> active(n, 1);
+            for (size_t i = 0; i < n; i++) {
+                cursors[i] = MakeChunkKey(headIDs[i]);
+                std::string raw(reinterpret_cast<const char*>(&headIDs[i]), sizeof(SizeType));
+                endKeys[i].reserve(m_keyPrefix.size() + 1 + sizeof(SizeType) + 1);
+                endKeys[i].append(m_keyPrefix);
+                endKeys[i].push_back('_');
+                endKeys[i].append(raw);
+                endKeys[i].push_back('\x01');
+                values[i].SetAvailableSize(0);
+            }
+
+            int failCount = 0;
+            while (true) {
+                int activeCount = 0;
+                for (auto a : active) if (a) activeCount++;
+                if (activeCount == 0) break;
+
+                auto batch = std::make_shared<AsyncBatch>();
+                batch->Add(activeCount);
+                std::vector<std::atomic<int>> okFlags(n);
+                std::vector<std::atomic<int>> pageCounts(n);
+                std::vector<std::atomic<bool>> moreFlags(n);
+                for (size_t i = 0; i < n; i++) {
+                    okFlags[i].store(0, std::memory_order_relaxed);
+                    pageCounts[i].store(0, std::memory_order_relaxed);
+                    moreFlags[i].store(false, std::memory_order_relaxed);
+                }
+
+                for (size_t i = 0; i < n; i++) {
+                    if (!active[i]) continue;
+                    nextCursors[i].clear();
+                    AsyncRawScanPagePrefixed(cursors[i], endKeys[i], &postings[i], &nextCursors[i],
+                                             &pageCounts[i], &moreFlags[i], batch, &okFlags[i], timeout);
+                }
+                auto waitBegin = std::chrono::high_resolution_clock::now();
+                batch->Wait();
+                RecordAsyncWait(AsyncWaitKind::MultiScanPostings, activeCount,
+                    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::high_resolution_clock::now() - waitBegin).count()));
+
+                for (size_t i = 0; i < n; i++) {
+                    if (!active[i]) continue;
+                    if (okFlags[i].load(std::memory_order_acquire) != 1) {
+                        std::string posting;
+                        auto ret = ScanPosting(headIDs[i], &posting, timeout);
                         if (ret == ErrorCode::Fail) {
-                            failCount.fetch_add(1);
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "MultiScanPostings: ScanPosting failed for headID %d after retry\n", headIDs[i]);
+                            auto retryTimeout = std::chrono::microseconds(10000000); // 10s
+                            ret = ScanPosting(headIDs[i], &posting, retryTimeout);
                         }
+                        if (ret == ErrorCode::Success) {
+                            postings[i] = std::move(posting);
+                        } else if (ret == ErrorCode::Fail) {
+                            failCount++;
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "MultiScanPostings: ScanPosting failed for headID %d after retry\n",
+                                headIDs[i]);
+                        }
+                        active[i] = 0;
+                        continue;
                     }
-                }));
+
+                    int pageCount = pageCounts[i].load(std::memory_order_acquire);
+                    if (pageCount == 0) {
+                        active[i] = 0;
+                    } else if (moreFlags[i].load(std::memory_order_acquire)) {
+                        cursors[i] = nextCursors[i];
+                    } else {
+                        active[i] = 0;
+                    }
+                }
             }
-            for (auto& f : futures) f.get();
-            if (failCount.load() > 0) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "MultiScanPostings: %d/%d postings had gRPC errors\n", failCount.load(), (int)headIDs.size());
+
+            for (size_t i = 0; i < n; i++) {
+                if (postings[i].empty()) continue;
+                if (postings[i].size() > values[i].GetPageSize()) {
+                    values[i].ReservePageBuffer(postings[i].size());
+                }
+                memcpy(values[i].GetBuffer(), postings[i].data(), postings[i].size());
+                values[i].SetAvailableSize(static_cast<int>(postings[i].size()));
             }
-            return ErrorCode::Success;
+
+            if (failCount > 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "MultiScanPostings: %d/%d postings had gRPC errors\n",
+                    failCount, (int)headIDs.size());
+            }
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
         }
 
         // ---- Scan operations ----
@@ -1330,12 +2023,294 @@ namespace SPTAG::SPANN
             return ErrorCode::Success;
         }
 
+        // ---- Async fan-out: submit one BatchPut RPC without blocking ----
+        //
+        // Issues an async RawBatchPut for {chunkKey,chunkValue}+{countKey,countValue}
+        // (the canonical "append a chunk and update the count" pair used by
+        // SPFresh multi-chunk Append). The caller must have called
+        // batch->Add(N) once before submitting N RPCs against the same batch,
+        // and must Wait() on the batch before reading result_slot[i] or
+        // destroying any inputs.
+        //
+        // result_slot stores: 1 = success, 0 = failed (caller should sync-retry).
+        // Failure modes (any one marks the slot as 0):
+        //   * GetStubForKey returned null
+        //   * cq delivered ok=false (cancelled / shutdown)
+        //   * gRPC status not OK
+        //   * response.has_region_error()  (region cache also invalidated)
+        //   * !response.error().empty()
+        //
+        // The keys themselves and the values are COPIED into the per-RPC tag so
+        // that the caller may free its inputs as soon as the call returns.
+        void AsyncRawBatchPut(const std::string& chunkKey,
+                              const std::string& chunkValue,
+                              const std::string& countKey,
+                              const std::string& countValue,
+                              std::shared_ptr<AsyncBatch> batch,
+                              std::atomic<int>* result_slot,
+                              const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+            auto* stub = GetStubForKey(chunkKey);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
+            auto* tag = new AsyncBatchPutTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = chunkKey;
+            tag->owner = this;
+            SetContext(tag->request.mutable_context(), chunkKey);
+            auto* p1 = tag->request.add_pairs();
+            p1->set_key(chunkKey);
+            p1->set_value(chunkValue);
+            auto* p2 = tag->request.add_pairs();
+            p2->set_key(countKey);
+            p2->set_value(countValue);
+            SetDeadline(tag->ctx, timeout);
+
+            tag->rpc = stub->AsyncRawBatchPut(&tag->ctx, tag->request, &m_asyncCq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        // Async single-key Get. The caller key is the RAW key (will be prefixed
+        // here). out_value receives the value on success; out_found (optional)
+        // distinguishes "found" vs "not_found" — both yield slot=1, but found=false.
+        // Caller is responsible for not destroying out_value/out_found until Wait().
+        void AsyncRawGet(const std::string& key,
+                         std::string* out_value,
+                         std::atomic<bool>* out_found,
+                         std::shared_ptr<AsyncBatch> batch,
+                         std::atomic<int>* result_slot,
+                         const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+            std::string prefixedKey = MakePrefixedKey(key);
+            auto* stub = GetStubForKey(prefixedKey);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
+            auto* tag = new AsyncGetTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = prefixedKey;
+            tag->owner = this;
+            tag->out_value = out_value;
+            tag->out_found = out_found;
+            tag->request.set_key(prefixedKey);
+            SetContext(tag->request.mutable_context(), prefixedKey);
+            SetDeadline(tag->ctx, timeout);
+
+            tag->rpc = stub->AsyncRawGet(&tag->ctx, tag->request, &m_asyncCq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        // Async single-key Put. The key is the RAW key (will be prefixed here).
+        // The value is COPIED into the tag — caller may free as soon as call returns.
+        void AsyncRawPut(const std::string& key,
+                         const std::string& value,
+                         std::shared_ptr<AsyncBatch> batch,
+                         std::atomic<int>* result_slot,
+                         const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+            std::string prefixedKey = MakePrefixedKey(key);
+            auto* stub = GetStubForKey(prefixedKey);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
+            auto* tag = new AsyncPutTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = prefixedKey;
+            tag->owner = this;
+            tag->request.set_key(prefixedKey);
+            tag->request.set_value(value);
+            SetContext(tag->request.mutable_context(), prefixedKey);
+            SetDeadline(tag->ctx, timeout);
+
+            tag->rpc = stub->AsyncRawPut(&tag->ctx, tag->request, &m_asyncCq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        void AsyncRawBatchGetPrefixed(const std::string& leaderAddr,
+                          const kvrpcpb::Context& context,
+                                      const std::vector<std::pair<size_t, std::string>>& group,
+                                      std::vector<std::string>* out_values,
+                                      std::shared_ptr<AsyncBatch> batch,
+                                      std::atomic<int>* result_slot,
+                                      const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire) || group.empty()) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+
+            auto* stub = GetOrCreateStub(leaderAddr);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+
+            auto* tag = new AsyncBatchGetTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = group.front().second;
+            tag->owner = this;
+            tag->keys = group;
+            tag->out_values = out_values;
+            *tag->request.mutable_context() = context;
+            for (auto& kv : tag->keys) {
+                tag->request.add_keys(kv.second);
+            }
+            SetDeadline(tag->ctx, timeout);
+
+            tag->rpc = stub->AsyncRawBatchGet(&tag->ctx, tag->request, &m_asyncCq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        void AsyncRawScanPagePrefixed(const std::string& startKey,
+                                      const std::string& endKey,
+                                      std::string* out_posting,
+                                      std::string* out_next_cursor,
+                                      std::atomic<int>* out_count,
+                                      std::atomic<bool>* out_more,
+                                      std::shared_ptr<AsyncBatch> batch,
+                                      std::atomic<int>* result_slot,
+                                      const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+
+            auto* stub = GetStubForKey(startKey);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+
+            auto* tag = new AsyncScanPageTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = startKey;
+            tag->owner = this;
+            tag->out_posting = out_posting;
+            tag->out_next_cursor = out_next_cursor;
+            tag->out_count = out_count;
+            tag->out_more = out_more;
+            tag->request.set_start_key(startKey);
+            tag->request.set_end_key(endKey);
+            tag->request.set_limit(1024);
+            SetContext(tag->request.mutable_context(), startKey);
+            SetDeadline(tag->ctx, timeout);
+
+            tag->rpc = stub->AsyncRawScan(&tag->ctx, tag->request, &m_asyncCq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        // Convenience wrapper mirroring PutChunkAndCount but async: builds the
+        // (timestamped chunk key, count key) pair internally and dispatches via
+        // AsyncRawBatchPut. Used by SPFresh AddIndex Phase 2 multi-chunk fast
+        // path to fan out 12-30 RPCs without spawning OS threads.
+        void AsyncAppendChunkAndUpdateCount(SizeType headID,
+                                            const std::string& appendPosting,
+                                            int newCount,
+                                            std::shared_ptr<AsyncBatch> batch,
+                                            std::atomic<int>* result_slot,
+                                            const std::chrono::microseconds& timeout)
+        {
+            auto now = std::chrono::high_resolution_clock::now().time_since_epoch();
+            uint64_t ts = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+            std::string suffix(reinterpret_cast<const char*>(&ts), sizeof(ts));
+            std::string chunkKey = MakeChunkKey(headID, suffix);
+            std::string countKey = MakeCountKey(headID);
+            std::string countValue(reinterpret_cast<const char*>(&newCount), sizeof(int32_t));
+            AsyncRawBatchPut(chunkKey, appendPosting, countKey, countValue,
+                             std::move(batch), result_slot, timeout);
+        }
+
     private:
+        // Pump loop: blocks on m_asyncCq.Next, dispatches each completion via
+        // the tag's virtual OnComplete. Runs until ShutDown() calls
+        // m_asyncCq.Shutdown(), at which point Next() drains any remaining
+        // tags (delivering ok=false for cancelled) and finally returns false.
+        // Every submission path MUST produce exactly one Finish() call so that
+        // every tag is freed here.
+        void AsyncPumpLoop() {
+            void* raw_tag = nullptr;
+            bool ok = false;
+            while (m_asyncCq.Next(&raw_tag, &ok)) {
+                auto* t = static_cast<AsyncTagBase*>(raw_tag);
+                bool success = t->OnComplete(ok);
+                if (t->result_slot) {
+                    t->result_slot->store(success ? 1 : 0, std::memory_order_release);
+                }
+                if (t->batch) t->batch->Done(success);
+                delete t;
+            }
+        }
+
+    private:
+        static constexpr int kAsyncWaitHistBuckets = 22;
+
+        static int AsyncWaitHistBucketOf(uint64_t v) {
+            if (v == 0) return 0;
+            int b = 0;
+            uint64_t x = v;
+            while (x > 1) { x >>= 1; ++b; }
+            if (b >= kAsyncWaitHistBuckets) b = kAsyncWaitHistBuckets - 1;
+            return b;
+        }
+
+        static const char* AsyncWaitKindName(AsyncWaitKind kind) {
+            switch (kind) {
+            case AsyncWaitKind::MultiGetPageBuffer: return "MultiGetPageBuffer";
+            case AsyncWaitKind::MultiGetString: return "MultiGetString";
+            case AsyncWaitKind::MultiScanPostings: return "MultiScanPostings";
+            case AsyncWaitKind::CountBatchGet: return "CountBatchGet";
+            case AsyncWaitKind::AddIndexMultiChunk: return "AddIndexMultiChunk";
+            case AsyncWaitKind::CollectReAssignMultiChunk: return "CollectReAssignMultiChunk";
+            case AsyncWaitKind::AddIndexSingleKeyGet: return "AddIndexSingleKeyGet";
+            case AsyncWaitKind::AddIndexSingleKeyPut: return "AddIndexSingleKeyPut";
+            case AsyncWaitKind::Count: break;
+            }
+            return "Unknown";
+        }
+
         std::string m_keyPrefix;
         std::vector<std::string> m_pdAddresses;
         std::unique_ptr<pdpb::PD::Stub> m_pdStub;
         uint64_t m_clusterId = 0;
         bool m_available = false;
+
+        // Async RPC pump (see AsyncRawBatchPut above).
+        grpc::CompletionQueue m_asyncCq;
+        std::thread m_asyncPumpThread;
+        std::atomic<bool> m_asyncPumpRunning{false};
 
         // TiKV store stub pools keyed by store address (multiple channels per store)
         static constexpr int kStubPoolSize = 48;
@@ -1352,6 +2327,11 @@ namespace SPTAG::SPANN
         // reserved for future PD topology changes). Threads compare this against a
         // thread-local cached value to know when to refresh their TLS stub map.
         std::atomic<uint64_t> m_stubEpoch{0};
+
+        std::atomic_uint64_t m_asyncWaitUs[static_cast<int>(AsyncWaitKind::Count)][kAsyncWaitHistBuckets]{};
+        std::atomic_uint64_t m_asyncWaitTotalUs[static_cast<int>(AsyncWaitKind::Count)]{};
+        std::atomic_uint64_t m_asyncWaitBatchTotal[static_cast<int>(AsyncWaitKind::Count)]{};
+        std::atomic_uint64_t m_asyncWaitSampleCount[static_cast<int>(AsyncWaitKind::Count)]{};
 
         // Store address cache: store_id -> address
         mutable std::mutex m_storeAddrMutex;

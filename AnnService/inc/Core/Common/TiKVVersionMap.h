@@ -48,23 +48,22 @@ namespace SPTAG
             struct CachedChunk {
                 SizeType chunkId;
                 std::string data;
-                std::chrono::steady_clock::time_point fetchTime;
             };
             using LruList = std::list<CachedChunk>;
             mutable std::shared_mutex m_cacheMutex;
             mutable LruList m_lruList;
             mutable std::unordered_map<SizeType, LruList::iterator> m_cacheMap;
-            int m_cacheTTLMs{0};        // TTL in ms, 0 = cache disabled
-            int m_cacheMaxChunks{10000}; // max cached chunks (~40MB at 4096 chunk size)
+            int m_cacheMaxChunks{10000}; // max cached chunks; <= 0 disables caching
 
             // Insert or update a chunk in the LRU cache. Caller must hold exclusive m_cacheMutex.
-            void CachePut(SizeType chunkId, const std::string& data, std::chrono::steady_clock::time_point now) const
+            void CachePut(SizeType chunkId, const std::string& data) const
             {
+                if (m_cacheMaxChunks <= 0) return;
+
                 auto it = m_cacheMap.find(chunkId);
                 if (it != m_cacheMap.end()) {
                     // Update existing: move to front
                     it->second->data = data;
-                    it->second->fetchTime = now;
                     m_lruList.splice(m_lruList.begin(), m_lruList, it->second);
                 } else {
                     // Evict LRU entries if at capacity
@@ -73,7 +72,7 @@ namespace SPTAG
                         m_cacheMap.erase(back.chunkId);
                         m_lruList.pop_back();
                     }
-                    m_lruList.push_front({chunkId, data, now});
+                    m_lruList.push_front({chunkId, data});
                     m_cacheMap[chunkId] = m_lruList.begin();
                 }
             }
@@ -110,7 +109,7 @@ namespace SPTAG
                 auto ret = m_db->Put(ChunkKey(chunkId), data, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Success) {
                     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
-                    CachePut(chunkId, data, std::chrono::steady_clock::now());
+                    CachePut(chunkId, data);
                 }
                 return ret;
             }
@@ -132,7 +131,7 @@ namespace SPTAG
                 std::string data = ReadChunk(chunkId);
                 if (!data.empty()) {
                     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
-                    CachePut(chunkId, data, std::chrono::steady_clock::now());
+                    CachePut(chunkId, data);
                 }
                 return data;
             }
@@ -186,7 +185,6 @@ namespace SPTAG
             void SetDB(std::shared_ptr<Helper::KeyValueIO> db) { m_db = db; }
             void SetLayer(int layer) { m_layer = layer; }
             void SetChunkSize(int chunkSize) { m_chunkSize = chunkSize; }
-            void SetCacheTTL(int ttlMs) { m_cacheTTLMs = ttlMs; }
             void SetCacheMaxChunks(int maxChunks) { m_cacheMaxChunks = maxChunks; }
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
@@ -452,8 +450,7 @@ namespace SPTAG
                 if (vids.empty()) return;
 
                 SizeType count = m_count.load();
-                auto now = std::chrono::steady_clock::now();
-                bool cacheEnabled = (m_cacheTTLMs > 0);
+                bool cacheEnabled = (m_cacheMaxChunks > 0);
 
                 // Group VIDs by chunk
                 std::unordered_map<SizeType, std::vector<size_t>> chunkToIndices;
@@ -475,11 +472,8 @@ namespace SPTAG
                     for (auto& [cid, indices] : chunkToIndices) {
                         auto it = m_cacheMap.find(cid);
                         if (it != m_cacheMap.end()) {
-                            auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second->fetchTime).count();
-                            if (ageMs < m_cacheTTLMs) {
-                                resolvedChunks[cid] = it->second->data; // copy
-                                continue;
-                            }
+                            resolvedChunks[cid] = it->second->data; // copy
+                            continue;
                         }
                         missChunkIds.push_back(cid);
                     }
@@ -522,7 +516,7 @@ namespace SPTAG
                     if (cacheEnabled && !fetchedChunks.empty()) {
                         std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
                         for (auto& [cid, data] : fetchedChunks) {
-                            CachePut(cid, data, now);
+                            CachePut(cid, data);
                         }
                     }
                 }
