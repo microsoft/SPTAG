@@ -3617,17 +3617,18 @@ namespace SPTAG::SPANN {
 
             if (pendings.empty()) return ErrorCode::Success;
 
-            // ---- Pass 2: fan-out AsyncRawGet for every head ----
-            auto getBatch = std::make_shared<TiKVIO::AsyncBatch>();
-            getBatch->Add(static_cast<int>(pendings.size()));
-            for (auto& p : pendings) {
-                SizeType k = DBKey(p->headID);
-                std::string keyStr(reinterpret_cast<const char*>(&k), sizeof(SizeType));
-                tikv->AsyncRawGet(keyStr, &p->fullPosting, &p->found,
-                                  getBatch, &p->getOk, MaxTimeout);
+            std::vector<std::string> keys(pendings.size());
+            for (size_t i = 0; i < pendings.size(); i++) {
+                SizeType k = DBKey(pendings[i]->headID);
+                keys[i] = std::string(reinterpret_cast<const char*>(&k), sizeof(SizeType));
             }
+
+            // ---- Pass 2: region-batched RawBatchGet for all target heads ----
+            std::vector<std::string> getValues;
+            std::vector<uint8_t> getOk;
             auto _getWaitBegin = std::chrono::high_resolution_clock::now();
-            getBatch->Wait();
+            tikv->MultiGetWithStatus(keys, &getValues, &getOk, MaxTimeout,
+                                     &(p_exWorkSpace->m_diskRequests));
             tikv->RecordAsyncWait(TiKVIO::AsyncWaitKind::AddIndexSingleKeyGet,
                 pendings.size(),
                 static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -3637,32 +3638,32 @@ namespace SPTAG::SPANN {
             // sync-retry via Append() in Pass 5 (preserves existing data-loss
             // safety semantics: only "key absent" is treated as empty, every
             // other Get failure aborts this head's RMW).
-            auto putBatch = std::make_shared<TiKVIO::AsyncBatch>();
             int activeCount = 0;
-            for (auto& p : pendings) {
-                if (p->getOk.load(std::memory_order_acquire) != 1) {
+            std::vector<std::string> putKeys;
+            std::vector<std::string> putValues;
+            std::vector<int> putIndexByPending(pendings.size(), -1);
+            putKeys.reserve(pendings.size());
+            putValues.reserve(pendings.size());
+            for (size_t i = 0; i < pendings.size(); i++) {
+                auto& p = pendings[i];
+                if (i >= getOk.size() || getOk[i] == 0) {
                     p->active = false;  // sync-retry in Pass 5
                     continue;
                 }
-                if (!p->found.load(std::memory_order_acquire)) {
-                    p->fullPosting.clear();
-                }
+                p->fullPosting = std::move(getValues[i]);
                 p->fullPosting.append(*p->appendPosting);
                 p->finalSize = static_cast<int>(p->fullPosting.size());
+                putIndexByPending[i] = static_cast<int>(putKeys.size());
+                putKeys.push_back(keys[i]);
+                putValues.push_back(std::move(p->fullPosting));
                 activeCount++;
             }
 
+            std::vector<uint8_t> putOk;
             if (activeCount > 0) {
-                putBatch->Add(activeCount);
-                for (auto& p : pendings) {
-                    if (!p->active) continue;
-                    SizeType k = DBKey(p->headID);
-                    std::string keyStr(reinterpret_cast<const char*>(&k), sizeof(SizeType));
-                    tikv->AsyncRawPut(keyStr, p->fullPosting,
-                                      putBatch, &p->putOk, MaxTimeout);
-                }
                 auto _putWaitBegin = std::chrono::high_resolution_clock::now();
-                putBatch->Wait();
+                tikv->MultiPutWithStatus(putKeys, putValues, &putOk, MaxTimeout,
+                                         &(p_exWorkSpace->m_diskRequests));
                 tikv->RecordAsyncWait(TiKVIO::AsyncWaitKind::AddIndexSingleKeyPut,
                     activeCount,
                     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -3672,9 +3673,12 @@ namespace SPTAG::SPANN {
             // ---- Pass 4: process results + post-merge SplitAsync ----
             ErrorCode firstErr = ErrorCode::Success;
             int retryCount = 0;
-            for (auto& p : pendings) {
-                bool needRetry = !p->active ||
-                                 p->putOk.load(std::memory_order_acquire) != 1;
+            for (size_t i = 0; i < pendings.size(); i++) {
+                auto& p = pendings[i];
+                int putIndex = putIndexByPending[i];
+                bool needRetry = !p->active || putIndex < 0 ||
+                                 static_cast<size_t>(putIndex) >= putOk.size() ||
+                                 putOk[putIndex] == 0;
                 if (needRetry) {
                     // Drop our lock so Append() can re-acquire it cleanly.
                     p->lock.unlock();

@@ -50,9 +50,9 @@ namespace SPTAG::SPANN
         //
         // For high-fan-out scenarios (e.g. SPFresh AddIndex Phase 2 issuing
         // 12-30 BatchPut RPCs per call) we want to avoid spawning a fresh OS
-        // thread per RPC. Instead, all async RPCs share ONE CompletionQueue
-        // serviced by a single background pump thread. The caller blocks on
-        // an AsyncBatch wait-group that counts down as completions arrive.
+        // thread per RPC. Instead, async RPCs are spread across a small set of
+        // CompletionQueues serviced by background pump threads. The caller
+        // blocks on an AsyncBatch wait-group that counts down as completions arrive.
         //
         // Lifetime: cq + pump are created lazily on first Async* call (after
         // the TiKVIO is fully constructed) and torn down in ShutDown().
@@ -146,11 +146,7 @@ namespace SPTAG::SPANN
                 uint64_t waitSamples = m_asyncRpcThrottleWaitSamples.exchange(0, std::memory_order_relaxed);
                 uint64_t waitTotalUs = m_asyncRpcThrottleWaitTotalUs.exchange(0, std::memory_order_relaxed);
                 uint64_t maxObserved = m_asyncRpcMaxInflightObserved.exchange(0, std::memory_order_relaxed);
-                uint64_t currentInflight = 0;
-                {
-                    std::lock_guard<std::mutex> lock(m_asyncRpcMutex);
-                    currentInflight = m_asyncRpcInflight;
-                }
+                uint64_t currentInflight = m_asyncRpcInflight.load(std::memory_order_acquire);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "[DIAG-ASYNC] layer %d RpcThrottle limit=%d current=%lu maxObserved=%lu waitSamples=%lu avgWait=%.2fus\n",
                     layer,
@@ -415,11 +411,20 @@ namespace SPTAG::SPANN
                     m_asyncRpcMaxInflight);
             }
 
-            // Start the async-RPC pump thread now that the object is fully
-            // initialized. Single thread services a single CompletionQueue
-            // shared by every Async* call below.
+            // Start async-RPC pump threads now that the object is fully
+            // initialized. Multiple CompletionQueues prevent heavy completion
+            // parsing/copying in one pump from serializing every async RPC.
+            m_asyncCqs.reserve(kAsyncCompletionQueueCount);
+            for (int i = 0; i < kAsyncCompletionQueueCount; i++) {
+                m_asyncCqs.emplace_back(std::make_unique<grpc::CompletionQueue>());
+            }
             m_asyncPumpRunning.store(true, std::memory_order_release);
-            m_asyncPumpThread = std::thread([this]() { AsyncPumpLoop(); });
+            m_asyncPumpThreads.reserve(m_asyncCqs.size());
+            for (size_t i = 0; i < m_asyncCqs.size(); i++) {
+                m_asyncPumpThreads.emplace_back([this, i]() { AsyncPumpLoop(i); });
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "TiKVIO: Async RPC completion queues=%zu\n", m_asyncCqs.size());
         }
 
         ~TiKVIO() override {
@@ -433,8 +438,12 @@ namespace SPTAG::SPANN
             bool wasRunning = m_asyncPumpRunning.exchange(false, std::memory_order_acq_rel);
             if (wasRunning) {
                 m_asyncRpcCv.notify_all();
-                m_asyncCq.Shutdown();
-                if (m_asyncPumpThread.joinable()) m_asyncPumpThread.join();
+                for (auto& cq : m_asyncCqs) cq->Shutdown();
+                for (auto& thread : m_asyncPumpThreads) {
+                    if (thread.joinable()) thread.join();
+                }
+                m_asyncPumpThreads.clear();
+                m_asyncCqs.clear();
             }
             m_available = false;
             std::lock_guard<std::mutex> lock(m_storeMutex);
@@ -875,6 +884,183 @@ namespace SPTAG::SPANN
                 strKeys[i] = std::string(reinterpret_cast<const char*>(&keys[i]), sizeof(SizeType));
             }
             return MultiGet(strKeys, values, timeout, reqs);
+        }
+
+        ErrorCode MultiGetWithStatus(const std::vector<std::string>& keys,
+                                     std::vector<std::string>* values,
+                                     std::vector<uint8_t>* okFlags,
+                                     const std::chrono::microseconds& timeout,
+                                     std::vector<Helper::AsyncReadRequest>* reqs)
+        {
+            if (keys.empty()) {
+                values->clear();
+                okFlags->clear();
+                return ErrorCode::Success;
+            }
+
+            std::vector<std::string> prefixedKeys(keys.size());
+            for (size_t i = 0; i < keys.size(); i++) {
+                prefixedKeys[i] = MakePrefixedKey(keys[i]);
+            }
+            values->assign(keys.size(), std::string());
+            okFlags->assign(keys.size(), 0);
+
+            std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
+            for (size_t i = 0; i < prefixedKeys.size(); i++) {
+                RegionInfo region{};
+                std::string addr;
+                uint64_t rid = 0;
+                if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
+                    addr = region.leaderAddr;
+                    rid = region.regionId;
+                } else {
+                    addr = GetAnyStoreAddress();
+                }
+                auto& group = regionGroups[{addr, rid}];
+                if (group.keys.empty()) group.region = region;
+                group.keys.push_back({i, prefixedKeys[i]});
+            }
+
+            struct PendingRegionGroup {
+                std::string leaderAddr;
+                RegionInfo region{};
+                std::vector<std::pair<size_t, std::string>> keys;
+            };
+
+            std::vector<PendingRegionGroup> groups;
+            groups.reserve(regionGroups.size());
+            for (auto& kv : regionGroups) {
+                PendingRegionGroup group;
+                group.leaderAddr = kv.first.leaderAddr;
+                group.region = kv.second.region;
+                group.keys = std::move(kv.second.keys);
+                groups.push_back(std::move(group));
+            }
+
+            auto batch = std::make_shared<AsyncBatch>();
+            batch->Add(static_cast<int>(groups.size()));
+            std::vector<std::atomic<int>> groupOk(groups.size());
+            for (auto& flag : groupOk) flag.store(0, std::memory_order_relaxed);
+
+            for (size_t i = 0; i < groups.size(); i++) {
+                kvrpcpb::Context context;
+                SetContextFromRegion(&context, groups[i].region);
+                AsyncRawBatchGetPrefixed(groups[i].leaderAddr, context, groups[i].keys,
+                                         values, batch, &groupOk[i], timeout);
+            }
+            batch->Wait();
+
+            int failCount = 0;
+            for (size_t i = 0; i < groups.size(); i++) {
+                if (groupOk[i].load(std::memory_order_acquire) == 1) {
+                    for (auto& [idx, pkey] : groups[i].keys) (*okFlags)[idx] = 1;
+                    continue;
+                }
+                for (auto& [idx, pkey] : groups[i].keys) {
+                    InvalidateRegionCache(pkey);
+                    std::string val;
+                    auto ret = Get(keys[idx], &val, timeout, reqs);
+                    if (ret == ErrorCode::Success) {
+                        (*values)[idx] = std::move(val);
+                        (*okFlags)[idx] = 1;
+                    } else if (ret == ErrorCode::Key_NotFound) {
+                        (*okFlags)[idx] = 1;
+                    } else {
+                        failCount++;
+                    }
+                }
+            }
+
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
+        }
+
+        ErrorCode MultiPutWithStatus(const std::vector<std::string>& keys,
+                                     const std::vector<std::string>& values,
+                                     std::vector<uint8_t>* okFlags,
+                                     const std::chrono::microseconds& timeout,
+                                     std::vector<Helper::AsyncReadRequest>* reqs)
+        {
+            if (keys.empty()) {
+                okFlags->clear();
+                return ErrorCode::Success;
+            }
+            if (keys.size() != values.size()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVIO::MultiPutWithStatus size mismatch: keys=%zu values=%zu\n",
+                    keys.size(), values.size());
+                okFlags->assign(keys.size(), 0);
+                return ErrorCode::Fail;
+            }
+
+            std::vector<std::string> prefixedKeys(keys.size());
+            for (size_t i = 0; i < keys.size(); i++) {
+                prefixedKeys[i] = MakePrefixedKey(keys[i]);
+            }
+            okFlags->assign(keys.size(), 0);
+
+            std::unordered_map<RegionGroupKey, RegionGroup, RegionGroupKeyHash> regionGroups;
+            for (size_t i = 0; i < prefixedKeys.size(); i++) {
+                RegionInfo region{};
+                std::string addr;
+                uint64_t rid = 0;
+                if (FindRegionForKey(prefixedKeys[i], region) && !region.leaderAddr.empty()) {
+                    addr = region.leaderAddr;
+                    rid = region.regionId;
+                } else {
+                    addr = GetAnyStoreAddress();
+                }
+                auto& group = regionGroups[{addr, rid}];
+                if (group.keys.empty()) group.region = region;
+                group.keys.push_back({i, prefixedKeys[i]});
+            }
+
+            struct PendingRegionGroup {
+                std::string leaderAddr;
+                RegionInfo region{};
+                std::vector<std::pair<size_t, std::string>> keys;
+            };
+
+            std::vector<PendingRegionGroup> groups;
+            groups.reserve(regionGroups.size());
+            for (auto& kv : regionGroups) {
+                PendingRegionGroup group;
+                group.leaderAddr = kv.first.leaderAddr;
+                group.region = kv.second.region;
+                group.keys = std::move(kv.second.keys);
+                groups.push_back(std::move(group));
+            }
+
+            auto batch = std::make_shared<AsyncBatch>();
+            batch->Add(static_cast<int>(groups.size()));
+            std::vector<std::atomic<int>> groupOk(groups.size());
+            for (auto& flag : groupOk) flag.store(0, std::memory_order_relaxed);
+
+            for (size_t i = 0; i < groups.size(); i++) {
+                kvrpcpb::Context context;
+                SetContextFromRegion(&context, groups[i].region);
+                AsyncRawBatchPutPrefixed(groups[i].leaderAddr, context, groups[i].keys,
+                                         values, batch, &groupOk[i], timeout);
+            }
+            batch->Wait();
+
+            int failCount = 0;
+            for (size_t i = 0; i < groups.size(); i++) {
+                if (groupOk[i].load(std::memory_order_acquire) == 1) {
+                    for (auto& [idx, pkey] : groups[i].keys) (*okFlags)[idx] = 1;
+                    continue;
+                }
+                for (auto& [idx, pkey] : groups[i].keys) {
+                    InvalidateRegionCache(pkey);
+                    auto ret = RawPutWithRetry(pkey, values[idx], timeout);
+                    if (ret == ErrorCode::Success) {
+                        (*okFlags)[idx] = 1;
+                    } else {
+                        failCount++;
+                    }
+                }
+            }
+
+            return failCount == 0 ? ErrorCode::Success : ErrorCode::Fail;
         }
 
         // ---- MultiPut / MultiDelete operations ----
@@ -2109,7 +2295,15 @@ namespace SPTAG::SPANN
             p2->set_value(countValue);
             SetDeadline(tag->ctx, timeout);
 
-            tag->rpc = stub->AsyncRawBatchPut(&tag->ctx, tag->request, &m_asyncCq);
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawBatchPut(&tag->ctx, tag->request, cq);
             tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
         }
 
@@ -2154,7 +2348,15 @@ namespace SPTAG::SPANN
             SetContext(tag->request.mutable_context(), prefixedKey);
             SetDeadline(tag->ctx, timeout);
 
-            tag->rpc = stub->AsyncRawGet(&tag->ctx, tag->request, &m_asyncCq);
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawGet(&tag->ctx, tag->request, cq);
             tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
         }
 
@@ -2195,7 +2397,15 @@ namespace SPTAG::SPANN
             SetContext(tag->request.mutable_context(), prefixedKey);
             SetDeadline(tag->ctx, timeout);
 
-            tag->rpc = stub->AsyncRawPut(&tag->ctx, tag->request, &m_asyncCq);
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawPut(&tag->ctx, tag->request, cq);
             tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
         }
 
@@ -2240,7 +2450,68 @@ namespace SPTAG::SPANN
             }
             SetDeadline(tag->ctx, timeout);
 
-            tag->rpc = stub->AsyncRawBatchGet(&tag->ctx, tag->request, &m_asyncCq);
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawBatchGet(&tag->ctx, tag->request, cq);
+            tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
+        }
+
+        void AsyncRawBatchPutPrefixed(const std::string& leaderAddr,
+                                      const kvrpcpb::Context& context,
+                                      const std::vector<std::pair<size_t, std::string>>& group,
+                                      const std::vector<std::string>& values,
+                                      std::shared_ptr<AsyncBatch> batch,
+                                      std::atomic<int>* result_slot,
+                                      const std::chrono::microseconds& timeout)
+        {
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire) || group.empty()) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
+
+            auto* stub = GetOrCreateStub(leaderAddr);
+            if (!stub) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
+
+            auto* tag = new AsyncBatchPutTag();
+            tag->batch = batch;
+            tag->result_slot = result_slot;
+            tag->keyForCacheInvalidation = group.front().second;
+            tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
+            *tag->request.mutable_context() = context;
+            for (auto& kv : group) {
+                auto* pair = tag->request.add_pairs();
+                pair->set_key(kv.second);
+                pair->set_value(values[kv.first]);
+            }
+            SetDeadline(tag->ctx, timeout);
+
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawBatchPut(&tag->ctx, tag->request, cq);
             tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
         }
 
@@ -2289,7 +2560,15 @@ namespace SPTAG::SPANN
             SetContext(tag->request.mutable_context(), startKey);
             SetDeadline(tag->ctx, timeout);
 
-            tag->rpc = stub->AsyncRawScan(&tag->ctx, tag->request, &m_asyncCq);
+            auto* cq = PickAsyncCompletionQueue();
+            if (!cq) {
+                if (tag->releaseAsyncPermit) ReleaseAsyncRpcPermit();
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                delete tag;
+                return;
+            }
+            tag->rpc = stub->AsyncRawScan(&tag->ctx, tag->request, cq);
             tag->rpc->Finish(&tag->response, &tag->status, static_cast<void*>(static_cast<AsyncTagBase*>(tag)));
         }
 
@@ -2321,49 +2600,73 @@ namespace SPTAG::SPANN
             if (m_asyncRpcMaxInflight <= 0) return true;
 
             auto waitBegin = std::chrono::high_resolution_clock::now();
-            std::unique_lock<std::mutex> lock(m_asyncRpcMutex);
-            m_asyncRpcCv.wait(lock, [&] {
-                return !m_asyncPumpRunning.load(std::memory_order_acquire) ||
-                       m_asyncRpcInflight < static_cast<uint64_t>(m_asyncRpcMaxInflight);
-            });
-            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) return false;
+            const uint64_t limit = static_cast<uint64_t>(m_asyncRpcMaxInflight);
+            bool waited = false;
 
-            uint64_t waitUs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now() - waitBegin).count());
-            m_asyncRpcThrottleWaitSamples.fetch_add(1, std::memory_order_relaxed);
-            m_asyncRpcThrottleWaitTotalUs.fetch_add(waitUs, std::memory_order_relaxed);
+            while (m_asyncPumpRunning.load(std::memory_order_acquire)) {
+                uint64_t current = m_asyncRpcInflight.load(std::memory_order_relaxed);
+                while (current < limit) {
+                    if (m_asyncRpcInflight.compare_exchange_weak(
+                            current, current + 1,
+                            std::memory_order_acq_rel,
+                            std::memory_order_relaxed)) {
+                        acquiredPermit = true;
+                        ObserveAsyncRpcInflight(current + 1);
+                        if (waited) {
+                            uint64_t waitUs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::high_resolution_clock::now() - waitBegin).count());
+                            m_asyncRpcThrottleWaitSamples.fetch_add(1, std::memory_order_relaxed);
+                            m_asyncRpcThrottleWaitTotalUs.fetch_add(waitUs, std::memory_order_relaxed);
+                        }
+                        return true;
+                    }
+                }
 
-            acquiredPermit = true;
-            uint64_t current = ++m_asyncRpcInflight;
-            lock.unlock();
+                waited = true;
+                std::unique_lock<std::mutex> lock(m_asyncRpcMutex);
+                m_asyncRpcCv.wait(lock, [&] {
+                    return !m_asyncPumpRunning.load(std::memory_order_acquire) ||
+                           m_asyncRpcInflight.load(std::memory_order_acquire) < limit;
+                });
+            }
+            return false;
+        }
 
+        void ReleaseAsyncRpcPermit() {
+            if (m_asyncRpcMaxInflight <= 0) return;
+            uint64_t previous = m_asyncRpcInflight.fetch_sub(1, std::memory_order_acq_rel);
+            if (previous == 0) {
+                m_asyncRpcInflight.store(0, std::memory_order_release);
+            }
+            m_asyncRpcCv.notify_one();
+        }
+
+        void ObserveAsyncRpcInflight(uint64_t current) {
             uint64_t observed = m_asyncRpcMaxInflightObserved.load(std::memory_order_relaxed);
             while (current > observed &&
                    !m_asyncRpcMaxInflightObserved.compare_exchange_weak(
                        observed, current, std::memory_order_relaxed, std::memory_order_relaxed)) {
             }
-            return true;
         }
 
-        void ReleaseAsyncRpcPermit() {
-            if (m_asyncRpcMaxInflight <= 0) return;
-            {
-                std::lock_guard<std::mutex> lock(m_asyncRpcMutex);
-                if (m_asyncRpcInflight > 0) m_asyncRpcInflight--;
-            }
-            m_asyncRpcCv.notify_one();
+        grpc::CompletionQueue* PickAsyncCompletionQueue() {
+            if (m_asyncCqs.empty()) return nullptr;
+            size_t idx = m_asyncCqNext.fetch_add(1, std::memory_order_relaxed) % m_asyncCqs.size();
+            return m_asyncCqs[idx].get();
         }
 
-        // Pump loop: blocks on m_asyncCq.Next, dispatches each completion via
+        // Pump loop: blocks on one CompletionQueue::Next, dispatches each completion via
         // the tag's virtual OnComplete. Runs until ShutDown() calls
-        // m_asyncCq.Shutdown(), at which point Next() drains any remaining
+        // CompletionQueue::Shutdown(), at which point Next() drains any remaining
         // tags (delivering ok=false for cancelled) and finally returns false.
         // Every submission path MUST produce exactly one Finish() call so that
         // every tag is freed here.
-        void AsyncPumpLoop() {
+        void AsyncPumpLoop(size_t cqIndex) {
+            grpc::CompletionQueue* cq = cqIndex < m_asyncCqs.size() ? m_asyncCqs[cqIndex].get() : nullptr;
+            if (!cq) return;
             void* raw_tag = nullptr;
             bool ok = false;
-            while (m_asyncCq.Next(&raw_tag, &ok)) {
+            while (cq->Next(&raw_tag, &ok)) {
                 auto* t = static_cast<AsyncTagBase*>(raw_tag);
                 bool success = t->OnComplete(ok);
                 if (t->releaseAsyncPermit) ReleaseAsyncRpcPermit();
@@ -2409,13 +2712,15 @@ namespace SPTAG::SPANN
         bool m_available = false;
 
         // Async RPC pump (see AsyncRawBatchPut above).
-        grpc::CompletionQueue m_asyncCq;
-        std::thread m_asyncPumpThread;
+        static constexpr int kAsyncCompletionQueueCount = 4;
+        std::vector<std::unique_ptr<grpc::CompletionQueue>> m_asyncCqs;
+        std::vector<std::thread> m_asyncPumpThreads;
+        std::atomic<uint64_t> m_asyncCqNext{0};
         std::atomic<bool> m_asyncPumpRunning{false};
         int m_asyncRpcMaxInflight = 0;
         std::mutex m_asyncRpcMutex;
         std::condition_variable m_asyncRpcCv;
-        uint64_t m_asyncRpcInflight = 0;
+        std::atomic<uint64_t> m_asyncRpcInflight{0};
         std::atomic<uint64_t> m_asyncRpcThrottleWaitSamples{0};
         std::atomic<uint64_t> m_asyncRpcThrottleWaitTotalUs{0};
         std::atomic<uint64_t> m_asyncRpcMaxInflightObserved{0};
