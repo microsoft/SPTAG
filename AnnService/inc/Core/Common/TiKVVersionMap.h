@@ -400,6 +400,13 @@ namespace SPTAG
 
             ErrorCode AddBatch(SizeType num) override
             {
+                return AddBatch(num, false);
+            }
+
+            ErrorCode AddBatch(SizeType num, bool deleted) override
+            {
+                if (num <= 0) return ErrorCode::Success;
+
                 SizeType oldCount = m_count.load();
                 SizeType newCount = oldCount + num;
 
@@ -407,9 +414,27 @@ namespace SPTAG
                 SizeType oldLastChunk = (oldCount > 0) ? ChunkId(oldCount - 1) : -1;
                 SizeType newLastChunk = ChunkId(newCount - 1);
 
-                for (SizeType c = oldLastChunk + 1; c <= newLastChunk; c++) {
-                    std::string newChunk(m_chunkSize, static_cast<char>(0xff));
-                    WriteChunk(c, newChunk);
+                if (!deleted) {
+                    for (SizeType c = oldLastChunk + 1; c <= newLastChunk; c++) {
+                        std::string newChunk(m_chunkSize, static_cast<char>(0xff));
+                        WriteChunk(c, newChunk);
+                    }
+                } else {
+                    SizeType firstChunk = ChunkId(oldCount);
+                    for (SizeType c = firstChunk; c <= newLastChunk; c++) {
+                        std::lock_guard<std::mutex> lock(ChunkMutex(c));
+                        std::string chunk = (c <= oldLastChunk) ? ReadChunk(c) : std::string();
+                        if (chunk.empty()) {
+                            chunk.assign(m_chunkSize, static_cast<char>(0xff));
+                        }
+
+                        int beginOffset = (c == firstChunk) ? ChunkOffset(oldCount) : 0;
+                        int endOffset = (c == newLastChunk) ? ChunkOffset(newCount - 1) + 1 : m_chunkSize;
+                        std::fill(chunk.begin() + beginOffset, chunk.begin() + endOffset, static_cast<char>(0xfe));
+
+                        WriteChunk(c, chunk);
+                    }
+                    m_deleted.fetch_add(num, std::memory_order_relaxed);
                 }
 
                 m_count = newCount;

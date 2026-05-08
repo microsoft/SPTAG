@@ -123,6 +123,7 @@ namespace SPTAG {
             int m_versionChunkSize;
             float m_oversampleFactor;
             int m_versionCacheMaxChunks;
+            int m_asyncRpcMaxInflight;
 
             // GPU building
             int m_gpuSSDNumTrees;

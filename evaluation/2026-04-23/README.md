@@ -239,6 +239,7 @@ docker stop $(docker ps -q --filter name=tikv-)   # stop cluster
 | `BuildSSDIndex.ReassignK` | 64 | split/reassign target fanout knob |
 | `BuildSSDIndex.AsyncMergeInSearch` | true | async merge during search |
 | `BuildSSDIndex.VersionCacheMaxChunks` | 100_000 | enables version chunk cache when greater than 0 |
+| `BuildSSDIndex.AsyncRpcMaxInflight` | 512 | caps total in-flight async TiKV RPCs per `TiKVIO`; `0` disables throttling |
 | `BuildSSDIndex.LatencyLimit` | 100 | ms latency cap fed to SPANN |
 
 ## 5. Output JSON structure (per batch)

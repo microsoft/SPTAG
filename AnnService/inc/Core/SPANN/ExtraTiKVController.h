@@ -141,6 +141,25 @@ namespace SPTAG::SPANN
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", buf);
             }
+
+            if (m_asyncRpcMaxInflight > 0) {
+                uint64_t waitSamples = m_asyncRpcThrottleWaitSamples.exchange(0, std::memory_order_relaxed);
+                uint64_t waitTotalUs = m_asyncRpcThrottleWaitTotalUs.exchange(0, std::memory_order_relaxed);
+                uint64_t maxObserved = m_asyncRpcMaxInflightObserved.exchange(0, std::memory_order_relaxed);
+                uint64_t currentInflight = 0;
+                {
+                    std::lock_guard<std::mutex> lock(m_asyncRpcMutex);
+                    currentInflight = m_asyncRpcInflight;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[DIAG-ASYNC] layer %d RpcThrottle limit=%d current=%lu maxObserved=%lu waitSamples=%lu avgWait=%.2fus\n",
+                    layer,
+                    m_asyncRpcMaxInflight,
+                    (unsigned long)currentInflight,
+                    (unsigned long)std::max(maxObserved, currentInflight),
+                    (unsigned long)waitSamples,
+                    waitSamples ? static_cast<double>(waitTotalUs) / waitSamples : 0.0);
+            }
         }
 
         // Per-RPC heap-allocated tag base. Concrete tag types embed their own
@@ -153,6 +172,7 @@ namespace SPTAG::SPANN
             std::string keyForCacheInvalidation;
             TiKVIO* owner = nullptr;
             virtual ~AsyncTagBase() = default;
+            bool releaseAsyncPermit = false;
             // Returns true on success (response was OK and parseable).
             // ok=false comes from the cq itself (cancel / shutdown / network).
             virtual bool OnComplete(bool ok) = 0;
@@ -305,8 +325,9 @@ namespace SPTAG::SPANN
             }
         };
 
-        TiKVIO(const std::string& pdAddresses, const std::string& keyPrefix)
-            : m_keyPrefix(keyPrefix)
+        TiKVIO(const std::string& pdAddresses, const std::string& keyPrefix, int asyncRpcMaxInflight = 0)
+            : m_keyPrefix(keyPrefix),
+              m_asyncRpcMaxInflight(std::max(asyncRpcMaxInflight, 0))
         {
             // Parse comma-separated PD addresses and try to connect.
             std::istringstream ss(pdAddresses);
@@ -388,6 +409,11 @@ namespace SPTAG::SPANN
 
             m_available = true;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "TiKVIO: Initialized with key prefix '%s'\n", m_keyPrefix.c_str());
+            if (m_asyncRpcMaxInflight > 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "TiKVIO: Async RPC in-flight limit enabled: %d\n",
+                    m_asyncRpcMaxInflight);
+            }
 
             // Start the async-RPC pump thread now that the object is fully
             // initialized. Single thread services a single CompletionQueue
@@ -406,6 +432,7 @@ namespace SPTAG::SPANN
             // (drains in-flight tags as cancelled) -> join pump -> drop stubs.
             bool wasRunning = m_asyncPumpRunning.exchange(false, std::memory_order_acq_rel);
             if (wasRunning) {
+                m_asyncRpcCv.notify_all();
                 m_asyncCq.Shutdown();
                 if (m_asyncPumpThread.joinable()) m_asyncPumpThread.join();
             }
@@ -2061,11 +2088,18 @@ namespace SPTAG::SPANN
                 batch->Done(false);
                 return;
             }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
             auto* tag = new AsyncBatchPutTag();
             tag->batch = batch;
             tag->result_slot = result_slot;
             tag->keyForCacheInvalidation = chunkKey;
             tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
             SetContext(tag->request.mutable_context(), chunkKey);
             auto* p1 = tag->request.add_pairs();
             p1->set_key(chunkKey);
@@ -2102,11 +2136,18 @@ namespace SPTAG::SPANN
                 batch->Done(false);
                 return;
             }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
             auto* tag = new AsyncGetTag();
             tag->batch = batch;
             tag->result_slot = result_slot;
             tag->keyForCacheInvalidation = prefixedKey;
             tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
             tag->out_value = out_value;
             tag->out_found = out_found;
             tag->request.set_key(prefixedKey);
@@ -2137,11 +2178,18 @@ namespace SPTAG::SPANN
                 batch->Done(false);
                 return;
             }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                batch->Done(false);
+                return;
+            }
             auto* tag = new AsyncPutTag();
             tag->batch = batch;
             tag->result_slot = result_slot;
             tag->keyForCacheInvalidation = prefixedKey;
             tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
             tag->request.set_key(prefixedKey);
             tag->request.set_value(value);
             SetContext(tag->request.mutable_context(), prefixedKey);
@@ -2171,12 +2219,19 @@ namespace SPTAG::SPANN
                 if (batch) batch->Done(false);
                 return;
             }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
 
             auto* tag = new AsyncBatchGetTag();
             tag->batch = batch;
             tag->result_slot = result_slot;
             tag->keyForCacheInvalidation = group.front().second;
             tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
             tag->keys = group;
             tag->out_values = out_values;
             *tag->request.mutable_context() = context;
@@ -2211,12 +2266,19 @@ namespace SPTAG::SPANN
                 if (batch) batch->Done(false);
                 return;
             }
+            bool acquiredPermit = false;
+            if (!AcquireAsyncRpcPermit(acquiredPermit)) {
+                if (result_slot) result_slot->store(0, std::memory_order_release);
+                if (batch) batch->Done(false);
+                return;
+            }
 
             auto* tag = new AsyncScanPageTag();
             tag->batch = batch;
             tag->result_slot = result_slot;
             tag->keyForCacheInvalidation = startKey;
             tag->owner = this;
+            tag->releaseAsyncPermit = acquiredPermit;
             tag->out_posting = out_posting;
             tag->out_next_cursor = out_next_cursor;
             tag->out_count = out_count;
@@ -2254,6 +2316,44 @@ namespace SPTAG::SPANN
         }
 
     private:
+        bool AcquireAsyncRpcPermit(bool& acquiredPermit) {
+            acquiredPermit = false;
+            if (m_asyncRpcMaxInflight <= 0) return true;
+
+            auto waitBegin = std::chrono::high_resolution_clock::now();
+            std::unique_lock<std::mutex> lock(m_asyncRpcMutex);
+            m_asyncRpcCv.wait(lock, [&] {
+                return !m_asyncPumpRunning.load(std::memory_order_acquire) ||
+                       m_asyncRpcInflight < static_cast<uint64_t>(m_asyncRpcMaxInflight);
+            });
+            if (!m_asyncPumpRunning.load(std::memory_order_acquire)) return false;
+
+            uint64_t waitUs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - waitBegin).count());
+            m_asyncRpcThrottleWaitSamples.fetch_add(1, std::memory_order_relaxed);
+            m_asyncRpcThrottleWaitTotalUs.fetch_add(waitUs, std::memory_order_relaxed);
+
+            acquiredPermit = true;
+            uint64_t current = ++m_asyncRpcInflight;
+            lock.unlock();
+
+            uint64_t observed = m_asyncRpcMaxInflightObserved.load(std::memory_order_relaxed);
+            while (current > observed &&
+                   !m_asyncRpcMaxInflightObserved.compare_exchange_weak(
+                       observed, current, std::memory_order_relaxed, std::memory_order_relaxed)) {
+            }
+            return true;
+        }
+
+        void ReleaseAsyncRpcPermit() {
+            if (m_asyncRpcMaxInflight <= 0) return;
+            {
+                std::lock_guard<std::mutex> lock(m_asyncRpcMutex);
+                if (m_asyncRpcInflight > 0) m_asyncRpcInflight--;
+            }
+            m_asyncRpcCv.notify_one();
+        }
+
         // Pump loop: blocks on m_asyncCq.Next, dispatches each completion via
         // the tag's virtual OnComplete. Runs until ShutDown() calls
         // m_asyncCq.Shutdown(), at which point Next() drains any remaining
@@ -2266,6 +2366,7 @@ namespace SPTAG::SPANN
             while (m_asyncCq.Next(&raw_tag, &ok)) {
                 auto* t = static_cast<AsyncTagBase*>(raw_tag);
                 bool success = t->OnComplete(ok);
+                if (t->releaseAsyncPermit) ReleaseAsyncRpcPermit();
                 if (t->result_slot) {
                     t->result_slot->store(success ? 1 : 0, std::memory_order_release);
                 }
@@ -2311,6 +2412,13 @@ namespace SPTAG::SPANN
         grpc::CompletionQueue m_asyncCq;
         std::thread m_asyncPumpThread;
         std::atomic<bool> m_asyncPumpRunning{false};
+        int m_asyncRpcMaxInflight = 0;
+        std::mutex m_asyncRpcMutex;
+        std::condition_variable m_asyncRpcCv;
+        uint64_t m_asyncRpcInflight = 0;
+        std::atomic<uint64_t> m_asyncRpcThrottleWaitSamples{0};
+        std::atomic<uint64_t> m_asyncRpcThrottleWaitTotalUs{0};
+        std::atomic<uint64_t> m_asyncRpcMaxInflightObserved{0};
 
         // TiKV store stub pools keyed by store address (multiple channels per store)
         static constexpr int kStubPoolSize = 48;

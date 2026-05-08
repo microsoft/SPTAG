@@ -51,6 +51,17 @@ namespace SPTAG
             virtual bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) = 0;
 
             virtual ErrorCode AddBatch(SizeType num) = 0;
+            virtual ErrorCode AddBatch(SizeType num, bool deleted)
+            {
+                SizeType begin = Count();
+                auto ret = AddBatch(num);
+                if (ret == ErrorCode::Success && deleted) {
+                    for (SizeType i = begin; i < begin + num; i++) {
+                        Delete(i);
+                    }
+                }
+                return ret;
+            }
             virtual void SetR(SizeType num) = 0;
 
             virtual ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) = 0;

@@ -430,14 +430,7 @@ namespace SPTAG::SPANN {
         
         virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) override
         {
-            SizeType begin = m_versionMap->Count();
-            auto ret = m_versionMap->AddBatch(capa);
-            if (ret == ErrorCode::Success && deleted) {
-                for (SizeType i = begin; i < begin + capa; i++) {
-                    m_versionMap->Delete(i);
-                }
-            }
-            return ret;
+            return m_versionMap->AddBatch(capa, deleted);
         }
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
