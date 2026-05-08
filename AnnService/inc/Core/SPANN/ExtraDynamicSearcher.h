@@ -477,6 +477,7 @@ namespace SPTAG::SPANN {
                                 finalcode = ret;
                                 return;
                             }
+                            CheckCentroid(globalID, postingList, "RefineIndex");
                         }
                         else
                         {
@@ -506,6 +507,25 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
         
+        void CheckCentroid(SizeType pid, std::string& posting, std::string where)
+        {
+            SizeType postVectorNum = posting.size() / m_vectorInfoSize;
+            uint8_t* vectorId = reinterpret_cast<uint8_t*>(posting.data());
+            bool hasHead = false;
+            for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+            {
+                SizeType VID = *((SizeType*)(vectorId));
+                if (VID == pid) {
+                    hasHead = true;
+                    break;
+                }
+            }
+            if (!hasHead) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "CheckCentroid cannot find head in posting! pid:%d, where:%s\n", pid, where.c_str());
+                exit(-1);
+            }
+        }
+
         ErrorCode Split(ExtraWorkSpace* p_exWorkSpace, const SizeType headID, bool requirelock = true)
         {
             auto splitBegin = std::chrono::high_resolution_clock::now();
@@ -613,6 +633,7 @@ namespace SPTAG::SPANN {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split Fail to write back posting %lld\n", (std::int64_t)(headID));
                         return ret;
                     }
+                    CheckCentroid(headID, postingList, "Split-GC");
                     m_stat.m_garbageNum++;
                     auto GCEnd = std::chrono::high_resolution_clock::now();
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
@@ -654,6 +675,7 @@ namespace SPTAG::SPANN {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split fail to override posting cut to limit for posting %lld\n", (std::int64_t)(headID));
                         return ret;
                     }
+                    CheckCentroid(headID, newpostingList, "Split-one-cluster");
                     {
                         std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
                         m_splitList.unsafe_erase(headID);
@@ -690,6 +712,7 @@ namespace SPTAG::SPANN {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to override posting %lld\n", (std::int64_t)(newHeadVID));
                             return ret;
                         }
+                        CheckCentroid(newHeadVID, newPostingLists[k], "Split-SameHead");
                         auto splitPutEnd = std::chrono::high_resolution_clock::now();
                         elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
                         m_stat.m_putCost += elapsedMSeconds;
@@ -805,6 +828,7 @@ namespace SPTAG::SPANN {
                                              (std::int64_t)(newHeadVID));
                                 return ret;
                             }
+                            CheckCentroid(newHeadVID, mergedPostingList, "Split-MergePosting");
                             auto splitPutEnd = std::chrono::high_resolution_clock::now();
                             elapsedMSeconds =
                                 std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin)
@@ -821,6 +845,7 @@ namespace SPTAG::SPANN {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to add new posting %lld\n", (std::int64_t)(newHeadVID));
                                 return ret;
                             }
+                            CheckCentroid(newHeadVID, newPostingLists[k], "Split-NewPosting");
                             auto splitPutEnd = std::chrono::high_resolution_clock::now();
                             elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
                             m_stat.m_putCost += elapsedMSeconds;
@@ -837,6 +862,7 @@ namespace SPTAG::SPANN {
                             elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
                             m_stat.m_updateHeadCost += elapsedMSeconds;
                         }
+                        if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
                     }
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
                 }
@@ -862,6 +888,7 @@ namespace SPTAG::SPANN {
                         }
                     }
                 }
+                lock.unlock();
             }
             
             m_stat.m_splitNum++;
@@ -950,6 +977,7 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge Fail to write back posting %lld\n", (std::int64_t)headID);
                     return ret;
                 }
+                CheckCentroid(headID, mergedPostingList, "MergePostings-ignore");
                 {
                     std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
                     m_mergeList.unsafe_erase(headID);
@@ -1036,6 +1064,7 @@ namespace SPTAG::SPANN {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail to override old posting %lld after merge\n", (std::int64_t)headID);
                             return ret;
                         }
+                        CheckCentroid(headID, mergedPostingList, "MergePostings-currentLength >= nextLength");
                         m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1);
                         if ((ret=db->Delete(DBKey(queryResult->VID))) != ErrorCode::Success)
                         {
@@ -1056,6 +1085,7 @@ namespace SPTAG::SPANN {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail to override posting %lld after merge\n", (std::int64_t)(queryResult->VID));
                             return ret;
                         }
+                        CheckCentroid(queryResult->VID, mergedPostingList, "MergePostings-currentLength < nextLength");
                         m_headIndex->DeleteIndex(headID, m_layer + 1);
                         if ((ret = db->Delete(DBKey(headID))) != ErrorCode::Success)
                         {
@@ -1112,6 +1142,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge Fail to write back posting %lld\n", (std::int64_t)headID);
                 return ret;
             }
+            CheckCentroid(headID, mergedPostingList, "MergePostings-GC");
             {
                 std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
                 m_mergeList.unsafe_erase(headID);
@@ -1478,6 +1509,7 @@ namespace SPTAG::SPANN {
                 m_stat.m_appendPostingBytesTotal.fetch_add((uint64_t)postingSize, std::memory_order_relaxed);
                 m_stat.m_appendRmwSampleCount.fetch_add(1, std::memory_order_relaxed);
                 postingSize /= m_vectorInfoSize;
+                lock.unlock();
             }
             if (postingSize > (m_postingSizeLimit + reassignThreshold)) {
                 // SizeType VID = *(int*)(&appendPosting[0]);
@@ -2474,6 +2506,7 @@ namespace SPTAG::SPANN {
                             ret = tmp;
                             return;
                         }
+                        CheckCentroid(postingID, postinglist, "WriteDownAllPostingToDB");
                     }
                     else
                     {
@@ -2644,7 +2677,8 @@ namespace SPTAG::SPANN {
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[GetWritePosting] Put fail!\n");
                     return ret;
-                }                   
+                }                  
+                CheckCentroid(pid, posting, "GetWritePosting"); 
                 // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "PostingSize: %d\n", m_postingSizes.GetSize(pid));
             } else {
                 if ((ret = db->Get(DBKey(pid), &posting, MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) 

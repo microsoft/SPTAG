@@ -246,11 +246,9 @@ std::shared_ptr<VectorIndex> BuildIndex(const std::string &outDirectory, std::sh
 
 template <typename T>
 std::shared_ptr<VectorIndex> BuildLargeIndex(const std::string &outDirectory, std::string &pvecset,
-                                        std::string& pmetaset, std::string& pmetaidx, const std::string &distMethod = "L2",
+                                        std::string& pmetaset, std::string& pmetaidx, Helper::IniReader& iniReader, const std::string &distMethod = "L2",
                                         int searchthread = 2, int insertthread = 2, int layers = 1,
-                                        std::shared_ptr<COMMON::IQuantizer> quantizer = nullptr, std::string quantizerFilePath = "quantizer.bin",
-                                        const std::map<std::string, std::string>& ssdOverrides = {},
-                                        bool ssdOnly = false)
+                                        std::shared_ptr<COMMON::IQuantizer> quantizer = nullptr, std::string quantizerFilePath = "quantizer.bin")
 {
     auto vecIndex = VectorIndex::CreateInstance(IndexAlgoType::SPANN, GetEnumValueType<T>());
     int maxthreads = std::thread::hardware_concurrency();
@@ -341,27 +339,13 @@ std::shared_ptr<VectorIndex> BuildLargeIndex(const std::string &outDirectory, st
         }
     }
 
-    // Apply overrides (e.g., Storage, TiKV settings, SelectHead/BuildHead params)
-    for (const auto &[key, val] : ssdOverrides)
+    for (const auto &sec : sections)
     {
-        // Keys prefixed with "SectionName." are routed to the corresponding section
-        auto dotPos = key.find('.');
-        if (dotPos != std::string::npos) {
-            std::string section = key.substr(0, dotPos);
-            std::string param = key.substr(dotPos + 1);
-            vecIndex->SetParameter(param.c_str(), val.c_str(), section.c_str());
-        } else {
-            vecIndex->SetParameter(key.c_str(), val.c_str(), "BuildSSDIndex");
+        auto params = iniReader.GetParameters(sec.c_str());
+        for (const auto &[key, val] : params)
+        {
+            vecIndex->SetParameter(key.c_str(), val.c_str(), sec.c_str());
         }
-    }
-
-    // SSD-only mode: skip SelectHead and BuildHead, resume from specified layer
-    if (ssdOnly)
-    {
-        // Allow explicit ResumeLayer from config/overrides; otherwise default to layer 0
-        // (rebuild SSD for all layers, reusing existing head indexes)
-        int resumeLayer = 0;
-        vecIndex->SetParameter("ResumeLayer", std::to_string(resumeLayer).c_str(), "BuildSSDIndex");
     }
 
     if (quantizer)
@@ -677,11 +661,9 @@ ErrorCode QuantizeVectors(const std::shared_ptr<COMMON::IQuantizer>& quantizer,
 template <typename T>
 void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, const std::string &truthPath,
                   DistCalcMethod distMethod, const std::string &indexPath, int dimension, int baseVectorCount,
-                  int insertVectorCount, int deleteVectorCount, int batches, int topK, int numSearchThreads, int numInsertThreads, int numSearchDuringInsertThreads, int numQueries,
+                  int insertVectorCount, int deleteVectorCount, int batches, int topK, int numSearchThreads, int numInsertThreads, int numSearchDuringInsertThreads, int numQueries, Helper::IniReader& iniReader,
                   const std::string &outputFile = "output.json", const bool rebuild = true, const int resume = -1,
-                  const std::string &quantizerFilePath = std::string(""), int quantizedDim = 0, int layers = 1,
-                  const std::map<std::string, std::string>& ssdOverrides = {},
-                  bool rebuildSsdOnly = false)
+                  const std::string &quantizerFilePath = std::string(""), int quantizedDim = 0, int layers = 1)
 {
     int oldM = M, oldK = K, oldN = N, oldQueries = queries;
     N = baseVectorCount;
@@ -750,18 +732,7 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     
     // Build initial index
     BOOST_TEST_MESSAGE("\n=== Building Index ===");
-    if (rebuild || rebuildSsdOnly || !direxists(indexPath.c_str())) {
-        if (!rebuildSsdOnly) {
-            // Allow empty or non-existent directories; block only if index files already exist
-            if (direxists(indexPath.c_str()) && fileexists((indexPath + FolderSep + "indexloader.ini").c_str())) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                    "Index directory '%s' already exists with index files. Refusing to delete. "
-                    "Remove it manually or use RebuildSSDOnly=true to resume.\n",
-                    indexPath.c_str());
-                BOOST_FAIL("Index directory already exists: " + indexPath);
-                return;
-            }
-        }
+    if (rebuild || !direxists(indexPath.c_str())) {
         auto buildstart = std::chrono::high_resolution_clock::now();
 
         if (enableQuantization)
@@ -786,13 +757,13 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                 quantizedBase->Save(pquanvecset);
             }
 
-            index = BuildLargeIndex<uint8_t>(indexPath, pquanvecset, pmeta, pmetaidx, dist, numSearchThreads, numInsertThreads, layers, quantizer, "quantizer.bin", ssdOverrides, rebuildSsdOnly);
+            index = BuildLargeIndex<uint8_t>(indexPath, pquanvecset, pmeta, pmetaidx, iniReader, dist, numSearchThreads, numInsertThreads, layers, quantizer, "quantizer.bin");
             BOOST_REQUIRE(index != nullptr);
             index->SetQuantizerADC(true);
         }
         else
         {
-            index = BuildLargeIndex<T>(indexPath, pvecset, pmeta, pmetaidx, dist, numSearchThreads, numInsertThreads, layers, nullptr, "quantizer.bin", ssdOverrides, rebuildSsdOnly);
+            index = BuildLargeIndex<T>(indexPath, pvecset, pmeta, pmetaidx, iniReader, dist, numSearchThreads, numInsertThreads, layers);
             BOOST_REQUIRE(index != nullptr);
         }
 
@@ -2099,43 +2070,8 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     int numQueries = iniReader.GetParameter("Benchmark", "NumQueries", 1000);
     int layers = iniReader.GetParameter("Benchmark", "Layers", 1);
     DistCalcMethod distMethod = iniReader.GetParameter("Benchmark", "DistMethod", DistCalcMethod::L2);
-    bool rebuild = iniReader.GetParameter("Benchmark", "Rebuild", true);
-    bool rebuildSsdOnly = iniReader.GetParameter("Benchmark", "RebuildSSDOnly", false);
+    bool rebuild = (iniReader.GetParameter("Benchmark", "Rebuild", true) || iniReader.GetParameter("Benchmark", "RebuildSSDOnly", false));
     int resume = iniReader.GetParameter("Benchmark", "Resume", -1);
-
-    // Read storage backend overrides for BuildSSDIndex
-    std::map<std::string, std::string> ssdOverrides;
-    std::string storage = iniReader.GetParameter("Benchmark", "Storage", std::string(""));
-    if (!storage.empty()) {
-        ssdOverrides["Storage"] = storage;
-    }
-    std::string tikvPDAddresses = iniReader.GetParameter("Benchmark", "TiKVPDAddresses", std::string(""));
-    if (!tikvPDAddresses.empty()) {
-        ssdOverrides["TiKVPDAddresses"] = tikvPDAddresses;
-    }
-    std::string tikvKeyPrefix = iniReader.GetParameter("Benchmark", "TiKVKeyPrefix", std::string(""));
-    if (!tikvKeyPrefix.empty()) {
-        ssdOverrides["TiKVKeyPrefix"] = tikvKeyPrefix;
-    }
-    if (appendThreadNum > 0) {
-        ssdOverrides["AppendThreadNum"] = std::to_string(appendThreadNum);
-    }
-
-    // Pass through any [BuildSSDIndex] section params from the ini as overrides
-    auto buildSSDParams = iniReader.GetParameters("BuildSSDIndex");
-    for (const auto &[key, val] : buildSSDParams) {
-        ssdOverrides[key] = val;
-    }
-
-    // Pass through [SelectHead] and [BuildHead] params as overrides too
-    auto selectHeadParams = iniReader.GetParameters("SelectHead");
-    for (const auto &[key, val] : selectHeadParams) {
-        ssdOverrides["SelectHead." + key] = val;
-    }
-    auto buildHeadParams = iniReader.GetParameters("BuildHead");
-    for (const auto &[key, val] : buildHeadParams) {
-        ssdOverrides["BuildHead." + key] = val;
-    }
 
     BOOST_TEST_MESSAGE("=== Benchmark Configuration ===");
     BOOST_TEST_MESSAGE("Vector Path: " << vectorPath);
@@ -2166,20 +2102,20 @@ BOOST_AUTO_TEST_CASE(BenchmarkFromConfig)
     if (valueType == VectorValueType::Float)
     {
         RunBenchmark<float>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                    insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries, outputFile, 
-                    rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
+                    insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries, iniReader, 
+                    outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers);
     }
     else if (valueType == VectorValueType::Int8)
     {
         RunBenchmark<std::int8_t>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                      insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries,
-                      outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
+                      insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries, iniReader,
+                      outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers);
     }
     else if (valueType == VectorValueType::UInt8)
     {
         RunBenchmark<std::uint8_t>(vectorPath, queryPath, truthPath, distMethod, indexPath, dimension, baseVectorCount,
-                       insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries,
-                       outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers, ssdOverrides, rebuildSsdOnly);
+                       insertVectorCount, deleteVectorCount, batchNum, topK, numSearchThreads, numInsertThreads, numSearchDuringInsertThreads, numQueries, iniReader,
+                       outputFile, rebuild, resume, quantizerFilePath, quantizedDim, layers);
     }
 
     //std::filesystem::remove_all(indexPath);
