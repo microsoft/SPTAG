@@ -894,14 +894,14 @@ namespace SPTAG::SPANN {
                         }
                     }
                 }
-                lock.unlock();
+                if (requirelock) lock.unlock();
             }
             
             m_stat.m_splitNum++;
             if (!m_opt->m_disableReassign) {
                 auto reassignScanBegin = std::chrono::high_resolution_clock::now();
 
-                CollectReAssign(p_exWorkSpace, headID, headVec, newPostingLists, newHeadsID, newHeadsVec, theSameHead);
+                CollectReAssign(p_exWorkSpace, headID, headVec, newPostingLists, newHeadsID, newHeadsVec, theSameHead, requirelock);
 
                 auto reassignScanEnd = std::chrono::high_resolution_clock::now();
                 elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(reassignScanEnd - reassignScanBegin).count();
@@ -919,13 +919,13 @@ namespace SPTAG::SPANN {
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
 
             if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
-                std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 m_mergeList.unsafe_erase(headID);
                 return ErrorCode::Success;
             }
 
             {
-                std::shared_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 if (m_mergeList.find(headID) == m_mergeList.end()) {
                     return ErrorCode::Success;
                 }
@@ -985,7 +985,7 @@ namespace SPTAG::SPANN {
                 }
                 CheckCentroid(headID, mergedPostingList, "MergePostings-ignore");
                 {
-                    std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                    std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                     m_mergeList.unsafe_erase(headID);
                 }
                 return ErrorCode::Success;
@@ -1130,7 +1130,7 @@ namespace SPTAG::SPANN {
 
                 {
                     {
-                        std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                        std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                         m_mergeList.unsafe_erase(headID);
                         m_mergeList.unsafe_erase(queryResult->VID);
                     }
@@ -1152,7 +1152,7 @@ namespace SPTAG::SPANN {
             }
             CheckCentroid(headID, mergedPostingList, "MergePostings-GC");
             {
-                std::unique_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 m_mergeList.unsafe_erase(headID);
             }
             return ErrorCode::Success;
@@ -1188,7 +1188,7 @@ namespace SPTAG::SPANN {
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
             {
-                std::shared_lock<std::shared_timed_mutex> lock(m_mergeListLock);
+                std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 auto res = m_mergeList.insert(headID);
                 if (!res.second)
                 {
@@ -1213,7 +1213,7 @@ namespace SPTAG::SPANN {
 
         ErrorCode CollectReAssign(ExtraWorkSpace *p_exWorkSpace, SizeType headID, std::shared_ptr<std::string> headVec,
                                   std::vector<std::string> &postingLists, std::vector<SizeType> &newHeadsID, std::vector<std::shared_ptr<std::string>> &newHeadsVec,
-                                  bool theSameHead)
+                                  bool theSameHead, bool requirelock)
         {
             auto headVector = reinterpret_cast<const ValueType*>(headVec->data() + m_metaDataSize);
 
@@ -1370,7 +1370,7 @@ namespace SPTAG::SPANN {
             // Split -> CollectReAssign -> Append -> Split -> CollectReAssign -> ...
             for (auto& kv : batchReassign) {
                 int count = static_cast<int>(kv.second.size() / m_vectorInfoSize);
-                ErrorCode ret = Append(p_exWorkSpace, kv.first, count, kv.second, 0);
+                ErrorCode ret = Append(p_exWorkSpace, kv.first, count, kv.second, 0, requirelock || m_rwLocks.hash_func(kv.first) != m_rwLocks.hash_func(headID));
                 if (ret != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "BatchReassign Append failed for head %d, count %d\n", kv.first, count);
                 }
@@ -1424,7 +1424,7 @@ namespace SPTAG::SPANN {
         }
 
 
-        ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0)
+        ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0, bool requirelock = true)
         {
             auto appendBegin = std::chrono::high_resolution_clock::now();
             if (appendPosting.empty()) {
@@ -1458,7 +1458,8 @@ namespace SPTAG::SPANN {
                 //std::shared_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]); //ROCKSDB
                 // [DIAG] measure lock wait time (suspect A: lock contention)
                 auto _lockBegin = std::chrono::high_resolution_clock::now();
-                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]); //SPDK
+                std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID], std::defer_lock); //SPDK
+                if (requirelock) lock.lock();
                 auto _lockAcq = std::chrono::high_resolution_clock::now();
                 uint64_t _lockWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(_lockAcq - _lockBegin).count();
                 IndexStats::HistAdd(m_stat.m_appendLockWaitUs, _lockWaitUs);
@@ -1466,11 +1467,11 @@ namespace SPTAG::SPANN {
 
                 ErrorCode ret;
                 if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
-                    lock.unlock();
+                    if (requirelock) lock.unlock();
                     goto checkDeleted;
                 }
                 {
-                    std::shared_lock<std::shared_timed_mutex> lock(m_splitListLock);
+                    std::shared_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
                     auto it = m_splitList.find(headID);
                     if (it != m_splitList.end()) {
                         postingSize = it->second;
@@ -1482,7 +1483,7 @@ namespace SPTAG::SPANN {
                     ret = Split(p_exWorkSpace, headID, false);
                     if (ret != ErrorCode::Success)
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split %lld failed!\n", (std::int64_t)headID);
-                    lock.unlock();
+                    if (requirelock) lock.unlock();
                     goto checkDeleted;
                 }
 
@@ -1497,7 +1498,7 @@ namespace SPTAG::SPANN {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split %lld failed!\n", (std::int64_t)headID);
                             return ret;
                         }
-                        lock.unlock();
+                        if (requirelock) lock.unlock();
                         goto checkDeleted;
                     }
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge failed for %lld! Posting Size:%d, limit: %d\n", (std::int64_t)headID, postingSize, m_postingSizeLimit);
@@ -1518,7 +1519,7 @@ namespace SPTAG::SPANN {
                 m_stat.m_appendPostingBytesTotal.fetch_add((uint64_t)postingSize, std::memory_order_relaxed);
                 m_stat.m_appendRmwSampleCount.fetch_add(1, std::memory_order_relaxed);
                 postingSize /= m_vectorInfoSize;
-                lock.unlock();
+                if (requirelock) lock.unlock();
             }
             if (postingSize > (m_postingSizeLimit + reassignThreshold)) {
                 // SizeType VID = *(int*)(&appendPosting[0]);
