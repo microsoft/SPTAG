@@ -374,8 +374,8 @@ namespace SPTAG::SPANN {
             m_mergeThreshold = p_opt.m_mergeThreshold;          
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Posting size limit: %d, search limit: %f, merge threshold: %d\n", m_postingSizeLimit, p_opt.m_latencyLimit, m_mergeThreshold);
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[CONFIG] layer=%d DistributedVersionMap=%s UseMultiChunkPosting=%s PostingPageLimit=%d\n",
-                layer, p_opt.m_distributedVersionMap ? "true" : "false", p_opt.m_useMultiChunkPosting ? "true" : "false", p_opt.m_postingPageLimit);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[CONFIG] layer=%d DistributedVersionMap=%s SearchCheckVersionMapOnlyLayer0=%s UseMultiChunkPosting=%s PostingPageLimit=%d\n",
+                layer, p_opt.m_distributedVersionMap ? "true" : "false", p_opt.m_searchCheckVersionMapOnlyLayer0 ? "true" : "false", p_opt.m_useMultiChunkPosting ? "true" : "false", p_opt.m_postingPageLimit);
 
             // Initialize posting count cache for multi-chunk mode
             if (p_opt.m_useMultiChunkPosting && p_opt.m_storage == Storage::TIKVIO) {
@@ -426,6 +426,14 @@ namespace SPTAG::SPANN {
                     globalIDs.push_back(i);
             }
             return ErrorCode::Success;
+        }
+
+        bool ShouldCheckVersionMapInSearch() const
+        {
+            return !(m_opt->m_storage == Storage::TIKVIO &&
+                     m_opt->m_distributedVersionMap &&
+                     m_opt->m_searchCheckVersionMapOnlyLayer0 &&
+                     m_layer != 0);
         }
         
         virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) override
@@ -2038,6 +2046,7 @@ namespace SPTAG::SPANN {
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
             bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
+            bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch();
             for (uint32_t pi = 0; pi < postingListCount; ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
@@ -2056,7 +2065,7 @@ namespace SPTAG::SPANN {
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
 		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
-                    if (!isTiKV && m_versionMap->Deleted(vectorID)) {
+                    if (!isTiKV && checkVersionMapInSearch && m_versionMap->Deleted(vectorID)) {
                         realNum--;
                         listElements--;
                         continue;
@@ -2084,7 +2093,7 @@ namespace SPTAG::SPANN {
             }
 
             // For TiKV mode: post-heap version check via BatchGetVersions
-            if (isTiKV) {
+            if (isTiKV && checkVersionMapInSearch) {
                 int K = queryResults.GetResultNum();
                 int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
                 fetchCount = std::min(fetchCount, K + 100); // safety cap
@@ -2189,7 +2198,7 @@ namespace SPTAG::SPANN {
             }
 
             // Post-heap batch version check for TiKV mode
-            {
+            if (ShouldCheckVersionMapInSearch()) {
                 int K = queryResults.GetResultNum();
                 int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
                 fetchCount = std::min(fetchCount, K + 100);

@@ -120,6 +120,7 @@ namespace SPTAG {
 
             // Distributed VersionMap
             bool m_distributedVersionMap;
+            bool m_searchCheckVersionMapOnlyLayer0;
             int m_versionChunkSize;
             float m_oversampleFactor;
             int m_versionCacheMaxChunks;
