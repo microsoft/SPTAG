@@ -1688,8 +1688,18 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     std::shared_lock<std::shared_timed_mutex> lock(m_checkPointLock);
 
     SizeType begin, end;
+    std::uint64_t addIndexLockWaitUs = 0;
+    std::uint64_t addIndexLockHoldUs = 0;
+    std::uint64_t addIndexAddCapacityLayer0Us = 0;
+    std::uint64_t addIndexAddCapacityUpperUs = 0;
+    std::uint64_t addIndexMetadataUs = 0;
     {
-        std::lock_guard<std::mutex> lock(m_dataAddLock);
+        auto lockWaitBegin = std::chrono::high_resolution_clock::now();
+        m_dataAddLock.lock();
+        auto lockWaitEnd = std::chrono::high_resolution_clock::now();
+        std::lock_guard<std::mutex> dataAddLock(m_dataAddLock, std::adopt_lock);
+        addIndexLockWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(lockWaitEnd - lockWaitBegin).count();
+        auto lockHoldBegin = lockWaitEnd;
 
         begin = m_options.m_vectorSize;
         end = begin + p_vectorNum;
@@ -1701,13 +1711,19 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
 
         for (int layer = 0; layer < m_extraSearchers.size(); layer++)
         {
+            auto addCapacityBegin = std::chrono::high_resolution_clock::now();
             if (m_extraSearchers[layer]->AddIDCapacity(p_vectorNum, layer == 0? false : true) != ErrorCode::Success)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow for layer %d: add VID: %d\n", layer, begin);
                 return ErrorCode::MemoryOverFlow;
             }
+            auto addCapacityEnd = std::chrono::high_resolution_clock::now();
+            auto addCapacityUs = std::chrono::duration_cast<std::chrono::microseconds>(addCapacityEnd - addCapacityBegin).count();
+            if (layer == 0) addIndexAddCapacityLayer0Us += addCapacityUs;
+            else addIndexAddCapacityUpperUs += addCapacityUs;
         }
 
+        auto metadataBegin = std::chrono::high_resolution_clock::now();
         if (m_pMetadata != nullptr)
         {
             if (p_metadataSet != nullptr)
@@ -1729,7 +1745,41 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
                     m_pMetadata->Add(ByteArray::c_empty);
             }
         }
+        auto metadataEnd = std::chrono::high_resolution_clock::now();
+        addIndexMetadataUs = std::chrono::duration_cast<std::chrono::microseconds>(metadataEnd - metadataBegin).count();
         m_options.m_vectorSize = end;
+        auto lockHoldEnd = std::chrono::high_resolution_clock::now();
+        addIndexLockHoldUs = std::chrono::duration_cast<std::chrono::microseconds>(lockHoldEnd - lockHoldBegin).count();
+    }
+
+    auto updateMax = [](std::atomic_uint64_t& target, std::uint64_t value) {
+        std::uint64_t current = target.load(std::memory_order_relaxed);
+        while (current < value && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {}
+    };
+    updateMax(m_addIndexLockWaitMaxUs, addIndexLockWaitUs);
+    updateMax(m_addIndexLockHoldMaxUs, addIndexLockHoldUs);
+
+    m_addIndexDiagVectors.fetch_add(p_vectorNum, std::memory_order_relaxed);
+    m_addIndexLockWaitUs.fetch_add(addIndexLockWaitUs, std::memory_order_relaxed);
+    m_addIndexLockHoldUs.fetch_add(addIndexLockHoldUs, std::memory_order_relaxed);
+    m_addIndexAddCapacityLayer0Us.fetch_add(addIndexAddCapacityLayer0Us, std::memory_order_relaxed);
+    m_addIndexAddCapacityUpperUs.fetch_add(addIndexAddCapacityUpperUs, std::memory_order_relaxed);
+    m_addIndexMetadataUs.fetch_add(addIndexMetadataUs, std::memory_order_relaxed);
+    std::uint64_t addIndexCalls = m_addIndexDiagCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (addIndexCalls <= 16 || addIndexCalls % 50000 == 0)
+    {
+        double calls = static_cast<double>(addIndexCalls);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "[DIAG-ADDINDEX] calls=%llu vectors=%llu lockWaitAvg=%.2fus lockWaitMax=%lluus lockHoldAvg=%.2fus lockHoldMax=%lluus addCapL0Avg=%.2fus addCapUpperAvg=%.2fus metadataAvg=%.2fus\n",
+            static_cast<unsigned long long>(addIndexCalls),
+            static_cast<unsigned long long>(m_addIndexDiagVectors.load(std::memory_order_relaxed)),
+            m_addIndexLockWaitUs.load(std::memory_order_relaxed) / calls,
+            static_cast<unsigned long long>(m_addIndexLockWaitMaxUs.load(std::memory_order_relaxed)),
+            m_addIndexLockHoldUs.load(std::memory_order_relaxed) / calls,
+            static_cast<unsigned long long>(m_addIndexLockHoldMaxUs.load(std::memory_order_relaxed)),
+            m_addIndexAddCapacityLayer0Us.load(std::memory_order_relaxed) / calls,
+            m_addIndexAddCapacityUpperUs.load(std::memory_order_relaxed) / calls,
+            m_addIndexMetadataUs.load(std::memory_order_relaxed) / calls);
     }
 
     if (VID != nullptr)

@@ -72,6 +72,16 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
+            std::atomic_uint64_t m_addIndexDiagCalls{0};
+            std::atomic_uint64_t m_addIndexDiagVectors{0};
+            std::atomic_uint64_t m_addIndexLockWaitUs{0};
+            std::atomic_uint64_t m_addIndexLockHoldUs{0};
+            std::atomic_uint64_t m_addIndexAddCapacityLayer0Us{0};
+            std::atomic_uint64_t m_addIndexAddCapacityUpperUs{0};
+            std::atomic_uint64_t m_addIndexMetadataUs{0};
+            std::atomic_uint64_t m_addIndexLockWaitMaxUs{0};
+            std::atomic_uint64_t m_addIndexLockHoldMaxUs{0};
+
             std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
             std::atomic<int> m_workspaceCount = 0;
 
