@@ -523,7 +523,8 @@ namespace SPTAG {
 
             virtual ErrorCode SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
-                SearchStats* p_stats, std::set<SizeType>* truth = nullptr, std::map<SizeType, std::set<SizeType>>* found = nullptr) = 0;
+                SearchStats* p_stats, std::set<SizeType>* truth = nullptr, std::map<SizeType, std::set<SizeType>>* found = nullptr,
+                bool p_checkVersionMap = true) = 0;
 
             virtual ErrorCode SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults) = 0;

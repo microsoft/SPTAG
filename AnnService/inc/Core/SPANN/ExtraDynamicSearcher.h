@@ -428,12 +428,14 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
-        bool ShouldCheckVersionMapInSearch() const
+        bool ShouldCheckVersionMapInSearch(bool p_checkVersionMap) const
         {
-            return !(m_opt->m_storage == Storage::TIKVIO &&
-                     m_opt->m_distributedVersionMap &&
-                     m_opt->m_searchCheckVersionMapOnlyLayer0 &&
-                     m_layer != 0);
+            if (!(m_opt->m_storage == Storage::TIKVIO &&
+                  m_opt->m_distributedVersionMap &&
+                  m_opt->m_searchCheckVersionMapOnlyLayer0)) {
+                return true;
+            }
+            return p_checkVersionMap;
         }
         
         virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) override
@@ -1997,11 +1999,12 @@ namespace SPTAG::SPANN {
 
         virtual ErrorCode SearchIndex(ExtraWorkSpace* p_exWorkSpace,
             QueryResult& p_queryResults,
-            SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found) override
+            SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
+            bool p_checkVersionMap) override
         {
             // Use coprocessor search if enabled and storage is TiKV
             if (m_opt->m_useCoprocessorSearch && m_opt->m_storage == Storage::TIKVIO) {
-                return SearchIndexWithCoprocessor(p_exWorkSpace, p_queryResults, p_stats, truth, found);
+                return SearchIndexWithCoprocessor(p_exWorkSpace, p_queryResults, p_stats, truth, found, p_checkVersionMap);
             }
 
             if (p_stats) p_stats->m_exSetUpLatency = 0;
@@ -2046,7 +2049,7 @@ namespace SPTAG::SPANN {
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
             bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
-            bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch();
+            bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch(p_checkVersionMap);
             for (uint32_t pi = 0; pi < postingListCount; ++pi) {
                 auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                 auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
@@ -2065,7 +2068,7 @@ namespace SPTAG::SPANN {
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
 		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
-                    if (!isTiKV && checkVersionMapInSearch && m_versionMap->Deleted(vectorID)) {
+                    if (!isTiKV && m_versionMap->Deleted(vectorID)) {
                         realNum--;
                         listElements--;
                         continue;
@@ -2146,7 +2149,8 @@ namespace SPTAG::SPANN {
         // distances, and returns only top-N candidates.
         ErrorCode SearchIndexWithCoprocessor(ExtraWorkSpace* p_exWorkSpace,
             QueryResult& p_queryResults,
-            SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found)
+            SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
+            bool p_checkVersionMap)
         {
             if (p_stats) p_stats->m_exSetUpLatency = 0;
 
@@ -2198,7 +2202,7 @@ namespace SPTAG::SPANN {
             }
 
             // Post-heap batch version check for TiKV mode
-            if (ShouldCheckVersionMapInSearch()) {
+            if (ShouldCheckVersionMapInSearch(p_checkVersionMap)) {
                 int K = queryResults.GetResultNum();
                 int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
                 fetchCount = std::min(fetchCount, K + 100);

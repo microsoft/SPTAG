@@ -237,7 +237,8 @@ namespace SPTAG
             virtual ErrorCode SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
                 SearchStats* p_stats,
-                std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found)
+                std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
+                bool)
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 

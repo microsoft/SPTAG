@@ -559,34 +559,25 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
     COMMON::OptHashPosVector resultDedup;
     resultDedup.Init(m_options.m_maxCheck, m_options.m_hashExp);
     COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-    int k = 0;
+    auto targetLayerContains = [&](SizeType vid) {
+        return m_extraSearchers[p_tolayer]->ContainSample(vid, p_exWorkSpace->m_versionReadPolicy);
+    };
     for (int i = 0, j = 0; i < p_queryResults->GetResultNum(); ++i)
     {
         auto res = p_queryResults->GetResult(i);
         if (res->VID == -1) break;
 
-        resultDedup.CheckAndSet(res->VID);
         if (j < m_options.m_searchInternalResultNum) *(localResults.GetResult(j++)) = *res;
-        if (m_extraSearchers[p_tolayer]->ContainSample(res->VID, p_exWorkSpace->m_versionReadPolicy)) {
-            if (k < i) {
-                *(p_queryResults->GetResult(k++)) = *res;
-                res->VID = -1;
-                res->Dist = MaxDist;
-                res->Vec = ByteArray::c_empty;
-            }
-            else k++;
-        } else {
-            res->VID = -1;
-            res->Dist = MaxDist;
-            res->Vec = ByteArray::c_empty;
-        }
     }
-    p_queryResults->Reverse();
+    p_queryResults->Reset();
 
     ErrorCode ret;
     for (int layer = m_extraSearchers.size() - 1; layer >= p_tolayer; layer--) {
         auto& searcher = m_extraSearchers[layer];
-        if (!searcher) return ErrorCode::Fail;
+        if (!searcher) {
+            return ErrorCode::Fail;
+        }
+        const bool isTargetLayer = (layer == p_tolayer);
 
         p_exWorkSpace->m_deduper.clear();
         p_exWorkSpace->m_postingIDs.clear();
@@ -598,14 +589,17 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
+            if (!isTargetLayer) continue;
+            if (!targetLayerContains(res->VID)) continue;
             if (resultDedup.CheckAndSet(res->VID)) continue;
-            if (!m_extraSearchers[p_tolayer]->ContainSample(res->VID, p_exWorkSpace->m_versionReadPolicy)) continue;
             p_queryResults->AddPoint(res->VID, res->Dist, res->Vec);
         }
         localResults.Reset();
-        if ((ret = searcher->SearchIndex(p_exWorkSpace, localResults, p_stats)) !=
+        if ((ret = searcher->SearchIndex(p_exWorkSpace, localResults, p_stats, nullptr, nullptr, isTargetLayer)) !=
             ErrorCode::Success)
+        {
             return ret;
+        }
     }
 
     for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
