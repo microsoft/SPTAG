@@ -120,7 +120,7 @@ DefineSSDParameter(m_postingCountCacheCapacity, int, 100000, "PostingCountCacheC
 DefineSSDParameter(m_distributedVersionMap, bool, true, "DistributedVersionMap")
 DefineSSDParameter(m_searchCheckVersionMapOnlyLayer0, bool, false, "SearchCheckVersionMapOnlyLayer0")
 DefineSSDParameter(m_versionChunkSize, int, 4096, "VersionChunkSize")
-DefineSSDParameter(m_oversampleFactor, float, 0.0f, "OversampleFactor")
+DefineSSDParameter(m_versionCacheTTLMs, int, 0, "VersionCacheTTLMs")
 DefineSSDParameter(m_versionCacheMaxChunks, int, 10000, "VersionCacheMaxChunks")
 DefineSSDParameter(m_asyncRpcMaxInflight, int, 0, "AsyncRpcMaxInflight")
 

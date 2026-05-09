@@ -32,7 +32,7 @@ static std::unique_ptr<LocalVersionMap> MakeLocalVersionMap()
 // Helper: create a TiKVVersionMap connected to the live TiKV cluster.
 // Requires env TIKV_PD_ADDRESSES (e.g. "127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793").
 // Uses a unique key prefix per test to avoid collision.
-static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int cacheMaxChunks = 100)
+static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int cacheMaxChunks = 100, int cacheTTLMs = 0)
 {
     const char* pdAddr = std::getenv("TIKV_PD_ADDRESSES");
     if (!pdAddr || std::string(pdAddr).empty()) {
@@ -49,6 +49,7 @@ static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& tes
     vm->SetDB(db);
     vm->SetLayer(0);
     vm->SetChunkSize(chunkSize);
+    vm->SetCacheTTL(cacheTTLMs);
     vm->SetCacheMaxChunks(cacheMaxChunks);
     return vm;
 }
@@ -497,6 +498,32 @@ BOOST_AUTO_TEST_CASE(TiKV_CacheNoTTLExpiry)
 
     // Cache is capacity-bound only; elapsed time should not expire entries.
     BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
+}
+
+BOOST_AUTO_TEST_CASE(TiKV_CacheTTLExpiry)
+{
+    auto vm = MakeTiKVVersionMap("CacheTTL", 64, 100, 50);
+    if (!vm) return;
+
+    vm->Initialize(100, 1, 100);
+    vm->SetVersion(5, 10);
+
+    // Populate vm's local cache with version 10.
+    BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
+
+    // A separate version-map instance writes the same TiKV key without updating vm's cache.
+    auto writer = std::make_unique<TiKVVersionMap>();
+    writer->SetDB(vm->GetDB());
+    writer->SetLayer(0);
+    writer->SetChunkSize(64);
+    writer->SetCacheMaxChunks(0);
+    BOOST_CHECK(writer->Load(std::string(), 1, 100) == ErrorCode::Success);
+    writer->SetVersion(5, 20);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    // After TTL expiry, vm should refresh from TiKV and observe the external update.
+    BOOST_CHECK_EQUAL(vm->GetVersion(5), 20);
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_CacheEviction)

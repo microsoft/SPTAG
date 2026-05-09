@@ -360,10 +360,11 @@ namespace SPTAG::SPANN {
                 tikvMap->SetDB(db);
                 tikvMap->SetLayer(layer);
                 tikvMap->SetChunkSize(p_opt.m_versionChunkSize);
+                tikvMap->SetCacheTTL(p_opt.m_versionCacheTTLMs);
                 tikvMap->SetCacheMaxChunks(p_opt.m_versionCacheMaxChunks);
                 m_versionMap = std::move(tikvMap);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, chunkSize=%d, cacheMax=%d)\n",
-                    layer, p_opt.m_versionChunkSize, p_opt.m_versionCacheMaxChunks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, chunkSize=%d, cacheTTL=%dms, cacheMax=%d)\n",
+                    layer, p_opt.m_versionChunkSize, p_opt.m_versionCacheTTLMs, p_opt.m_versionCacheMaxChunks);
             } else {
                 m_versionMap = std::make_unique<COMMON::LocalVersionMap>();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using local in-memory VersionMap (layer=%d)\n", layer);
@@ -2097,9 +2098,7 @@ namespace SPTAG::SPANN {
 
             // For TiKV mode: post-heap version check via BatchGetVersions
             if (isTiKV && checkVersionMapInSearch) {
-                int K = queryResults.GetResultNum();
-                int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
-                fetchCount = std::min(fetchCount, K + 100); // safety cap
+                int fetchCount = queryResults.GetResultNum();
 
                 // Collect candidate VIDs from the top results
                 std::vector<SizeType> candidateVIDs;
@@ -2203,9 +2202,7 @@ namespace SPTAG::SPANN {
 
             // Post-heap batch version check for TiKV mode
             if (ShouldCheckVersionMapInSearch(p_checkVersionMap)) {
-                int K = queryResults.GetResultNum();
-                int fetchCount = static_cast<int>(std::ceil(K * (1.0f + m_opt->m_oversampleFactor)));
-                fetchCount = std::min(fetchCount, K + 100);
+                int fetchCount = queryResults.GetResultNum();
 
                 std::vector<SizeType> candidateVIDs;
                 candidateVIDs.reserve(fetchCount);

@@ -18,8 +18,8 @@ The relevant options are defined under the SSD/SPANN parameter set:
 | `DistributedVersionMap` | `true` | Use `TiKVVersionMap` when `Storage=TIKVIO`; otherwise use local in-memory `LocalVersionMap`. |
 | `SearchCheckVersionMapOnlyLayer0` | `false` | When enabled with TiKV distributed VM, search checks the version map only on the current search target layer. For normal user search (`p_tolayer=0`), this means layer 0 only. |
 | `VersionChunkSize` | `4096` | Number of VIDs stored in one TiKV version chunk. |
+| `VersionCacheTTLMs` | `0` | Cache-entry freshness TTL in milliseconds. `0` means cached chunks do not expire. |
 | `VersionCacheMaxChunks` | `10000` | Max chunks in the local LRU cache. `<= 0` disables cache. |
-| `OversampleFactor` | `0.0` | Extra top candidates to fetch versions for during post-heap filtering. |
 | `AsyncRpcMaxInflight` | `0` | TiKV async RPC in-flight limit. This is owned by TiKV IO, not the version map itself. |
 
 Current benchmark config enables:
@@ -29,6 +29,7 @@ Storage=TIKVIO
 DistributedVersionMap=true
 SearchCheckVersionMapOnlyLayer0=true
 VersionCacheMaxChunks=100000
+VersionCacheTTLMs=0
 AsyncRpcMaxInflight=512
 ```
 
@@ -191,7 +192,7 @@ for each vector in postings:
     add candidate to heap
 
 if TiKV and p_checkVersionMap:
-    collect top K * (1 + OversampleFactor), capped at K + 100
+    collect current result buffer VIDs
     BatchGetVersions(candidateVIDs)
     mark 0xfe candidates invalid
     SortResult()
@@ -216,12 +217,17 @@ if p_checkVersionMap:
 The version map has a per-process LRU chunk cache:
 
 - Front of the list is most recently inserted/updated.
-- Cache hits use shared locking and do not reorder entries.
-- Cache misses fetch from TiKV and insert under an exclusive lock.
+- `VersionCacheMaxChunks <= 0` disables the cache.
+- `VersionCacheTTLMs <= 0` keeps the current pure-LRU behavior: cached chunks do not expire by age.
+- `VersionCacheTTLMs > 0` makes cache hits valid only while `now - refreshTime < VersionCacheTTLMs`.
+- Fresh cache hits use shared locking and do not reorder entries.
+- Cache misses and expired entries fetch from TiKV and insert under an exclusive lock.
 - Writes update the cache after a successful TiKV `Put`.
 - `BypassCacheNoFill` disables both lookup and fill for that read.
 
-This cache reduces repeated chunk reads but is not a distributed coherence mechanism. Other processes can update TiKV without invalidating this process's cached chunks. Search paths can bypass cache when freshness is preferred.
+Single-chunk reads use a striped refresh mutex so multiple threads do not all refresh the same expired/missing chunk at once. Batched reads group miss/expired chunks and refresh them with one TiKV `MultiGet`.
+
+This cache reduces repeated chunk reads but is not a distributed coherence mechanism. Other processes can update TiKV without invalidating this process's cached chunks before TTL expiry. Search paths can bypass cache when freshness is preferred.
 
 ## Failure And Missing-Key Behavior
 
@@ -242,6 +248,7 @@ Write-side behavior:
 - `IncVersion()` is not a distributed atomic CAS. Concurrent writers from different processes can still race at chunk granularity.
 - Delete count is maintained locally during writes and recomputed by scanning chunks on load; it is not stored as a separate authoritative TiKV counter.
 - The LRU cache is local to one process and has no cross-process invalidation.
+- `VersionCacheTTLMs` bounds cache staleness only for code paths that use `UseCache`; `BypassCacheNoFill` still reads TiKV directly.
 - `SearchCheckVersionMapOnlyLayer0` is historically named; with the current implementation it means target-layer-only checking for TiKV distributed VM.
 - Missing version chunks are treated as deleted. This favors correctness over recall when TiKV data is incomplete.
 

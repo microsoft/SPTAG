@@ -44,26 +44,43 @@ namespace SPTAG
             mutable std::mutex m_chunkWriteMutex[kWriteStripes];
             std::mutex& ChunkMutex(SizeType chunkId) const { return m_chunkWriteMutex[chunkId % kWriteStripes]; }
 
+            // Striped mutexes to avoid duplicate refreshes for the same expired/missing chunk.
+            static constexpr int kRefreshStripes = 64;
+            mutable std::mutex m_chunkRefreshMutex[kRefreshStripes];
+            std::mutex& RefreshMutex(SizeType chunkId) const { return m_chunkRefreshMutex[chunkId % kRefreshStripes]; }
+
             // LRU chunk cache: list front = most recently used
             struct CachedChunk {
                 SizeType chunkId;
                 std::string data;
+                std::chrono::steady_clock::time_point refreshTime;
             };
             using LruList = std::list<CachedChunk>;
             mutable std::shared_mutex m_cacheMutex;
             mutable LruList m_lruList;
             mutable std::unordered_map<SizeType, LruList::iterator> m_cacheMap;
+            int m_cacheTTLMs{0}; // <= 0 means cached chunks do not expire
             int m_cacheMaxChunks{10000}; // max cached chunks; <= 0 disables caching
 
-            // Insert or update a chunk in the LRU cache. Caller must hold exclusive m_cacheMutex.
-            void CachePut(SizeType chunkId, const std::string& data) const
+            bool CacheEnabled() const { return m_cacheMaxChunks > 0; }
+
+            bool CacheFresh(const LruList::iterator& it, std::chrono::steady_clock::time_point now) const
             {
-                if (m_cacheMaxChunks <= 0) return;
+                if (m_cacheTTLMs <= 0) return true;
+                auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->refreshTime).count();
+                return ageMs < m_cacheTTLMs;
+            }
+
+            // Insert or update a chunk in the LRU cache. Caller must hold exclusive m_cacheMutex.
+            void CachePut(SizeType chunkId, const std::string& data, std::chrono::steady_clock::time_point now) const
+            {
+                if (!CacheEnabled()) return;
 
                 auto it = m_cacheMap.find(chunkId);
                 if (it != m_cacheMap.end()) {
                     // Update existing: move to front
                     it->second->data = data;
+                    it->second->refreshTime = now;
                     m_lruList.splice(m_lruList.begin(), m_lruList, it->second);
                 } else {
                     // Evict LRU entries if at capacity
@@ -72,7 +89,7 @@ namespace SPTAG
                         m_cacheMap.erase(back.chunkId);
                         m_lruList.pop_back();
                     }
-                    m_lruList.push_front({chunkId, data});
+                    m_lruList.push_front({chunkId, data, now});
                     m_cacheMap[chunkId] = m_lruList.begin();
                 }
             }
@@ -109,29 +126,46 @@ namespace SPTAG
                 auto ret = m_db->Put(ChunkKey(chunkId), data, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Success) {
                     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
-                    CachePut(chunkId, data);
+                    CachePut(chunkId, data, std::chrono::steady_clock::now());
                 }
                 return ret;
             }
 
-            // Read a chunk with pure LRU cache.
+            // Read a chunk with LRU cache and optional TTL refresh.
             // Uses shared_lock for cache hits (no LRU reorder) to allow concurrent reads.
             // Only takes exclusive lock on cache miss for insertion.
             std::string ReadChunkCached(SizeType chunkId) const
             {
+                if (!CacheEnabled()) return ReadChunk(chunkId);
+
+                auto now = std::chrono::steady_clock::now();
+
                 // Try cache with shared lock — concurrent reads OK
                 {
                     std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
                     auto it = m_cacheMap.find(chunkId);
-                    if (it != m_cacheMap.end()) {
+                    if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
                         return it->second->data;
                     }
                 }
-                // Cache miss — fetch from TiKV, then exclusive lock to insert
+
+                std::lock_guard<std::mutex> refreshLock(RefreshMutex(chunkId));
+                now = std::chrono::steady_clock::now();
+
+                // Another thread may have refreshed this chunk while we waited.
+                {
+                    std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
+                    auto it = m_cacheMap.find(chunkId);
+                    if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
+                        return it->second->data;
+                    }
+                }
+
+                // Cache miss or expired — fetch from TiKV, then exclusive lock to insert
                 std::string data = ReadChunk(chunkId);
                 if (!data.empty()) {
                     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
-                    CachePut(chunkId, data);
+                    CachePut(chunkId, data, now);
                 }
                 return data;
             }
@@ -186,6 +220,7 @@ namespace SPTAG
             void SetDB(std::shared_ptr<Helper::KeyValueIO> db) { m_db = db; }
             void SetLayer(int layer) { m_layer = layer; }
             void SetChunkSize(int chunkSize) { m_chunkSize = chunkSize; }
+            void SetCacheTTL(int ttlMs) { m_cacheTTLMs = ttlMs; }
             void SetCacheMaxChunks(int maxChunks) { m_cacheMaxChunks = maxChunks; }
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
@@ -492,7 +527,8 @@ namespace SPTAG
 
                 SizeType count = m_count.load();
                 bool bypassCache = (policy == VersionReadPolicy::BypassCacheNoFill);
-                bool cacheEnabled = (m_cacheMaxChunks > 0 && !bypassCache);
+                bool cacheEnabled = (CacheEnabled() && !bypassCache);
+                auto now = std::chrono::steady_clock::now();
 
                 // Group VIDs by chunk
                 std::unordered_map<SizeType, std::vector<size_t>> chunkToIndices;
@@ -513,7 +549,7 @@ namespace SPTAG
                     std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
                     for (auto& [cid, indices] : chunkToIndices) {
                         auto it = m_cacheMap.find(cid);
-                        if (it != m_cacheMap.end()) {
+                        if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
                             resolvedChunks[cid] = it->second->data; // copy
                             continue;
                         }
@@ -558,7 +594,7 @@ namespace SPTAG
                     if (cacheEnabled && !fetchedChunks.empty()) {
                         std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
                         for (auto& [cid, data] : fetchedChunks) {
-                            CachePut(cid, data);
+                            CachePut(cid, data, now);
                         }
                     }
                 }
