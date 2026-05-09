@@ -5,7 +5,7 @@
 #define _SPTAG_HELPER_THREADPOOL_H_
 
 #include <atomic>
-#include <queue>
+#include <deque>
 #include <vector>
 #include <thread>
 #include <mutex>
@@ -78,7 +78,16 @@ namespace SPTAG
             {
                 {
                     std::lock_guard<std::mutex> lock(m_lock);
-                    m_jobs.push(j);
+                    m_jobs.push_back(j);
+                }
+                m_cond.notify_one();
+            }
+
+            void addfront(Job* j)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(m_lock);
+                    m_jobs.push_front(j);
                 }
                 m_cond.notify_one();
             }
@@ -90,7 +99,7 @@ namespace SPTAG
                 if (!m_abort.ShouldAbort()) {
                     j = m_jobs.front();
                     currentJobs++;
-                    m_jobs.pop();
+                    m_jobs.pop_front();
                     return true;
                 }
                 return false;
@@ -113,7 +122,7 @@ namespace SPTAG
 
         protected:
             std::atomic_uint32_t currentJobs{ 0 };
-            std::queue<Job*> m_jobs;
+            std::deque<Job*> m_jobs;
             Abort m_abort;
             std::mutex m_lock;
             std::condition_variable m_cond;
