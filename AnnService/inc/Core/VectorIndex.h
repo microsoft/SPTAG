@@ -208,7 +208,7 @@ public:
 
         void ClearHeadNodeMeta();
 
-        void InitializeHeadNodeMeta(SizeType p_numSamples, int p_numTagsPerSample);
+        void InitializeHeadNodeMeta(SizeType p_numSamples);
 
         bool HasHeadNodeMeta() const { return m_headNodeMetaStride > 0 && !m_headNodeMeta.empty(); }
 
@@ -234,11 +234,23 @@ public:
 
         bool IsHeadNodeHeadOnly(SizeType p_sampleId) const;
 
-        uint32_t* MutableHeadNodeTags(SizeType p_sampleId);
+        void SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask);
 
-        const uint32_t* GetHeadNodeTags(SizeType p_sampleId) const;
+        const Cache::HierarchicalPostingMask* GetHeadNodeHierMask(SizeType p_sampleId) const;
 
-        bool HeadNodeMatchesAnyQueryTag(SizeType p_sampleId, const uint32_t* p_queryTags, int p_numQueryTags) const;
+        void SetHeadNodeBundleNodeId(SizeType p_sampleId, int16_t p_bundleNodeId);
+
+        int16_t GetHeadNodeBundleNodeId(SizeType p_sampleId) const;
+
+        bool HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, uint32_t p_routedNodeMask) const;
+
+        // Lightweight tag-content gate for heads: returns true iff the head has
+        // hier_mask metadata AND that mask MayIntersect the query mask. Unlike
+        // HeadNodeMatchesQuery this does not require IsHeadNodeHeadOnly and does
+        // not check bundle routing, so it can be used both for "real" heads
+        // (whose hier_mask reflects their posting members' tags) and for ghost
+        // head-only vectors (whose hier_mask reflects their own tags).
+        bool HeadHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const;
 
         struct PostingScanStats {
             uint64_t m_readPostings = 0;
@@ -322,15 +334,15 @@ protected:
 
 public:
     // Per-head-node metadata blob, indexed by local head sample id (hid).
-    // Each record stores:
-    //   [PostingBitmask PS][global VID][head-only flag][fixed tag array]
-    // so filtered search can reach node-local metadata via one hid-based offset.
+    // Layout V2 (each record stores):
+    //   [PostingBitmask (legacy 256-bit)][HierarchicalPostingMask][globalVID][bundleNodeId][headOnly]
+    // Aligned to alignof(PostingBitmask)=8 for stride.
     size_t m_headNodeMetaStride = 0;
     size_t m_headNodePSOffset = 0;
+    size_t m_headNodeHierMaskOffset = 0;
     size_t m_headNodeGlobalVIDOffset = 0;
+    size_t m_headNodeBundleNodeIdOffset = 0;
     size_t m_headNodeHeadOnlyOffset = 0;
-    size_t m_headNodeTagOffset = 0;
-    int m_headTagCountPerSample = 0;
     std::vector<std::uint8_t> m_headNodeMeta;
 
 public:

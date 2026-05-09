@@ -2,15 +2,21 @@
 // Licensed under the MIT License.
 
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/BKT/Index.h"
+#include "inc/Core/KDT/Index.h"
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
+#include "inc/Helper/HeadCrossEdges.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <functional>
+#include <queue>
 #include <random>
 #include <shared_mutex>
+#include <unordered_set>
 
 #include "inc/Core/ResultIterator.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
@@ -26,10 +32,24 @@ namespace SPANN
 {
 EdgeCompare Selection::g_edgeComparer;
 
+// Per-thread phase timings (set by CrossSubgraphGraphSearch, read by SearchIndex)
+thread_local double g_bktSeedMs = 0.0;
+thread_local double g_pqGraphMs = 0.0;
+
 namespace
 {
 constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
+
+// Helper to determine tag level from tag ID based on range
+// Level 0 (org): 1000-1999, Level 1 (dept): 2000-2999,
+// Level 2 (team): 3000-3999, Level 3 (project): 4000-4999
+static inline int TagLevelFromId(uint32_t tag) {
+    if (tag < 2000) return 0;
+    if (tag < 3000) return 1;
+    if (tag < 4000) return 2;
+    return 3;
+}
 
 double GetMultiNodeBudgetKeepRatio()
 {
@@ -398,6 +418,8 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
         }
 
         localToGlobalHIDs.reserve(nodeHeadIDs.R());
+        std::vector<std::pair<SizeType, SizeType>> reverseMapEntries;
+        reverseMapEntries.reserve(nodeHeadIDs.R());
         for (SizeType localHid = 0; localHid < nodeHeadIDs.R(); ++localHid)
         {
             SizeType globalVID = static_cast<SizeType>(*(nodeHeadIDs[localHid]));
@@ -412,6 +434,16 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
                 return ErrorCode::Fail;
             }
             localToGlobalHIDs.push_back(globalHidIt->second);
+            reverseMapEntries.emplace_back(globalVID, localHid);
+        }
+
+        // Publish the (globalVID -> (bundleNodeId, localHidWithinBundle)) reverse map
+        // so cross-subgraph traversal can hop to a foreign node's BKT directly.
+        {
+            std::lock_guard<std::mutex> mapLock(m_globalVIDToBundleLocMutex);
+            for (auto& entry : reverseMapEntries) {
+                m_globalVIDToBundleLoc[entry.first] = std::make_pair(p_nodeId, entry.second);
+            }
         }
     }
 
@@ -454,6 +486,400 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
         return ErrorCode::Fail;
     }
 
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
+{
+    if (m_headCrossEdgesLoaded.load(std::memory_order_acquire)) {
+        return ErrorCode::Success;
+    }
+    std::lock_guard<std::mutex> lock(m_headCrossEdgesMutex);
+    if (m_headCrossEdgesLoaded.load(std::memory_order_relaxed)) {
+        return ErrorCode::Success;
+    }
+
+    std::string baseDir = m_headBundleBaseDir;
+    if (baseDir.empty()) baseDir = m_options.m_indexDirectory;
+    if (baseDir.empty()) {
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
+
+    std::string path = baseDir;
+    if (!path.empty() && path.back() != FolderSep) path += FolderSep;
+    path += m_options.m_headIndexFolder;
+    if (!path.empty() && path.back() != FolderSep) path += FolderSep;
+    path += Helper::kHeadCrossEdgesFileName;
+
+    FILE* fp = std::fopen(path.c_str(), "rb");
+    if (fp == nullptr) {
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
+
+    Helper::HeadCrossEdgesHeader header{};
+    if (std::fread(&header, sizeof(header), 1, fp) != 1 ||
+        header.magic != Helper::kHeadCrossEdgesMagic ||
+        header.version != Helper::kHeadCrossEdgesVersion) {
+        std::fclose(fp);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "head_cross_edges.bin format mismatch at %s — ignoring.\n", path.c_str());
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
+
+    m_headCrossEdges.clear();
+    m_headCrossEdges.reserve(static_cast<size_t>(header.totalHeads));
+    bool ok = true;
+    for (std::int32_t i = 0; i < header.totalHeads && ok; ++i) {
+        std::int32_t globalVID = 0;
+        std::int32_t edgeCount = 0;
+        if (std::fread(&globalVID, sizeof(std::int32_t), 1, fp) != 1 ||
+            std::fread(&edgeCount, sizeof(std::int32_t), 1, fp) != 1) { ok = false; break; }
+        if (edgeCount < 0 || edgeCount > header.maxEdgesPerHead) { ok = false; break; }
+        std::vector<Helper::HeadCrossEdgeEntry> entries(static_cast<size_t>(edgeCount));
+        if (edgeCount > 0 &&
+            std::fread(entries.data(), sizeof(Helper::HeadCrossEdgeEntry), entries.size(), fp) != entries.size()) {
+            ok = false; break;
+        }
+        auto& neighbors = m_headCrossEdges[static_cast<SizeType>(globalVID)];
+        neighbors.reserve(entries.size());
+        for (const auto& e : entries) {
+            neighbors.push_back(static_cast<SizeType>(e.neighborGlobalVID));
+        }
+    }
+    std::fclose(fp);
+
+    if (!ok) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "head_cross_edges.bin truncated at %s — partial load (%zu entries).\n",
+                     path.c_str(), m_headCrossEdges.size());
+    } else {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "Loaded head_cross_edges.bin: %d records, M=%d, K=%d.\n",
+                     header.totalHeads, header.maxEdgesPerHead, header.searchTopK);
+    }
+    m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+    return ErrorCode::Success;
+}
+
+// Helper: access RNG graph + samples uniformly for either KDT or BKT head-bundle index.
+template <typename T>
+struct HeadBundleAccess {
+    const COMMON::RelativeNeighborhoodGraph* graph = nullptr;
+    DimensionType nbrSize = 0;
+    std::function<const T*(SizeType)> getSample;
+    SizeType numSamples = 0;
+    bool valid = false;
+};
+
+template <typename T>
+static HeadBundleAccess<T> AccessHeadBundleIndex(VectorIndex* p_idx) {
+    HeadBundleAccess<T> a;
+    if (p_idx == nullptr) return a;
+    if (auto* b = dynamic_cast<BKT::Index<T>*>(p_idx)) {
+        a.graph = &b->GetGraph();
+        a.nbrSize = b->GetNeighborhoodSize();
+        a.getSample = [b](SizeType i) { return static_cast<const T*>(b->GetSample(i)); };
+        a.numSamples = b->GetNumSamples();
+        a.valid = true;
+    } else if (auto* k = dynamic_cast<KDT::Index<T>*>(p_idx)) {
+        a.graph = &k->GetGraph();
+        a.nbrSize = k->GetNeighborhoodSize();
+        a.getSample = [k](SizeType i) { return static_cast<const T*>(k->GetSample(i)); };
+        a.numSamples = k->GetNumSamples();
+        a.valid = true;
+    }
+    return a;
+}
+
+template <typename T>
+ErrorCode Index<T>::CrossSubgraphGraphSearch(
+    QueryResult& p_query,
+    COMMON::QueryResultSet<T>* p_queryResults,
+    const std::vector<int>& p_candidateNodes,
+    const std::uint32_t* p_queryTags,
+    int p_numQueryTags,
+    int p_graphResultNum,
+    int& p_scannedOut) const
+{
+    if (p_candidateNodes.empty() || p_queryResults == nullptr || m_index == nullptr) {
+        return ErrorCode::Fail;
+    }
+    if (LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdges.empty()) {
+        return ErrorCode::Fail;
+    }
+
+    // Force-load all bundle nodes once so the globalVID -> (nodeId, localHid)
+    // reverse map is fully populated. With ~14-16 bundle nodes per tenant and
+    // a few MB each, this is cheap and saves us mid-search lazy-load cost.
+    for (const auto& bundleNodeInfo : m_headBundleNodes) {
+        if (EnsureHeadBundleNodeLoaded(bundleNodeInfo.nodeId) != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+
+    int entryNode = p_candidateNodes.front();
+    if (entryNode < 0 || entryNode >= static_cast<int>(m_loadedHeadBundleIndexes.size())) {
+        return ErrorCode::Fail;
+    }
+    const auto& entryIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(entryNode)];
+    const auto& entryL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(entryNode)];
+    if (entryIdx == nullptr || entryL2G.empty()) {
+        return ErrorCode::Fail;
+    }
+
+    auto entryAcc = AccessHeadBundleIndex<T>(entryIdx.get());
+    if (!entryAcc.valid) {
+        return ErrorCode::Fail;
+    }
+
+    const T* qTarget = static_cast<const T*>(p_query.GetTarget());
+    DimensionType dim = static_cast<DimensionType>(GetFeatureDim());
+
+    // Build hierarchical query mask from query tags
+    SPTAG::Cache::HierarchicalPostingMask queryHierMask;
+    queryHierMask.Clear();
+    if (p_queryTags != nullptr && p_numQueryTags > 0) {
+        for (int i = 0; i < p_numQueryTags; ++i) {
+            queryHierMask.Insert(TagLevelFromId(p_queryTags[i]), p_queryTags[i]);
+        }
+    }
+
+    // Build routed node mask from candidateNodeSet
+    uint32_t routedNodeMask = 0;
+    for (int nid : p_candidateNodes) {
+        if (nid >= 0 && nid < 32) {
+            routedNodeMask |= (1u << nid);
+        }
+    }
+
+    // Open priority queue (min-heap by distance) and visited set on globalVID.
+    struct Cand {
+        float dist;
+        int nodeId;
+        SizeType bundleLocal;
+        SizeType globalA;     // tenant data global VID
+        SizeType m_idx_B;     // m_index local hid (for AddPoint + PS lookup)
+    };
+    auto cmp = [](const Cand& a, const Cand& b) { return a.dist > b.dist; };
+    std::priority_queue<Cand, std::vector<Cand>, decltype(cmp)> pq(cmp);
+    std::unordered_set<SizeType> visitedA;
+    visitedA.reserve(static_cast<size_t>(p_graphResultNum) * 16);
+
+    auto pushCandidate = [&](int nodeId, SizeType bundleLocal, SizeType globalA,
+                             SizeType m_idx_B, float dist) {
+        if (visitedA.count(globalA)) return;
+        pq.push({dist, nodeId, bundleLocal, globalA, m_idx_B});
+    };
+
+    // Phase 1: seed from EVERY routed node. Cross-edges alone are too sparse
+    // a bridge when candidateNodes is small (e.g. 2-node dept queries) — the
+    // entry-only seed leaves the other half of the routed scope unreachable.
+    // We split the seed budget across all routed nodes and let each node's
+    // BKT contribute its local nearest heads to the priority queue.
+    //
+    // Critical: per-node head indexes are configured with MaxCheck=4096 (the
+    // global SPANN maxCheck). Calling their default SearchIndex() therefore
+    // burns 4096 distance ops *per routed node* just to seed K~16 heads —
+    // for a 4-node org query that's 16k ops before the unified PQ even
+    // starts. We override with a tight budget here; the unified RNG +
+    // cross-edge expansion below does the heavy lifting.
+    int totalSeedK = std::max(16, std::min(p_graphResultNum, 64));
+    int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(p_candidateNodes.size()));
+    int seedMaxCheck = std::max(64, perNodeSeed * 8);
+    int scanned = 0;
+    int totalSeeded = 0;
+    int seedDroppedByTag = 0;
+
+    auto _bktT0 = std::chrono::high_resolution_clock::now();
+
+    for (int nodeId : p_candidateNodes) {
+        if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
+        const auto& nodeIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
+        const auto& nodeL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
+        if (nodeIdx == nullptr || nodeL2G.empty()) continue;
+        auto nodeAcc = AccessHeadBundleIndex<T>(nodeIdx.get());
+        if (!nodeAcc.valid) continue;
+
+        int seedK = std::min(perNodeSeed, static_cast<int>(nodeL2G.size()));
+        if (seedK <= 0) continue;
+
+        COMMON::QueryResultSet<T> seedResults(qTarget, seedK);
+        if (nodeIdx->SearchIndex(seedResults) != ErrorCode::Success) continue;
+        scanned += seedResults.GetScanned();
+
+        for (int i = 0; i < seedResults.GetResultNum(); ++i) {
+            auto* r = seedResults.GetResult(i);
+            if (r == nullptr || r->VID < 0) continue;
+            if (static_cast<size_t>(r->VID) >= nodeL2G.size()) continue;
+            SizeType bundleLocal = r->VID;
+            SizeType m_idx_B = nodeL2G[static_cast<size_t>(bundleLocal)];
+            SizeType globalA = m_index->GetHeadNodeGlobalVID(m_idx_B);
+            if (globalA == MaxSize) continue;
+            pushCandidate(nodeId, bundleLocal, globalA, m_idx_B, r->Dist);
+            ++totalSeeded;
+        }
+    }
+
+    if (totalSeeded == 0) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "CrossSubgraph DBG: totalSeeded=0 nodes=%zu seedMaxCheck=%d perNodeSeed=%d\n",
+                     p_candidateNodes.size(), seedMaxCheck, perNodeSeed);
+        return ErrorCode::Fail;
+    }
+
+    auto _bktT1 = std::chrono::high_resolution_clock::now();
+    g_bktSeedMs = std::chrono::duration<double, std::milli>(_bktT1 - _bktT0).count();
+
+    int maxChecks = std::max(m_options.m_maxCheck, p_graphResultNum * 4);
+    int checks = 0;
+    int crossHopCount = 0;
+    int crossEdgesSeen = 0;
+    int crossDroppedByTag = 0;
+
+    // Early termination floor: ensure result heap is filled and PQ has settled
+    // before allowing the worstDist gate to kick in. Without this, we would
+    // exit before AddPoint has accumulated graphResultNum candidates (worstDist
+    // is +inf until then, so it wouldn't trigger anyway, but pq could also be
+    // tiny right after seeding).
+    int minChecks = std::max(p_graphResultNum, std::min(256, maxChecks));
+
+    while (!pq.empty() && checks < maxChecks) {
+        Cand cur = pq.top();
+        pq.pop();
+
+        if (visitedA.count(cur.globalA)) continue;
+        visitedA.insert(cur.globalA);
+        ++checks;
+
+        // Early termination: once we've done minChecks and the closest remaining
+        // PQ candidate is already worse than the worst kept top-graphResultNum
+        // distance, no future candidate can improve the result heap. This is the
+        // same idea KDT uses (gnode.distance > p_query.worstDist()) but applied
+        // to the cross-subgraph unified PQ.
+        if (checks >= minChecks && cur.dist > p_queryResults->worstDist()) {
+            break;
+        }
+
+        // Push to result heap. AddPoint uses m_idx_B (m_index local hid space) to
+        // match the existing post-graph code path that translates B -> tenant
+        // data globalVID downstream via translateHeadVID.
+        // Tag-aware in-filter: only commit head as a result (and thus its posting
+        // for I/O) if its hier_mask intersects the query mask. Continue walking
+        // (RNG / cross-edge expansion) regardless so navigation isn't cut.
+        bool keepHead = true;
+        if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
+            keepHead = m_index->HeadHierMaskMayIntersect(cur.m_idx_B, queryHierMask);
+        }
+        if (keepHead) {
+            p_queryResults->AddPoint(cur.m_idx_B, cur.dist);
+        }
+
+        // Expand RNG neighbors within the home node's head index (BKT or KDT).
+        if (cur.nodeId >= 0 && cur.nodeId < static_cast<int>(m_loadedHeadBundleIndexes.size())) {
+            const auto& homeIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(cur.nodeId)];
+            const auto& homeL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(cur.nodeId)];
+            auto homeAcc = AccessHeadBundleIndex<T>(homeIdx.get());
+            if (homeAcc.valid && cur.bundleLocal >= 0 &&
+                cur.bundleLocal < homeAcc.numSamples) {
+                const SizeType* nbrs = (*homeAcc.graph)[cur.bundleLocal];
+                for (DimensionType i = 0; i < homeAcc.nbrSize; ++i) {
+                    SizeType nbrLocal = nbrs[i];
+                    if (nbrLocal < 0) break;
+                    if (nbrLocal >= homeAcc.numSamples) continue;
+                    if (static_cast<size_t>(nbrLocal) >= homeL2G.size()) continue;
+                    SizeType nbr_B = homeL2G[static_cast<size_t>(nbrLocal)];
+                    SizeType nbr_A = m_index->GetHeadNodeGlobalVID(nbr_B);
+                    if (nbr_A == MaxSize) continue;
+                    if (visitedA.count(nbr_A)) continue;
+                    const T* nbrVec = homeAcc.getSample(nbrLocal);
+                    if (nbrVec == nullptr) continue;
+                    float d = m_fComputeDistance(qTarget, nbrVec, dim);
+                    pushCandidate(cur.nodeId, nbrLocal, nbr_A, nbr_B, d);
+                }
+            }
+        }
+
+        // Expand cross-subgraph edges. Cross-edges store space A (tenant data
+        // global VID). Translate the source key from B to A via m_index meta.
+        static const bool s_disableCross = (std::getenv("SPTAG_DISABLE_CROSS_EDGES") != nullptr);
+        auto crossIt = s_disableCross ? m_headCrossEdges.end() : m_headCrossEdges.find(cur.globalA);
+        if (crossIt != m_headCrossEdges.end()) {
+            for (SizeType nbrA : crossIt->second) {
+                if (nbrA < 0) continue;
+                ++crossEdgesSeen;
+                if (visitedA.count(nbrA)) continue;
+
+                // Hierarchical mask filter: skip neighbors that don't match query
+                // This replaces the old HeadNodeMatchesAnyQueryTag check and integrates
+                // bundle node routing.
+                auto bIt = m_globalHeadVIDToLocalHID.find(nbrA);
+                if (bIt == m_globalHeadVIDToLocalHID.end()) continue;
+                SizeType nbr_B = bIt->second;
+                if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
+                    // Bundle node routing check (separate from tag content)
+                    if (routedNodeMask != 0) {
+                        int16_t bundleNodeId = m_index->GetHeadNodeBundleNodeId(nbr_B);
+                        if (bundleNodeId >= 0 &&
+                            ((routedNodeMask >> bundleNodeId) & 1u) == 0) {
+                            ++crossDroppedByTag;
+                            continue;
+                        }
+                    }
+                    // Tag-content check via posting hier_mask (no IsHeadNodeHeadOnly gate)
+                    if (!m_index->HeadHierMaskMayIntersect(nbr_B, queryHierMask)) {
+                        ++crossDroppedByTag;
+                        continue;
+                    }
+                }
+
+                // Locate which bundle node hosts this head and compute query
+                // distance against its sample vector.
+                std::pair<int, SizeType> loc;
+                {
+                    std::lock_guard<std::mutex> lk(m_globalVIDToBundleLocMutex);
+                    auto locIt = m_globalVIDToBundleLoc.find(nbrA);
+                    if (locIt == m_globalVIDToBundleLoc.end()) continue;
+                    loc = locIt->second;
+                }
+                if (loc.first < 0 || loc.first >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
+                const auto& othIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(loc.first)];
+                auto othAcc = AccessHeadBundleIndex<T>(othIdx.get());
+                if (!othAcc.valid) continue;
+                if (loc.second < 0 || loc.second >= othAcc.numSamples) continue;
+                const T* nbrVec = othAcc.getSample(loc.second);
+                if (nbrVec == nullptr) continue;
+
+                float d = m_fComputeDistance(qTarget, nbrVec, dim);
+                pushCandidate(loc.first, loc.second, nbrA, nbr_B, d);
+                ++crossHopCount;
+            }
+        }
+    }
+
+    p_queryResults->SortResult();
+    p_scannedOut = scanned + checks;
+
+    if (m_options.m_logAdaptiveNprobe) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "CrossSubgraph: nodes=%zu totalSeeded=%d checks=%d crossHops=%d nodesVisited=%zu "
+            "crossEdgesSeen=%d crossDroppedByTag=%d (tagPass=%.3f)\n",
+            p_candidateNodes.size(), totalSeeded, checks, crossHopCount, visitedA.size(),
+            crossEdgesSeen, crossDroppedByTag,
+            crossEdgesSeen > 0 ? 1.0 - (double)crossDroppedByTag / crossEdgesSeen : 0.0);
+    }
+    {
+        auto _pqT1 = std::chrono::high_resolution_clock::now();
+        g_pqGraphMs = std::chrono::duration<double, std::milli>(_pqT1 - _bktT1).count();
+    }
+    static const bool s_logCS = (std::getenv("SPTAG_LOG_CROSS_STATS") != nullptr);
+    if (s_logCS) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "CSStats: nodes=%zu seeded=%d seedDropTag=%d checks=%d cross=%d crossDropTag=%d visited=%zu maxC=%d\n",
+            p_candidateNodes.size(), totalSeeded, seedDroppedByTag, checks, crossEdgesSeen, crossDroppedByTag,
+            visitedA.size(), maxChecks);
+    }
     return ErrorCode::Success;
 }
 
@@ -814,9 +1240,17 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             numQueryTags > 0 &&
             m_index != nullptr)
         {
+            // Build hierarchical query mask for head-only vectors
+            SPTAG::Cache::HierarchicalPostingMask queryHierMask;
+            queryHierMask.Clear();
+            for (int i = 0; i < numQueryTags; ++i) {
+                queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+            }
+
             const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
             for (SizeType sampleId = 0; sampleId < sampleCount; ++sampleId) {
-                if (!m_index->HeadNodeMatchesAnyQueryTag(sampleId, queryTags, numQueryTags)) {
+                // Pass routedNodeMask=0 to skip node check (we're scanning all heads)
+                if (!m_index->HeadNodeMatchesQuery(sampleId, queryHierMask, 0)) {
                     continue;
                 }
 
@@ -1034,6 +1468,11 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
     ErrorCode ret;
     bool usedHeadBundleGraphSearch = false;
+    static const bool s_phaseTime = (std::getenv("SPTAG_LOG_PHASE_TIME") != nullptr);
+    g_bktSeedMs = 0.0;
+    g_pqGraphMs = 0.0;
+    auto _phT0 = s_phaseTime ? std::chrono::high_resolution_clock::now()
+                             : std::chrono::high_resolution_clock::time_point{};
     if (!candidateNodes.empty())
     {
         bool canUseHeadBundle = true;
@@ -1050,8 +1489,68 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         {
             p_queryResults->Reset();
             int scanned = 0;
-            for (int nodeId : candidateNodes)
+
+            // Cross-subgraph unified traversal: when (a) cross-edges are
+            // available, (b) the query tag scope spans more than one routing
+            // node, and (c) we have query tags for PS in-filtering, run a
+            // single best-first search across all bundle nodes' BKTs joined
+            // by cross-edges instead of the serial per-node fanout. This
+            // turns nprobe amplification (K_nodes * nprobe) into a single
+            // budget walk while still covering query's true k-NN via cross
+            // shortcut edges.
+            bool useCrossSubgraph = (candidateNodes.size() > 1)
+                && (queryTags != nullptr && numQueryTags > 0)
+                && (LoadHeadCrossEdges() == ErrorCode::Success)
+                && (!m_headCrossEdges.empty());
+
+            static const bool s_logPathStats = (std::getenv("SPTAG_LOG_PATH_STATS") != nullptr);
+            if (s_logPathStats) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "PathStats: nodes=%d cross=%d\n",
+                    static_cast<int>(candidateNodes.size()), useCrossSubgraph ? 1 : 0);
+            }
+
+            if (useCrossSubgraph)
             {
+                ret = CrossSubgraphGraphSearch(p_query, p_queryResults, candidateNodes,
+                                               queryTags, numQueryTags, graphResultNum, scanned);
+                if (ret != ErrorCode::Success) {
+                    canUseHeadBundle = false;
+                    p_queryResults->Reset();
+                }
+                else if (m_options.m_logAdaptiveNprobe)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "Using cross-subgraph unified search across %d candidate nodes (entry=%d).\n",
+                                 static_cast<int>(candidateNodes.size()), candidateNodes.front());
+                }
+            }
+            else
+            {
+                // Tag-aware head pre-filter: when a hierarchical query mask is
+                // present, expand KDT search by alpha and filter returned heads
+                // by hier_mask intersection so the downstream posting scan
+                // budget is spent on tag-relevant heads (in-filter).
+                static const int s_tagAwareExpansion = []() {
+                    const char* e = std::getenv("SPTAG_TAG_AWARE_HEAD_EXPANSION");
+                    int v = (e != nullptr) ? std::atoi(e) : 4;
+                    if (v < 1) v = 1;
+                    if (v > 32) v = 32;
+                    return v;
+                }();
+                const bool hasTagFilterLocal = (queryTags != nullptr && numQueryTags > 0);
+                SPTAG::Cache::HierarchicalPostingMask tagAwareQueryMask;
+                const bool tagAwareEnabled = hasTagFilterLocal && s_tagAwareExpansion > 1
+                    && m_index != nullptr && m_index->HasHeadNodeMeta();
+                if (tagAwareEnabled) {
+                    tagAwareQueryMask.Clear();
+                    for (int qi = 0; qi < numQueryTags; ++qi) {
+                        tagAwareQueryMask.Insert(TagLevelFromId(queryTags[qi]), queryTags[qi]);
+                    }
+                }
+
+                for (int nodeId : candidateNodes)
+                {
                 const auto& nodeIndex = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
                 const auto& localToGlobalHIDs = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
                 if (nodeIndex == nullptr || localToGlobalHIDs.empty())
@@ -1066,7 +1565,12 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                     continue;
                 }
 
-                COMMON::QueryResultSet<T> nodeResults((const T*)p_query.GetTarget(), nodeGraphResultNum);
+                const int searchNum = tagAwareEnabled
+                    ? std::min<int>(nodeGraphResultNum * s_tagAwareExpansion,
+                                    static_cast<int>(localToGlobalHIDs.size()))
+                    : nodeGraphResultNum;
+
+                COMMON::QueryResultSet<T> nodeResults((const T*)p_query.GetTarget(), searchNum);
                 if ((ret = nodeIndex->SearchIndex(nodeResults)) != ErrorCode::Success)
                 {
                     canUseHeadBundle = false;
@@ -1074,8 +1578,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 }
 
                 scanned += nodeResults.GetScanned();
+                int kept = 0;
                 for (int resultId = 0; resultId < nodeResults.GetResultNum(); ++resultId)
                 {
+                    if (kept >= nodeGraphResultNum) break;
                     auto* nodeResult = nodeResults.GetResult(resultId);
                     if (nodeResult == nullptr || nodeResult->VID == -1) {
                         continue;
@@ -1085,17 +1591,27 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                         continue;
                     }
 
-                    p_queryResults->AddPoint(localToGlobalHIDs[static_cast<size_t>(nodeResult->VID)],
-                                             nodeResult->Dist);
+                    SizeType globalHID = localToGlobalHIDs[static_cast<size_t>(nodeResult->VID)];
+
+                    if (tagAwareEnabled
+                        && !m_index->HeadHierMaskMayIntersect(globalHID, tagAwareQueryMask)) {
+                        continue;
+                    }
+
+                    p_queryResults->AddPoint(globalHID, nodeResult->Dist);
+                    ++kept;
                 }
-            }
+                }  // end for(nodeId : candidateNodes)
+            }  // end else (per-node fanout branch)
 
             if (canUseHeadBundle)
             {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                             "Using routed head bundle graph search across %d nodes.\n",
-                             static_cast<int>(candidateNodes.size()));
-                p_queryResults->SortResult();
+                if (!useCrossSubgraph) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "Using routed head bundle graph search across %d nodes.\n",
+                                 static_cast<int>(candidateNodes.size()));
+                    p_queryResults->SortResult();
+                }
                 p_queryResults->SetScanned(scanned);
                 usedHeadBundleGraphSearch = true;
             }
@@ -1112,6 +1628,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         if ((ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
             return ret;
     }
+
+    auto _phT1 = s_phaseTime ? std::chrono::high_resolution_clock::now()
+                             : std::chrono::high_resolution_clock::time_point{};
 
     if (m_extraSearcher != nullptr)
     {
@@ -1143,6 +1662,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         workSpace->m_postingProbeStats.Reset();
 
         const bool hasTagFilter = queryTags != nullptr && numQueryTags > 0;
+        // Build hierarchical query mask once
+        SPTAG::Cache::HierarchicalPostingMask queryHierMask;
+        if (hasTagFilter) {
+            queryHierMask.Clear();
+            for (int i = 0; i < numQueryTags; ++i) {
+                queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+            }
+        }
         auto translateHeadVID = [&](SizeType localHid) -> SizeType {
             if (m_index != nullptr && m_index->HasHeadNodeMeta()) {
                 SizeType metaVID = m_index->GetHeadNodeGlobalVID(localHid);
@@ -1154,9 +1681,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         };
         auto shouldKeepHeadResult = [&](SizeType localHid) -> bool {
             if (!hasTagFilter) return true;
+            // Intentionally uses HeadNodeMatchesQuery (with IsHeadNodeHeadOnly
+            // gate) so that only ghost head-only vectors can be returned as
+            // top-K results. For real heads (centroids of postings) the head
+            // VID's own tag is NOT guaranteed to match the query even when its
+            // posting members do; rejecting them here ensures top-K is sourced
+            // only from posting scans (and the rare head-only ghost vectors).
             return m_index != nullptr &&
                    m_index->HasHeadNodeMeta() &&
-                   m_index->HeadNodeMatchesAnyQueryTag(localHid, queryTags, numQueryTags);
+                   m_index->HeadNodeMatchesQuery(localHid, queryHierMask, 0);
         };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
@@ -1240,6 +1773,17 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             return ret;
         m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
         p_queryResults->SortResult();
+    }
+
+    if (s_phaseTime) {
+        auto _phT2 = std::chrono::high_resolution_clock::now();
+        double graphTotalMs = std::chrono::duration<double, std::milli>(_phT1 - _phT0).count();
+        double postMs  = std::chrono::duration<double, std::milli>(_phT2 - _phT1).count();
+        uint32_t firstTag = (queryTags != nullptr && numQueryTags > 0) ? queryTags[0] : 0u;
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "PhaseTime: tag=%u nprobe=%d bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f total=%.3f\n",
+            firstTag, postingTarget, g_bktSeedMs, g_pqGraphMs,
+            graphTotalMs - g_bktSeedMs - g_pqGraphMs, postMs, graphTotalMs + postMs);
     }
 
     if (p_queryResults != (COMMON::QueryResultSet<T> *)&p_query)

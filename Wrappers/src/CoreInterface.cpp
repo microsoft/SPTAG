@@ -297,7 +297,7 @@ bool TryGetAncestorTag(uint32_t tag,
 
 } // namespace
 
-constexpr int32_t kHeadNodeMetaVersion = 1;
+constexpr int32_t kHeadNodeMetaVersion = 2;
 
 struct HeadNodeMetaFileHeader {
     int32_t version;
@@ -329,7 +329,7 @@ bool SaveHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
     HeadNodeMetaFileHeader header{};
     header.version = kHeadNodeMetaVersion;
     header.numSamples = headIndex->GetHeadNodeMetaSampleCount();
-    header.numTagsPerSample = headIndex->m_headTagCountPerSample;
+    header.numTagsPerSample = 0;  // No longer used in V2, repurposed/reserved
     header.stride = static_cast<int32_t>(headIndex->GetHeadNodeMetaStride());
 
     const auto& blob = headIndex->GetHeadNodeMetaBlob();
@@ -350,14 +350,26 @@ bool LoadHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
 
     HeadNodeMetaFileHeader header{};
     bool ok = fread(&header, sizeof(header), 1, f) == 1;
-    if (!ok || header.version != kHeadNodeMetaVersion || header.numSamples < 0 || header.numTagsPerSample < 0 ||
-        header.stride <= 0 || header.numSamples != headIndex->GetNumSamples()) {
+    if (!ok || header.numSamples < 0 || header.stride <= 0 ||
+        header.numSamples != headIndex->GetNumSamples()) {
         fclose(f);
         return false;
     }
 
-    headIndex->InitializeHeadNodeMeta(header.numSamples, header.numTagsPerSample);
+    // Version check with detailed error message
+    if (header.version != kHeadNodeMetaVersion) {
+        fprintf(stderr, "[ERROR] head_node_meta.bin version mismatch: file has version %d, expected version %d. "
+                        "Please rebuild the index to use the new hierarchical mask format.\n",
+                header.version, kHeadNodeMetaVersion);
+        fclose(f);
+        return false;
+    }
+
+    headIndex->InitializeHeadNodeMeta(header.numSamples);
     if (static_cast<int32_t>(headIndex->GetHeadNodeMetaStride()) != header.stride) {
+        fprintf(stderr, "[ERROR] head_node_meta.bin stride mismatch: file has stride %d, expected %zu. "
+                        "Binary layout has changed.\n",
+                header.stride, headIndex->GetHeadNodeMetaStride());
         headIndex->ClearHeadNodeMeta();
         fclose(f);
         return false;
@@ -388,7 +400,7 @@ bool LoadPostingSignaturesIntoHeadIndex(const std::string& workDir,
 
     const SizeType numHeadSamples = headIndex->GetNumSamples();
     if (!headIndex->HasHeadNodeMeta()) {
-        headIndex->InitializeHeadNodeMeta(numHeadSamples, 0);
+        headIndex->InitializeHeadNodeMeta(numHeadSamples);
     }
 
     for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
@@ -3238,6 +3250,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
 
     // 4. For each posting, read its blocks and extract vector IDs
     std::vector<std::vector<uint32_t>> posting_tags(numHeads);
+    std::vector<SPTAG::Cache::HierarchicalPostingMask> posting_hier_masks(numHeads);
     int totalAssignments = 0;
     std::vector<uint8_t> blockBuf(PAGE_SIZE);
 
@@ -3270,9 +3283,12 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             int32_t vid;
             memcpy(&vid, raw.data() + offset, sizeof(int32_t));
             if (vid < 0 || vid >= p_numVectors) continue;
-            // Insert ALL tags for this vector into this posting's Bloom
+            // Insert ALL tags for this vector into this posting's Bloom AND hierarchical mask
             for (int t = 0; t < p_numTagsPerVec; t++) {
-                posting_tags[pid].push_back(p_tagsPtr[vid * p_numTagsPerVec + t]);
+                uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
+                posting_tags[pid].push_back(tag);
+                // Also insert into hierarchical mask at level t
+                posting_hier_masks[pid].Insert(t, tag);
             }
             totalAssignments++;
         }
@@ -3411,12 +3427,16 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
         if (memoryIndex != nullptr && spannInternalIdx != nullptr) {
             const SizeType numHeadSamples = memoryIndex->GetNumSamples();
-            memoryIndex->InitializeHeadNodeMeta(numHeadSamples, p_numTagsPerVec);
+            memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
             for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
                 SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
                 memoryIndex->SetHeadNodeGlobalVID(hid, globalVID);
                 if (hid < sigs->num_postings) {
                     memoryIndex->SetHeadNodePS(hid, sigs->ps[hid]);
+                }
+                // Set hierarchical mask for this head
+                if (hid < (SizeType)posting_hier_masks.size()) {
+                    memoryIndex->SetHeadNodeHierMask(hid, posting_hier_masks[hid]);
                 }
 
                 if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(p_numVectors)) {
@@ -3426,17 +3446,18 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                     continue;
                 }
 
+                // This is a head-only vector (not in any posting)
                 memoryIndex->SetHeadNodeHeadOnly(hid, true);
-                uint32_t* headTags = memoryIndex->MutableHeadNodeTags(hid);
-                if (headTags == nullptr) {
-                    continue;
-                }
+                // Build its hierarchical mask from its tags
+                SPTAG::Cache::HierarchicalPostingMask headMask;
+                headMask.Clear();
                 for (int t = 0; t < p_numTagsPerVec; ++t) {
-                    headTags[t] = p_tagsPtr[static_cast<size_t>(globalVID) * static_cast<size_t>(p_numTagsPerVec) + static_cast<size_t>(t)];
+                    uint32_t tag = p_tagsPtr[static_cast<size_t>(globalVID) * static_cast<size_t>(p_numTagsPerVec) + static_cast<size_t>(t)];
+                    headMask.Insert(t, tag);
                 }
+                memoryIndex->SetHeadNodeHierMask(hid, headMask);
                 headTagCount++;
             }
-            SaveHeadNodeMetaFile(workDir, memoryIndex);
 
             if (pivotCandidate != nullptr) {
                 std::vector<int> headNodeToNode;
@@ -3448,12 +3469,22 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                                                      spannInternalIdx,
                                                      headNodeToNode);
                 m_tenantHeadNodeToNode[p_tenantId] = headNodeToNode;
+
+                // Populate bundleNodeId for each head
+                for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
+                    int16_t nid = (hid < (SizeType)headNodeToNode.size() && headNodeToNode[hid] >= 0)
+                                  ? (int16_t)headNodeToNode[hid] : (int16_t)-1;
+                    memoryIndex->SetHeadNodeBundleNodeId(hid, nid);
+                }
+
                 SaveHeadNodeRoutingIndexFile(workDir,
                                              pivotCandidate->pivotLevel,
                                              pivotCandidate->nodePivotTags,
                                              m_tenantTagToNodes[p_tenantId],
                                              headNodeToNode);
             }
+            // Save meta file AFTER bundleNodeId is populated
+            SaveHeadNodeMetaFile(workDir, memoryIndex);
         }
     }
 
@@ -3474,8 +3505,15 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     ByteArray p_queryVector, int p_tenantId, int p_resultNum,
     ByteArray p_queryTags, int p_numTags)
 {
+    static const bool s_wrapperTime = (std::getenv("SPTAG_LOG_WRAPPER_TIME") != nullptr);
+    auto _wrTotal0 = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                   : std::chrono::high_resolution_clock::time_point{};
     const uint32_t* queryTagsPtr = reinterpret_cast<const uint32_t*>(p_queryTags.Data());
+    auto _ck_a = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                               : std::chrono::high_resolution_clock::time_point{};
     if (!EnsureTenantLoaded(p_tenantId)) return nullptr;
+    auto _ck_b = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                               : std::chrono::high_resolution_clock::time_point{};
     auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
     if (wdIt == m_tenantSpannWorkDirs.end()) return nullptr;
     const std::string& workDir = wdIt->second;
@@ -3487,8 +3525,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         if (it == m_tenantIndices.end()) return nullptr;
         indexPtr = it->second;
     }
+    auto _ck_c = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                               : std::chrono::high_resolution_clock::time_point{};
 
     auto internalIdx = indexPtr->GetInternalIndex();
+    auto _ck_d = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                               : std::chrono::high_resolution_clock::time_point{};
     bool forceDenseTagSearch = false;
     int directSparseMaxPostings = 320;
     float filteredSearchNprobeSafety = 1.0f;
@@ -3517,8 +3559,25 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         }
     }
 
+    auto _ck_afterIdx = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                      : std::chrono::high_resolution_clock::time_point{};
+    if (s_wrapperTime) {
+        double t_a = std::chrono::duration<double, std::milli>(_ck_a - _wrTotal0).count();
+        double t_b = std::chrono::duration<double, std::milli>(_ck_b - _ck_a).count();
+        double t_c = std::chrono::duration<double, std::milli>(_ck_c - _ck_b).count();
+        double t_d = std::chrono::duration<double, std::milli>(_ck_d - _ck_c).count();
+        double t_e = std::chrono::duration<double, std::milli>(_ck_afterIdx - _ck_d).count();
+        fprintf(stdout,
+            "[1] WrapperEntry: tag0=%u  preEnsure=%.4f ensureTenant=%.4f tenantLookups=%.4f getInternal=%.4f getParams=%.4f\n",
+            (p_numTags > 0 && queryTagsPtr) ? queryTagsPtr[0] : 0u,
+            t_a, t_b, t_c, t_d, t_e);
+        fflush(stdout);
+    }
     const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
     const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
+
+    auto _ck_routingStart = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                          : std::chrono::high_resolution_clock::time_point{};
 
     const auto tagToNodesIt = m_tenantTagToNodes.find(p_tenantId);
     const auto headNodeToNodeIt = m_tenantHeadNodeToNode.find(p_tenantId);
@@ -3556,8 +3615,24 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     }
 
     // Check if ALL query tags are sparse → use brute-force path
+    auto _ck_routing = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                     : std::chrono::high_resolution_clock::time_point{};
+    if (s_wrapperTime) {
+        double t_idxParam = std::chrono::duration<double, std::milli>(_ck_afterIdx - _wrTotal0).count();
+        double t_tagStats = std::chrono::duration<double, std::milli>(_ck_routingStart - _ck_afterIdx).count();
+        double t_routeNodes = std::chrono::duration<double, std::milli>(_ck_routing - _ck_routingStart).count();
+        fprintf(stdout,
+            "[1] WrapperRouting: tag0=%u rn=%zu  idxParam=%.3f tagStats=%.3f routeNodes=%.3f\n",
+            (p_numTags > 0 && queryTagsPtr) ? queryTagsPtr[0] : 0u,
+            (size_t)routedNodes.size(), t_idxParam, t_tagStats, t_routeNodes);
+        fflush(stdout);
+    }
+    static const bool s_disableSparsePath = []() {
+        const char* v = std::getenv("SPTAG_DISABLE_SPARSE_PATH");
+        return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
+    }();
     auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
-    if (!forceDenseTagSearch && sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
+    if (!s_disableSparsePath && !forceDenseTagSearch && sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
         auto& sparseIdx = sparseIt->second;
         bool hasDirectPostingListsForAllTags = true;
         // Collect posting IDs for all query tags
@@ -3588,6 +3663,8 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 
     // Dense tag path: SPANN graph + bitmask PS + inline filter
     // Build query bitmask from requested tags
+    auto _ck_sparse = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                    : std::chrono::high_resolution_clock::time_point{};
     SPTAG::Cache::PostingBitmask queryMask;
     queryMask.Clear();
     for (int i = 0; i < p_numTags; i++) {
@@ -3595,6 +3672,8 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     }
     auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
     EnsureHeadNodeMetaLoaded(workDir, internalIdx);
+    auto _ck_qmask = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                   : std::chrono::high_resolution_clock::time_point{};
     SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
     if (p_numTags > 0 && queryTagsPtr != nullptr) {
         searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
@@ -3645,8 +3724,36 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         }
     }
     SPTAG::VectorIndex::ThreadLocalSearchContextGuard searchContextGuard(std::move(searchContext));
+    auto _ck_denseEnd = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                      : std::chrono::high_resolution_clock::time_point{};
 
+    auto _wrSearch0 = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                                    : std::chrono::high_resolution_clock::time_point{};
+    if (s_wrapperTime) {
+        double t_routing = std::chrono::duration<double, std::milli>(_ck_routing - _wrTotal0).count();
+        double t_sparse  = std::chrono::duration<double, std::milli>(_ck_sparse  - _ck_routing).count();
+        double t_qmask   = std::chrono::duration<double, std::milli>(_ck_qmask   - _ck_sparse ).count();
+        double t_dense   = std::chrono::duration<double, std::milli>(_ck_denseEnd- _ck_qmask  ).count();
+        fprintf(stdout,
+            "[1] WrapperPre: tag0=%u rn=%zu  routing=%.3f sparse=%.3f qmask=%.3f denseSetup=%.3f\n",
+            (p_numTags > 0 && queryTagsPtr) ? queryTagsPtr[0] : 0u,
+            (size_t)routedNodes.size(), t_routing, t_sparse, t_qmask, t_dense);
+        fflush(stdout);
+    }
+    auto _wrT0 = s_wrapperTime ? std::chrono::high_resolution_clock::now()
+                               : std::chrono::high_resolution_clock::time_point{};
     auto result = indexPtr->Search(p_queryVector, p_resultNum);
+    if (s_wrapperTime) {
+        auto _wrT1 = std::chrono::high_resolution_clock::now();
+        double searchMs = std::chrono::duration<double, std::milli>(_wrT1 - _wrSearch0).count();
+        double totalMs  = std::chrono::duration<double, std::milli>(_wrT1 - _wrTotal0).count();
+        double preMs    = std::chrono::duration<double, std::milli>(_wrSearch0 - _wrTotal0).count();
+        fprintf(stdout,
+            "[1] WrapperCall: tag0=%u nTags=%d routedNodes=%zu preMs=%.3f searchMs=%.3f totalMs=%.3f\n",
+            (p_numTags > 0 && queryTagsPtr) ? queryTagsPtr[0] : 0u,
+            p_numTags, (size_t)routedNodes.size(), preMs, searchMs, totalMs);
+        fflush(stdout);
+    }
 
     return result;
 }

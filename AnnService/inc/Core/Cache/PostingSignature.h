@@ -194,6 +194,77 @@ struct PostingBitmask {
     }
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// Hierarchical Posting Mask: 4-level tag hierarchy filter
+//
+// Each level has its own bit array sized to cover the typical tag range:
+//   Level 0 (org):     1000-1099 → 8 bits   (supports up to 8 orgs)
+//   Level 1 (dept):    2000-2999 → 32 bits  (supports up to 32 depts)
+//   Level 2 (team):    3000-3999 → 128 bits (supports up to 128 teams)
+//   Level 3 (project): 4000-4999 → 128 bits (supports up to 128 projects)
+//
+// Insert(level, tag) sets bit at position: tag % LEVEL_BITS
+// MayIntersect checks OR-across-levels (matches existing HeadNodeMatchesAnyQueryTag
+// semantic: pass if ANY of head's tags equals ANY of query's tags).
+// ═══════════════════════════════════════════════════════════════════
+
+static constexpr int HIER_ORG_BITS  = 8;
+static constexpr int HIER_DEPT_BITS = 32;
+static constexpr int HIER_TEAM_BITS = 128;
+static constexpr int HIER_PROJ_BITS = 128;
+
+struct HierarchicalPostingMask {
+    uint8_t  orgMask = 0;        // 8 bits for org tags
+    uint32_t deptMask = 0;       // 32 bits for dept tags
+    uint64_t teamMask[2] = {};   // 128 bits for team tags
+    uint64_t projectMask[2] = {}; // 128 bits for project tags
+
+    void Clear() {
+        orgMask = 0;
+        deptMask = 0;
+        teamMask[0] = teamMask[1] = 0;
+        projectMask[0] = projectMask[1] = 0;
+    }
+
+    // level: 0=org, 1=dept, 2=team, 3=project. tag is the raw tag id.
+    void Insert(int level, uint32_t tag) {
+        switch (level) {
+            case 0: {  // org
+                uint32_t pos = tag % HIER_ORG_BITS;
+                orgMask |= (1u << pos);
+                break;
+            }
+            case 1: {  // dept
+                uint32_t pos = tag % HIER_DEPT_BITS;
+                deptMask |= (1u << pos);
+                break;
+            }
+            case 2: {  // team
+                uint32_t pos = tag % HIER_TEAM_BITS;
+                teamMask[pos >> 6] |= (1ULL << (pos & 63));
+                break;
+            }
+            case 3: {  // project
+                uint32_t pos = tag % HIER_PROJ_BITS;
+                projectMask[pos >> 6] |= (1ULL << (pos & 63));
+                break;
+            }
+        }
+    }
+
+    // OR-across-levels semantic: returns true if ANY level has a non-zero AND.
+    // This matches the existing HeadNodeMatchesAnyQueryTag behavior.
+    bool MayIntersect(const HierarchicalPostingMask& q) const {
+        if ((orgMask & q.orgMask) != 0) return true;
+        if ((deptMask & q.deptMask) != 0) return true;
+        if ((teamMask[0] & q.teamMask[0]) != 0) return true;
+        if ((teamMask[1] & q.teamMask[1]) != 0) return true;
+        if ((projectMask[0] & q.projectMask[0]) != 0) return true;
+        if ((projectMask[1] & q.projectMask[1]) != 0) return true;
+        return false;
+    }
+};
+
 // Bitmask-based Posting Signatures for one tenant.
 struct TenantBitmaskPS {
     int num_postings = 0;

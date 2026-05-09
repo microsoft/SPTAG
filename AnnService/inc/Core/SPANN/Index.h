@@ -30,6 +30,7 @@
 
 #include <functional>
 #include <shared_mutex>
+#include <atomic>
 
 namespace SPTAG
 {
@@ -66,6 +67,13 @@ namespace SPTAG
             mutable std::vector<std::vector<SizeType>> m_headBundleLocalToGlobalHIDs;
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
             mutable std::mutex m_headBundleLoadLock;
+            mutable std::unordered_map<SizeType, std::vector<SizeType>> m_headCrossEdges;
+            mutable std::atomic<bool> m_headCrossEdgesLoaded{false};
+            mutable std::mutex m_headCrossEdgesMutex;
+            // globalVID -> (bundleNodeId, localHidWithinBundle) reverse map, populated
+            // on each EnsureHeadBundleNodeLoaded for the loaded node only.
+            mutable std::unordered_map<SizeType, std::pair<int, SizeType>> m_globalVIDToBundleLoc;
+            mutable std::mutex m_globalVIDToBundleLocMutex;
             std::string m_headBundleBaseDir;
 	        COMMON::Dataset<std::uint64_t> m_vectorTranslateMap;
             std::unordered_map<std::string, std::string> m_headParameters;
@@ -213,6 +221,21 @@ namespace SPTAG
             ErrorCode LoadHeadBundleManifest(const std::string& p_baseDir);
             ErrorCode InitializeHeadBundleRuntime(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
+            ErrorCode LoadHeadCrossEdges() const;
+
+            // Multi-BKT cross-subgraph unified best-first traversal. Used when
+            // a query tag scope spans multiple routing nodes and cross-edge
+            // data is available. Uses the entry node's BKT to seed, then
+            // unwinds a single priority queue across all bundle nodes via
+            // RNG edges (intra-node) + cross-edges (inter-node).
+            ErrorCode CrossSubgraphGraphSearch(
+                QueryResult& p_query,
+                COMMON::QueryResultSet<T>* p_queryResults,
+                const std::vector<int>& p_candidateNodes,
+                const std::uint32_t* p_queryTags,
+                int p_numQueryTags,
+                int p_graphResultNum,
+                int& p_scannedOut) const;
 
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr);
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;

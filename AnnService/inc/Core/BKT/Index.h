@@ -152,6 +152,10 @@ namespace SPTAG
             }
             inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
             inline bool ContainSample(const SizeType idx) const { return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx); }
+
+            // Raw graph access for cross-subgraph orchestration above the BKT layer.
+            inline const COMMON::RelativeNeighborhoodGraph& GetGraph() const { return m_pGraph; }
+            inline DimensionType GetNeighborhoodSize() const { return m_pGraph.m_iNeighborhoodSize; }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {

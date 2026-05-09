@@ -349,6 +349,11 @@ private:
     // tenant_id -> SPANN build work directory (IndexDirectory)
     std::map<int, std::string> m_tenantSpannWorkDirs;
 
+    // tenant_id -> whether HeadIndex/head_cross_edges.bin exists.
+    // Cached on first query to enable cross-subindex routing trim.
+    mutable std::unordered_map<int, bool> m_tenantHasCrossEdges;
+    mutable std::mutex m_tenantHasCrossEdgesMutex;
+
     // --- String tenant ID ↔ internal integer ID mapping ---
     std::unordered_map<std::string, int> m_tenantStrToInt;
     std::unordered_map<int, std::string> m_tenantIntToStr;

@@ -257,30 +257,34 @@ void VectorIndex::ClearHeadNodeMeta()
 {
     m_headNodeMetaStride = 0;
     m_headNodePSOffset = 0;
+    m_headNodeHierMaskOffset = 0;
     m_headNodeGlobalVIDOffset = 0;
+    m_headNodeBundleNodeIdOffset = 0;
     m_headNodeHeadOnlyOffset = 0;
-    m_headNodeTagOffset = 0;
-    m_headTagCountPerSample = 0;
     m_headNodeMeta.clear();
 }
 
-void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numTagsPerSample)
+void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples)
 {
     ClearHeadNodeMeta();
     if (p_numSamples <= 0) return;
 
-    m_headTagCountPerSample = std::max(0, p_numTagsPerSample);
+    // New layout per sample:
+    // | PostingBitmask (32B) | HierarchicalPostingMask (37B→40B w/padding) | globalVID (4B) | bundleNodeId (2B) | headOnly (1B) |
+    // Aligned to alignof(PostingBitmask)=8
     m_headNodePSOffset = 0;
-    m_headNodeGlobalVIDOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(SizeType));
-    m_headNodeHeadOnlyOffset = AlignUp(m_headNodeGlobalVIDOffset + sizeof(SizeType), alignof(std::uint8_t));
-    m_headNodeTagOffset = AlignUp(m_headNodeHeadOnlyOffset + sizeof(std::uint8_t), alignof(uint32_t));
+    m_headNodeHierMaskOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(Cache::HierarchicalPostingMask));
+    m_headNodeGlobalVIDOffset = AlignUp(m_headNodeHierMaskOffset + sizeof(Cache::HierarchicalPostingMask), alignof(SizeType));
+    m_headNodeBundleNodeIdOffset = AlignUp(m_headNodeGlobalVIDOffset + sizeof(SizeType), alignof(int16_t));
+    m_headNodeHeadOnlyOffset = AlignUp(m_headNodeBundleNodeIdOffset + sizeof(int16_t), alignof(std::uint8_t));
     m_headNodeMetaStride = AlignUp(
-        m_headNodeTagOffset + static_cast<size_t>(m_headTagCountPerSample) * sizeof(uint32_t),
+        m_headNodeHeadOnlyOffset + sizeof(std::uint8_t),
         alignof(Cache::PostingBitmask));
 
     m_headNodeMeta.assign(static_cast<size_t>(p_numSamples) * m_headNodeMetaStride, 0);
     for (SizeType sampleId = 0; sampleId < p_numSamples; ++sampleId) {
         SetHeadNodeGlobalVID(sampleId, MaxSize);
+        SetHeadNodeBundleNodeId(sampleId, -1);
     }
 }
 
@@ -339,33 +343,63 @@ bool VectorIndex::IsHeadNodeHeadOnly(SizeType p_sampleId) const
     return base != nullptr && base[m_headNodeHeadOnlyOffset] != 0;
 }
 
-uint32_t* VectorIndex::MutableHeadNodeTags(SizeType p_sampleId)
+void VectorIndex::SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask)
 {
     auto* base = HeadNodeMetaBase(this, p_sampleId);
-    if (base == nullptr || m_headTagCountPerSample <= 0) return nullptr;
-    return reinterpret_cast<uint32_t*>(base + m_headNodeTagOffset);
+    if (base == nullptr) return;
+    std::memcpy(base + m_headNodeHierMaskOffset, &p_mask, sizeof(Cache::HierarchicalPostingMask));
 }
 
-const uint32_t* VectorIndex::GetHeadNodeTags(SizeType p_sampleId) const
+const Cache::HierarchicalPostingMask* VectorIndex::GetHeadNodeHierMask(SizeType p_sampleId) const
 {
     const auto* base = HeadNodeMetaBase(this, p_sampleId);
-    if (base == nullptr || m_headTagCountPerSample <= 0) return nullptr;
-    return reinterpret_cast<const uint32_t*>(base + m_headNodeTagOffset);
+    if (base == nullptr) return nullptr;
+    return reinterpret_cast<const Cache::HierarchicalPostingMask*>(base + m_headNodeHierMaskOffset);
 }
 
-bool VectorIndex::HeadNodeMatchesAnyQueryTag(SizeType p_sampleId, const uint32_t* p_queryTags, int p_numQueryTags) const
+void VectorIndex::SetHeadNodeBundleNodeId(SizeType p_sampleId, int16_t p_bundleNodeId)
 {
-    if (p_queryTags == nullptr || p_numQueryTags <= 0) return false;
+    auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return;
+    std::memcpy(base + m_headNodeBundleNodeIdOffset, &p_bundleNodeId, sizeof(int16_t));
+}
+
+int16_t VectorIndex::GetHeadNodeBundleNodeId(SizeType p_sampleId) const
+{
+    const auto* base = HeadNodeMetaBase(this, p_sampleId);
+    if (base == nullptr) return -1;
+    int16_t bundleNodeId = -1;
+    std::memcpy(&bundleNodeId, base + m_headNodeBundleNodeIdOffset, sizeof(int16_t));
+    return bundleNodeId;
+}
+
+bool VectorIndex::HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, uint32_t p_routedNodeMask) const
+{
+    // Only consider heads that are head-only (have their own tags)
     if (!IsHeadNodeHeadOnly(p_sampleId)) return false;
-    const uint32_t* headTags = GetHeadNodeTags(p_sampleId);
-    if (headTags == nullptr) return false;
-    for (int ti = 0; ti < m_headTagCountPerSample; ++ti) {
-        uint32_t headTag = headTags[ti];
-        for (int qi = 0; qi < p_numQueryTags; ++qi) {
-            if (headTag == p_queryTags[qi]) return true;
+
+    // If routedNodeMask is provided, check bundle node routing
+    if (p_routedNodeMask != 0) {
+        int16_t bundleNodeId = GetHeadNodeBundleNodeId(p_sampleId);
+        if (bundleNodeId >= 0) {
+            // Check if this bundle node is in the routed set
+            if (((p_routedNodeMask >> bundleNodeId) & 1) == 0) {
+                return false;
+            }
         }
     }
-    return false;
+
+    // Check hierarchical mask intersection
+    const auto* hierMask = GetHeadNodeHierMask(p_sampleId);
+    if (hierMask == nullptr) return false;
+    return hierMask->MayIntersect(p_queryMask);
+}
+
+bool VectorIndex::HeadHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const
+{
+    const auto* hierMask = GetHeadNodeHierMask(p_sampleId);
+    if (hierMask == nullptr) return false;
+    return hierMask->MayIntersect(p_queryMask);
 }
 
 void VectorIndex::ResetThreadLocalPostingScanStats()
