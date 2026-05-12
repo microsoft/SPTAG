@@ -312,6 +312,7 @@ namespace SPTAG::SPANN {
             }
 
             // Initialize version map: TiKV-backed or local
+#ifdef TIKV
             if (p_opt.m_storage == Storage::TIKVIO && p_opt.m_distributedVersionMap) {
                 auto tikvMap = std::make_unique<COMMON::TiKVVersionMap>();
                 tikvMap->SetDB(db);
@@ -322,7 +323,9 @@ namespace SPTAG::SPANN {
                 m_versionMap = std::move(tikvMap);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, chunkSize=%d, cacheTTL=%d, cacheMax=%d)\n",
                     layer, p_opt.m_versionChunkSize, p_opt.m_versionCacheTTLMs, p_opt.m_versionCacheMaxChunks);
-            } else {
+            } else 
+#endif
+            {
                 m_versionMap = std::make_unique<COMMON::LocalVersionMap>();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using local in-memory VersionMap (layer=%d)\n", layer);
             }
@@ -1519,7 +1522,7 @@ namespace SPTAG::SPANN {
                     }
                 }
 
-                if (postingSize + appendNum > (m_postingSizeLimit + m_bufferSizeLimit)) {
+                if (postingSize + appendNum > (m_postingSizeLimit + m_bufferSizeLimit) && m_opt->m_storage == Storage::FILEIO) {
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "After appending, the number of vectors in %lld exceeds the postingsize + buffersize (%d + %d)! Do split now...\n", (std::int64_t)headID, m_postingSizeLimit, m_bufferSizeLimit);
                     ret = Split(p_exWorkSpace, headID, false);
                     if (ret != ErrorCode::Success)
@@ -1804,10 +1807,11 @@ namespace SPTAG::SPANN {
             SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found) override
         {
             // Use coprocessor search if enabled and storage is TiKV
+#ifdef TIKV
             if (m_opt->m_useCoprocessorSearch && m_opt->m_storage == Storage::TIKVIO) {
                 return SearchIndexWithCoprocessor(p_exWorkSpace, p_queryResults, p_stats, truth, found);
             }
-
+#endif
             if (p_stats) p_stats->m_exSetUpLatency = 0;
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
@@ -1929,6 +1933,7 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
+#ifdef TIKV
         // Coprocessor-based search: push distance computation into TiKV.
         // Instead of fetching raw posting data, sends the query vector and
         // posting keys to TiKV, which reads postings locally, computes L2
@@ -2027,7 +2032,7 @@ namespace SPTAG::SPANN {
             queryResults.SetScanned(listElements);
             return ErrorCode::Success;
         }
-
+#endif
         virtual ErrorCode SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace)
         {
             int retry = 0;
