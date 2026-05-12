@@ -16,6 +16,7 @@
 #include <vector>
 #include <chrono>
 #include <atomic>
+#include <array>
 #include <set>
 
 namespace SPTAG {
@@ -39,9 +40,31 @@ namespace SPTAG {
                 m_sleepLatency(0),
                 m_compLatency(0),
                 m_diskReadLatency(0),
+                m_versionMapLatency(0),
                 m_exSetUpLatency(0),
                 m_threadID(0)
             {
+                ResetBreakdown();
+            }
+
+            static constexpr int kSearchLatencyBreakdownLayers = 16;
+
+            void ResetBreakdown()
+            {
+                m_layerSetupLatency.fill(0);
+                m_layerPostingReadLatency.fill(0);
+                m_layerCompLatency.fill(0);
+                m_layerVersionMapLatency.fill(0);
+                m_layerTotalLatency.fill(0);
+                m_layerPostingCount.fill(0);
+                m_layerListElementsCount.fill(0);
+                m_layerVersionCheckCount.fill(0);
+                m_layerDiskAccessCount.fill(0);
+            }
+
+            static bool IsValidBreakdownLayer(int layer)
+            {
+                return layer >= 0 && layer < kSearchLatencyBreakdownLayers;
             }
 
             int m_check;
@@ -74,7 +97,27 @@ namespace SPTAG {
 
             double m_diskReadLatency;
 
+            double m_versionMapLatency;
+
             double m_exSetUpLatency;
+
+            std::array<double, kSearchLatencyBreakdownLayers> m_layerSetupLatency;
+
+            std::array<double, kSearchLatencyBreakdownLayers> m_layerPostingReadLatency;
+
+            std::array<double, kSearchLatencyBreakdownLayers> m_layerCompLatency;
+
+            std::array<double, kSearchLatencyBreakdownLayers> m_layerVersionMapLatency;
+
+            std::array<double, kSearchLatencyBreakdownLayers> m_layerTotalLatency;
+
+            std::array<int, kSearchLatencyBreakdownLayers> m_layerPostingCount;
+
+            std::array<int, kSearchLatencyBreakdownLayers> m_layerListElementsCount;
+
+            std::array<int, kSearchLatencyBreakdownLayers> m_layerVersionCheckCount;
+
+            std::array<int, kSearchLatencyBreakdownLayers> m_layerDiskAccessCount;
 
             std::chrono::steady_clock::time_point m_searchRequestTime;
 
@@ -556,6 +599,14 @@ namespace SPTAG {
             virtual bool ContainSample(const SizeType idx, COMMON::VersionReadPolicy policy) const
             {
                 return ContainSample(idx);
+            }
+
+            virtual void ContainSamples(const std::vector<SizeType>& ids, std::vector<uint8_t>& contains, COMMON::VersionReadPolicy policy) const
+            {
+                contains.resize(ids.size());
+                for (size_t i = 0; i < ids.size(); ++i) {
+                    contains[i] = ContainSample(ids[i], policy) ? 1 : 0;
+                }
             }
 
             virtual SizeType GetNumDeleted() const

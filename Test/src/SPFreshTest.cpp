@@ -62,6 +62,66 @@ DimensionType M = 100;
 int K = 10;
 int queries = 10;
 
+struct LatencySummary
+{
+    double mean = 0;
+    double p50 = 0;
+    double p90 = 0;
+    double p95 = 0;
+    double p99 = 0;
+};
+
+LatencySummary SummarizeLatencyValues(std::vector<double> values)
+{
+    LatencySummary summary;
+    if (values.empty()) return summary;
+
+    for (double value : values) summary.mean += value;
+    summary.mean /= values.size();
+
+    std::sort(values.begin(), values.end());
+    auto percentile = [&values](double ratio) -> double {
+        size_t index = static_cast<size_t>(values.size() * ratio);
+        if (index >= values.size()) index = values.size() - 1;
+        return values[index];
+    };
+
+    summary.p50 = percentile(0.50);
+    summary.p90 = percentile(0.90);
+    summary.p95 = percentile(0.95);
+    summary.p99 = percentile(0.99);
+    return summary;
+}
+
+template <typename Getter>
+LatencySummary SummarizeSearchStats(const std::vector<SPANN::SearchStats>& stats, Getter getter)
+{
+    std::vector<double> values;
+    values.reserve(stats.size());
+    for (const auto& stat : stats) values.push_back(getter(stat));
+    return SummarizeLatencyValues(std::move(values));
+}
+
+template <typename Getter>
+double MeanSearchStats(const std::vector<SPANN::SearchStats>& stats, Getter getter)
+{
+    if (stats.empty()) return 0;
+    double total = 0;
+    for (const auto& stat : stats) total += getter(stat);
+    return total / stats.size();
+}
+
+void WriteLatencySummary(std::ostream& out, const std::string& prefix, const char* name, const LatencySummary& summary, bool comma = true)
+{
+    out << prefix << "        \"" << name << "\": {"
+        << "\"mean\": " << summary.mean
+        << ", \"p50\": " << summary.p50
+        << ", \"p90\": " << summary.p90
+        << ", \"p95\": " << summary.p95
+        << ", \"p99\": " << summary.p99
+        << "}" << (comma ? "," : "") << "\n";
+}
+
 std::shared_ptr<VectorSet> ConvertToFloatVectorSet(const std::shared_ptr<VectorSet>& src)
 {
     if (!src)
@@ -551,6 +611,8 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
     std::vector<float> latencies(numQueries);
     std::atomic_size_t queriesSent(0);
     std::vector<QueryResult> results(numQueries);
+    std::vector<SPANN::SearchStats> searchStats(numQueries);
+    auto* spannIndex = dynamic_cast<SPANN::Index<T>*>(index.get());
 
     for (int i = 0; i < numQueries; i++)
     {
@@ -569,7 +631,14 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
             while ((qid = queriesSent.fetch_add(1)) < numQueries)
             {
                 auto t1 = std::chrono::high_resolution_clock::now();
-                index->SearchIndex(results[qid]);
+                if (spannIndex != nullptr)
+                {
+                    spannIndex->SearchIndex(results[qid], &searchStats[qid]);
+                }
+                else
+                {
+                    index->SearchIndex(results[qid]);
+                }
                 auto t2 = std::chrono::high_resolution_clock::now();
                 latencies[qid] = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0f;
             }
@@ -622,7 +691,77 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
     benchmarkData << prefix << "      \"minLatency\": " << minLat << ",\n";
     benchmarkData << prefix << "      \"maxLatency\": " << maxLat << ",\n";
     benchmarkData << prefix << "      \"qps\": " << qps << ",\n";
-    
+
+    if (spannIndex != nullptr)
+    {
+        auto postingReadSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_diskReadLatency; });
+        auto versionMapSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_versionMapLatency; });
+        auto compSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_compLatency; });
+        auto setupSummary = SummarizeSearchStats(searchStats, [](const SPANN::SearchStats& stat) { return stat.m_exSetUpLatency; });
+
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "[SearchBreakdown] postingReadMs mean=%.4lf p50=%.4lf p95=%.4lf p99=%.4lf, versionMapMs mean=%.4lf p50=%.4lf p95=%.4lf p99=%.4lf\n",
+                     postingReadSummary.mean, postingReadSummary.p50, postingReadSummary.p95, postingReadSummary.p99,
+                     versionMapSummary.mean, versionMapSummary.p50, versionMapSummary.p95, versionMapSummary.p99);
+
+        std::vector<int> activeLayers;
+        for (int layer = 0; layer < SPANN::SearchStats::kSearchLatencyBreakdownLayers; layer++)
+        {
+            bool active = false;
+            for (const auto& stat : searchStats)
+            {
+                if (stat.m_layerPostingCount[layer] > 0 ||
+                    stat.m_layerListElementsCount[layer] > 0 ||
+                    stat.m_layerVersionCheckCount[layer] > 0 ||
+                    stat.m_layerTotalLatency[layer] > 0)
+                {
+                    active = true;
+                    break;
+                }
+            }
+            if (active) activeLayers.push_back(layer);
+        }
+
+        benchmarkData << prefix << "      \"latencyBreakdown\": {\n";
+        std::string breakdownPrefix = prefix + "  ";
+        WriteLatencySummary(benchmarkData, breakdownPrefix, "postingReadMs", postingReadSummary);
+        WriteLatencySummary(benchmarkData, breakdownPrefix, "versionMapMs", versionMapSummary);
+        WriteLatencySummary(benchmarkData, breakdownPrefix, "compMs", compSummary);
+        WriteLatencySummary(benchmarkData, breakdownPrefix, "setupMs", setupSummary);
+        benchmarkData << prefix << "        \"layers\": {\n";
+        for (size_t layerIndex = 0; layerIndex < activeLayers.size(); layerIndex++)
+        {
+            int layer = activeLayers[layerIndex];
+            auto layerPostingReadSummary = SummarizeSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerPostingReadLatency[layer]; });
+            auto layerVersionMapSummary = SummarizeSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerVersionMapLatency[layer]; });
+            auto layerCompSummary = SummarizeSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerCompLatency[layer]; });
+            auto layerSetupSummary = SummarizeSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerSetupLatency[layer]; });
+            auto layerTotalSummary = SummarizeSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerTotalLatency[layer]; });
+
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "[SearchBreakdown][Layer %d] postingReadMs mean=%.4lf p95=%.4lf, versionMapMs mean=%.4lf p95=%.4lf, compMs mean=%.4lf, setupMs mean=%.4lf, totalMs mean=%.4lf\n",
+                         layer,
+                         layerPostingReadSummary.mean, layerPostingReadSummary.p95,
+                         layerVersionMapSummary.mean, layerVersionMapSummary.p95,
+                         layerCompSummary.mean,
+                         layerSetupSummary.mean,
+                         layerTotalSummary.mean);
+
+            std::string layerPrefix = prefix + "          ";
+            benchmarkData << prefix << "          \"" << layer << "\": {\n";
+            WriteLatencySummary(benchmarkData, layerPrefix, "postingReadMs", layerPostingReadSummary);
+            WriteLatencySummary(benchmarkData, layerPrefix, "versionMapMs", layerVersionMapSummary);
+            WriteLatencySummary(benchmarkData, layerPrefix, "compMs", layerCompSummary);
+            WriteLatencySummary(benchmarkData, layerPrefix, "setupMs", layerSetupSummary);
+            WriteLatencySummary(benchmarkData, layerPrefix, "totalMs", layerTotalSummary);
+            benchmarkData << prefix << "            \"postingCountMean\": " << MeanSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerPostingCount[layer]; }) << ",\n";
+            benchmarkData << prefix << "            \"versionCheckCountMean\": " << MeanSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerVersionCheckCount[layer]; }) << ",\n";
+            benchmarkData << prefix << "            \"listElementsMean\": " << MeanSearchStats(searchStats, [layer](const SPANN::SearchStats& stat) { return stat.m_layerListElementsCount[layer]; }) << "\n";
+            benchmarkData << prefix << "          }" << (layerIndex + 1 < activeLayers.size() ? "," : "") << "\n";
+        }
+        benchmarkData << prefix << "        }\n";
+        benchmarkData << prefix << "      },\n";
+    }
 
     // Recall evaluation (if truth file provided)
     if (!truth || truthPath.empty() || truthPath == "none")

@@ -462,3 +462,7 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# SPTAG benchmark generated artifacts
+/perftest_*
+/evaluation/2026-04-23/output_distributed_hostname_*.json

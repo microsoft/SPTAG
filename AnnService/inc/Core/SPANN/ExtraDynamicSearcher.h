@@ -414,6 +414,30 @@ namespace SPTAG::SPANN {
             return !m_versionMap->Deleted(idx, policy);
         }
 
+        virtual void ContainSamples(const std::vector<SizeType>& ids, std::vector<uint8_t>& contains, COMMON::VersionReadPolicy policy) const override
+        {
+            contains.assign(ids.size(), 0);
+            if (ids.empty()) return;
+
+            const SizeType count = m_versionMap->Count();
+            std::vector<SizeType> validIDs;
+            std::vector<size_t> validIndices;
+            validIDs.reserve(ids.size());
+            validIndices.reserve(ids.size());
+            for (size_t i = 0; i < ids.size(); ++i) {
+                if (ids[i] < 0 || ids[i] >= count) continue;
+                validIDs.push_back(ids[i]);
+                validIndices.push_back(i);
+            }
+            if (validIDs.empty()) return;
+
+            std::vector<uint8_t> versions;
+            m_versionMap->BatchGetVersions(validIDs, versions, policy);
+            for (size_t i = 0; i < validIndices.size() && i < versions.size(); ++i) {
+                contains[validIndices[i]] = (versions[i] != 0xfe) ? 1 : 0;
+            }
+        }
+
         virtual SizeType GetNumDeleted() const override
         {
             return m_versionMap->GetDeleteCount();
@@ -2008,7 +2032,7 @@ namespace SPTAG::SPANN {
                 return SearchIndexWithCoprocessor(p_exWorkSpace, p_queryResults, p_stats, truth, found, p_checkVersionMap);
             }
 
-            if (p_stats) p_stats->m_exSetUpLatency = 0;
+            auto layerTotalStart = std::chrono::high_resolution_clock::now();
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
 
@@ -2018,6 +2042,8 @@ namespace SPTAG::SPANN {
 
             double compLatency = 0;
             double readLatency = 0;
+            double versionMapLatency = 0;
+            int versionCheckCount = 0;
             std::chrono::microseconds remainLimit;
             if (p_stats) remainLimit = m_hardLatencyLimit - std::chrono::microseconds((int)p_stats->m_totalLatency);
             else remainLimit = m_hardLatencyLimit;
@@ -2112,7 +2138,11 @@ namespace SPTAG::SPANN {
 
                 // Batch check versions
                 std::vector<uint8_t> versions;
+                auto versionMapStart = std::chrono::high_resolution_clock::now();
                 m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
+                auto versionMapEnd = std::chrono::high_resolution_clock::now();
+                versionMapLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count());
+                versionCheckCount += static_cast<int>(candidateVIDs.size());
 
                 // Filter: rebuild results without deleted entries
                 // We mark deleted entries with MaxDist so they sort to the end
@@ -2130,13 +2160,31 @@ namespace SPTAG::SPANN {
                 queryResults.SortResult();
             }
 
+            auto layerTotalEnd = std::chrono::high_resolution_clock::now();
+            double layerTotalLatency = ((double)std::chrono::duration_cast<std::chrono::microseconds>(layerTotalEnd - layerTotalStart).count()) / 1000;
+
             if (p_stats)
             {
-                p_stats->m_compLatency = compLatency / 1000;
-                p_stats->m_diskReadLatency = readLatency / 1000;
-                p_stats->m_totalListElementsCount = listElements;
-                p_stats->m_diskIOCount = diskIO;
-                p_stats->m_diskAccessCount = diskRead / 1024;
+                double compLatencyMs = compLatency / 1000;
+                double readLatencyMs = readLatency / 1000;
+                double versionMapLatencyMs = versionMapLatency / 1000;
+                int diskAccessKB = diskRead / 1024;
+                p_stats->m_compLatency += compLatencyMs;
+                p_stats->m_diskReadLatency += readLatencyMs;
+                p_stats->m_versionMapLatency += versionMapLatencyMs;
+                p_stats->m_totalListElementsCount += listElements;
+                p_stats->m_diskIOCount += diskIO;
+                p_stats->m_diskAccessCount += diskAccessKB;
+                if (SearchStats::IsValidBreakdownLayer(m_layer)) {
+                    p_stats->m_layerPostingReadLatency[m_layer] += readLatencyMs;
+                    p_stats->m_layerCompLatency[m_layer] += compLatencyMs;
+                    p_stats->m_layerVersionMapLatency[m_layer] += versionMapLatencyMs;
+                    p_stats->m_layerTotalLatency[m_layer] += layerTotalLatency;
+                    p_stats->m_layerPostingCount[m_layer] += static_cast<int>(postingListCount);
+                    p_stats->m_layerListElementsCount[m_layer] += listElements;
+                    p_stats->m_layerVersionCheckCount[m_layer] += versionCheckCount;
+                    p_stats->m_layerDiskAccessCount[m_layer] += diskAccessKB;
+                }
             }
             queryResults.SetScanned(listElements);
             return ErrorCode::Success;
@@ -2151,12 +2199,14 @@ namespace SPTAG::SPANN {
             SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
             bool p_checkVersionMap)
         {
-            if (p_stats) p_stats->m_exSetUpLatency = 0;
+            auto layerTotalStart = std::chrono::high_resolution_clock::now();
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
 
             int listElements = 0;
             double readLatency = 0;
+            double versionMapLatency = 0;
+            int versionCheckCount = 0;
 
             int valueType = 0; // UInt8
             if (std::is_same<ValueType, float>::value) valueType = 3;
@@ -2212,7 +2262,11 @@ namespace SPTAG::SPANN {
                 }
 
                 std::vector<uint8_t> versions;
+                auto versionMapStart = std::chrono::high_resolution_clock::now();
                 m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
+                auto versionMapEnd = std::chrono::high_resolution_clock::now();
+                versionMapLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count());
+                versionCheckCount += static_cast<int>(candidateVIDs.size());
 
                 int vidIdx = 0;
                 for (int i = 0; i < fetchCount && i < queryResults.GetResultNum(); i++) {
@@ -2228,13 +2282,27 @@ namespace SPTAG::SPANN {
                 queryResults.SortResult();
             }
 
+            auto layerTotalEnd = std::chrono::high_resolution_clock::now();
+            double layerTotalLatency = ((double)std::chrono::duration_cast<std::chrono::microseconds>(layerTotalEnd - layerTotalStart).count()) / 1000;
+
             if (p_stats)
             {
-                p_stats->m_compLatency = 0; // computation done on TiKV side
-                p_stats->m_diskReadLatency = readLatency / 1000;
-                p_stats->m_totalListElementsCount = listElements;
-                p_stats->m_diskIOCount = 0;
-                p_stats->m_diskAccessCount = 0;
+                double readLatencyMs = readLatency / 1000;
+                double versionMapLatencyMs = versionMapLatency / 1000;
+                p_stats->m_compLatency += 0; // computation done on TiKV side
+                p_stats->m_diskReadLatency += readLatencyMs;
+                p_stats->m_versionMapLatency += versionMapLatencyMs;
+                p_stats->m_totalListElementsCount += listElements;
+                p_stats->m_diskIOCount += 0;
+                p_stats->m_diskAccessCount += 0;
+                if (SearchStats::IsValidBreakdownLayer(m_layer)) {
+                    p_stats->m_layerPostingReadLatency[m_layer] += readLatencyMs;
+                    p_stats->m_layerVersionMapLatency[m_layer] += versionMapLatencyMs;
+                    p_stats->m_layerTotalLatency[m_layer] += layerTotalLatency;
+                    p_stats->m_layerPostingCount[m_layer] += static_cast<int>(p_exWorkSpace->m_postingIDs.size());
+                    p_stats->m_layerListElementsCount[m_layer] += listElements;
+                    p_stats->m_layerVersionCheckCount[m_layer] += versionCheckCount;
+                }
             }
             queryResults.SetScanned(listElements);
             return ErrorCode::Success;
