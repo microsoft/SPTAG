@@ -70,6 +70,37 @@ double GetMultiNodeBudgetKeepRatio()
     return ratio;
 }
 
+// SPTAG_UNIFIED_NPROBE_BUDGET (default 1): use a single aggregate budget for
+// all tag queries (including multi-subindex routed queries) instead of
+// summing per-subindex budgets. Set to 0 to fall back to the legacy
+// summed-child-budget × keepRatio formula.
+bool UseUnifiedNprobeBudget()
+{
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPTAG_UNIFIED_NPROBE_BUDGET");
+        if (value == nullptr || *value == '\0') return true;
+        return !(value[0] == '0' && value[1] == '\0');
+    }();
+    return enabled;
+}
+
+// SPTAG_FIXED_NPROBE=N : if set to a positive integer, override adaptive
+// nprobe estimation entirely and always use N as graphResultNum (still
+// clamped to candidate posting count). Useful when adaptive estimation
+// is uncertain and we want to fix the IO budget.
+int GetFixedNprobeOverride()
+{
+    static const int v = []() {
+        const char* value = std::getenv("SPTAG_FIXED_NPROBE");
+        if (value == nullptr || *value == '\0') return 0;
+        char* end = nullptr;
+        long parsed = std::strtol(value, &end, 10);
+        if (end == value || parsed <= 0 || parsed > 100000) return 0;
+        return static_cast<int>(parsed);
+    }();
+    return v;
+}
+
 struct HeadBundleManifestHeader
 {
     std::uint32_t magic;
@@ -1407,7 +1438,11 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // total budget from the sum of child-node budgets instead of relying
         // only on one aggregate local-selectivity estimate, then keep a
         // configurable fraction after merge by trimming the tail budget.
-        if (candidateNodes.size() > 1) {
+        // Disabled by default: SPTAG_UNIFIED_NPROBE_BUDGET=1 makes all routed
+        // queries (including multi-subindex) trust the single aggregate budget,
+        // which matches the unified cross-subgraph PQ search and avoids
+        // amplifying nprobe by the number of routed subindexes.
+        if (candidateNodes.size() > 1 && !UseUnifiedNprobeBudget()) {
             const double multiNodeBudgetKeepRatio = GetMultiNodeBudgetKeepRatio();
             long long summedChildPostingTarget = 0;
             for (int nodeId : candidateNodes)
@@ -1438,6 +1473,24 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 postingTarget = std::min(static_cast<int>(postingCountCap),
                                          std::max(aggregatePostingTarget, trimmedChildPostingTarget));
             }
+        }
+    }
+
+    // SPTAG_FIXED_NPROBE override: if set, force a fixed posting budget for
+    // all tag queries regardless of adaptive estimation. Still clamped to
+    // available posting count.
+    {
+        int fixedNprobe = GetFixedNprobeOverride();
+        if (fixedNprobe > 0) {
+            SizeType cap = m_index ? m_index->GetNumSamples() : fixedNprobe;
+            if (!candidateNodes.empty()) {
+                SizeType candidateCap = 0;
+                for (int nodeId : candidateNodes) {
+                    candidateCap += m_headBundleNodes[static_cast<size_t>(nodeId)].postingCount;
+                }
+                if (candidateCap > 0) cap = candidateCap;
+            }
+            postingTarget = std::min(fixedNprobe, static_cast<int>(cap));
         }
     }
 
@@ -1765,6 +1818,19 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
 
         p_queryResults->Reverse();
+        {
+            static const bool s_dumpHeads = (std::getenv("SPTAG_DUMP_HEADS") != nullptr);
+            if (s_dumpHeads) {
+                std::string s = "HEADDUMP:";
+                s.reserve(workSpace->m_postingIDs.size() * 8 + 16);
+                for (auto h : workSpace->m_postingIDs) {
+                    s.push_back(' ');
+                    s += std::to_string(static_cast<long long>(h));
+                }
+                fprintf(stderr, "%s\n", s.c_str());
+                fflush(stderr);
+            }
+        }
         ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
         SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
             workSpace->m_postingProbeStats.m_readPostings,
