@@ -2663,7 +2663,7 @@ namespace SPTAG::SPANN {
                              "total_completed split:%zu merge:%zu reassign:%zu | "
                              "split_latency avg:%.1fms max:%.1fms\n",
                              m_layer, totalJobs, m_splitJobsInFlight.load(),
-                             m_mergeJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
+                             m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
                              m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                              m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
                              avgSplitMs, maxSplitMs);
