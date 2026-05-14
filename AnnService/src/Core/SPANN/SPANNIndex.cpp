@@ -12,7 +12,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <fstream>
 #include <functional>
+#include <map>
 #include <queue>
 #include <random>
 #include <shared_mutex>
@@ -2457,6 +2459,36 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
     COMMON::Dataset<InternalDataType> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(),
                                            vectorset->Count() + 1, (InternalDataType *)vectorset->GetData());
 
+    // Allow runtime override of m_selectType via env var (used by experimental
+    // selectType variants like PerTagBKTMerge that aren't surfaced in config yet).
+    if (const char* selOverride = std::getenv("SPTAG_SELECT_TYPE_OVERRIDE"))
+    {
+        if (selOverride[0] != '\0' &&
+            !Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), selOverride))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "SPTAG_SELECT_TYPE_OVERRIDE: overriding selectType '%s' -> '%s'\n",
+                         m_options.m_selectType.c_str(), selOverride);
+            m_options.m_selectType = selOverride;
+        }
+    }
+
+    if (const char* ratioOverride = std::getenv("SPTAG_RATIO_OVERRIDE"))
+    {
+        if (ratioOverride[0] != '\0')
+        {
+            try {
+                double r = std::stod(ratioOverride);
+                if (r > 0.0 && r < 1.0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "SPTAG_RATIO_OVERRIDE: overriding m_ratio %.6f -> %.6f\n",
+                                 m_options.m_ratio, r);
+                    m_options.m_ratio = r;
+                }
+            } catch (...) {}
+        }
+    }
+
     auto t1 = std::chrono::high_resolution_clock::now();
     SelectHeadAdjustOptions(data.R());
     std::vector<int> selected;
@@ -2516,6 +2548,435 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         if (selected.empty())
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Can't select any vector as head with current settings\n");
+            return false;
+        }
+    }
+    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "PerTagBKTMerge"))
+    {
+        // Boss-proposed scheme:
+        //   Phase 1 — partition vectors by tag value (e.g. team-level, 64 groups).
+        //             For each group: build a BKTree on that subset and run
+        //             SelectHeadDynamically with the head ratio bumped by an
+        //             oversample factor (default 3x). Concatenate all per-tag
+        //             heads into a single candidate set.
+        //   Phase 2 — greedy 3-way merge: each candidate looks for its k nearest
+        //             unmerged neighbours within (same tag) ∪ (top-K cross-tag
+        //             neighbours by tag centroid). Merge if pairwise distances
+        //             are within alpha * mean(1-NN spacing) and the implied
+        //             posting size cap is respected.
+        //   Phase 3 — for each merged group, elect the candidate closest to the
+        //             group geometric mean as the representative head. Singletons
+        //             survive as-is.
+        // Inputs:
+        //   env SPTAG_PER_VECTOR_TAGS_FILE       : text file, one int per line
+        //                                          (length must equal data.R())
+        //   env SPTAG_PARTITION_OVERSAMPLE       : default 3.0
+        //   env SPTAG_MERGE_ALPHA                : default 0.2
+        //   env SPTAG_CROSS_TAG_NEIGHBORS        : default 3
+        //   env SPTAG_MERGE_GROUP_SIZE           : default 3
+        //
+        const char* tagsFile = std::getenv("SPTAG_PER_VECTOR_TAGS_FILE");
+        if (tagsFile == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "PerTagBKTMerge requires env SPTAG_PER_VECTOR_TAGS_FILE\n");
+            return false;
+        }
+        float oversample = 3.0f;
+        if (const char* e = std::getenv("SPTAG_PARTITION_OVERSAMPLE"))
+            oversample = std::max(1.0f, static_cast<float>(std::atof(e)));
+        float mergeAlpha = 1.0f;
+        if (const char* e = std::getenv("SPTAG_MERGE_ALPHA"))
+            mergeAlpha = std::max(0.0f, static_cast<float>(std::atof(e)));
+        int crossTagNeighbors = 3;
+        if (const char* e = std::getenv("SPTAG_CROSS_TAG_NEIGHBORS"))
+            crossTagNeighbors = std::max(0, std::atoi(e));
+        int mergeGroupSize = 3;
+        if (const char* e = std::getenv("SPTAG_MERGE_GROUP_SIZE"))
+            mergeGroupSize = std::max(2, std::atoi(e));
+        // Target FINAL head ratio (after merge). Per-tag SelectHead aims at
+        // `oversample × finalRatio`. Defaults to 0.016 ≈ SIFT-1M tenant-0
+        // baseline. Override per dataset.
+        double finalRatio = 0.016;
+        if (const char* e = std::getenv("SPTAG_PERTAG_HEAD_RATIO"))
+            finalRatio = std::max(1e-5, std::atof(e));
+        // Cap on the sum of per-head catchments inside a merge group, expressed
+        // as a multiplier of the mean catchment. Default 1.2 ⇒ no group's
+        // resulting posting may exceed 1.2 × mergeGroupSize × meanCatchment
+        // (i.e. ~1.2× of the uniform "fair share" if the group fills up).
+        // Set to 0 (or a huge number) to disable the cap.
+        double sizeCapMultiplier = 1.2;
+        if (const char* e = std::getenv("SPTAG_PERTAG_SIZE_CAP_MULT"))
+            sizeCapMultiplier = std::max(0.0, std::atof(e));
+
+        // ---- Read per-vector tag column (one int per line) ----
+        std::vector<int> perVecTag(data.R(), -1);
+        {
+            std::ifstream fin(tagsFile);
+            if (!fin.good())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "PerTagBKTMerge failed to open %s\n", tagsFile);
+                return false;
+            }
+            int v; int idx = 0;
+            while (idx < data.R() && (fin >> v))
+                perVecTag[idx++] = v;
+            if (idx != data.R())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "PerTagBKTMerge tag file has %d entries, expected %d\n",
+                             idx, data.R());
+                return false;
+            }
+        }
+
+        // ---- Group vector IDs by tag value ----
+        std::map<int, std::vector<SizeType>> tagGroups;
+        for (int i = 0; i < data.R(); ++i)
+            if (perVecTag[i] >= 0)
+                tagGroups[perVecTag[i]].push_back(static_cast<SizeType>(i));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge: %zu distinct tag values "
+                     "(oversample=%.2f, alpha=%.3f, cross-tag-knn=%d, group=%d)\n",
+                     tagGroups.size(), oversample, mergeAlpha, crossTagNeighbors, mergeGroupSize);
+
+        // ---- Phase 1: per-tag BKT + SelectHeadDynamically (oversampled) ----
+        // Target ratio for SelectHeadDynamically per tag = oversample × finalRatio
+        // so that after 3-way merge we land roughly at finalRatio.
+        const double perTagTarget = std::min(0.9, oversample * finalRatio);
+        const auto savedRatio    = m_options.m_ratio;
+        const auto savedSelTh    = m_options.m_selectThreshold;
+        const auto savedSplTh    = m_options.m_splitThreshold;
+        const auto savedSplFa    = m_options.m_splitFactor;
+        const auto savedKmeansK  = m_options.m_iBKTKmeansK;
+        const auto savedSamples  = m_options.m_iSamples;
+
+        std::vector<int> initialHeads;     // global VIDs
+        std::vector<int> initialHeadTag;   // tag value of each initial head
+
+        for (auto& kv : tagGroups)
+        {
+            int tagVal = kv.first;
+            std::vector<SizeType>& subIdx = kv.second;
+            int subSize = static_cast<int>(subIdx.size());
+            if (subSize <= 1)
+            {
+                if (subSize == 1) {
+                    initialHeads.push_back(static_cast<int>(subIdx[0]));
+                    initialHeadTag.push_back(tagVal);
+                }
+                continue;
+            }
+
+            // Reset & adjust options for this subset.
+            // Set target = oversample × finalRatio. Reset thresholds to 0 so
+            // SelectHeadAdjustOptions derives them from the new ratio.
+            m_options.m_ratio = perTagTarget;
+            m_options.m_selectThreshold = 0;
+            m_options.m_splitThreshold = 0;
+            m_options.m_splitFactor = 0;
+            m_options.m_iBKTKmeansK = savedKmeansK;
+            m_options.m_iSamples = std::min(savedSamples, subSize);
+            SelectHeadAdjustOptions(subSize);
+
+            std::shared_ptr<COMMON::BKTree> bkt = std::make_shared<COMMON::BKTree>();
+            bkt->m_iBKTKmeansK   = m_options.m_iBKTKmeansK;
+            bkt->m_iBKTLeafSize  = m_options.m_iBKTLeafSize;
+            bkt->m_iSamples      = std::min(m_options.m_iSamples, subSize);
+            bkt->m_iTreeNumber   = m_options.m_iTreeNumber;
+            bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
+            bkt->m_pQuantizer    = m_pQuantizer;
+            bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod,
+                                              m_options.m_iSelectHeadNumberOfThreads,
+                                              &subIdx, nullptr, true);
+
+            std::vector<int> subSelected;
+            SelectHeadDynamically(bkt, subSize, subSelected);
+            if (subSelected.empty())
+                subSelected.push_back(static_cast<int>(subIdx[0]));
+
+            for (int h : subSelected)
+            {
+                initialHeads.push_back(h);
+                initialHeadTag.push_back(tagVal);
+            }
+        }
+
+        // restore options for downstream Build phases
+        m_options.m_ratio = savedRatio;
+        m_options.m_selectThreshold = savedSelTh;
+        m_options.m_splitThreshold = savedSplTh;
+        m_options.m_splitFactor = savedSplFa;
+        m_options.m_iBKTKmeansK = savedKmeansK;
+        m_options.m_iSamples = savedSamples;
+
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge Phase 1: %zu initial heads "
+                     "(finalRatio=%.3f%%, perTagTarget=%.3f%%, achieved=%.3f%%)\n",
+                     initialHeads.size(),
+                     100.0 * finalRatio,
+                     100.0 * perTagTarget,
+                     100.0 * initialHeads.size() / data.R());
+
+        // ---- Phase 2 prep: tag centroids + per-tag head lists ----
+        const int dim = data.C();
+        std::map<int, std::vector<int>> tagToHeadIdx;  // tag -> indices into initialHeads[]
+        for (size_t i = 0; i < initialHeads.size(); ++i)
+            tagToHeadIdx[initialHeadTag[i]].push_back(static_cast<int>(i));
+
+        // Per-tag centroid in float (float regardless of InternalDataType)
+        std::map<int, std::vector<float>> tagCentroid;
+        for (auto& kv : tagGroups)
+        {
+            std::vector<float> c(dim, 0.0f);
+            for (SizeType vid : kv.second)
+            {
+                const InternalDataType* p = data[vid];
+                for (int d = 0; d < dim; ++d) c[d] += static_cast<float>(p[d]);
+            }
+            float inv = 1.0f / std::max<size_t>(1, kv.second.size());
+            for (int d = 0; d < dim; ++d) c[d] *= inv;
+            tagCentroid[kv.first] = std::move(c);
+        }
+        // For each tag, list its top-K nearest other tags by centroid L2
+        std::map<int, std::vector<int>> tagNearest;
+        {
+            std::vector<int> tagList;
+            tagList.reserve(tagCentroid.size());
+            for (auto& kv : tagCentroid) tagList.push_back(kv.first);
+            for (int t : tagList)
+            {
+                std::vector<std::pair<float, int>> dlist;
+                dlist.reserve(tagList.size());
+                const auto& ct = tagCentroid[t];
+                for (int u : tagList)
+                {
+                    if (u == t) continue;
+                    const auto& cu = tagCentroid[u];
+                    float d = 0;
+                    for (int k = 0; k < dim; ++k) {
+                        float diff = ct[k] - cu[k];
+                        d += diff * diff;
+                    }
+                    dlist.emplace_back(d, u);
+                }
+                int k = std::min<int>(crossTagNeighbors, static_cast<int>(dlist.size()));
+                std::partial_sort(dlist.begin(), dlist.begin() + k, dlist.end());
+                std::vector<int> nb;
+                nb.reserve(k);
+                for (int i = 0; i < k; ++i) nb.push_back(dlist[i].second);
+                tagNearest[t] = std::move(nb);
+            }
+        }
+
+        auto headDist = [&](int hi, int hj) -> float {
+            const InternalDataType* a = data[initialHeads[hi]];
+            const InternalDataType* b = data[initialHeads[hj]];
+            float d = 0;
+            for (int k = 0; k < dim; ++k) {
+                float diff = static_cast<float>(a[k]) - static_cast<float>(b[k]);
+                d += diff * diff;
+            }
+            return d;  // squared L2, fine for comparisons
+        };
+
+        // ---- Compute mean 1-NN distance among initialHeads (sampled) ----
+        // For each sample head, scan its candidate set (same tag + nearest tags)
+        // and find the min distance to any other head. Mean of these = baseline.
+        float meanNN1 = 0.0f;
+        {
+            std::mt19937 rg(12345);
+            int n = static_cast<int>(initialHeads.size());
+            int sampleCount = std::min(n, 4096);
+            std::vector<int> samp(n);
+            for (int i = 0; i < n; ++i) samp[i] = i;
+            std::shuffle(samp.begin(), samp.end(), rg);
+            samp.resize(sampleCount);
+            double sum = 0;
+            int cnt = 0;
+            for (int hi : samp)
+            {
+                int t = initialHeadTag[hi];
+                std::vector<int> candTags = { t };
+                for (int u : tagNearest[t]) candTags.push_back(u);
+                float best = std::numeric_limits<float>::infinity();
+                for (int ct : candTags) {
+                    for (int hj : tagToHeadIdx[ct]) {
+                        if (hj == hi) continue;
+                        float d = headDist(hi, hj);
+                        if (d < best) best = d;
+                    }
+                }
+                if (std::isfinite(best)) {
+                    sum += std::sqrt(best);
+                    ++cnt;
+                }
+            }
+            meanNN1 = (cnt > 0) ? static_cast<float>(sum / cnt) : 1.0f;
+        }
+        const float mergeThresholdSq = (mergeAlpha * meanNN1) * (mergeAlpha * meanNN1);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge Phase 2: meanNN1=%.4f, threshold=%.4f (alpha=%.3f, sq=%.4f)\n",
+                     meanNN1, mergeAlpha * meanNN1, mergeAlpha, mergeThresholdSq);
+
+        // ---- Estimate per-head catchment (# base vecs whose nearest head is i) ----
+        // Brute force within each tag partition: vecs in tag T snap to nearest
+        // head in {heads(T) ∪ heads(tagNearest[T])}. This is identical to the
+        // candidate set used during query routing and is what determines the
+        // post-merge posting size.
+        std::vector<int> catchment(initialHeads.size(), 0);
+        {
+            auto vecHeadDistSq = [&](SizeType vid, int hidx) -> float {
+                const InternalDataType* a = data[vid];
+                const InternalDataType* b = data[initialHeads[hidx]];
+                float d = 0;
+                for (int k = 0; k < dim; ++k) {
+                    float diff = static_cast<float>(a[k]) - static_cast<float>(b[k]);
+                    d += diff * diff;
+                }
+                return d;
+            };
+            for (auto& kv : tagGroups)
+            {
+                int tagVal = kv.first;
+                std::vector<int> candHeads;
+                auto it = tagToHeadIdx.find(tagVal);
+                if (it != tagToHeadIdx.end())
+                    candHeads.insert(candHeads.end(), it->second.begin(), it->second.end());
+                auto itN = tagNearest.find(tagVal);
+                if (itN != tagNearest.end()) {
+                    for (int u : itN->second) {
+                        auto itu = tagToHeadIdx.find(u);
+                        if (itu != tagToHeadIdx.end())
+                            candHeads.insert(candHeads.end(), itu->second.begin(), itu->second.end());
+                    }
+                }
+                if (candHeads.empty()) continue;
+                for (SizeType vid : kv.second) {
+                    float best = std::numeric_limits<float>::infinity();
+                    int bestH = -1;
+                    for (int hidx : candHeads) {
+                        float d = vecHeadDistSq(vid, hidx);
+                        if (d < best) { best = d; bestH = hidx; }
+                    }
+                    if (bestH >= 0) {
+                        catchment[bestH]++;
+                    }
+                }
+            }
+            double sum = 0; int nonzero = 0; int mx = 0;
+            for (int c : catchment) { sum += c; if (c > 0) ++nonzero; if (c > mx) mx = c; }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "PerTagBKTMerge catchment: total=%.0f, heads=%zu, mean=%.2f, nonzero=%d, max=%d\n",
+                         sum, initialHeads.size(),
+                         sum / std::max<size_t>(1, initialHeads.size()), nonzero, mx);
+        }
+        const double meanCatchment =
+            static_cast<double>(data.R()) / std::max<size_t>(1, initialHeads.size());
+        // Per-group catchment-sum cap. If sizeCapMultiplier == 0, treat as disabled (∞).
+        const double groupCatchmentCap = (sizeCapMultiplier > 0)
+            ? sizeCapMultiplier * mergeGroupSize * meanCatchment
+            : std::numeric_limits<double>::infinity();
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge merge cap: meanCatchment=%.2f, groupCap=%.2f (mult=%.2f × groupSize=%d)\n",
+                     meanCatchment, groupCatchmentCap, sizeCapMultiplier, mergeGroupSize);
+
+        // ---- Greedy K-way merge ----
+        int n = static_cast<int>(initialHeads.size());
+        std::vector<int> mergedGroup(n, -1);  // -1 = unmerged, else group ID
+        std::vector<std::vector<int>> groups; // each = head indices in initialHeads[]
+        std::vector<int> order(n);
+        for (int i = 0; i < n; ++i) order[i] = i;
+        std::mt19937 rg(54321);
+        std::shuffle(order.begin(), order.end(), rg);
+
+        size_t mergedHeadCount = 0;
+        size_t capBlocked = 0;
+        for (int hi : order)
+        {
+            if (mergedGroup[hi] != -1) continue;
+            int t = initialHeadTag[hi];
+
+            // Build candidate set: heads in same tag or nearest tags, within
+            // mergeThresholdSq distance, not already merged.
+            std::vector<int> candTags = { t };
+            for (int u : tagNearest[t]) candTags.push_back(u);
+            std::vector<std::pair<float, int>> cands;
+            for (int ct : candTags) {
+                for (int hj : tagToHeadIdx[ct]) {
+                    if (hj == hi || mergedGroup[hj] != -1) continue;
+                    float d = headDist(hi, hj);
+                    if (d <= mergeThresholdSq)
+                        cands.emplace_back(d, hj);
+                }
+            }
+            // Sort by distance ascending; pick nearest, but skip any that would
+            // push the group's catchment sum beyond groupCatchmentCap.
+            std::sort(cands.begin(), cands.end());
+            std::vector<int> picked = { hi };
+            double pickedCatchment = static_cast<double>(catchment[hi]);
+            for (auto& c : cands) {
+                if (static_cast<int>(picked.size()) >= mergeGroupSize) break;
+                double newSum = pickedCatchment + static_cast<double>(catchment[c.second]);
+                if (newSum > groupCatchmentCap) { ++capBlocked; continue; }
+                picked.push_back(c.second);
+                pickedCatchment = newSum;
+            }
+            int gid = static_cast<int>(groups.size());
+            for (int idx : picked) mergedGroup[idx] = gid;
+            groups.push_back(picked);
+            if (picked.size() > 1) mergedHeadCount += picked.size();
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge merge done: %zu groups, %zu heads merged into groups, %zu candidates blocked by cap\n",
+                     groups.size(), mergedHeadCount, capBlocked);
+
+        // ---- Phase 3: re-elect representative head per group ----
+        std::vector<int> finalHeads;
+        finalHeads.reserve(groups.size());
+        for (auto& g : groups)
+        {
+            if (g.size() == 1) {
+                finalHeads.push_back(initialHeads[g[0]]);
+                continue;
+            }
+            // geometric mean (float) of group members
+            std::vector<float> mean(dim, 0.0f);
+            for (int idx : g) {
+                const InternalDataType* p = data[initialHeads[idx]];
+                for (int d = 0; d < dim; ++d) mean[d] += static_cast<float>(p[d]);
+            }
+            float inv = 1.0f / static_cast<float>(g.size());
+            for (int d = 0; d < dim; ++d) mean[d] *= inv;
+            // pick member nearest to mean
+            int best = g[0];
+            float bestD = std::numeric_limits<float>::infinity();
+            for (int idx : g) {
+                const InternalDataType* p = data[initialHeads[idx]];
+                float d = 0;
+                for (int k = 0; k < dim; ++k) {
+                    float diff = mean[k] - static_cast<float>(p[k]);
+                    d += diff * diff;
+                }
+                if (d < bestD) { bestD = d; best = idx; }
+            }
+            finalHeads.push_back(initialHeads[best]);
+        }
+
+        // dedup + sort
+        std::sort(finalHeads.begin(), finalHeads.end());
+        finalHeads.erase(std::unique(finalHeads.begin(), finalHeads.end()), finalHeads.end());
+        selected.swap(finalHeads);
+
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "PerTagBKTMerge Phase 3: %zu groups -> %zu final heads "
+                     "(%.3f%% of data, merged_in_groups=%zu)\n",
+                     groups.size(), selected.size(),
+                     100.0 * selected.size() / data.R(), mergedHeadCount);
+
+        if (selected.empty()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PerTagBKTMerge produced no heads\n");
             return false;
         }
     }
