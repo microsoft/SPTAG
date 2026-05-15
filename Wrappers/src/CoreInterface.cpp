@@ -3364,11 +3364,18 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         routeStats[tag] = TagRoutingStats{vectorCount, tagPostingCounts[tag]};
     }
 
-    // Build sparse tag index from exact posting fanout instead of a fixed top-k
-    // vector-count heuristic. Query-time routing already checks the exact posting
-    // union size, so materializing bounded-fanout tags here keeps sparse routing
-    // general across top-k choices while keeping the side metadata bounded.
-    constexpr int kSparseIndexBuildMaxPostings = 1024;
+    // Sparse-path single knob:
+    //   SPTAG_SPARSE_MAX_POSTINGS = N (default 1024)
+    // A tag is materialized into sparse_tags.bin iff it appears in ≤ N postings.
+    // At query time, materialized tags ALWAYS route through the sparse path
+    // (no second-stage union-size gate) - this is the single fixed threshold.
+    int kSparseIndexBuildMaxPostings = 1024;
+    if (const char* env = std::getenv("SPTAG_SPARSE_MAX_POSTINGS")) {
+        int parsed = 0;
+        if (SPTAG::Helper::Convert::ConvertStringTo<int>(env, parsed) && parsed > 0) {
+            kSparseIndexBuildMaxPostings = parsed;
+        }
+    }
     auto sparseIdx = std::make_shared<SPTAG::Cache::SparseTagIndex>();
     sparseIdx->Build(numHeads, posting_tags, tagPostingCounts, kSparseIndexBuildMaxPostings);
 
@@ -3565,21 +3572,11 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     auto _ck_d = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                : std::chrono::high_resolution_clock::time_point{};
     bool forceDenseTagSearch = false;
-    int directSparseMaxPostings = 320;
     float filteredSearchNprobeSafety = 1.0f;
     if (internalIdx != nullptr) {
         const std::string forceDenseParam = internalIdx->GetParameter("ForceDenseTagSearch", "BuildSSDIndex");
         if (!forceDenseParam.empty()) {
             SPTAG::Helper::Convert::ConvertStringTo<bool>(forceDenseParam.c_str(), forceDenseTagSearch);
-        }
-
-        const std::string directSparseMaxPostingsParam = internalIdx->GetParameter("DirectSparseMaxPostings", "BuildSSDIndex");
-        if (!directSparseMaxPostingsParam.empty()) {
-            int parsedDirectSparseMaxPostings = 0;
-            if (SPTAG::Helper::Convert::ConvertStringTo<int>(directSparseMaxPostingsParam.c_str(), parsedDirectSparseMaxPostings)
-                && parsedDirectSparseMaxPostings > 0) {
-                directSparseMaxPostings = parsedDirectSparseMaxPostings;
-            }
         }
 
         const std::string filteredSearchNprobeSafetyParam = internalIdx->GetParameter("FilteredSearchNprobeSafety", "BuildSSDIndex");
@@ -3679,11 +3676,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             bfPostings.insert(pids->begin(), pids->end());
         }
 
-        // The sparse fast path reads every matching posting directly.
-        // Only use it when the exact posting union is small enough; this keeps
-        // the route stable across tenant scales because the decision is based on
-        // actual posting fanout instead of raw matching vector count.
-        if (hasDirectPostingListsForAllTags && !bfPostings.empty() && static_cast<int>(bfPostings.size()) <= directSparseMaxPostings) {
+        // Sparse fast-path policy: build-time `kSparseIndexBuildMaxPostings` is
+        // the single source of truth - if a tag's posting list was materialized
+        // at build, query-time always routes through the sparse path. No
+        // second-stage union-size cap: that would create a window where the
+        // sidecar was paid for but the path silently fell back to ANN.
+        if (hasDirectPostingListsForAllTags && !bfPostings.empty()) {
             SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
             searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
             searchContext.m_directPostingIDs.assign(bfPostings.begin(), bfPostings.end());
