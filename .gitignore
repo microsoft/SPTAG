@@ -462,3 +462,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# SPTAG benchmark generated artifacts
+*perftest_*

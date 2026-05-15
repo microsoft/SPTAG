@@ -44,27 +44,43 @@ namespace SPTAG
             mutable std::mutex m_chunkWriteMutex[kWriteStripes];
             std::mutex& ChunkMutex(SizeType chunkId) const { return m_chunkWriteMutex[chunkId % kWriteStripes]; }
 
+            // Striped mutexes to avoid duplicate refreshes for the same expired/missing chunk.
+            static constexpr int kRefreshStripes = 64;
+            mutable std::mutex m_chunkRefreshMutex[kRefreshStripes];
+            std::mutex& RefreshMutex(SizeType chunkId) const { return m_chunkRefreshMutex[chunkId % kRefreshStripes]; }
+
             // LRU chunk cache: list front = most recently used
             struct CachedChunk {
                 SizeType chunkId;
                 std::string data;
-                std::chrono::steady_clock::time_point fetchTime;
+                std::chrono::steady_clock::time_point refreshTime;
             };
             using LruList = std::list<CachedChunk>;
             mutable std::shared_mutex m_cacheMutex;
             mutable LruList m_lruList;
             mutable std::unordered_map<SizeType, LruList::iterator> m_cacheMap;
-            int m_cacheTTLMs{0};        // TTL in ms, 0 = cache disabled
-            int m_cacheMaxChunks{10000}; // max cached chunks (~40MB at 4096 chunk size)
+            int m_cacheTTLMs{0}; // <= 0 means cached chunks do not expire
+            int m_cacheMaxChunks{10000}; // max cached chunks; <= 0 disables caching
+
+            bool CacheEnabled() const { return m_cacheMaxChunks > 0; }
+
+            bool CacheFresh(const LruList::iterator& it, std::chrono::steady_clock::time_point now) const
+            {
+                if (m_cacheTTLMs <= 0) return true;
+                auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->refreshTime).count();
+                return ageMs < m_cacheTTLMs;
+            }
 
             // Insert or update a chunk in the LRU cache. Caller must hold exclusive m_cacheMutex.
             void CachePut(SizeType chunkId, const std::string& data, std::chrono::steady_clock::time_point now) const
             {
+                if (!CacheEnabled()) return;
+
                 auto it = m_cacheMap.find(chunkId);
                 if (it != m_cacheMap.end()) {
                     // Update existing: move to front
                     it->second->data = data;
-                    it->second->fetchTime = now;
+                    it->second->refreshTime = now;
                     m_lruList.splice(m_lruList.begin(), m_lruList, it->second);
                 } else {
                     // Evict LRU entries if at capacity
@@ -115,33 +131,51 @@ namespace SPTAG
                 return ret;
             }
 
-            // Read a chunk with pure LRU cache.
+            // Read a chunk with LRU cache and optional TTL refresh.
             // Uses shared_lock for cache hits (no LRU reorder) to allow concurrent reads.
             // Only takes exclusive lock on cache miss for insertion.
             std::string ReadChunkCached(SizeType chunkId) const
             {
+                if (!CacheEnabled()) return ReadChunk(chunkId);
+
+                auto now = std::chrono::steady_clock::now();
+
                 // Try cache with shared lock — concurrent reads OK
                 {
                     std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
                     auto it = m_cacheMap.find(chunkId);
-                    if (it != m_cacheMap.end()) {
+                    if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
                         return it->second->data;
                     }
                 }
-                // Cache miss — fetch from TiKV, then exclusive lock to insert
+
+                std::lock_guard<std::mutex> refreshLock(RefreshMutex(chunkId));
+                now = std::chrono::steady_clock::now();
+
+                // Another thread may have refreshed this chunk while we waited.
+                {
+                    std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
+                    auto it = m_cacheMap.find(chunkId);
+                    if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
+                        return it->second->data;
+                    }
+                }
+
+                // Cache miss or expired — fetch from TiKV, then exclusive lock to insert
                 std::string data = ReadChunk(chunkId);
                 if (!data.empty()) {
                     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
-                    CachePut(chunkId, data, std::chrono::steady_clock::now());
+                    CachePut(chunkId, data, now);
                 }
                 return data;
             }
 
-            // Read a single byte for a VID using cache. Returns 0xfe on error/miss.
-            uint8_t ReadVersionByte(SizeType vid) const
+            // Read a single byte for a VID. Returns 0xfe on error/miss.
+            uint8_t ReadVersionByte(SizeType vid, VersionReadPolicy policy = VersionReadPolicy::UseCache) const
             {
                 SizeType cid = ChunkId(vid);
-                std::string chunk = ReadChunkCached(cid);
+                std::string chunk = (policy == VersionReadPolicy::BypassCacheNoFill) ?
+                    ReadChunk(cid) : ReadChunkCached(cid);
                 if (chunk.empty() || (int)chunk.size() <= ChunkOffset(vid)) {
                     return 0xfe;
                 }
@@ -290,11 +324,16 @@ namespace SPTAG
 
             bool Deleted(const SizeType& key) const override
             {
+                return Deleted(key, VersionReadPolicy::UseCache);
+            }
+
+            bool Deleted(const SizeType& key, VersionReadPolicy policy) const override
+            {
                 if (key < 0 || key >= m_count.load()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Deleted: invalid key %d (max %d)\n", key, m_count.load());
                     return true;
                 }
-                return ReadVersionByte(key) == 0xfe;
+                return ReadVersionByte(key, policy) == 0xfe;
             }
 
             bool Delete(const SizeType& key) override
@@ -320,11 +359,16 @@ namespace SPTAG
 
             uint8_t GetVersion(const SizeType& key) override
             {
+                return GetVersion(key, VersionReadPolicy::UseCache);
+            }
+
+            uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) override
+            {
                 if (key < 0 || key >= m_count.load()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::GetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return 0xfe;
                 }
-                return ReadVersionByte(key);
+                return ReadVersionByte(key, policy);
             }
 
             void SetVersion(const SizeType& key, const uint8_t& version) override
@@ -391,6 +435,13 @@ namespace SPTAG
 
             ErrorCode AddBatch(SizeType num) override
             {
+                return AddBatch(num, false);
+            }
+
+            ErrorCode AddBatch(SizeType num, bool deleted) override
+            {
+                if (num <= 0) return ErrorCode::Success;
+
                 SizeType oldCount = m_count.load();
                 SizeType newCount = oldCount + num;
 
@@ -398,9 +449,27 @@ namespace SPTAG
                 SizeType oldLastChunk = (oldCount > 0) ? ChunkId(oldCount - 1) : -1;
                 SizeType newLastChunk = ChunkId(newCount - 1);
 
-                for (SizeType c = oldLastChunk + 1; c <= newLastChunk; c++) {
-                    std::string newChunk(m_chunkSize, static_cast<char>(0xff));
-                    WriteChunk(c, newChunk);
+                if (!deleted) {
+                    for (SizeType c = oldLastChunk + 1; c <= newLastChunk; c++) {
+                        std::string newChunk(m_chunkSize, static_cast<char>(0xff));
+                        WriteChunk(c, newChunk);
+                    }
+                } else {
+                    SizeType firstChunk = ChunkId(oldCount);
+                    for (SizeType c = firstChunk; c <= newLastChunk; c++) {
+                        std::lock_guard<std::mutex> lock(ChunkMutex(c));
+                        std::string chunk = (c <= oldLastChunk) ? ReadChunk(c) : std::string();
+                        if (chunk.empty()) {
+                            chunk.assign(m_chunkSize, static_cast<char>(0xff));
+                        }
+
+                        int beginOffset = (c == firstChunk) ? ChunkOffset(oldCount) : 0;
+                        int endOffset = (c == newLastChunk) ? ChunkOffset(newCount - 1) + 1 : m_chunkSize;
+                        std::fill(chunk.begin() + beginOffset, chunk.begin() + endOffset, static_cast<char>(0xfe));
+
+                        WriteChunk(c, chunk);
+                    }
+                    m_deleted.fetch_add(num, std::memory_order_relaxed);
                 }
 
                 m_count = newCount;
@@ -448,12 +517,18 @@ namespace SPTAG
             /// Checks cache first, only fetches misses from TiKV via BatchGet.
             void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
             {
+                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
+            }
+
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy) override
+            {
                 versions.resize(vids.size());
                 if (vids.empty()) return;
 
                 SizeType count = m_count.load();
+                bool bypassCache = (policy == VersionReadPolicy::BypassCacheNoFill);
+                bool cacheEnabled = (CacheEnabled() && !bypassCache);
                 auto now = std::chrono::steady_clock::now();
-                bool cacheEnabled = (m_cacheTTLMs > 0);
 
                 // Group VIDs by chunk
                 std::unordered_map<SizeType, std::vector<size_t>> chunkToIndices;
@@ -474,12 +549,9 @@ namespace SPTAG
                     std::shared_lock<std::shared_mutex> lock(m_cacheMutex);
                     for (auto& [cid, indices] : chunkToIndices) {
                         auto it = m_cacheMap.find(cid);
-                        if (it != m_cacheMap.end()) {
-                            auto ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second->fetchTime).count();
-                            if (ageMs < m_cacheTTLMs) {
-                                resolvedChunks[cid] = it->second->data; // copy
-                                continue;
-                            }
+                        if (it != m_cacheMap.end() && CacheFresh(it->second, now)) {
+                            resolvedChunks[cid] = it->second->data; // copy
+                            continue;
                         }
                         missChunkIds.push_back(cid);
                     }
@@ -518,7 +590,7 @@ namespace SPTAG
                                      m_layer, missingChunks, static_cast<int>(missChunkIds.size()), missChunkIds[0]);
                     }
 
-                    // Update LRU cache with fetched chunks (exclusive lock)
+                    // Update LRU cache with fetched chunks (exclusive lock). Bypass reads never fill cache.
                     if (cacheEnabled && !fetchedChunks.empty()) {
                         std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
                         for (auto& [cid, data] : fetchedChunks) {

@@ -1,0 +1,45 @@
+memory-usage-limit = "80GB"
+
+[server]
+grpc-concurrency = 16
+grpc-memory-pool-quota = "8GB"
+
+[raftstore]
+region-max-size = "512MB"
+region-split-size = "384MB"
+region-max-keys = 5120000
+region-split-keys = 3840000
+apply-pool-size = 4
+store-pool-size = 4
+
+[rocksdb]
+max-background-jobs = 32
+max-sub-compactions = 8
+rate-bytes-per-sec = "0"
+
+[rocksdb.defaultcf]
+write-buffer-size = "512MB"
+max-write-buffer-number = 5
+min-write-buffer-number-to-merge = 2
+level0-file-num-compaction-trigger = 12
+level0-slowdown-writes-trigger = 28
+level0-stop-writes-trigger = 40
+max-bytes-for-level-base = "2GB"
+compression-per-level = ["no", "no", "no", "lz4", "lz4", "zstd", "zstd"]
+target-file-size-base = "128MB"
+
+[rocksdb.writecf]
+write-buffer-size = "128MB"
+max-write-buffer-number = 5
+
+[storage]
+reserve-space = "1GB"
+
+[storage.block-cache]
+capacity = "60GB"
+
+[coprocessor]
+region-max-size = "512MB"
+region-split-size = "384MB"
+region-max-keys = 5120000
+region-split-keys = 3840000

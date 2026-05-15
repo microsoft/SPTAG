@@ -327,6 +327,11 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
 
 template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
 {
+    return SearchIndex(p_query, nullptr, p_searchDeleted);
+}
+
+template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, SearchStats* p_stats, bool p_searchDeleted) const
+{
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
 
@@ -338,8 +343,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
 
     ErrorCode ret;
+    auto searchStart = std::chrono::high_resolution_clock::now();
     if ((ret = m_topIndex->SearchIndex(*p_queryResults)) != ErrorCode::Success)
         return ret;
+    auto headEnd = std::chrono::high_resolution_clock::now();
+    if (p_stats)
+    {
+        p_stats->m_totalLatency = std::chrono::duration_cast<std::chrono::microseconds>(headEnd - searchStart).count() / 1000.0;
+    }
 
     for (int i = 0; i < p_queryResults->GetResultNum(); ++i)
     {
@@ -349,8 +360,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         res->VID = static_cast<SizeType>(*(m_topLocalToGlobalID[res->VID]));
     }
 
-    if ((ret = SearchDiskIndex(*p_queryResults)) != ErrorCode::Success)
+    if ((ret = SearchDiskIndex(*p_queryResults, p_stats)) != ErrorCode::Success)
         return ret;
+    auto diskEnd = std::chrono::high_resolution_clock::now();
+    if (p_stats)
+    {
+        p_stats->m_exLatency = std::chrono::duration_cast<std::chrono::microseconds>(diskEnd - headEnd).count() / 1000.0;
+        p_stats->m_totalLatency = p_stats->m_totalSearchLatency = std::chrono::duration_cast<std::chrono::microseconds>(diskEnd - searchStart).count() / 1000.0;
+    }
 
     if (p_query.GetResultNum() < m_options.m_searchInternalResultNum)
     {
@@ -446,6 +463,7 @@ std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool
         InitWorkSpace(extraWorkspace.get(), true);
     }
     extraWorkspace->m_filterFunc = p_filterFunc;
+    extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     extraWorkspace->m_relaxedMono = false;
     extraWorkspace->m_loadedPostingNum = 0;
     extraWorkspace->m_deduper.clear();
@@ -552,43 +570,51 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
             InitWorkSpace(workSpace.get(), true);
         }
         p_exWorkSpace = workSpace.get();
+        p_exWorkSpace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     }
 
     COMMON::OptHashPosVector resultDedup;
     resultDedup.Init(m_options.m_maxCheck, m_options.m_hashExp);
     COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
-    int k = 0;
     for (int i = 0, j = 0; i < p_queryResults->GetResultNum(); ++i)
     {
         auto res = p_queryResults->GetResult(i);
         if (res->VID == -1) break;
 
-        resultDedup.CheckAndSet(res->VID);
         if (j < m_options.m_searchInternalResultNum) *(localResults.GetResult(j++)) = *res;
-        if (m_extraSearchers[p_tolayer]->ContainSample(res->VID)) {
-            if (k < i) {
-                *(p_queryResults->GetResult(k++)) = *res;
-                res->VID = -1;
-                res->Dist = MaxDist;
-                res->Vec = ByteArray::c_empty;
-            }
-            else k++;
-        } else {
-            res->VID = -1;
-            res->Dist = MaxDist;
-            res->Vec = ByteArray::c_empty;
-        }
     }
-    p_queryResults->Reverse();
+    p_queryResults->Reset();
 
     ErrorCode ret;
     for (int layer = m_extraSearchers.size() - 1; layer >= p_tolayer; layer--) {
         auto& searcher = m_extraSearchers[layer];
-        if (!searcher) return ErrorCode::Fail;
+        if (!searcher) {
+            return ErrorCode::Fail;
+        }
+        const bool isTargetLayer = (layer == p_tolayer);
 
+        auto setupStart = std::chrono::high_resolution_clock::now();
+        double setupVersionMapLatency = 0;
         p_exWorkSpace->m_deduper.clear();
         p_exWorkSpace->m_postingIDs.clear();
 
+        std::vector<SizeType> targetLayerCandidateIDs;
+        std::vector<uint8_t> targetLayerContains;
+        if (isTargetLayer) {
+            targetLayerCandidateIDs.reserve(m_options.m_searchInternalResultNum);
+            for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
+            {
+                auto res = localResults.GetResult(i);
+                if (res->VID == -1) continue;
+                targetLayerCandidateIDs.emplace_back(res->VID);
+            }
+            auto versionMapStart = std::chrono::high_resolution_clock::now();
+            searcher->ContainSamples(targetLayerCandidateIDs, targetLayerContains, p_exWorkSpace->m_versionReadPolicy);
+            auto versionMapEnd = std::chrono::high_resolution_clock::now();
+            setupVersionMapLatency += (double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count();
+        }
+
+        size_t targetLayerCandidateIndex = 0;
         for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
         {
             auto res = localResults.GetResult(i);
@@ -596,14 +622,31 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
+            if (!isTargetLayer) continue;
+            bool containsTargetLayer = targetLayerCandidateIndex < targetLayerContains.size() && targetLayerContains[targetLayerCandidateIndex] != 0;
+            targetLayerCandidateIndex++;
+            if (!containsTargetLayer) continue;
             if (resultDedup.CheckAndSet(res->VID)) continue;
-            if (!m_extraSearchers[p_tolayer]->ContainSample(res->VID)) continue;
             p_queryResults->AddPoint(res->VID, res->Dist, res->Vec);
         }
+        auto setupEnd = std::chrono::high_resolution_clock::now();
+        double setupLatency = (double)std::chrono::duration_cast<std::chrono::microseconds>(setupEnd - setupStart).count() / 1000;
+        double setupVersionMapLatencyMs = setupVersionMapLatency / 1000;
         localResults.Reset();
-        if ((ret = searcher->SearchIndex(p_exWorkSpace, localResults, p_stats)) !=
+        if ((ret = searcher->SearchIndex(p_exWorkSpace, localResults, p_stats, nullptr, nullptr, isTargetLayer)) !=
             ErrorCode::Success)
+        {
             return ret;
+        }
+        if (p_stats)
+        {
+            p_stats->m_exSetUpLatency += setupLatency;
+            p_stats->m_versionMapLatency += setupVersionMapLatencyMs;
+            if (SearchStats::IsValidBreakdownLayer(layer)) {
+                p_stats->m_layerSetupLatency[layer] += setupLatency;
+                p_stats->m_layerVersionMapLatency[layer] += setupVersionMapLatencyMs;
+            }
+        }
     }
 
     for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
@@ -1688,8 +1731,18 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     std::shared_lock<std::shared_timed_mutex> lock(m_checkPointLock);
 
     SizeType begin, end;
+    std::uint64_t addIndexLockWaitUs = 0;
+    std::uint64_t addIndexLockHoldUs = 0;
+    std::uint64_t addIndexAddCapacityLayer0Us = 0;
+    std::uint64_t addIndexAddCapacityUpperUs = 0;
+    std::uint64_t addIndexMetadataUs = 0;
     {
-        std::lock_guard<std::mutex> lock(m_dataAddLock);
+        auto lockWaitBegin = std::chrono::high_resolution_clock::now();
+        m_dataAddLock.lock();
+        auto lockWaitEnd = std::chrono::high_resolution_clock::now();
+        std::lock_guard<std::mutex> dataAddLock(m_dataAddLock, std::adopt_lock);
+        addIndexLockWaitUs = std::chrono::duration_cast<std::chrono::microseconds>(lockWaitEnd - lockWaitBegin).count();
+        auto lockHoldBegin = lockWaitEnd;
 
         begin = m_options.m_vectorSize;
         end = begin + p_vectorNum;
@@ -1701,13 +1754,19 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
 
         for (int layer = 0; layer < m_extraSearchers.size(); layer++)
         {
+            auto addCapacityBegin = std::chrono::high_resolution_clock::now();
             if (m_extraSearchers[layer]->AddIDCapacity(p_vectorNum, layer == 0? false : true) != ErrorCode::Success)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow for layer %d: add VID: %d\n", layer, begin);
                 return ErrorCode::MemoryOverFlow;
             }
+            auto addCapacityEnd = std::chrono::high_resolution_clock::now();
+            auto addCapacityUs = std::chrono::duration_cast<std::chrono::microseconds>(addCapacityEnd - addCapacityBegin).count();
+            if (layer == 0) addIndexAddCapacityLayer0Us += addCapacityUs;
+            else addIndexAddCapacityUpperUs += addCapacityUs;
         }
 
+        auto metadataBegin = std::chrono::high_resolution_clock::now();
         if (m_pMetadata != nullptr)
         {
             if (p_metadataSet != nullptr)
@@ -1729,7 +1788,41 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
                     m_pMetadata->Add(ByteArray::c_empty);
             }
         }
+        auto metadataEnd = std::chrono::high_resolution_clock::now();
+        addIndexMetadataUs = std::chrono::duration_cast<std::chrono::microseconds>(metadataEnd - metadataBegin).count();
         m_options.m_vectorSize = end;
+        auto lockHoldEnd = std::chrono::high_resolution_clock::now();
+        addIndexLockHoldUs = std::chrono::duration_cast<std::chrono::microseconds>(lockHoldEnd - lockHoldBegin).count();
+    }
+
+    auto updateMax = [](std::atomic_uint64_t& target, std::uint64_t value) {
+        std::uint64_t current = target.load(std::memory_order_relaxed);
+        while (current < value && !target.compare_exchange_weak(current, value, std::memory_order_relaxed)) {}
+    };
+    updateMax(m_addIndexLockWaitMaxUs, addIndexLockWaitUs);
+    updateMax(m_addIndexLockHoldMaxUs, addIndexLockHoldUs);
+
+    m_addIndexDiagVectors.fetch_add(p_vectorNum, std::memory_order_relaxed);
+    m_addIndexLockWaitUs.fetch_add(addIndexLockWaitUs, std::memory_order_relaxed);
+    m_addIndexLockHoldUs.fetch_add(addIndexLockHoldUs, std::memory_order_relaxed);
+    m_addIndexAddCapacityLayer0Us.fetch_add(addIndexAddCapacityLayer0Us, std::memory_order_relaxed);
+    m_addIndexAddCapacityUpperUs.fetch_add(addIndexAddCapacityUpperUs, std::memory_order_relaxed);
+    m_addIndexMetadataUs.fetch_add(addIndexMetadataUs, std::memory_order_relaxed);
+    std::uint64_t addIndexCalls = m_addIndexDiagCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (addIndexCalls <= 16 || addIndexCalls % 50000 == 0)
+    {
+        double calls = static_cast<double>(addIndexCalls);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "[DIAG-ADDINDEX] calls=%llu vectors=%llu lockWaitAvg=%.2fus lockWaitMax=%lluus lockHoldAvg=%.2fus lockHoldMax=%lluus addCapL0Avg=%.2fus addCapUpperAvg=%.2fus metadataAvg=%.2fus\n",
+            static_cast<unsigned long long>(addIndexCalls),
+            static_cast<unsigned long long>(m_addIndexDiagVectors.load(std::memory_order_relaxed)),
+            m_addIndexLockWaitUs.load(std::memory_order_relaxed) / calls,
+            static_cast<unsigned long long>(m_addIndexLockWaitMaxUs.load(std::memory_order_relaxed)),
+            m_addIndexLockHoldUs.load(std::memory_order_relaxed) / calls,
+            static_cast<unsigned long long>(m_addIndexLockHoldMaxUs.load(std::memory_order_relaxed)),
+            m_addIndexAddCapacityLayer0Us.load(std::memory_order_relaxed) / calls,
+            m_addIndexAddCapacityUpperUs.load(std::memory_order_relaxed) / calls,
+            m_addIndexMetadataUs.load(std::memory_order_relaxed) / calls);
     }
 
     if (VID != nullptr)
@@ -1919,7 +2012,7 @@ template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueI
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseTiKV\n");
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:PD addresses:%s, prefix:%s, useMultiChunkPosting:%s\n",
                      m_options.m_tikvPDAddresses.c_str(), m_options.m_tikvKeyPrefix.c_str(), m_options.m_useMultiChunkPosting ? "true" : "false");
-        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix, m_options.m_useMultiChunkPosting));
+        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix, m_options.m_useMultiChunkPosting, m_options.m_postingCountCacheCapacity, m_options.m_asyncRpcMaxInflight));
 #else
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPANNIndex:TiKV unsupport! Use -DTIKV to enable TiKV when doing cmake.\n");
         return;

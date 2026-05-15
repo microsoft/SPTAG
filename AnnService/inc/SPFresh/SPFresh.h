@@ -351,6 +351,87 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nVersionMap Latency Distribution:\n");
+                PrintPercentiles<double, SPANN::SearchStats>(stats,
+                    [](const SPANN::SearchStats& ss) -> double
+                    {
+                        return ss.m_versionMapLatency;
+                    },
+                    "%.3lf");
+
+                for (int layer = 0; layer < SPANN::SearchStats::kSearchLatencyBreakdownLayers; layer++)
+                {
+                    bool hasLayerSamples = false;
+                    for (const auto& ss : stats)
+                    {
+                        if (ss.m_layerPostingCount[layer] > 0 ||
+                            ss.m_layerListElementsCount[layer] > 0 ||
+                            ss.m_layerVersionCheckCount[layer] > 0 ||
+                            ss.m_layerTotalLatency[layer] > 0)
+                        {
+                            hasLayerSamples = true;
+                            break;
+                        }
+                    }
+                    if (!hasLayerSamples) continue;
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Posting Read Latency Distribution:\n", layer);
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_layerPostingReadLatency[layer];
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d VersionMap Latency Distribution:\n", layer);
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_layerVersionMapLatency[layer];
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Comp Latency Distribution:\n", layer);
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_layerCompLatency[layer];
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Setup Latency Distribution:\n", layer);
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_layerSetupLatency[layer];
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Total Disk Layer Latency Distribution:\n", layer);
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_layerTotalLatency[layer];
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Posting Count Distribution:\n", layer);
+                    PrintPercentiles<int, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> int
+                        {
+                            return ss.m_layerPostingCount[layer];
+                        },
+                        "%4d");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nLayer %d Version Check Count Distribution:\n", layer);
+                    PrintPercentiles<int, SPANN::SearchStats>(stats,
+                        [layer](const SPANN::SearchStats& ss) -> int
+                        {
+                            return ss.m_layerVersionCheckCount[layer];
+                        },
+                        "%4d");
+                }
+
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double
@@ -397,7 +478,9 @@ namespace SPTAG {
                     totalStats[i].m_diskIOCount = 0;
                     totalStats[i].m_compLatency = 0;
                     totalStats[i].m_diskReadLatency = 0;
+                    totalStats[i].m_versionMapLatency = 0;
                     totalStats[i].m_exSetUpLatency = 0;
+                    totalStats[i].ResetBreakdown();
                 }
             }
 
@@ -412,7 +495,20 @@ namespace SPTAG {
                     totalStats[i].m_diskIOCount += addedStats[i].m_diskIOCount;
                     totalStats[i].m_compLatency += addedStats[i].m_compLatency;
                     totalStats[i].m_diskReadLatency += addedStats[i].m_diskReadLatency;
+                    totalStats[i].m_versionMapLatency += addedStats[i].m_versionMapLatency;
                     totalStats[i].m_exSetUpLatency += addedStats[i].m_exSetUpLatency;
+                    for (int layer = 0; layer < SPANN::SearchStats::kSearchLatencyBreakdownLayers; layer++)
+                    {
+                        totalStats[i].m_layerSetupLatency[layer] += addedStats[i].m_layerSetupLatency[layer];
+                        totalStats[i].m_layerPostingReadLatency[layer] += addedStats[i].m_layerPostingReadLatency[layer];
+                        totalStats[i].m_layerCompLatency[layer] += addedStats[i].m_layerCompLatency[layer];
+                        totalStats[i].m_layerVersionMapLatency[layer] += addedStats[i].m_layerVersionMapLatency[layer];
+                        totalStats[i].m_layerTotalLatency[layer] += addedStats[i].m_layerTotalLatency[layer];
+                        totalStats[i].m_layerPostingCount[layer] += addedStats[i].m_layerPostingCount[layer];
+                        totalStats[i].m_layerListElementsCount[layer] += addedStats[i].m_layerListElementsCount[layer];
+                        totalStats[i].m_layerVersionCheckCount[layer] += addedStats[i].m_layerVersionCheckCount[layer];
+                        totalStats[i].m_layerDiskAccessCount[layer] += addedStats[i].m_layerDiskAccessCount[layer];
+                    }
                 }
             }
 
@@ -427,7 +523,20 @@ namespace SPTAG {
                     totalStats[i].m_diskIOCount /= avgStatsNum;
                     totalStats[i].m_compLatency /= avgStatsNum;
                     totalStats[i].m_diskReadLatency /= avgStatsNum;
+                    totalStats[i].m_versionMapLatency /= avgStatsNum;
                     totalStats[i].m_exSetUpLatency /= avgStatsNum;
+                    for (int layer = 0; layer < SPANN::SearchStats::kSearchLatencyBreakdownLayers; layer++)
+                    {
+                        totalStats[i].m_layerSetupLatency[layer] /= avgStatsNum;
+                        totalStats[i].m_layerPostingReadLatency[layer] /= avgStatsNum;
+                        totalStats[i].m_layerCompLatency[layer] /= avgStatsNum;
+                        totalStats[i].m_layerVersionMapLatency[layer] /= avgStatsNum;
+                        totalStats[i].m_layerTotalLatency[layer] /= avgStatsNum;
+                        totalStats[i].m_layerPostingCount[layer] /= avgStatsNum;
+                        totalStats[i].m_layerListElementsCount[layer] /= avgStatsNum;
+                        totalStats[i].m_layerVersionCheckCount[layer] /= avgStatsNum;
+                        totalStats[i].m_layerDiskAccessCount[layer] /= avgStatsNum;
+                    }
                 }
             }
 

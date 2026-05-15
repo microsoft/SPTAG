@@ -72,6 +72,16 @@ namespace SPTAG
             std::shared_timed_mutex m_dataDeleteLock;
             std::shared_timed_mutex m_checkPointLock;
 
+            std::atomic_uint64_t m_addIndexDiagCalls{0};
+            std::atomic_uint64_t m_addIndexDiagVectors{0};
+            std::atomic_uint64_t m_addIndexLockWaitUs{0};
+            std::atomic_uint64_t m_addIndexLockHoldUs{0};
+            std::atomic_uint64_t m_addIndexAddCapacityLayer0Us{0};
+            std::atomic_uint64_t m_addIndexAddCapacityUpperUs{0};
+            std::atomic_uint64_t m_addIndexMetadataUs{0};
+            std::atomic_uint64_t m_addIndexLockWaitMaxUs{0};
+            std::atomic_uint64_t m_addIndexLockHoldMaxUs{0};
+
             std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
             std::atomic<int> m_workspaceCount = 0;
 
@@ -180,6 +190,7 @@ namespace SPTAG
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(bool p_normalized = false);
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
+            ErrorCode SearchIndex(QueryResult &p_query, SearchStats* p_stats, bool p_searchDeleted = false) const;
 
             std::shared_ptr<ResultIterator> GetIterator(const void* p_target, bool p_searchDeleted = false, std::function<bool(const ByteArray&)> p_filterFunc = nullptr, int p_maxCheck = 0) const;
             ErrorCode SearchIndexIterativeNext(QueryResult& p_results, COMMON::WorkSpace* workSpace, int batch, int& resultCount, bool p_isFirst, bool p_searchDeleted = false) const;

@@ -38,6 +38,18 @@ namespace SPTAG
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;
 
+            virtual ErrorCode MultiMerge(const std::vector<SizeType>& keys, const std::vector<std::string>& values, 
+                                         const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, std::vector<int>& sizes) {
+                sizes.resize(keys.size());
+                for (size_t i = 0; i < keys.size(); i++) {
+                    auto err = Merge(keys[i], values[i], timeout, reqs, sizes[i]);
+                    if (err != ErrorCode::Success) {
+                        return err;
+                    }
+                }
+                return ErrorCode::Success;
+            }
+
             virtual ErrorCode Delete(SizeType key) = 0;
 
             virtual ErrorCode DeleteRange(SizeType start, SizeType end) {return ErrorCode::Undefined;}
@@ -65,6 +77,8 @@ namespace SPTAG
             virtual ErrorCode StartToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
 
             virtual ErrorCode NextToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
+
+            virtual void LogAsyncWaitStatsAndReset(int layer) {}
         };
     }
 }

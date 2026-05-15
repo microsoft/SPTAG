@@ -32,7 +32,7 @@ static std::unique_ptr<LocalVersionMap> MakeLocalVersionMap()
 // Helper: create a TiKVVersionMap connected to the live TiKV cluster.
 // Requires env TIKV_PD_ADDRESSES (e.g. "127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793").
 // Uses a unique key prefix per test to avoid collision.
-static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int cacheTTLMs = 0, int cacheMaxChunks = 100)
+static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int cacheMaxChunks = 100, int cacheTTLMs = 0)
 {
     const char* pdAddr = std::getenv("TIKV_PD_ADDRESSES");
     if (!pdAddr || std::string(pdAddr).empty()) {
@@ -44,7 +44,7 @@ static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& tes
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     std::string prefix = "vmtest_" + testName + "_" + std::to_string(now) + "_";
 
-    auto db = std::make_shared<SPTAG::SPANN::TiKVIO>(std::string(pdAddr), prefix, false);
+    auto db = std::make_shared<SPTAG::SPANN::TiKVIO>(std::string(pdAddr), prefix, false, 100000);
     auto vm = std::make_unique<TiKVVersionMap>();
     vm->SetDB(db);
     vm->SetLayer(0);
@@ -467,8 +467,7 @@ BOOST_AUTO_TEST_CASE(TiKV_BatchGetVersionsEmpty)
 
 BOOST_AUTO_TEST_CASE(TiKV_CacheHitMiss)
 {
-    // Enable cache with a generous TTL
-    auto vm = MakeTiKVVersionMap("CacheHit", 64, 5000, 100);
+    auto vm = MakeTiKVVersionMap("CacheHit", 64, 100);
     if (!vm) return;
 
     vm->Initialize(200, 1, 200);
@@ -484,10 +483,9 @@ BOOST_AUTO_TEST_CASE(TiKV_CacheHitMiss)
     BOOST_CHECK_EQUAL(vm->GetVersion(0), 0);
 }
 
-BOOST_AUTO_TEST_CASE(TiKV_CacheTTLExpiry)
+BOOST_AUTO_TEST_CASE(TiKV_CacheNoTTLExpiry)
 {
-    // Short TTL: 100ms
-    auto vm = MakeTiKVVersionMap("CacheTTL", 64, 100, 100);
+    auto vm = MakeTiKVVersionMap("CacheNoTTL", 64, 100);
     if (!vm) return;
 
     vm->Initialize(100, 1, 100);
@@ -496,17 +494,42 @@ BOOST_AUTO_TEST_CASE(TiKV_CacheTTLExpiry)
     // Read to populate cache
     BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
 
-    // Wait for TTL to expire
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-    // Should re-fetch from TiKV (still 10, but cache is refreshed)
+    // Cache is capacity-bound only; elapsed time should not expire entries.
     BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
+}
+
+BOOST_AUTO_TEST_CASE(TiKV_CacheTTLExpiry)
+{
+    auto vm = MakeTiKVVersionMap("CacheTTL", 64, 100, 50);
+    if (!vm) return;
+
+    vm->Initialize(100, 1, 100);
+    vm->SetVersion(5, 10);
+
+    // Populate vm's local cache with version 10.
+    BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
+
+    // A separate version-map instance writes the same TiKV key without updating vm's cache.
+    auto writer = std::make_unique<TiKVVersionMap>();
+    writer->SetDB(vm->GetDB());
+    writer->SetLayer(0);
+    writer->SetChunkSize(64);
+    writer->SetCacheMaxChunks(0);
+    BOOST_CHECK(writer->Load(std::string(), 1, 100) == ErrorCode::Success);
+    writer->SetVersion(5, 20);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    // After TTL expiry, vm should refresh from TiKV and observe the external update.
+    BOOST_CHECK_EQUAL(vm->GetVersion(5), 20);
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_CacheEviction)
 {
     // Small cache: max 3 chunks, chunkSize=64
-    auto vm = MakeTiKVVersionMap("CacheEvict", 64, 30000, 3);
+    auto vm = MakeTiKVVersionMap("CacheEvict", 64, 3);
     if (!vm) return;
 
     vm->Initialize(500, 1, 500);
@@ -529,7 +552,7 @@ BOOST_AUTO_TEST_CASE(TiKV_CacheEviction)
 
 BOOST_AUTO_TEST_CASE(TiKV_BatchGetWithCache)
 {
-    auto vm = MakeTiKVVersionMap("BatchCache", 64, 5000, 100);
+    auto vm = MakeTiKVVersionMap("BatchCache", 64, 100);
     if (!vm) return;
 
     vm->Initialize(200, 1, 200);
@@ -559,7 +582,7 @@ BOOST_AUTO_TEST_CASE(TiKV_BatchGetWithCache)
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentDelete)
 {
-    auto vm = MakeTiKVVersionMap("ConcDel", 64, 0, 100);  // no cache, to avoid stale reads
+    auto vm = MakeTiKVVersionMap("ConcDel", 64, 0);  // no cache, to avoid stale reads
     if (!vm) return;
 
     const int N = 256;  // exactly 4 chunks of 64
@@ -595,7 +618,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentDelete)
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentIncVersion)
 {
-    auto vm = MakeTiKVVersionMap("ConcInc", 64, 0, 100);
+    auto vm = MakeTiKVVersionMap("ConcInc", 64, 0);
     if (!vm) return;
 
     const int N = 100;
@@ -630,7 +653,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentIncVersion)
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentReadWrite)
 {
-    auto vm = MakeTiKVVersionMap("ConcRW", 64, 5000, 100);
+    auto vm = MakeTiKVVersionMap("ConcRW", 64, 100);
     if (!vm) return;
 
     const int N = 200;
