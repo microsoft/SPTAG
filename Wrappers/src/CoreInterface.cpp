@@ -2664,7 +2664,38 @@ bool TenantIndexManager::LoadAll(const char* p_baseDir)
             int tenantId = kv.first;
             m_tenantSpannWorkDirs[tenantId] = baseDir + "/tenant_" + std::to_string(tenantId) + "/index";
         }
+        LoadTenantSparseIndices();
         return true;
+    }
+}
+
+void TenantIndexManager::LoadTenantSparseIndices()
+{
+    // Sparse-tag fast-path index is small (<<1MB/tenant) but the saved
+    // m_tenantSparseIdx map is only populated at build time. Without this
+    // load step, query-side sparse routing in SearchWithTags is a no-op on
+    // any process that only Load()s the index.
+    int loadedCount = 0;
+    for (const auto& kv : m_tenantSpannWorkDirs)
+    {
+        int tenantId = kv.first;
+        if (m_tenantSparseIdx.count(tenantId)) continue;
+        const std::string sparsePath = kv.second + "/sparse_tags.bin";
+        struct stat st{};
+        if (stat(sparsePath.c_str(), &st) != 0) continue;
+        auto sparseIdx = std::make_shared<SPTAG::Cache::SparseTagIndex>();
+        if (!sparseIdx->Load(sparsePath))
+        {
+            fprintf(stderr, "[WARN] Tenant %d: failed to load sparse_tags.bin (%s)\n",
+                    tenantId, sparsePath.c_str());
+            continue;
+        }
+        m_tenantSparseIdx[tenantId] = std::move(sparseIdx);
+        ++loadedCount;
+    }
+    if (loadedCount > 0)
+    {
+        fprintf(stderr, "[INFO] Loaded sparse tag indices for %d tenants\n", loadedCount);
     }
 }
 
@@ -2765,6 +2796,8 @@ bool TenantIndexManager::LoadUnifiedStorage(const char* p_baseDir)
             m_tenantIndexPaths[tenantId] = tenantDir + "/index";
         }
     }
+
+    LoadTenantSparseIndices();
 
     return true;
 }

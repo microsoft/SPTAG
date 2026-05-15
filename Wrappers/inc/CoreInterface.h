@@ -430,6 +430,11 @@ private:
     bool SaveUnifiedStorage(const char* p_baseDir);
     bool LoadUnifiedStorage(const char* p_baseDir);
 
+    // Load per-tenant sparse_tags.bin sidecars into m_tenantSparseIdx.
+    // Called from both LoadUnifiedStorage and the legacy load path; safe to
+    // call repeatedly (skips tenants that already have an entry).
+    void LoadTenantSparseIndices();
+
     // Concurrent cache management
     void InitCache();
     bool EnsureTenantCached(int p_tenantId);
