@@ -23,6 +23,7 @@
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
+#include <memory>
 
 namespace SPTAG {
 namespace Cache {
@@ -579,6 +580,98 @@ struct TagPurePosting {
                       [](const std::pair<float,int>& a,
                          const std::pair<float,int>& b) { return a.first < b.first; });
         }
+    }
+};
+
+// Persistence bundle for an entire tenant's tag-pure postings.
+// File layout (little-endian):
+//   [magic   uint32 = 'TPUR' = 0x52555054]
+//   [version uint32 = 1]
+//   [dim     int32 ]
+//   [numTags uint32]
+//   repeated numTags times:
+//     [tag_id      uint32]
+//     [count       int32 ]
+//     [numChunks   uint32]
+//     [chunkKeys   int32 × numChunks]
+//     [chunkCounts int32 × numChunks]
+struct TagPureBundle {
+    static constexpr uint32_t kMagic   = 0x52555054u;  // 'TPUR' little-endian
+    static constexpr uint32_t kVersion = 1u;
+
+    static bool Save(const std::string& path,
+                     int dim,
+                     const std::unordered_map<uint32_t,
+                         std::shared_ptr<TagPurePosting>>& tags)
+    {
+        FILE* f = std::fopen(path.c_str(), "wb");
+        if (f == nullptr) return false;
+        uint32_t magic = kMagic, version = kVersion;
+        int32_t dim32 = dim;
+        uint32_t numTags = 0;
+        for (const auto& kv : tags) if (kv.second && kv.second->count > 0) ++numTags;
+        if (std::fwrite(&magic,   sizeof(magic),   1, f) != 1) { std::fclose(f); return false; }
+        if (std::fwrite(&version, sizeof(version), 1, f) != 1) { std::fclose(f); return false; }
+        if (std::fwrite(&dim32,   sizeof(dim32),   1, f) != 1) { std::fclose(f); return false; }
+        if (std::fwrite(&numTags, sizeof(numTags), 1, f) != 1) { std::fclose(f); return false; }
+        for (const auto& kv : tags) {
+            if (!kv.second || kv.second->count <= 0) continue;
+            uint32_t tagId = kv.first;
+            const auto& p = *kv.second;
+            int32_t cnt = p.count;
+            uint32_t nChunks = (uint32_t)p.chunkKeys.size();
+            if (std::fwrite(&tagId,   sizeof(tagId),   1, f) != 1) { std::fclose(f); return false; }
+            if (std::fwrite(&cnt,     sizeof(cnt),     1, f) != 1) { std::fclose(f); return false; }
+            if (std::fwrite(&nChunks, sizeof(nChunks), 1, f) != 1) { std::fclose(f); return false; }
+            if (nChunks > 0) {
+                if (std::fwrite(p.chunkKeys.data(),   sizeof(int32_t), nChunks, f) != nChunks)
+                { std::fclose(f); return false; }
+                if (std::fwrite(p.chunkCounts.data(), sizeof(int32_t), nChunks, f) != nChunks)
+                { std::fclose(f); return false; }
+            }
+        }
+        std::fclose(f);
+        return true;
+    }
+
+    static bool Load(const std::string& path,
+                     int& outDim,
+                     std::unordered_map<uint32_t,
+                         std::shared_ptr<TagPurePosting>>& outTags)
+    {
+        FILE* f = std::fopen(path.c_str(), "rb");
+        if (f == nullptr) return false;
+        uint32_t magic = 0, version = 0, numTags = 0;
+        int32_t dim32 = 0;
+        if (std::fread(&magic,   sizeof(magic),   1, f) != 1) { std::fclose(f); return false; }
+        if (std::fread(&version, sizeof(version), 1, f) != 1) { std::fclose(f); return false; }
+        if (std::fread(&dim32,   sizeof(dim32),   1, f) != 1) { std::fclose(f); return false; }
+        if (std::fread(&numTags, sizeof(numTags), 1, f) != 1) { std::fclose(f); return false; }
+        if (magic != kMagic || version != kVersion || dim32 <= 0) { std::fclose(f); return false; }
+        outDim = dim32;
+        outTags.clear();
+        outTags.reserve(numTags);
+        for (uint32_t i = 0; i < numTags; ++i) {
+            uint32_t tagId = 0, nChunks = 0;
+            int32_t cnt = 0;
+            if (std::fread(&tagId,   sizeof(tagId),   1, f) != 1) { std::fclose(f); return false; }
+            if (std::fread(&cnt,     sizeof(cnt),     1, f) != 1) { std::fclose(f); return false; }
+            if (std::fread(&nChunks, sizeof(nChunks), 1, f) != 1) { std::fclose(f); return false; }
+            auto pp = std::make_shared<TagPurePosting>();
+            pp->dim = dim32;
+            pp->count = cnt;
+            pp->chunkKeys.resize(nChunks);
+            pp->chunkCounts.resize(nChunks);
+            if (nChunks > 0) {
+                if (std::fread(pp->chunkKeys.data(),   sizeof(int32_t), nChunks, f) != nChunks)
+                { std::fclose(f); return false; }
+                if (std::fread(pp->chunkCounts.data(), sizeof(int32_t), nChunks, f) != nChunks)
+                { std::fclose(f); return false; }
+            }
+            outTags[tagId] = std::move(pp);
+        }
+        std::fclose(f);
+        return true;
     }
 };
 

@@ -2671,6 +2671,7 @@ bool TenantIndexManager::LoadAll(const char* p_baseDir)
             m_tenantSpannWorkDirs[tenantId] = baseDir + "/tenant_" + std::to_string(tenantId) + "/index";
         }
         LoadTenantSparseIndices();
+        LoadTenantTagPureIndices();
         return true;
     }
 }
@@ -2702,6 +2703,86 @@ void TenantIndexManager::LoadTenantSparseIndices()
     if (loadedCount > 0)
     {
         fprintf(stderr, "[INFO] Loaded sparse tag indices for %d tenants\n", loadedCount);
+    }
+}
+
+void TenantIndexManager::LoadTenantTagPureIndices()
+{
+    // Tag-pure chunks live inside the SPANN KV store (FileIO mapping / RocksDB).
+    // The chunk data persists across runs because BuildSignatures explicitly
+    // calls extra->Checkpoint() after writing chunks. The sidecar holds the
+    // metadata (tag → chunkKeys, chunkCounts, count). Without loading it
+    // back, SearchWithACL would fall through the fast path.
+    int loadedCount = 0;
+    for (const auto& kv : m_tenantSpannWorkDirs)
+    {
+        int tenantId = kv.first;
+        if (m_tenantTagPurePostings.count(tenantId)) continue;
+        const std::string metaPath = kv.second + "/tagpure_meta.bin";
+        struct stat st{};
+        if (stat(metaPath.c_str(), &st) != 0) continue;
+
+        int loadedDim = 0;
+        std::unordered_map<uint32_t, std::shared_ptr<SPTAG::Cache::TagPurePosting>> tags;
+        if (!SPTAG::Cache::TagPureBundle::Load(metaPath, loadedDim, tags))
+        {
+            fprintf(stderr, "[WARN] Tenant %d: failed to load tagpure_meta.bin (%s)\n",
+                    tenantId, metaPath.c_str());
+            continue;
+        }
+
+        // Resolve KV store + page budget from the (now loaded) SPANN index.
+        // EnsureTenantLoaded must succeed for the kvDb to be available.
+        if (!EnsureTenantLoaded(tenantId))
+        {
+            fprintf(stderr, "[WARN] Tenant %d: cannot ensure loaded for tag-pure attach\n",
+                    tenantId);
+            continue;
+        }
+
+        std::shared_ptr<SPTAG::Helper::KeyValueIO> kvDb;
+        int postingPageLimit = 3, bufferLength = 4;
+        SPTAG::SizeType nextKey = 0;
+        {
+            std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+            auto it = m_tenantIndices.find(tenantId);
+            if (it != m_tenantIndices.end()) {
+                auto internalIdx = it->second->GetInternalIndex();
+                auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+                if (spannIdx != nullptr) {
+                    if (auto* opts = spannIdx->GetOptions()) {
+                        postingPageLimit = std::max(1, opts->m_postingPageLimit);
+                        bufferLength = std::max(0, opts->m_bufferLength);
+                    }
+                    auto extra = spannIdx->GetDiskIndex();
+                    if (extra) kvDb = extra->GetKVStore();
+                }
+            }
+        }
+        if (kvDb == nullptr) {
+            fprintf(stderr, "[WARN] Tenant %d: no KV store while attaching tag-pure metadata\n",
+                    tenantId);
+            continue;
+        }
+
+        // Highest chunk key + 1 — covers future incremental rebuilds.
+        for (const auto& tkv : tags) {
+            if (!tkv.second) continue;
+            for (int k : tkv.second->chunkKeys) {
+                if (k + 1 > nextKey) nextKey = k + 1;
+            }
+        }
+
+        m_tenantTagPurePostings[tenantId] = std::move(tags);
+        m_tenantTagPureKV[tenantId] = std::move(kvDb);
+        m_tenantTagPureBlockLimit[tenantId] = postingPageLimit + bufferLength + 1;
+        m_tenantTagPurePagesPerChunk[tenantId] = postingPageLimit;
+        m_tenantTagPureNextKey[tenantId] = nextKey;
+        ++loadedCount;
+    }
+    if (loadedCount > 0)
+    {
+        fprintf(stderr, "[INFO] Loaded tag-pure indices for %d tenants\n", loadedCount);
     }
 }
 
@@ -2804,6 +2885,7 @@ bool TenantIndexManager::LoadUnifiedStorage(const char* p_baseDir)
     }
 
     LoadTenantSparseIndices();
+    LoadTenantTagPureIndices();
 
     return true;
 }
@@ -3222,6 +3304,43 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
     if (wdIt == m_tenantSpannWorkDirs.end()) return false;
     std::string workDir = wdIt->second;
+
+    // ── Idempotent fast path ─────────────────────────────────────────────
+    // If all three persisted artifacts (PS bitmask, sparse tags, tag-pure
+    // metadata) are already on disk, the previous BuildSignatures call has
+    // saved them and LoadAll has loaded the latter two. We still need PS to
+    // be attached to the head index; EnsureTenantLoaded → EnsureHeadNodeMetaLoaded
+    // handles that lazily. Just confirm and return so subsequent process
+    // startups don't re-scan the entire posting file (~minutes for SIFT-1M).
+    {
+        struct stat st{};
+        const std::string sigPath     = workDir + "/signatures_bitmask.bin";
+        const std::string sparsePath  = workDir + "/sparse_tags.bin";
+        const std::string tagPurePath = workDir + "/tagpure_meta.bin";
+        bool sigOk     = stat(sigPath.c_str(),     &st) == 0;
+        bool sparseOk  = stat(sparsePath.c_str(),  &st) == 0;
+        bool tagPureOk = stat(tagPurePath.c_str(), &st) == 0;
+        if (sigOk && sparseOk && tagPureOk) {
+            // Make sure the PS signatures are attached to the head index.
+            EnsureTenantLoaded(p_tenantId);
+            {
+                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                auto it = m_tenantIndices.find(p_tenantId);
+                if (it != m_tenantIndices.end()) {
+                    EnsureHeadNodeMetaLoaded(workDir, it->second->GetInternalIndex());
+                }
+            }
+            // tag-pure + sparse metadata is loaded by LoadAll; touch the
+            // loaders again for safety (idempotent — skips already-loaded).
+            LoadTenantSparseIndices();
+            LoadTenantTagPureIndices();
+            fprintf(stderr,
+                    "[INFO] Tenant %d: BuildSignatures short-circuit "
+                    "(sig=%d sparse=%d tagpure=%d on disk)\n",
+                    p_tenantId, (int)sigOk, (int)sparseOk, (int)tagPureOk);
+            return true;
+        }
+    }
 
     // Read head count from HeadIndex vectors.bin
     auto hcIt = m_tenantHeadCounts.find(p_tenantId);
@@ -3756,6 +3875,38 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             m_tenantTagPureKV[p_tenantId] = kvDb;
             m_tenantTagPureBlockLimit[p_tenantId] = blockLimit;
             m_tenantTagPurePagesPerChunk[p_tenantId] = postingPageLimit;
+
+            // Persist: 1) FileIO mapping + block pool so chunk addresses
+            // survive process restart; 2) sidecar metadata so we can attach
+            // the tag-pure structures at next LoadAll without re-scanning.
+            {
+                std::shared_ptr<SPTAG::SPANN::IExtraSearcher> extra;
+                {
+                    std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                    auto it = m_tenantIndices.find(p_tenantId);
+                    if (it != m_tenantIndices.end()) {
+                        auto internalIdx = it->second->GetInternalIndex();
+                        auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+                        if (spannIdx) extra = spannIdx->GetDiskIndex();
+                    }
+                }
+                if (extra) {
+                    auto ec = extra->Checkpoint(workDir);
+                    if (ec != SPTAG::ErrorCode::Success) {
+                        fprintf(stderr,
+                                "[TagPure] WARN tenant=%d kvDb checkpoint failed (err=%d); "
+                                "chunks will not persist across restart\n",
+                                p_tenantId, (int)ec);
+                    }
+                }
+                const std::string metaPath = workDir + "/tagpure_meta.bin";
+                if (!SPTAG::Cache::TagPureBundle::Save(metaPath, m_dimension, purePostings)) {
+                    fprintf(stderr,
+                            "[TagPure] WARN tenant=%d failed to write %s\n",
+                            p_tenantId, metaPath.c_str());
+                }
+            }
+
             fprintf(stdout,
                     "[TagPure] tenant=%d threshold=%.4f maxCount=%d tags=%d vecs=%zu "
                     "chunks=%zu chunkCap=%d failed=%zu missing=%zu\n",

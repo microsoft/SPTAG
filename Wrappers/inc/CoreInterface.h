@@ -457,6 +457,11 @@ private:
     // call repeatedly (skips tenants that already have an entry).
     void LoadTenantSparseIndices();
 
+    // Load per-tenant tagpure_meta.bin sidecars into m_tenantTagPurePostings.
+    // Also resolves and caches the KV store handle + page budget needed by
+    // the SearchWithACL fast path. Mirrors LoadTenantSparseIndices.
+    void LoadTenantTagPureIndices();
+
     // Concurrent cache management
     void InitCache();
     bool EnsureTenantCached(int p_tenantId);
