@@ -9,6 +9,7 @@
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/VersionLabel.h"
 #include "inc/Helper/AsyncFileReader.h"
+#include "inc/Helper/KeyValueIO.h"
 #include "inc/Helper/VectorSetReader.h"
 #include "inc/Helper/ConcurrentSet.h"
 #include <memory>
@@ -354,6 +355,12 @@ namespace SPTAG {
             virtual int64_t GetNumBlocks() { return 0; }
             virtual void GetIndexStats(int finishedInsert, bool cost, bool reset) { return; }
             virtual void ForceCompaction() { return; }
+
+            // Access to the underlying KeyValueIO (FileIO or RocksDB) so that
+            // sidecar structures such as tag-pure postings can reuse the same
+            // store (and its cache) as regular postings. Default returns null
+            // (e.g. for STATIC backend).
+            virtual std::shared_ptr<Helper::KeyValueIO> GetKVStore() { return nullptr; }
 
             virtual bool CheckValidPosting(SizeType postingID) = 0;
             virtual ErrorCode CheckPosting(SizeType postingiD, std::vector<std::uint8_t> *visited = nullptr,

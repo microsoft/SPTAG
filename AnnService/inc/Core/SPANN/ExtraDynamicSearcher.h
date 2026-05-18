@@ -285,6 +285,8 @@ namespace SPTAG::SPANN {
 
         ~ExtraDynamicSearcher() {}
 
+        std::shared_ptr<Helper::KeyValueIO> GetKVStore() override { return db; }
+
         virtual bool Available() override
         {
             return db->Available();

@@ -311,13 +311,27 @@ private:
     // Per-tenant sparse tag index: tag → [posting_ids] for low-selectivity tags
     std::map<int, std::shared_ptr<SPTAG::Cache::SparseTagIndex>> m_tenantSparseIdx;
 
-    // Per-tenant tag-pure postings: for very sparse tags (selectivity below
-    // SPTAG_TAG_PURE_THRESHOLD, default 0.01), each entry contains the full
-    // (VID, normalized-vector) list of vectors carrying that tag. Single-tag
-    // queries on a tag-pure-equipped tag flat-scan this in-memory table and
-    // return guaranteed top-K (R=1.0).
+    // Per-tenant tag-pure postings (chunked, stored inside the same KV/FileIO
+    // backend that holds the regular SPANN postings — reuses its cache).
+    // Each metadata entry carries the chunk-key list + per-chunk entry counts;
+    // payload bytes live in the KV store under keys [numHeads, numHeads+N).
     std::map<int, std::unordered_map<uint32_t,
         std::shared_ptr<SPTAG::Cache::TagPurePosting>>> m_tenantTagPurePostings;
+
+    // Cached KV-store handle per tenant for the tag-pure path. Populated at
+    // BuildSignatures time. Used by the SearchWithACL fast path to issue
+    // MultiGet without re-resolving the SPANN index pointer chain.
+    std::map<int, std::shared_ptr<SPTAG::Helper::KeyValueIO>> m_tenantTagPureKV;
+
+    // Per-tenant key cursor for tag-pure chunks; monotonically advances each
+    // BuildSignatures call (no reuse — drops the old keys from the LRU).
+    std::map<int, SPTAG::SizeType> m_tenantTagPureNextKey;
+
+    // Per-tenant FileIO page budget snapshot (postingPageLimit + bufferLength + 1
+    // pages and the per-chunk page count). Used to size the per-query
+    // ExtraWorkSpace used by MultiGet on the fast path.
+    std::map<int, int> m_tenantTagPureBlockLimit;
+    std::map<int, int> m_tenantTagPurePagesPerChunk;
 
     // Temporary storage during BuildFromDataWithTags
     ByteArray m_buildTags;

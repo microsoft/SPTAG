@@ -3594,16 +3594,52 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 pivotCandidate->nodeCount);
     }
 
-    // ── Tag-pure postings ────────────────────────────────────────────────
+    // ── Tag-pure postings (chunked, KV-backed) ───────────────────────────
     // For tags with selectivity strictly below SPTAG_TAG_PURE_THRESHOLD
-    // (default 0.01), build an in-memory (VID, normalized-vector) list. At
-    // query time, single-tag queries on these tags bypass BKT entirely and
-    // flat-scan the list (guaranteed R=1.0). Float dtype only.
+    // (default 0.01), build chunked (VID + normalized vector) payloads and
+    // write them into the same KeyValueIO that holds regular SPANN postings.
+    // That backend (FileIO ShardedLRUCache or RocksDB block cache) takes care
+    // of caching — no separate user-space LRU is introduced. Float dtype only.
     // Runs AFTER the head-iteration loop so vidVecData covers heads too.
     {
         auto& purePostings = m_tenantTagPurePostings[p_tenantId];
+
+        // Resolve the KV store + posting page limit from the loaded SPANN
+        // index (configured at index build time, not from defaults).
+        std::shared_ptr<SPTAG::Helper::KeyValueIO> kvDb;
+        int postingPageLimit = 3;
+        int bufferLength = 4;
+        {
+            std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+            auto it = m_tenantIndices.find(p_tenantId);
+            if (it != m_tenantIndices.end()) {
+                auto internalIdx2 = it->second->GetInternalIndex();
+                auto* spann2 = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx2.get());
+                if (spann2 != nullptr) {
+                    if (auto* opts = spann2->GetOptions()) {
+                        postingPageLimit = std::max(1, opts->m_postingPageLimit);
+                        bufferLength = std::max(0, opts->m_bufferLength);
+                    }
+                    auto extra = spann2->GetDiskIndex();
+                    if (extra) kvDb = extra->GetKVStore();
+                }
+            }
+        }
+
+        // Drop chunks written by a previous BuildSignatures call (keep the KV
+        // store tidy — no leak in its block pool).
+        if (kvDb != nullptr) {
+            for (auto& [tag, pp] : purePostings) {
+                if (!pp) continue;
+                for (int k : pp->chunkKeys) {
+                    kvDb->Delete(static_cast<SPTAG::SizeType>(k));
+                }
+            }
+        }
         purePostings.clear();
-        if (kTagPureEligible) {
+        m_tenantTagPureKV.erase(p_tenantId);
+
+        if (kTagPureEligible && kvDb != nullptr) {
             double pureThreshold = 0.01;
             if (const char* env = std::getenv("SPTAG_TAG_PURE_THRESHOLD")) {
                 double parsed = 0.0;
@@ -3639,27 +3675,95 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 if (anyHit && !vidSeen[vid]) ++missingVecs;
             }
 
+            // Chunk capacity: ≤ postingPageLimit pages per blob, matching the
+            // page budget that regular postings already obey in this index.
+            const int kRecBytes = (int)sizeof(int32_t) + m_dimension * (int)sizeof(float);
+            int chunkBytes = postingPageLimit * 4096;
+            int chunkCap = std::max(1, chunkBytes / kRecBytes);
+
+            // Allocate keys starting just past the head ID range. The
+            // FileIO mapping auto-grows; existing head keys are untouched.
+            SPTAG::SizeType keyCursor = static_cast<SPTAG::SizeType>(numHeads);
+            auto cursorIt = m_tenantTagPureNextKey.find(p_tenantId);
+            if (cursorIt != m_tenantTagPureNextKey.end() && cursorIt->second > keyCursor) {
+                keyCursor = cursorIt->second;
+            }
+
+            std::vector<float> normBuf;
+            std::vector<std::string> chunkBlobs;
             int builtTags = 0;
             size_t builtVecs = 0;
-            for (auto& [tag, vids] : tagVids) {
+            size_t totalChunks = 0;
+            size_t failedTags = 0;
+
+            // Workspace providing page-aligned buffers + iocb-initialized
+            // AsyncReadRequest entries — required by FileIO::Put's direct
+            // write path when the in-process LRU cache is disabled
+            // (CacheSizeGB=0). One workspace, reused across all Put calls.
+            const int blockLimit = postingPageLimit + bufferLength + 1;
+            SPTAG::SPANN::ExtraWorkSpace ws;
+            ws.Initialize(/*maxCheck*/16,
+                          /*hashExp*/4,
+                          /*internalResultNum*/1,
+                          /*maxPages bytes*/ blockLimit << SPTAG::PageSizeEx,
+                          /*blockIO*/true,
+                          /*enableDataCompression*/false);
+
+            for (auto& kv : tagVids) {
+                uint32_t tag = kv.first;
+                auto& vids = kv.second;
                 if (vids.empty()) continue;
+
+                // L2-normalize each vector once for cosine-as-1-IP at query.
+                normBuf.assign((size_t)vids.size() * (size_t)m_dimension, 0.0f);
+                for (size_t k = 0; k < vids.size(); ++k) {
+                    const float* src = vidVecData.data() + (size_t)vids[k] * (size_t)m_dimension;
+                    float n2 = 0.0f;
+                    for (int i = 0; i < m_dimension; ++i) n2 += src[i] * src[i];
+                    float inv = (n2 > 1e-30f) ? 1.0f / std::sqrt(n2) : 0.0f;
+                    float* dst = normBuf.data() + k * (size_t)m_dimension;
+                    for (int i = 0; i < m_dimension; ++i) dst[i] = src[i] * inv;
+                }
+
                 auto pure = std::make_shared<SPTAG::Cache::TagPurePosting>();
                 pure->dim = m_dimension;
-                pure->Reserve((int)vids.size());
-                for (int vid : vids) {
-                    const float* v = vidVecData.data()
-                        + (size_t)vid * (size_t)m_dimension;
-                    pure->AddVector(vid, v);
+                pure->Pack(vids, normBuf, chunkCap, chunkBlobs);
+
+                bool ok = true;
+                pure->chunkKeys.clear();
+                pure->chunkKeys.reserve(chunkBlobs.size());
+                for (auto& blob : chunkBlobs) {
+                    SPTAG::SizeType key = keyCursor++;
+                    auto err = kvDb->Put(key, blob, std::chrono::microseconds(0), &ws.m_diskRequests);
+                    if (err != SPTAG::ErrorCode::Success) {
+                        fprintf(stderr,
+                                "[TagPure] Put failed tenant=%d tag=%u key=%d err=%d size=%zu\n",
+                                p_tenantId, tag, (int)key, (int)err, blob.size());
+                        ok = false;
+                        break;
+                    }
+                    pure->chunkKeys.push_back((int)key);
                 }
+                if (!ok) { ++failedTags; continue; }
+
                 builtVecs += pure->count;
                 ++builtTags;
+                totalChunks += pure->chunkKeys.size();
                 purePostings[tag] = std::move(pure);
             }
+
+            m_tenantTagPureNextKey[p_tenantId] = keyCursor;
+            m_tenantTagPureKV[p_tenantId] = kvDb;
+            m_tenantTagPureBlockLimit[p_tenantId] = blockLimit;
+            m_tenantTagPurePagesPerChunk[p_tenantId] = postingPageLimit;
             fprintf(stdout,
-                    "[TagPure] tenant=%d threshold=%.4f maxCount=%d tags=%d vecs=%zu missing=%zu (mem~%.1fMB)\n",
-                    p_tenantId, pureThreshold, maxCount, builtTags, builtVecs, missingVecs,
-                    (double)(builtVecs * (size_t)m_dimension * sizeof(float)) / (1024.0 * 1024.0));
+                    "[TagPure] tenant=%d threshold=%.4f maxCount=%d tags=%d vecs=%zu "
+                    "chunks=%zu chunkCap=%d failed=%zu missing=%zu\n",
+                    p_tenantId, pureThreshold, maxCount, builtTags, builtVecs,
+                    totalChunks, chunkCap, failedTags, missingVecs);
             fflush(stdout);
+        } else if (kTagPureEligible) {
+            fprintf(stderr, "[TagPure] tenant=%d: no KV store available, skipping\n", p_tenantId);
         }
     }
 
@@ -3793,40 +3897,75 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
     }();
 
-    // ── Tag-pure fast path ──────────────────────────────────────────────
-    // Single-tag query whose tag has a materialized tag-pure posting:
-    // flat-scan the in-memory (VID, normalized-vector) list and return
-    // top-K directly. No BKT, no SSD, R=1.0 by construction.
+    // ── Tag-pure fast path (chunked KV-backed) ──────────────────────────
+    // Single-tag query whose tag has materialized tag-pure chunks: MultiGet
+    // the chunks from the shared KV store (FileIO ShardedLRUCache / RocksDB
+    // block cache handles caching), decode (VID + normVec) entries and
+    // flat-scan for top-K. Bypasses BKT/SSD and gives R=1.0 by construction.
     if (!s_disableTagPurePath && !forceDenseTagSearch && p_numTags == 1
         && m_valueType == SPTAG::VectorValueType::Float) {
         auto pureIt = m_tenantTagPurePostings.find(p_tenantId);
-        if (pureIt != m_tenantTagPurePostings.end()) {
+        auto kvIt = m_tenantTagPureKV.find(p_tenantId);
+        if (pureIt != m_tenantTagPurePostings.end() && kvIt != m_tenantTagPureKV.end()
+            && kvIt->second != nullptr) {
             auto tagIt = pureIt->second.find(queryTagsPtr[0]);
             if (tagIt != pureIt->second.end() && tagIt->second
                 && tagIt->second->count > 0
-                && tagIt->second->dim == m_dimension) {
+                && tagIt->second->dim == m_dimension
+                && !tagIt->second->chunkKeys.empty()) {
                 const auto& pure = *tagIt->second;
-                std::vector<std::pair<float, int>> topK;
-                pure.SearchTopK(reinterpret_cast<const float*>(p_queryVector.Data()),
-                                p_resultNum, topK);
-                auto result = std::make_shared<QueryResult>(
-                    p_queryVector.Data(), p_resultNum, false);
-                for (int i = 0; i < p_resultNum; ++i) {
-                    if (i < (int)topK.size())
-                        result->SetResult(i, topK[i].second, topK[i].first);
-                    else
-                        result->SetResult(i, -1, SPTAG::MaxDist);
+                auto& kvDb = kvIt->second;
+
+                std::vector<SPTAG::SizeType> keys;
+                keys.reserve(pure.chunkKeys.size());
+                for (int k : pure.chunkKeys) keys.push_back(static_cast<SPTAG::SizeType>(k));
+
+                int pagesPerChunk = 16;
+                auto pcIt = m_tenantTagPurePagesPerChunk.find(p_tenantId);
+                if (pcIt != m_tenantTagPurePagesPerChunk.end()) pagesPerChunk = pcIt->second;
+
+                // Workspace provides page-aligned per-chunk buffers and an
+                // AsyncReadRequest vector pre-sized to cover every page of
+                // every chunk. Required by FileIO::MultiGet for direct
+                // (no-cache) reads.
+                SPTAG::SPANN::ExtraWorkSpace ws;
+                ws.Initialize(/*maxCheck*/16,
+                              /*hashExp*/4,
+                              /*internalResultNum*/(int)keys.size(),
+                              /*maxPages bytes*/ pagesPerChunk << SPTAG::PageSizeEx,
+                              /*blockIO*/true,
+                              /*enableDataCompression*/false);
+
+                std::vector<std::string> values(keys.size());
+                auto err = kvDb->MultiGet(keys, &values,
+                                          std::chrono::microseconds(60000000),
+                                          &ws.m_diskRequests);
+                if (err == SPTAG::ErrorCode::Success) {
+                    std::vector<std::pair<float, int>> topK;
+                    pure.SearchTopK(reinterpret_cast<const float*>(p_queryVector.Data()),
+                                    values, p_resultNum, topK);
+                    auto result = std::make_shared<QueryResult>(
+                        p_queryVector.Data(), p_resultNum, false);
+                    for (int i = 0; i < p_resultNum; ++i) {
+                        if (i < (int)topK.size())
+                            result->SetResult(i, topK[i].second, topK[i].first);
+                        else
+                            result->SetResult(i, -1, SPTAG::MaxDist);
+                    }
+                    if (s_wrapperTime) {
+                        auto _ck_tp = std::chrono::high_resolution_clock::now();
+                        double t_total = std::chrono::duration<double, std::milli>(
+                            _ck_tp - _wrTotal0).count();
+                        fprintf(stdout,
+                            "[1] WrapperTagPure: tag=%u cands=%d chunks=%zu topK=%d total=%.3fms\n",
+                            queryTagsPtr[0], pure.count, keys.size(), p_resultNum, t_total);
+                        fflush(stdout);
+                    }
+                    return result;
                 }
-                if (s_wrapperTime) {
-                    auto _ck_tp = std::chrono::high_resolution_clock::now();
-                    double t_total = std::chrono::duration<double, std::milli>(
-                        _ck_tp - _wrTotal0).count();
-                    fprintf(stdout,
-                        "[1] WrapperTagPure: tag=%u cands=%d topK=%d total=%.3fms\n",
-                        queryTagsPtr[0], pure.count, p_resultNum, t_total);
-                    fflush(stdout);
-                }
-                return result;
+                // MultiGet failure → fall through to existing paths.
+                fprintf(stderr, "[TagPure] MultiGet failed tag=%u err=%d, fallback\n",
+                        queryTagsPtr[0], (int)err);
             }
         }
     }

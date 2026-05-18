@@ -481,57 +481,92 @@ struct SparseTagIndex {
     }
 };
 
-// Tag-pure posting: for very sparse tags (selectivity < threshold), materialize
-// the full list of (VID, normalized-vector) tuples for vectors that carry the
-// tag. At query time, a single-tag query whose tag has a pure posting bypasses
-// BKT/SSD entirely and flat-scans this in-memory table, guaranteeing R=1.0.
+// Tag-pure posting (chunked, KV-backed): for very sparse tags
+// (selectivity < threshold), materialize the full list of
+// (VID, normalized-vector) tuples for vectors that carry the tag and
+// store them inside the same KeyValueIO that holds regular postings
+// (FileIO ShardedLRUCache or RocksDB block cache provides caching).
 //
-// Storage: tag -> (vids, normVecs). normVecs is row-major [count x dim].
-// Distances are cosine (negative IP on L2-normalized vectors).
+// Layout per chunk value:
+//   repeated { int32_t vid; float normVec[dim]; }
+//
+// In-memory metadata kept per tag:
+//   dim          : vector dimensionality
+//   count        : total #entries across all chunks
+//   chunkKeys    : KV keys for this tag's chunks (allocated by builder)
+//   chunkCounts  : number of entries packed inside each chunk
+//
+// At query time, MultiGet all chunks, decode and flat-scan; R=1.0 by
+// construction since each chunk holds exact members of the tag.
 struct TagPurePosting {
     int dim = 0;
     int count = 0;
-    std::vector<int> vids;
-    std::vector<float> normVecs;  // count * dim, L2-normalized
+    std::vector<int>     chunkKeys;
+    std::vector<int>     chunkCounts;
 
-    void Reserve(int n) {
-        vids.reserve(n);
-        normVecs.reserve((size_t)n * (size_t)dim);
+    // Pack vids+normVecs into one or more byte buffers, each holding at
+    // most chunkCap entries. chunkCap must be > 0; recommended:
+    //   chunkCap = floor(postingPageLimit * 4096 / (4 + dim*4))
+    // Returns the packed chunks in order. Also fills chunkCounts.
+    void Pack(const std::vector<int>& vids,
+              const std::vector<float>& normVecs,
+              int chunkCap,
+              std::vector<std::string>& outChunks) {
+        outChunks.clear();
+        chunkCounts.clear();
+        count = (int)vids.size();
+        if (count == 0 || dim <= 0 || chunkCap <= 0) return;
+        const size_t recSize = sizeof(int32_t) + (size_t)dim * sizeof(float);
+        int idx = 0;
+        while (idx < count) {
+            int n = std::min(chunkCap, count - idx);
+            std::string blob;
+            blob.resize((size_t)n * recSize);
+            char* p = blob.data();
+            for (int j = 0; j < n; ++j) {
+                int32_t vid = vids[idx + j];
+                std::memcpy(p, &vid, sizeof(int32_t));
+                std::memcpy(p + sizeof(int32_t),
+                            normVecs.data() + (size_t)(idx + j) * (size_t)dim,
+                            (size_t)dim * sizeof(float));
+                p += recSize;
+            }
+            outChunks.emplace_back(std::move(blob));
+            chunkCounts.push_back(n);
+            idx += n;
+        }
     }
 
-    void AddVector(int vid, const float* v) {
-        // Compute L2 norm, store normalized copy.
-        float n2 = 0.0f;
-        for (int i = 0; i < dim; ++i) n2 += v[i] * v[i];
-        float inv = (n2 > 1e-30f) ? 1.0f / std::sqrt(n2) : 0.0f;
-        vids.push_back(vid);
-        size_t off = normVecs.size();
-        normVecs.resize(off + (size_t)dim);
-        for (int i = 0; i < dim; ++i) normVecs[off + i] = v[i] * inv;
-        ++count;
-    }
-
-    // Flat-scan top-K by negative IP (= cosine distance, lower = closer).
-    // q must be a plain float* of length dim (unnormalized OK).
-    void SearchTopK(const float* q, int topK,
+    // Decode all chunks (already fetched from KV) and flat-scan against q.
+    // chunkValues[i] must be the raw value blob for chunkKeys[i], holding
+    // chunkCounts[i] records of (int32 vid + float[dim] normVec).
+    // Distance: 1.0 - cos(q_normalized, v) → matches SPTAG cosine.
+    void SearchTopK(const float* q,
+                    const std::vector<std::string>& chunkValues,
+                    int topK,
                     std::vector<std::pair<float, int>>& out) const {
-        // Normalize query once.
         float qn2 = 0.0f;
         for (int i = 0; i < dim; ++i) qn2 += q[i] * q[i];
         float qInv = (qn2 > 1e-30f) ? 1.0f / std::sqrt(qn2) : 0.0f;
         std::vector<float> qn(dim);
         for (int i = 0; i < dim; ++i) qn[i] = q[i] * qInv;
 
+        const size_t recSize = sizeof(int32_t) + (size_t)dim * sizeof(float);
         out.clear();
         out.reserve(count);
-        const float* base = normVecs.data();
-        for (int j = 0; j < count; ++j) {
-            float ip = 0.0f;
-            const float* v = base + (size_t)j * (size_t)dim;
-            for (int i = 0; i < dim; ++i) ip += qn[i] * v[i];
-            // Cosine distance convention used by SPTAG: 1 - IP (range [0,2])
-            float d = 1.0f - ip;
-            out.emplace_back(d, vids[j]);
+        for (size_t c = 0; c < chunkValues.size() && c < chunkCounts.size(); ++c) {
+            int n = chunkCounts[c];
+            const char* base = chunkValues[c].data();
+            if (chunkValues[c].size() < (size_t)n * recSize) continue;
+            for (int j = 0; j < n; ++j) {
+                const char* rec = base + (size_t)j * recSize;
+                int32_t vid;
+                std::memcpy(&vid, rec, sizeof(int32_t));
+                const float* v = reinterpret_cast<const float*>(rec + sizeof(int32_t));
+                float ip = 0.0f;
+                for (int i = 0; i < dim; ++i) ip += qn[i] * v[i];
+                out.emplace_back(1.0f - ip, (int)vid);
+            }
         }
         int k = std::min(topK, (int)out.size());
         if (k < (int)out.size()) {
