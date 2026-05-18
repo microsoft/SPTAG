@@ -653,15 +653,11 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: DeletePosting failed for key %d\n", key);
                     return delRet;
                 }
-                auto ret = PutBaseChunk(key, value, timeout, reqs);
-                if (ret != ErrorCode::Success) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: PutBaseChunk failed for key %d\n", key);
-                    return ret;
-                }
                 int count = static_cast<int>(value.size());
-                auto countRet = SetPostingCount(key, count, timeout);
-                if (countRet != ErrorCode::Success) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "PutPostingToDB: SetPostingCount failed for key %d (data written OK)\n", key);
+                auto ret = PutBaseChunkAndCount(key, value, count, timeout, reqs);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PutPostingToDB: PutBaseChunkAndCount failed for key %d\n", key);
+                    return ret;
                 }
                 if (m_postingCountCache) m_postingCountCache->Put(key, count);
                 return ErrorCode::Success;
@@ -2258,8 +2254,10 @@ namespace SPTAG::SPANN
 
         // Same as PutChunkAndCount but writes the BASE chunk (no timestamp suffix).
         // Used by PutPostingToDB compaction path: replaces (overwrites) the base
-        // chunk and updates the count in a single RawBatchPut RPC. Saves one
-        // round trip vs separate PutBaseChunk + SetPostingCount.
+        // chunk and updates the count in a single RawBatchPut RPC. Do not fall
+        // back to separate writes here: count is required metadata for
+        // multi-chunk postings, so partial base/count updates must surface as
+        // failures instead of silently corrupting future append counts.
         ErrorCode PutBaseChunkAndCount(SizeType headID,
                                        const std::string& chunkValue,
                                        int newCount,
@@ -2271,56 +2269,46 @@ namespace SPTAG::SPANN
 
             {
                 auto stub = GetStubForKey(chunkKey);
-                if (stub) {
-                    kvrpcpb::RawBatchPutRequest request;
-                    SetContext(request.mutable_context(), chunkKey);
-
-                    auto* p1 = request.add_pairs();
-                    p1->set_key(chunkKey);
-                    p1->set_value(chunkValue);
-
-                    auto* p2 = request.add_pairs();
-                    p2->set_key(countKey);
-                    p2->set_value(countValue);
-
-                    kvrpcpb::RawBatchPutResponse response;
-                    grpc::ClientContext ctx;
-                    SetDeadline(ctx, timeout);
-
-                    auto status = stub->RawBatchPut(&ctx, request, &response);
-                    if (status.ok() && !response.has_region_error() && response.error().empty()) {
-                        return ErrorCode::Success;
-                    }
-                    if (!status.ok()) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                            "TiKVIO::PutBaseChunkAndCount BatchPut gRPC error headID=%d: %s, falling back\n",
-                            headID, status.error_message().c_str());
-                    } else if (response.has_region_error()) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                            "TiKVIO::PutBaseChunkAndCount BatchPut region_error headID=%d, falling back\n", headID);
-                    } else {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                            "TiKVIO::PutBaseChunkAndCount error: %s\n", response.error().c_str());
-                    }
-                    InvalidateRegionCache(chunkKey);
-                    InvalidateRegionCache(countKey);
+                if (!stub) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "TiKVIO::PutBaseChunkAndCount missing TiKV stub headID=%d\n", headID);
+                    return ErrorCode::Fail;
                 }
-            }
 
-            // Fallback: write chunk and count separately.
-            auto ret1 = RawPutWithRetry(chunkKey, chunkValue, timeout);
-            if (ret1 != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                    "TiKVIO::PutBaseChunkAndCount fallback: PutBaseChunk failed headID=%d\n", headID);
-                return ret1;
+                kvrpcpb::RawBatchPutRequest request;
+                SetContext(request.mutable_context(), chunkKey);
+
+                auto* p1 = request.add_pairs();
+                p1->set_key(chunkKey);
+                p1->set_value(chunkValue);
+
+                auto* p2 = request.add_pairs();
+                p2->set_key(countKey);
+                p2->set_value(countValue);
+
+                kvrpcpb::RawBatchPutResponse response;
+                grpc::ClientContext ctx;
+                SetDeadline(ctx, timeout);
+
+                auto status = stub->RawBatchPut(&ctx, request, &response);
+                if (status.ok() && !response.has_region_error() && response.error().empty()) {
+                    return ErrorCode::Success;
+                }
+                if (!status.ok()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "TiKVIO::PutBaseChunkAndCount BatchPut gRPC error headID=%d: %s\n",
+                        headID, status.error_message().c_str());
+                } else if (response.has_region_error()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "TiKVIO::PutBaseChunkAndCount BatchPut region_error headID=%d\n", headID);
+                } else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVIO::PutBaseChunkAndCount error: %s\n", response.error().c_str());
+                }
+                InvalidateRegionCache(chunkKey);
+                InvalidateRegionCache(countKey);
             }
-            auto ret2 = RawPutWithRetry(countKey, countValue, timeout);
-            if (ret2 != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                    "TiKVIO::PutBaseChunkAndCount fallback: PutCount failed headID=%d\n", headID);
-                return ret2;
-            }
-            return ErrorCode::Success;
+            return ErrorCode::Fail;
         }
 
         // Multi-posting scan: read multiple postings in parallel.
