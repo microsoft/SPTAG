@@ -1671,27 +1671,39 @@ namespace SPTAG::SPANN {
             std::vector<SizeType> keys;
             std::vector<std::string> values;
 
-            for (auto& kv : headAppends) 
-            {
-                m_rwLocks[kv.first].lock();
+            std::vector<SizeType> sortedHeadIDs;
+            sortedHeadIDs.reserve(headAppends.size());
+            for (const auto& kv : headAppends) sortedHeadIDs.push_back(kv.first);
+            std::sort(sortedHeadIDs.begin(), sortedHeadIDs.end());
 
-                if (!m_headIndex->ContainSample(kv.first, m_layer + 1)) {
-                    m_rwLocks[kv.first].unlock();
-                    for (std::uint8_t* ptr = (std::uint8_t*)(kv.second.data()); 
-                        ptr < (std::uint8_t*)(kv.second.data() + kv.second.size()); 
+            std::vector<std::unique_lock<std::shared_timed_mutex>> heldLocks;
+            heldLocks.reserve(sortedHeadIDs.size());
+
+            for (SizeType headID : sortedHeadIDs)
+            {
+                auto appendIt = headAppends.find(headID);
+                if (appendIt == headAppends.end()) continue;
+
+                std::unique_lock<std::shared_timed_mutex> headLock(m_rwLocks[headID]);
+
+                if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
+                    headLock.unlock();
+                    for (std::uint8_t* ptr = (std::uint8_t*)(appendIt->second.data());
+                        ptr < (std::uint8_t*)(appendIt->second.data() + appendIt->second.size());
                         ptr += m_vectorInfoSize) {
                         SizeType VID = *(SizeType*)(ptr);
                         uint8_t version = *(uint8_t*)(ptr + sizeof(SizeType));
                         if (m_versionMap->GetVersion(VID) == version) {
                             m_stat.m_headMiss++;
-                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), kv.first, true);
+                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), headID, true);
                         }
                     }
                     continue;
                 }
 
-                keys.push_back(kv.first);
-                values.push_back(kv.second);
+                keys.push_back(headID);
+                values.push_back(appendIt->second);
+                heldLocks.emplace_back(std::move(headLock));
             }
 
             if (keys.empty()) return ErrorCode::Success;
@@ -1704,17 +1716,14 @@ namespace SPTAG::SPANN {
                          *dbkeys, values, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSizes)) != ErrorCode::Success)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MultiMerge failed!\n");
-                for (int i = 0; i < keys.size(); i++) {
-                    m_rwLocks[keys[i]].unlock();
-                }
                 GetDBStats();
                 return ret;
             }
             auto appendIOEnd = std::chrono::high_resolution_clock::now();
             auto appendIOSeconds = std::chrono::duration_cast<std::chrono::microseconds>(appendIOEnd - appendIOBegin).count();
 
-            for (int i = 0; i < keys.size(); i++) {
-                m_rwLocks[keys[i]].unlock();
+            for (size_t i = 0; i < keys.size(); i++) {
+                heldLocks[i].unlock();
                 int postingSize = postingSizes[i];
                 if (postingSize % m_vectorInfoSize != 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
@@ -2979,7 +2988,7 @@ namespace SPTAG::SPANN {
                          "total_completed split:%zu merge:%zu reassign:%zu | "
                          "split_latency avg:%.1fms max:%.1fms\n",
                          m_layer, totalJobs,
-                         m_splitJobsInFlight.load(), m_mergeJobsInFlight.load(), m_reassignJobsInFlight.load(),
+                         m_splitJobsInFlight.load(), m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(),
                          m_splitThreadPool ? static_cast<unsigned int>(m_splitThreadPool->runningJobs()) : 0,
                          m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                          m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
