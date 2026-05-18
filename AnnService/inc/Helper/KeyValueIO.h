@@ -40,6 +40,9 @@ namespace SPTAG
 
             virtual ErrorCode MultiMerge(const std::vector<SizeType>& keys, const std::vector<std::string>& values, 
                                          const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, std::vector<int>& sizes) {
+                if (keys.size() != values.size()) {
+                    return ErrorCode::Undefined;
+                }
                 sizes.resize(keys.size());
                 for (size_t i = 0; i < keys.size(); i++) {
                     auto err = Merge(keys[i], values[i], timeout, reqs, sizes[i]);
