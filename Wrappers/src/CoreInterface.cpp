@@ -3293,6 +3293,18 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     int totalAssignments = 0;
     std::vector<uint8_t> blockBuf(PAGE_SIZE);
 
+    // Tag-pure path: collect first-occurrence vector data per VID so we can
+    // materialize per-tag dense lists for very-sparse tags after the loop.
+    // Only enabled for Float value type (m_inputVectorSize == dim * 4).
+    const bool kTagPureEligible = (m_valueType == SPTAG::VectorValueType::Float)
+        && (m_inputVectorSize == (size_t)m_dimension * sizeof(float));
+    std::vector<uint8_t> vidSeen;            // 0/1 per VID
+    std::vector<float>   vidVecData;         // p_numVectors * dim, row-major
+    if (kTagPureEligible) {
+        vidSeen.assign(p_numVectors, 0);
+        vidVecData.assign((size_t)p_numVectors * (size_t)m_dimension, 0.0f);
+    }
+
     for (int pid = 0; pid < std::min(numPostings, numHeads); pid++) {
         int nVecs = postingSizes[pid];
         if (nVecs <= 0) continue;
@@ -3330,6 +3342,14 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 posting_hier_masks[pid].Insert(t, tag);
             }
             totalAssignments++;
+
+            // First-occurrence capture of vector payload for tag-pure path.
+            if (kTagPureEligible && !vidSeen[vid]) {
+                const uint8_t* src = raw.data() + offset + META_SIZE;
+                std::memcpy(vidVecData.data() + (size_t)vid * (size_t)m_dimension,
+                            src, m_inputVectorSize);
+                vidSeen[vid] = 1;
+            }
         }
     }
     fclose(postF);
@@ -3388,6 +3408,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     std::string sparsePath = workDir + "/sparse_tags.bin";
     sparseIdx->Save(sparsePath);
     m_tenantSparseIdx[p_tenantId] = sparseIdx;
+
+    // (Tag-pure postings are built after the head-iteration loop below, once
+    // both posting-side and head-side vector data have been captured into
+    // vidVecData / vidSeen.)
 
     constexpr int kPivotEstimatorDefaultMaxNodes = 0;
     constexpr double kPivotEstimatorDefaultRecallTarget = 0.99;
@@ -3496,6 +3520,19 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                     continue;
                 }
 
+                // Tag-pure: head VIDs are NOT in any posting; capture their
+                // vector data here so the sparse fast path covers them too.
+                if (kTagPureEligible
+                    && globalVID >= 0 && globalVID < static_cast<SizeType>(p_numVectors)
+                    && !vidSeen[globalVID]) {
+                    const void* hv = memoryIndex->GetSample(hid);
+                    if (hv != nullptr) {
+                        std::memcpy(vidVecData.data() + (size_t)globalVID * (size_t)m_dimension,
+                                    hv, m_inputVectorSize);
+                        vidSeen[globalVID] = 1;
+                    }
+                }
+
                 // Own-tags mask: a single-vector mask reflecting THIS head
                 // centroid's own tags. Used by HeadNodeMatchesQuery to gate
                 // whether the head's centroid is admissible as a top-K result
@@ -3555,6 +3592,75 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 p_tenantId,
                 pivotCandidate->pivotLevel,
                 pivotCandidate->nodeCount);
+    }
+
+    // ── Tag-pure postings ────────────────────────────────────────────────
+    // For tags with selectivity strictly below SPTAG_TAG_PURE_THRESHOLD
+    // (default 0.01), build an in-memory (VID, normalized-vector) list. At
+    // query time, single-tag queries on these tags bypass BKT entirely and
+    // flat-scan the list (guaranteed R=1.0). Float dtype only.
+    // Runs AFTER the head-iteration loop so vidVecData covers heads too.
+    {
+        auto& purePostings = m_tenantTagPurePostings[p_tenantId];
+        purePostings.clear();
+        if (kTagPureEligible) {
+            double pureThreshold = 0.01;
+            if (const char* env = std::getenv("SPTAG_TAG_PURE_THRESHOLD")) {
+                double parsed = 0.0;
+                if (SPTAG::Helper::Convert::ConvertStringTo<double>(env, parsed)
+                    && parsed > 0.0 && parsed <= 1.0) {
+                    pureThreshold = parsed;
+                }
+            }
+            int maxCount = (int)std::floor(pureThreshold * (double)p_numVectors);
+            if (maxCount < 1) maxCount = 1;
+
+            std::unordered_set<uint32_t> eligibleTags;
+            eligibleTags.reserve(tagVectorCounts.size());
+            for (const auto& [tag, vectorCount] : tagVectorCounts) {
+                if (vectorCount > 0 && vectorCount <= maxCount) {
+                    eligibleTags.insert(tag);
+                }
+            }
+
+            std::unordered_map<uint32_t, std::vector<int>> tagVids;
+            tagVids.reserve(eligibleTags.size());
+            size_t missingVecs = 0;
+            for (int vid = 0; vid < p_numVectors; ++vid) {
+                std::unordered_set<uint32_t> seenLocal;
+                bool anyHit = false;
+                for (int t = 0; t < p_numTagsPerVec; ++t) {
+                    uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
+                    if (!seenLocal.insert(tag).second) continue;
+                    if (eligibleTags.count(tag) == 0) continue;
+                    if (!vidSeen[vid]) { anyHit = true; continue; }
+                    tagVids[tag].push_back(vid);
+                }
+                if (anyHit && !vidSeen[vid]) ++missingVecs;
+            }
+
+            int builtTags = 0;
+            size_t builtVecs = 0;
+            for (auto& [tag, vids] : tagVids) {
+                if (vids.empty()) continue;
+                auto pure = std::make_shared<SPTAG::Cache::TagPurePosting>();
+                pure->dim = m_dimension;
+                pure->Reserve((int)vids.size());
+                for (int vid : vids) {
+                    const float* v = vidVecData.data()
+                        + (size_t)vid * (size_t)m_dimension;
+                    pure->AddVector(vid, v);
+                }
+                builtVecs += pure->count;
+                ++builtTags;
+                purePostings[tag] = std::move(pure);
+            }
+            fprintf(stdout,
+                    "[TagPure] tenant=%d threshold=%.4f maxCount=%d tags=%d vecs=%zu missing=%zu (mem~%.1fMB)\n",
+                    p_tenantId, pureThreshold, maxCount, builtTags, builtVecs, missingVecs,
+                    (double)(builtVecs * (size_t)m_dimension * sizeof(float)) / (1024.0 * 1024.0));
+            fflush(stdout);
+        }
     }
 
     fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %d assignments, sparse_max_postings=%d)\n",
@@ -3682,6 +3788,49 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         const char* v = std::getenv("SPTAG_DISABLE_SPARSE_PATH");
         return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
     }();
+    static const bool s_disableTagPurePath = []() {
+        const char* v = std::getenv("SPTAG_DISABLE_TAG_PURE_PATH");
+        return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
+    }();
+
+    // ── Tag-pure fast path ──────────────────────────────────────────────
+    // Single-tag query whose tag has a materialized tag-pure posting:
+    // flat-scan the in-memory (VID, normalized-vector) list and return
+    // top-K directly. No BKT, no SSD, R=1.0 by construction.
+    if (!s_disableTagPurePath && !forceDenseTagSearch && p_numTags == 1
+        && m_valueType == SPTAG::VectorValueType::Float) {
+        auto pureIt = m_tenantTagPurePostings.find(p_tenantId);
+        if (pureIt != m_tenantTagPurePostings.end()) {
+            auto tagIt = pureIt->second.find(queryTagsPtr[0]);
+            if (tagIt != pureIt->second.end() && tagIt->second
+                && tagIt->second->count > 0
+                && tagIt->second->dim == m_dimension) {
+                const auto& pure = *tagIt->second;
+                std::vector<std::pair<float, int>> topK;
+                pure.SearchTopK(reinterpret_cast<const float*>(p_queryVector.Data()),
+                                p_resultNum, topK);
+                auto result = std::make_shared<QueryResult>(
+                    p_queryVector.Data(), p_resultNum, false);
+                for (int i = 0; i < p_resultNum; ++i) {
+                    if (i < (int)topK.size())
+                        result->SetResult(i, topK[i].second, topK[i].first);
+                    else
+                        result->SetResult(i, -1, SPTAG::MaxDist);
+                }
+                if (s_wrapperTime) {
+                    auto _ck_tp = std::chrono::high_resolution_clock::now();
+                    double t_total = std::chrono::duration<double, std::milli>(
+                        _ck_tp - _wrTotal0).count();
+                    fprintf(stdout,
+                        "[1] WrapperTagPure: tag=%u cands=%d topK=%d total=%.3fms\n",
+                        queryTagsPtr[0], pure.count, p_resultNum, t_total);
+                    fflush(stdout);
+                }
+                return result;
+            }
+        }
+    }
+
     auto sparseIt = m_tenantSparseIdx.find(p_tenantId);
     if (!s_disableSparsePath && !forceDenseTagSearch && sparseIt != m_tenantSparseIdx.end() && p_numTags > 0) {
         auto& sparseIdx = sparseIt->second;

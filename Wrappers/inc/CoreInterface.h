@@ -311,6 +311,14 @@ private:
     // Per-tenant sparse tag index: tag → [posting_ids] for low-selectivity tags
     std::map<int, std::shared_ptr<SPTAG::Cache::SparseTagIndex>> m_tenantSparseIdx;
 
+    // Per-tenant tag-pure postings: for very sparse tags (selectivity below
+    // SPTAG_TAG_PURE_THRESHOLD, default 0.01), each entry contains the full
+    // (VID, normalized-vector) list of vectors carrying that tag. Single-tag
+    // queries on a tag-pure-equipped tag flat-scan this in-memory table and
+    // return guaranteed top-K (R=1.0).
+    std::map<int, std::unordered_map<uint32_t,
+        std::shared_ptr<SPTAG::Cache::TagPurePosting>>> m_tenantTagPurePostings;
+
     // Temporary storage during BuildFromDataWithTags
     ByteArray m_buildTags;
     int m_buildNumTagsPerVec = 0;

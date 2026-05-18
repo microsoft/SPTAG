@@ -18,6 +18,9 @@
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
+#include <utility>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -475,6 +478,72 @@ struct SparseTagIndex {
         }
         fclose(f);
         return true;
+    }
+};
+
+// Tag-pure posting: for very sparse tags (selectivity < threshold), materialize
+// the full list of (VID, normalized-vector) tuples for vectors that carry the
+// tag. At query time, a single-tag query whose tag has a pure posting bypasses
+// BKT/SSD entirely and flat-scans this in-memory table, guaranteeing R=1.0.
+//
+// Storage: tag -> (vids, normVecs). normVecs is row-major [count x dim].
+// Distances are cosine (negative IP on L2-normalized vectors).
+struct TagPurePosting {
+    int dim = 0;
+    int count = 0;
+    std::vector<int> vids;
+    std::vector<float> normVecs;  // count * dim, L2-normalized
+
+    void Reserve(int n) {
+        vids.reserve(n);
+        normVecs.reserve((size_t)n * (size_t)dim);
+    }
+
+    void AddVector(int vid, const float* v) {
+        // Compute L2 norm, store normalized copy.
+        float n2 = 0.0f;
+        for (int i = 0; i < dim; ++i) n2 += v[i] * v[i];
+        float inv = (n2 > 1e-30f) ? 1.0f / std::sqrt(n2) : 0.0f;
+        vids.push_back(vid);
+        size_t off = normVecs.size();
+        normVecs.resize(off + (size_t)dim);
+        for (int i = 0; i < dim; ++i) normVecs[off + i] = v[i] * inv;
+        ++count;
+    }
+
+    // Flat-scan top-K by negative IP (= cosine distance, lower = closer).
+    // q must be a plain float* of length dim (unnormalized OK).
+    void SearchTopK(const float* q, int topK,
+                    std::vector<std::pair<float, int>>& out) const {
+        // Normalize query once.
+        float qn2 = 0.0f;
+        for (int i = 0; i < dim; ++i) qn2 += q[i] * q[i];
+        float qInv = (qn2 > 1e-30f) ? 1.0f / std::sqrt(qn2) : 0.0f;
+        std::vector<float> qn(dim);
+        for (int i = 0; i < dim; ++i) qn[i] = q[i] * qInv;
+
+        out.clear();
+        out.reserve(count);
+        const float* base = normVecs.data();
+        for (int j = 0; j < count; ++j) {
+            float ip = 0.0f;
+            const float* v = base + (size_t)j * (size_t)dim;
+            for (int i = 0; i < dim; ++i) ip += qn[i] * v[i];
+            // Cosine distance convention used by SPTAG: 1 - IP (range [0,2])
+            float d = 1.0f - ip;
+            out.emplace_back(d, vids[j]);
+        }
+        int k = std::min(topK, (int)out.size());
+        if (k < (int)out.size()) {
+            std::partial_sort(out.begin(), out.begin() + k, out.end(),
+                              [](const std::pair<float,int>& a,
+                                 const std::pair<float,int>& b) { return a.first < b.first; });
+            out.resize(k);
+        } else {
+            std::sort(out.begin(), out.end(),
+                      [](const std::pair<float,int>& a,
+                         const std::pair<float,int>& b) { return a.first < b.first; });
+        }
     }
 };
 
