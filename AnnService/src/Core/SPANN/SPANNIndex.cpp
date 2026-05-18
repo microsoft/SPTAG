@@ -1101,13 +1101,14 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
     COMMON::Dataset<SizeType> localToGlobalID;
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headIDFile for layer %d...\n", currentLayer - 1);
+        std::string localToGlobalIDPath = (currentLayer == 0)? m_options.m_globalIDPath : m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile;
         std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
         if (ptr == nullptr ||
-            !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
+            !ptr->Initialize(localToGlobalIDPath.c_str(),
                                 std::ios::binary | std::ios::in))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "No headIDFile file:%s\n",
-                            (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                            localToGlobalIDPath.c_str());
         }
         else {
             localToGlobalID.Load(ptr, this->m_iDataBlockSize, this->m_iDataCapacity);
