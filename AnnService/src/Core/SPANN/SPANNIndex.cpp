@@ -12,12 +12,14 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <queue>
 #include <random>
 #include <shared_mutex>
+#include <thread>
 #include <unordered_set>
 
 #include "inc/Core/ResultIterator.h"
@@ -2837,33 +2839,55 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                 }
                 return d;
             };
-            for (auto& kv : tagGroups)
-            {
-                int tagVal = kv.first;
-                std::vector<int> candHeads;
-                auto it = tagToHeadIdx.find(tagVal);
-                if (it != tagToHeadIdx.end())
-                    candHeads.insert(candHeads.end(), it->second.begin(), it->second.end());
-                auto itN = tagNearest.find(tagVal);
-                if (itN != tagNearest.end()) {
-                    for (int u : itN->second) {
-                        auto itu = tagToHeadIdx.find(u);
-                        if (itu != tagToHeadIdx.end())
-                            candHeads.insert(candHeads.end(), itu->second.begin(), itu->second.end());
+            std::vector<int> tagKeys;
+            tagKeys.reserve(tagGroups.size());
+            for (auto& kv : tagGroups) tagKeys.push_back(kv.first);
+
+            const int numThreads = std::max(1, m_options.m_iSSDNumberOfThreads);
+            std::vector<std::vector<int>> threadCatch(numThreads, std::vector<int>(initialHeads.size(), 0));
+            std::atomic<size_t> nextTag(0);
+            std::vector<std::thread> workers;
+            workers.reserve(numThreads);
+            for (int tid = 0; tid < numThreads; ++tid) {
+                workers.emplace_back([&, tid]() {
+                    auto& localCatch = threadCatch[tid];
+                    while (true) {
+                        size_t idx = nextTag.fetch_add(1, std::memory_order_relaxed);
+                        if (idx >= tagKeys.size()) return;
+                        int tagVal = tagKeys[idx];
+                        auto kvIt = tagGroups.find(tagVal);
+                        if (kvIt == tagGroups.end()) continue;
+                        std::vector<int> candHeads;
+                        auto it = tagToHeadIdx.find(tagVal);
+                        if (it != tagToHeadIdx.end())
+                            candHeads.insert(candHeads.end(), it->second.begin(), it->second.end());
+                        auto itN = tagNearest.find(tagVal);
+                        if (itN != tagNearest.end()) {
+                            for (int u : itN->second) {
+                                auto itu = tagToHeadIdx.find(u);
+                                if (itu != tagToHeadIdx.end())
+                                    candHeads.insert(candHeads.end(), itu->second.begin(), itu->second.end());
+                            }
+                        }
+                        if (candHeads.empty()) continue;
+                        for (SizeType vid : kvIt->second) {
+                            float best = std::numeric_limits<float>::infinity();
+                            int bestH = -1;
+                            for (int hidx : candHeads) {
+                                float d = vecHeadDistSq(vid, hidx);
+                                if (d < best) { best = d; bestH = hidx; }
+                            }
+                            if (bestH >= 0) {
+                                ++localCatch[bestH];
+                            }
+                        }
                     }
-                }
-                if (candHeads.empty()) continue;
-                for (SizeType vid : kv.second) {
-                    float best = std::numeric_limits<float>::infinity();
-                    int bestH = -1;
-                    for (int hidx : candHeads) {
-                        float d = vecHeadDistSq(vid, hidx);
-                        if (d < best) { best = d; bestH = hidx; }
-                    }
-                    if (bestH >= 0) {
-                        catchment[bestH]++;
-                    }
-                }
+                });
+            }
+            for (auto& t : workers) t.join();
+            for (int tid = 0; tid < numThreads; ++tid) {
+                const auto& lc = threadCatch[tid];
+                for (size_t i = 0; i < catchment.size(); ++i) catchment[i] += lc[i];
             }
             double sum = 0; int nonzero = 0; int mx = 0;
             for (int c : catchment) { sum += c; if (c > 0) ++nonzero; if (c > mx) mx = c; }

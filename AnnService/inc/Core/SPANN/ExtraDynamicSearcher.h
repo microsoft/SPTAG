@@ -2174,23 +2174,31 @@ namespace SPTAG::SPANN {
             std::vector<std::vector<int>> vectorMemberships;
             bool useNodeAwareBuild = !m_plannedNodeVectorAssignments.empty();
             size_t plannedAssignmentCount = static_cast<size_t>(fullCount);
+            // Prefer primary assignments (each vector owned by exactly one node) for
+            // posting placement so each vector contributes a unique posting footprint.
+            // Multi-membership planned assignments are kept only for head-routing/ACL.
+            const std::vector<std::vector<SizeType>>& postingPlacementSource =
+                !m_primaryNodeVectorAssignments.empty()
+                    ? m_primaryNodeVectorAssignments
+                    : m_plannedNodeVectorAssignments;
             if (useNodeAwareBuild)
             {
-                plannedNodeVectors.resize(m_plannedNodeVectorAssignments.size());
+                plannedNodeVectors.resize(postingPlacementSource.size());
                 vectorMemberships.assign(fullCount, std::vector<int>());
                 plannedAssignmentCount = 0;
 
-                for (size_t nodeId = 0; nodeId < m_plannedNodeVectorAssignments.size(); ++nodeId)
+                std::vector<uint8_t> claimedVector(fullCount, 0);
+                for (size_t nodeId = 0; nodeId < postingPlacementSource.size(); ++nodeId)
                 {
-                    std::unordered_set<SizeType> seenNodeVectors;
-                    for (SizeType vectorId : m_plannedNodeVectorAssignments[nodeId])
+                    for (SizeType vectorId : postingPlacementSource[nodeId])
                     {
                         if (vectorId < 0 || vectorId >= fullCount) {
                             continue;
                         }
-                        if (!seenNodeVectors.insert(vectorId).second) {
+                        if (claimedVector[static_cast<size_t>(vectorId)]) {
                             continue;
                         }
+                        claimedVector[static_cast<size_t>(vectorId)] = 1;
 
                         plannedNodeVectors[nodeId].push_back(vectorId);
                         vectorMemberships[vectorId].push_back(static_cast<int>(nodeId));
@@ -2199,6 +2207,11 @@ namespace SPTAG::SPANN {
                 }
 
                 useNodeAwareBuild = plannedAssignmentCount > 0;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "Node-aware build: posting placement source=%s, unique assignments=%zu across %zu nodes\n",
+                             (!m_primaryNodeVectorAssignments.empty() ? "primary" : "planned"),
+                             plannedAssignmentCount,
+                             postingPlacementSource.size());
             }
 
             Selection selections((useNodeAwareBuild ? plannedAssignmentCount : static_cast<size_t>(fullCount)) * m_opt->m_replicaCount, m_opt->m_tmpdir);
@@ -2337,13 +2350,25 @@ namespace SPTAG::SPANN {
 
                                 std::fill(localSelections.begin(), localSelections.end(), Edge());
                                 int localReplicaCount = 0;
+                                // Bundle structure must NOT constrain RNG replica placement:
+                                // posting layout stays globally-optimal (each vector to its top-K
+                                // nearest heads regardless of node). Bundles only carry the head
+                                // graph + tag-routing metadata; ACL routing happens at query time
+                                // via head→node mapping, not via posting partitioning.
+                                static const bool s_disableNodeReplicaMask = []() {
+                                    const char* v = std::getenv("SPTAG_NODE_REPLICA_MASK");
+                                    return !(v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
+                                }();
+                                const std::vector<uint8_t>* replicaMask = s_disableNodeReplicaMask
+                                    ? nullptr
+                                    : &allowedHeadMasks[static_cast<size_t>(nodeId)];
                                 RNGSelection(localSelections,
                                              (ValueType*)(fullVectors->GetVector(vectorId)),
                                              p_headIndex.get(),
                                              vectorId,
                                              localReplicaCount,
                                              -1,
-                                             &allowedHeadMasks[static_cast<size_t>(nodeId)]);
+                                             replicaMask);
 
                                 for (int selIdx = 0; selIdx < localReplicaCount && assignedReplicaCount < m_opt->m_replicaCount; ++selIdx)
                                 {

@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <thread>
+#include <atomic>
 #include "inc/Core/SPANN/Options.h"
 #include "inc/Core/SPANN/ExtraFileController.h"
 #include "inc/Core/SPANN/Index.h"
@@ -297,7 +298,7 @@ bool TryGetAncestorTag(uint32_t tag,
 
 } // namespace
 
-constexpr int32_t kHeadNodeMetaVersion = 2;
+constexpr int32_t kHeadNodeMetaVersion = 3;
 
 struct HeadNodeMetaFileHeader {
     int32_t version;
@@ -1874,7 +1875,12 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
 
         if (indexType == TenantIndexType::SPANN)
         {
-            if (!tenantLocalTags.empty()) {
+            const char* skipPivotEnv = std::getenv("SPTAG_DISABLE_PIVOT_ESTIMATOR");
+            bool skipPivot = (skipPivotEnv != nullptr && skipPivotEnv[0] != '\0' && skipPivotEnv[0] != '0');
+            if (skipPivot) {
+                fprintf(stderr, "[INFO] Tenant %d: SPTAG_DISABLE_PIVOT_ESTIMATOR set, skipping node-aware planning\n", tenantId);
+            }
+            if (!skipPivot && !tenantLocalTags.empty()) {
                 PivotEstimatorComputation pivotComputation;
                 const PivotEstimatorCandidate* pivotCandidate = nullptr;
                 if (BuildPivotEstimatorComputation(tenantLocalTags.data(),
@@ -3474,28 +3480,43 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 if (hid < sigs->num_postings) {
                     memoryIndex->SetHeadNodePS(hid, sigs->ps[hid]);
                 }
-                // Set hierarchical mask for this head
+
+                // Posting-content mask: union of all member-vector tags in the
+                // head's posting. Drives the dense-path posting pre-filter so
+                // that a posting is kept iff at least one of its member vectors
+                // MAY carry a tag matching the query (no-false-negative filter).
+                SPTAG::Cache::HierarchicalPostingMask postingMask;
+                postingMask.Clear();
                 if (hid < (SizeType)posting_hier_masks.size()) {
-                    memoryIndex->SetHeadNodeHierMask(hid, posting_hier_masks[hid]);
+                    postingMask = posting_hier_masks[hid];
                 }
+                memoryIndex->SetHeadNodePostingHierMask(hid, postingMask);
 
                 if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(p_numVectors)) {
                     continue;
                 }
-                if (postingVIDs.count(static_cast<int>(globalVID)) != 0) {
-                    continue;
-                }
 
-                // This is a head-only vector (not in any posting)
-                memoryIndex->SetHeadNodeHeadOnly(hid, true);
-                // Build its hierarchical mask from its tags
-                SPTAG::Cache::HierarchicalPostingMask headMask;
-                headMask.Clear();
+                // Own-tags mask: a single-vector mask reflecting THIS head
+                // centroid's own tags. Used by HeadNodeMatchesQuery to gate
+                // whether the head's centroid is admissible as a top-K result
+                // (head centroids are real dataset vectors but are never stored
+                // as members of any posting, so without this gate they would
+                // either be lost or leaked regardless of their own tag).
+                SPTAG::Cache::HierarchicalPostingMask ownMask;
+                ownMask.Clear();
                 for (int t = 0; t < p_numTagsPerVec; ++t) {
                     uint32_t tag = p_tagsPtr[static_cast<size_t>(globalVID) * static_cast<size_t>(p_numTagsPerVec) + static_cast<size_t>(t)];
-                    headMask.Insert(t, tag);
+                    ownMask.Insert(t, tag);
                 }
-                memoryIndex->SetHeadNodeHierMask(hid, headMask);
+                memoryIndex->SetHeadNodeHierMask(hid, ownMask);
+
+                // Heads are never stored as members of any posting in this
+                // SPANN build; the only way for a head centroid vector to be
+                // returned as a search result is via the head-as-top-K path
+                // (guarded by HeadNodeMatchesQuery's IsHeadNodeHeadOnly check).
+                // Mark all heads accordingly so we don't silently lose ~25% of
+                // the dataset to ACL queries.
+                memoryIndex->SetHeadNodeHeadOnly(hid, true);
                 headTagCount++;
             }
 
@@ -3698,8 +3719,16 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                                     : std::chrono::high_resolution_clock::time_point{};
     SPTAG::Cache::PostingBitmask queryMask;
     queryMask.Clear();
+    SPTAG::Cache::HierarchicalPostingMask queryHierMask;
+    queryHierMask.Clear();
     for (int i = 0; i < p_numTags; i++) {
         queryMask.Insert(queryTagsPtr[i]);
+        // Hierarchical mask uses 0-indexed levels (0=org,1=dept,2=team,3=project)
+        // matching the convention used at build time in
+        // LoadPostingSignaturesIntoHeadIndex (Insert(t, tag) for t = 0..numTagsPerVec-1).
+        uint32_t qtag = queryTagsPtr[i];
+        int level = (qtag < 2000) ? 0 : (qtag < 3000) ? 1 : (qtag < 4000) ? 2 : 3;
+        queryHierMask.Insert(level, qtag);
     }
     auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
     EnsureHeadNodeMetaLoaded(workDir, internalIdx);
@@ -3710,25 +3739,39 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
     }
     if (internalIdx) {
-            // Dense path uses the pivot routing index as a coarse posting filter.
-            // If routing metadata is missing or the node intersection collapses to
-            // empty, fall back to the original exact-filter-only behavior.
-            if (hasRoutingNodeFilter && headNodeToNode != nullptr) {
+            // Dense path posting pre-filter.
+            //
+            // The previous implementation routed each posting by its head centroid's
+            // OWN pivot-level tag (single-value `headNodeToNode`). That was a type
+            // error: SPANN places each vector in its K vector-space-nearest heads
+            // regardless of tag, so a posting's content has an arbitrary tag
+            // distribution that is NOT determined by the centroid's tag. Filtering
+            // on the centroid's tag dropped valid postings (whose member vectors
+            // matched the query) and capped ACL recall at ~0.91 regardless of nprobe.
+            //
+            // Fix: use the per-posting HierarchicalPostingMask built in
+            // LoadPostingSignaturesIntoHeadIndex by OR-ing ALL member vectors' tags
+            // at every level. MayIntersect is a no-false-negative test, so it is
+            // safe as a pre-filter (false positives only let extra postings through).
+            if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && p_numTags > 0) {
                 searchContext.m_postingFilter =
-                    [allowedNodeMask = std::move(allowedNodeMask), headNodeToNode](int localHid) {
-                        if (localHid < 0 || localHid >= static_cast<int>(headNodeToNode->size())) {
-                            return true;
-                        }
-
-                        int nodeId = (*headNodeToNode)[static_cast<size_t>(localHid)];
-                        if (nodeId < 0 || nodeId >= static_cast<int>(allowedNodeMask.size())) {
-                            return true;
-                        }
-
-                        return allowedNodeMask[static_cast<size_t>(nodeId)] != 0;
+                    [memIdx = memoryIndex.get(), queryHierMask](int localHid) {
+                        // Use the per-posting multi-membership mask (union of all
+                        // member-vector tags). MayIntersect is no-false-negative so
+                        // it is safe as a pre-filter; the inline per-vector tag
+                        // check inside the posting scan does the exact filtering.
+                        const auto* hierMask = memIdx->GetHeadNodePostingHierMask(localHid);
+                        if (hierMask == nullptr) return true;  // fail open
+                        return hierMask->MayIntersect(queryHierMask);
                     };
+            }
+            // Bundle-node routing (multi-bundle graph search) is separate from the
+            // posting pre-filter above and still useful when manifest has >1 node.
+            if (hasRoutingNodeFilter && headNodeToNode != nullptr) {
                 searchContext.m_searchHeadBundleNodes = routedNodes;
             }
+            (void)allowedNodeMask;
+            (void)headNodeToNode;
 
         auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
         int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;

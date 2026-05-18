@@ -238,6 +238,16 @@ public:
 
         const Cache::HierarchicalPostingMask* GetHeadNodeHierMask(SizeType p_sampleId) const;
 
+        // Posting-content mask: union of all member-vector tags in the head's
+        // posting. Distinct from the head's own-tag HierMask (used by
+        // HeadNodeMatchesQuery) which gates whether the head's centroid vector
+        // is admissible as a top-K result. The posting-content mask is the
+        // correct pre-filter for "this posting MAY contain a vector that
+        // matches the query".
+        void SetHeadNodePostingHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask);
+
+        const Cache::HierarchicalPostingMask* GetHeadNodePostingHierMask(SizeType p_sampleId) const;
+
         void SetHeadNodeBundleNodeId(SizeType p_sampleId, int16_t p_bundleNodeId);
 
         int16_t GetHeadNodeBundleNodeId(SizeType p_sampleId) const;
@@ -334,12 +344,13 @@ protected:
 
 public:
     // Per-head-node metadata blob, indexed by local head sample id (hid).
-    // Layout V2 (each record stores):
-    //   [PostingBitmask (legacy 256-bit)][HierarchicalPostingMask][globalVID][bundleNodeId][headOnly]
+    // Layout V3 (each record stores):
+    //   [PostingBitmask][HierarchicalPostingMask own-tags][HierarchicalPostingMask posting-content][globalVID][bundleNodeId][headOnly]
     // Aligned to alignof(PostingBitmask)=8 for stride.
     size_t m_headNodeMetaStride = 0;
     size_t m_headNodePSOffset = 0;
     size_t m_headNodeHierMaskOffset = 0;
+    size_t m_headNodePostingHierMaskOffset = 0;
     size_t m_headNodeGlobalVIDOffset = 0;
     size_t m_headNodeBundleNodeIdOffset = 0;
     size_t m_headNodeHeadOnlyOffset = 0;
