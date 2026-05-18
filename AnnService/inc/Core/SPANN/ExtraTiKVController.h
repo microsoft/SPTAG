@@ -1206,8 +1206,22 @@ namespace SPTAG::SPANN
             sizes.resize(keys.size());
             if (m_useMultiChunkPosting) {
                 std::vector<int> fetchedCounts;
-                AsyncGetPostingCounts(keys, &fetchedCounts,
+                ErrorCode countRet = AsyncGetPostingCounts(keys, &fetchedCounts,
                                             std::chrono::microseconds(5000000));
+                if (countRet != ErrorCode::Success || fetchedCounts.size() != keys.size()) {
+                    if (fetchedCounts.size() != keys.size()) fetchedCounts.assign(keys.size(), -1);
+                    for (size_t i = 0; i < keys.size(); i++) {
+                        if (fetchedCounts[i] >= 0) continue;
+                        fetchedCounts[i] = GetPostingCount(keys[i], MaxTimeout);
+                    }
+                }
+                for (size_t i = 0; i < keys.size(); i++) {
+                    if (fetchedCounts[i] < 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVIO::MultiMerge failed to fetch posting count headID=%d\n", keys[i]);
+                        return ErrorCode::Fail;
+                    }
+                }
 
                 auto batch = std::make_shared<TiKVIO::AsyncBatch>();
                 batch->Add(static_cast<int>(keys.size()));
