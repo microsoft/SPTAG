@@ -21,6 +21,11 @@ using namespace SPTAG;
     }
 
 typedef short LabelType;
+#ifndef LARGEVID
+#define MPIVIDTYPE MPI_INT
+#else
+#define MPIVIDTYPE MPI_LONG_LONG
+#endif
 
 class PartitionOptions : public Helper::ReaderOptions
 {
@@ -36,6 +41,7 @@ class PartitionOptions : public Helper::ReaderOptions
         AddOptionalOption(m_distMethod, "-m", "--dist", "Distance method (L2 or Cosine).");
         AddOptionalOption(m_outdir, "-o", "--outdir", "Output directory.");
         AddOptionalOption(m_weightfile, "-w", "--weight", "vector weight file.");
+        AddOptionalOption(m_gidfile, "-gid", "--gid", "global id file.");
         AddOptionalOption(m_wlambda, "-lw", "--wlambda", "lambda for balanced weight level.");
         AddOptionalOption(m_seed, "-e", "--seed", "Random seed.");
         AddOptionalOption(m_initIter, "-x", "--init", "Number of iterations for initialization.");
@@ -82,6 +88,7 @@ class PartitionOptions : public Helper::ReaderOptions
     std::string m_outfile = "vectors.bin";
     std::string m_outmetafile = "meta.bin";
     std::string m_outmetaindexfile = "metaindex.bin";
+    std::string m_gidfile = "-";
     std::string m_weightfile = "-";
     std::string m_stage = "Clustering";
     std::string m_status = ".";
@@ -495,6 +502,19 @@ template <typename T> void Process(MPI_Datatype type)
         win.read((char *)weights.data(), sizeof(float) * rows);
         win.close();
     }
+    
+    std::shared_ptr<COMMON::Dataset<SizeType>> globalids = nullptr;
+    if (options.m_gidfile.compare("-") != 0)
+    {
+        options.m_gidfile = Helper::StrUtils::ReplaceAll(options.m_gidfile, "*", std::to_string(rank));
+        globalids = std::make_shared<COMMON::Dataset<SizeType>>();
+        if (ErrorCode::Success != globalids->Load(options.m_gidfile, 1024 * 1024, vectors->Count() + 1))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Rank %d failed to read global ID file %s.\n", rank,
+                         options.m_gidfile.c_str());
+            exit(1);
+        }
+    }
     COMMON::Dataset<T> data(vectors->Count(), vectors->Dimension(), 1024 * 1024, vectors->Count() + 1,
                             (T *)vectors->GetData());
     COMMON::KmeansArgs<T> args(options.m_clusterNum, vectors->Dimension(), vectors->Count(), options.m_threadNum,
@@ -664,7 +684,8 @@ template <typename T> void Process(MPI_Datatype type)
                 std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + std::to_string(i);
                 std::string metaindexfile =
                     options.m_outdir + "/" + options.m_outmetaindexfile + "." + std::to_string(i);
-                std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
+                std::string gidfile = options.m_outdir + "/" + options.m_gidfile + "." + std::to_string(i);
+                std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO(), gidout = f_createIO();
                 if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out))
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
@@ -681,12 +702,18 @@ template <typename T> void Process(MPI_Datatype type)
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
                     exit(1);
                 }
-
-                CHECKIO(out, WriteBinary, sizeof(int), (char *)(&args.counts[i]));
-                CHECKIO(out, WriteBinary, sizeof(int), (char *)(&args._D));
+                if (globalids != nullptr && (gidout == nullptr || !gidout->Initialize(gidfile.c_str(), std::ios::binary | std::ios::out)))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", gidfile.c_str());
+                    exit(1);
+                }
+                CHECKIO(out, WriteBinary, sizeof(SizeType), (char *)(&args.counts[i]));
+                CHECKIO(out, WriteBinary, sizeof(DimensionType), (char *)(&args._D));
                 if (metas != nullptr)
-                    CHECKIO(metaindexout, WriteBinary, sizeof(int), (char *)(&args.counts[i]));
-
+                    CHECKIO(metaindexout, WriteBinary, sizeof(SizeType), (char *)(&args.counts[i]));
+                if (globalids != nullptr) {
+                    CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&args.counts[i]));
+                }
                 std::uint64_t offset = 0;
                 T *recvbuf = args.newTCenters;
                 int recvmetabuflen = 200;
@@ -696,9 +723,9 @@ template <typename T> void Process(MPI_Datatype type)
                     uint64_t offset_before = offset;
                     if (j != rank)
                     {
-                        int recv = 0;
-                        MPI_Recv(&recv, 1, MPI_INT, j, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        for (int k = 0; k < recv; k++)
+                        SizeType recv = 0;
+                        MPI_Recv(&recv, 1, MPIVIDTYPE, j, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        for (SizeType k = 0; k < recv; k++)
                         {
                             MPI_Recv(recvbuf, args._D, type, j, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                             CHECKIO(out, WriteBinary, sizeof(T) * args._D, (char *)recvbuf);
@@ -719,6 +746,12 @@ template <typename T> void Process(MPI_Datatype type)
                                 CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char *)(&offset));
                                 offset += len;
                             }
+                            if (globalids != nullptr)
+                            {
+                                SizeType gid;
+                                MPI_Recv(&gid, 1, MPIVIDTYPE, j, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&gid));
+                            }
                         }
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank %d <- rank %d: %d vectors, %llu bytes meta\n",
                                      rank, j, recv, (offset - offset_before));
@@ -726,9 +759,9 @@ template <typename T> void Process(MPI_Datatype type)
                     else
                     {
                         size_t total_rec = 0;
-                        for (int k = 0; k < data.R(); k++)
+                        for (SizeType k = 0; k < data.R(); k++)
                         {
-                            for (int kk = 0; kk < label.C(); kk++)
+                            for (DimensionType kk = 0; kk < label.C(); kk++)
                             {
                                 if (label[k][kk] == (LabelType)i)
                                 {
@@ -739,6 +772,10 @@ template <typename T> void Process(MPI_Datatype type)
                                         CHECKIO(metaout, WriteBinary, meta.Length(), (const char *)meta.Data());
                                         CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char *)(&offset));
                                         offset += meta.Length();
+                                    }
+                                    if (globalids != nullptr) {
+                                        SizeType gid = *((*globalids)[localindices[k]]);
+                                        CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&gid));
                                     }
                                     total_rec++;
                                 }
@@ -754,16 +791,17 @@ template <typename T> void Process(MPI_Datatype type)
                 out->ShutDown();
                 metaout->ShutDown();
                 metaindexout->ShutDown();
+                if (globalids != nullptr) gidout->ShutDown();
             }
             else
             {
                 int dest = i % size;
-                MPI_Send(&args.newCounts[i], 1, MPI_INT, dest, 0, MPI_COMM_WORLD);
+                MPI_Send(&args.newCounts[i], 1, MPIVIDTYPE, dest, 0, MPI_COMM_WORLD);
                 size_t total_len = 0;
                 size_t total_rec = 0;
-                for (int j = 0; j < data.R(); j++)
+                for (SizeType j = 0; j < data.R(); j++)
                 {
-                    for (int kk = 0; kk < label.C(); kk++)
+                    for (DimensionType kk = 0; kk < label.C(); kk++)
                     {
                         if (label[j][kk] == (LabelType)i)
                         {
@@ -775,6 +813,10 @@ template <typename T> void Process(MPI_Datatype type)
                                 MPI_Send(&len, 1, MPI_INT, dest, 2, MPI_COMM_WORLD);
                                 MPI_Send(meta.Data(), len, MPI_CHAR, dest, 3, MPI_COMM_WORLD);
                                 total_len += len;
+                            }
+                            if (globalids != nullptr) {
+                                SizeType gid = *((*globalids)[localindices[j]]);
+                                MPI_Send(&gid, 1, MPIVIDTYPE, dest, 4, MPI_COMM_WORLD);
                             }
                             total_rec++;
                         }
@@ -825,12 +867,12 @@ ErrorCode SyncSaveCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     CHECKIO(out, WriteBinary, sizeof(float) * args._K * args._D, (const char *)args.newCenters);
     if (assign)
     {
-        CHECKIO(out, WriteBinary, sizeof(int) * args._K, (const char *)args.counts);
+        CHECKIO(out, WriteBinary, sizeof(SizeType) * args._K, (const char *)args.counts);
         CHECKIO(out, WriteBinary, sizeof(float) * args._K, (const char *)args.weightedCounts);
     }
     else
     {
-        CHECKIO(out, WriteBinary, sizeof(int) * args._K, (const char *)args.newCounts);
+        CHECKIO(out, WriteBinary, sizeof(SizeType) * args._K, (const char *)args.newCounts);
         CHECKIO(out, WriteBinary, sizeof(float) * args._K, (const char *)args.newWeightedCounts);
     }
     out->ShutDown();
@@ -898,7 +940,7 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
     }
 
     memset(args.newCenters, 0, sizeof(float) * args._K * args._D);
-    memset(args.counts, 0, sizeof(int) * args._K);
+    memset(args.counts, 0, sizeof(SizeType) * args._K);
     memset(args.weightedCounts, 0, sizeof(float) * args._K);
     std::unique_ptr<char[]> buf(new char[sizeof(float) * args._K * args._D]);
     unsigned long long localCount;
@@ -926,10 +968,10 @@ ErrorCode SyncLoadCenter(COMMON::KmeansArgs<T> &args, int rank, int iteration, u
         for (int i = 0; i < args._K * args._D; i++)
             args.newCenters[i] += *((float *)(buf.get()) + i);
 
-        CHECKIO(input, ReadBinary, sizeof(int) * args._K, buf.get());
+        CHECKIO(input, ReadBinary, sizeof(SizeType) * args._K, buf.get());
         for (int i = 0; i < args._K; i++)
         {
-            int partsize = *((int *)(buf.get()) + i);
+            SizeType partsize = *((SizeType *)(buf.get()) + i);
             if (partsize >= 0 && args.counts[i] <= MaxSize - partsize)
                 args.counts[i] += partsize;
             else
@@ -1181,7 +1223,16 @@ template <typename T> void Partition()
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read labels.\n");
         exit(1);
     }
-
+    std::shared_ptr<COMMON::Dataset<SizeType>> globalids = nullptr;
+    if (options.m_gidfile.compare("-") != 0)
+    {
+        globalids = std::make_shared<COMMON::Dataset<SizeType>>();
+        if (ErrorCode::Success != globalids->Load(options.m_gidfile, 1024 * 1024, vectors->Count() + 1))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read global ID file %s.\n", options.m_gidfile.c_str());
+            exit(1);
+        }
+    }
     std::string taskId = options.m_labels.substr(options.m_labels.rfind(".") + 1);
     for (int i = 0; i < options.m_clusterNum; i++)
     {
@@ -1189,7 +1240,8 @@ template <typename T> void Partition()
         std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + taskId + "." + std::to_string(i);
         std::string metaindexfile =
             options.m_outdir + "/" + options.m_outmetaindexfile + "." + taskId + "." + std::to_string(i);
-        std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO();
+        std::string gidfile = options.m_outdir + "/" + options.m_gidfile + "." + taskId + "." + std::to_string(i);
+        std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO(), gidout = f_createIO();
         if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out))
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", vecfile.c_str());
@@ -1206,18 +1258,25 @@ template <typename T> void Partition()
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", metaindexfile.c_str());
             exit(1);
         }
-
-        int rows = data.R(), cols = data.C();
-        CHECKIO(out, WriteBinary, sizeof(int), (char *)(&rows));
-        CHECKIO(out, WriteBinary, sizeof(int), (char *)(&cols));
-        if (metas != nullptr)
-            CHECKIO(metaindexout, WriteBinary, sizeof(int), (char *)(&rows));
-
-        std::uint64_t offset = 0;
-        int records = 0;
-        for (int k = 0; k < data.R(); k++)
+        if (globalids != nullptr && (gidout == nullptr || !gidout->Initialize(gidfile.c_str(), std::ios::binary | std::ios::out)))
         {
-            for (int kk = 0; kk < label.C(); kk++)
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s to write.\n", gidfile.c_str());
+            exit(1);
+        }
+        SizeType rows = data.R();
+        DimensionType cols = data.C();
+        CHECKIO(out, WriteBinary, sizeof(SizeType), (char *)(&rows));
+        CHECKIO(out, WriteBinary, sizeof(DimensionType), (char *)(&cols));
+        if (metas != nullptr)
+            CHECKIO(metaindexout, WriteBinary, sizeof(SizeType), (char *)(&rows));
+        if (globalids != nullptr) {
+            CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&rows));
+        }
+        std::uint64_t offset = 0;
+        SizeType records = 0;
+        for (SizeType k = 0; k < data.R(); k++)
+        {
+            for (DimensionType kk = 0; kk < label.C(); kk++)
             {
                 if (label[k][kk] == (LabelType)i)
                 {
@@ -1229,6 +1288,10 @@ template <typename T> void Partition()
                         CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char *)(&offset));
                         offset += meta.Length();
                     }
+                    if (globalids != nullptr) {
+                        SizeType gid = *((*globalids)[k]);
+                        CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&gid));
+                    }
                     records++;
                 }
             }
@@ -1238,12 +1301,15 @@ template <typename T> void Partition()
 
         if (metas != nullptr)
             CHECKIO(metaindexout, WriteBinary, sizeof(std::uint64_t), (char *)(&offset));
-        CHECKIO(out, WriteBinary, sizeof(int), (char *)(&records), 0);
-        CHECKIO(metaindexout, WriteBinary, sizeof(int), (char *)(&records), 0);
-
+        CHECKIO(out, WriteBinary, sizeof(SizeType), (char *)(&records), 0);
+        CHECKIO(metaindexout, WriteBinary, sizeof(SizeType), (char *)(&records), 0);
+        if (globalids != nullptr) {
+            CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&records), 0);
+        }
         out->ShutDown();
         metaout->ShutDown();
         metaindexout->ShutDown();
+        if (globalids != nullptr) gidout->ShutDown();
     }
 }
 

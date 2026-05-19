@@ -1100,22 +1100,24 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
     int currentLayer = static_cast<int>(m_extraSearchers.size());
     COMMON::Dataset<SizeType> localToGlobalID;
     {
-        if (currentLayer > 0) {
-            std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
-            if (ptr == nullptr ||
-                !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
-                                    std::ios::binary | std::ios::in))
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headIDFile for layer %d...\n", currentLayer - 1);
+        std::string localToGlobalIDPath = (currentLayer == 0)? m_options.m_globalIDPath : m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile;
+        std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
+        if (ptr == nullptr ||
+            !ptr->Initialize(localToGlobalIDPath.c_str(),
+                                std::ios::binary | std::ios::in))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "No headIDFile file:%s\n",
+                            localToGlobalIDPath.c_str());
+        }
+        else {
+            localToGlobalID.Load(ptr, this->m_iDataBlockSize, this->m_iDataCapacity);
+            SizeType vectorCount = p_reader->GetVectorSet()->Count();
+            if (localToGlobalID.R() != vectorCount)
             {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "No headIDFile file:%s\n",
-                                (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "HeadIDFile count %lld doesn't match head vector file count %lld!\n", (int64_t)localToGlobalID.R(), (int64_t)vectorCount);
+                localToGlobalID.SetR(0);
             }
-            else {
-                localToGlobalID.Load(ptr, m_topIndex->m_iDataBlockSize, m_topIndex->m_iDataCapacity);
-            }
-        } else {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                         "Layer 0 build: skip loading localToGlobalID from %s\n",
-                         (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
         }
     }
 
@@ -1150,6 +1152,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
 
         m_topIndex = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_topIndex->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+        m_topIndex->SetParameter("ParallelBKTBuild", m_options.m_parallelBKTBuild ? "true" : "false");
         m_topIndex->SetQuantizer(m_pQuantizer);
         for (const auto &iter : m_topParameters)
         {
@@ -2008,9 +2011,9 @@ template <typename T> void Index<T>::PrepareDB(std::shared_ptr<Helper::KeyValueI
     else if (m_options.m_storage == Storage::TIKVIO) {
 #ifdef TIKV
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:UseTiKV\n");
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:PD addresses:%s, prefix:%s\n",
-                     m_options.m_tikvPDAddresses.c_str(), m_options.m_tikvKeyPrefix.c_str());
-        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix, m_options.m_asyncRpcMaxInflight));
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPANNIndex:PD addresses:%s, prefix:%s, useMultiChunkPosting:%s\n",
+                     m_options.m_tikvPDAddresses.c_str(), m_options.m_tikvKeyPrefix.c_str(), m_options.m_useMultiChunkPosting ? "true" : "false");
+        db.reset(new TiKVIO(m_options.m_tikvPDAddresses, m_options.m_tikvKeyPrefix, m_options.m_useMultiChunkPosting, m_options.m_postingCountCacheCapacity, m_options.m_asyncRpcMaxInflight));
 #else
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SPANNIndex:TiKV unsupport! Use -DTIKV to enable TiKV when doing cmake.\n");
         return;

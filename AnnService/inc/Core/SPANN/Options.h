@@ -34,6 +34,7 @@ namespace SPTAG {
             std::string m_truthPath;
             TruthFileType m_truthType;
             bool m_generateTruth;
+            std::string m_globalIDPath;
             std::string m_indexDirectory;
             std::string m_headIDFile;
             std::string m_headVectorFile;

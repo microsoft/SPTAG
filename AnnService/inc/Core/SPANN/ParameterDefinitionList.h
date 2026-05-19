@@ -23,6 +23,7 @@ DefineBasicParameter(m_warmupDelimiter, std::string, std::string("|"), "WarmupDe
 DefineBasicParameter(m_truthPath, std::string, std::string(""), "TruthPath")
 DefineBasicParameter(m_truthType, SPTAG::TruthFileType, SPTAG::TruthFileType::Undefined, "TruthType")
 DefineBasicParameter(m_generateTruth, bool, false, "GenerateTruth") // Mutable
+DefineBasicParameter(m_globalIDPath, std::string, std::string(""), "GlobalIDPath")
 DefineBasicParameter(m_indexDirectory, std::string, std::string("SPANN"), "IndexDirectory")
 DefineBasicParameter(m_headIDFile, std::string, std::string("SPTAGHeadVectorIDs.bin"), "HeadVectorIDs")
 DefineBasicParameter(m_deleteIDFile, std::string, std::string("DeletedIDs.bin"), "DeletedIDs")

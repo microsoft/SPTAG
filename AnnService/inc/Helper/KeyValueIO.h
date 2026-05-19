@@ -34,23 +34,24 @@ namespace SPTAG
 
             virtual ErrorCode Put(const SizeType key, const std::string& value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) = 0;
 
-            // Batched writes/deletes. Default implementations return Undefined so that
-            // backends without native batching (RocksDB, FileIO) can ignore them.
-            // TiKVIO overrides these to issue a single batched RPC per region group,
-            // which dramatically reduces the number of synchronous gRPC round-trips
-            // when callers (e.g. SPANN AddIndex Phase 2 / PutPostingToDB) want to
-            // commit several keys at once.
-            virtual ErrorCode MultiPut(const std::vector<std::string>& keys,
-                                       const std::vector<std::string>& values,
-                                       const std::chrono::microseconds& timeout,
-                                       std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }
-
-            virtual ErrorCode MultiDelete(const std::vector<std::string>& keys,
-                                          const std::chrono::microseconds& timeout) { return ErrorCode::Undefined; }
-
             virtual ErrorCode Merge(const SizeType key, const std::string &value,
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;
+
+            virtual ErrorCode MultiMerge(const std::vector<SizeType>& keys, const std::vector<std::string>& values, 
+                                         const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, std::vector<int>& sizes) {
+                if (keys.size() != values.size()) {
+                    return ErrorCode::Undefined;
+                }
+                sizes.resize(keys.size());
+                for (size_t i = 0; i < keys.size(); i++) {
+                    auto err = Merge(keys[i], values[i], timeout, reqs, sizes[i]);
+                    if (err != ErrorCode::Success) {
+                        return err;
+                    }
+                }
+                return ErrorCode::Success;
+            }
 
             virtual ErrorCode Delete(SizeType key) = 0;
 
@@ -79,6 +80,8 @@ namespace SPTAG
             virtual ErrorCode StartToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
 
             virtual ErrorCode NextToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
+
+            virtual void LogAsyncWaitStatsAndReset(int layer) {}
         };
     }
 }
