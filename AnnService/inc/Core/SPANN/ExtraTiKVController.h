@@ -805,7 +805,7 @@ namespace SPTAG::SPANN
                 { static std::atomic<int> _logOnce{0}; if (_logOnce.fetch_add(1) == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[PATH] Append using SINGLE-KEY Get+Put path (no multi-chunk)\n"); }
                 std::string fullPosting;
                 auto ret = Get(key, &fullPosting, MaxTimeout, reqs);
-                if (ret == ErrorCode::KeyNotFound) {
+                if (ret == ErrorCode::Key_NotFound) {
                     fullPosting.clear();
                 } else if (ret != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge failed to read existing posting for %lld before append.\n", (std::int64_t)key);
