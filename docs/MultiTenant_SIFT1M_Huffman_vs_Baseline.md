@@ -1,0 +1,158 @@
+# Multi-Tenant SIFT-1M — Huffman Partition Size Ablation (post bug-fix)
+
+Dataset: SIFT-1M, tenant_0 (404 819 vectors), 4-level ACL tree
+(org/dept/team/project, cardinalities **4 / 16 / 64 / 256**).
+Query: 100 SIFT queries, top-10, recall target **R ≥ 0.95**.
+
+Build params shared across all partition sizes:
+`final_ratio=0.05`, `oversample=3.0`, `merge_group=5`,
+`ReplicaCount=8`, `PostingVectorLimit=118`,
+`SelectHeadType=PerTagBKTMerge`, `NumTagsPerVec=4`.
+
+The partition size **N** is the number of Huffman tree-aware subsets
+(`SPTAG_PIVOT_FORCE_NODE_COUNT`); each subset has its own BKT over the
+heads assigned to it.
+
+## Two build/query bugs fixed in this iteration
+
+### Bug 1 — `RNGSelection` global-search-then-filter (build-time vector drop)
+
+In `ExtraDynamicSearcher.h::RNGSelection`, build-time posting selection
+used to search the **global** head BKT for ~32 candidates and then
+filter by `p_allowedHeads`. At N = 256 each subset owns only
+~0.3 % of heads, so ≈ 88 % of vectors had **all** 32 candidates
+rejected and were silently dropped from the index (zero replicas).
+Fix: when `p_allowedHeads != nullptr`, do a brute-force scan over only
+the allowed heads (≤ 430 heads per subset), then apply RNG dedup.
+Per-vector cost increases by ~50 k FLOPs — negligible against SSD I/O.
+
+### Bug 2 — Sparse-path duplicate when head VID coincides with GT
+
+`SPANNIndex::SearchIndex` sparse-tag fast path scans postings (with
+deduper) and *additionally* iterates over head samples that match the
+query mask, calling `AddPoint(globalVID, distance)` for each match.
+The head-iteration phase did **not** consult the deduper, so a GT
+vector that happens to be a head node was inserted twice (once from
+its replica posting, once from the head scan), pushing one real GT
+out of the top-K. The 0.938 recall ceiling we observed on N=64 team
+was 100 % explained by this — confirmed by single-query trace:
+
+```
+GT     = [359930, 389729, 331537, ..., 270610]
+SPTAG  = [359930, 389729, 389729, 331537, ..., 317752]   ← 389729 is a head
+```
+
+Fix: add `if (workSpace->m_deduper.CheckAndSet(globalVID)) continue;`
+before `AddPoint` in the head-iteration loop.
+
+## Sparse path vs dense path
+
+`sparse_tags.bin` materializes tag → posting-id lists for tags whose
+posting fanout ≤ `SPTAG_SPARSE_MAX_POSTINGS` (default 1024). At query
+time those tags brute-force-scan all listed postings, **ignoring nprobe**.
+
+For N = 64, team tags fall under the cap (fanout ≈ 430), so they take
+the sparse path. Even with Bug 2 fixed, the sparse path is ~26× slower
+than dense BKT (84 ms vs 3 ms at np = 8) and recall is no higher than
+dense. We run the ablation below with **`SPTAG_DISABLE_SPARSE_PATH=1`**
+so dense BKT handles team filters; project filters remain on the
+separate `tagpure_meta.bin` fast path (which has its own dedup).
+
+## Per-filter best operating point at R ≥ 0.95 (post-fix, dense path)
+
+| Filter   | N = 4 (v3)              | N = 64                  |
+|----------|--------------------------|--------------------------|
+| unfilter | R 0.97 @ np 64 → **63 QPS**  | ❌ max 0.78          |
+| org      | R 0.99 @ np 32 → **128 QPS** | R 0.973 @ np 100 → 49 QPS |
+| dept     | ❌ max 0.876               | R 0.952 @ np 24 → **209 QPS** |
+| team     | ❌ max 0.419               | R 0.979 @ np 8  → **519 QPS** |
+| project  | R 1.000 @ np 16 → 329 QPS | R 1.000 @ np 16 → 330 QPS |
+
+Project remains R = 1.000 ≈ 330 QPS at both sizes because it routes
+through `tagpure_meta.bin` (KV-backed exhaustive top-K) — independent
+of partition count.
+
+### Interpretation
+
+Partition size **N** controls which filter level is best served:
+
+* **N = 4** aligns with the org partition. unfilter / org are
+  strongest; dept and team queries route to wrong subsets and cannot
+  reach 0.95 regardless of nprobe.
+* **N = 64** aligns with the team partition. dept and especially team
+  become very fast (519 QPS at np = 8 for team) because each team
+  query routes into ~1 subset of ~430 heads. unfilter degrades because
+  the search has to cover 64 subsets in series — nprobe budget is
+  spread thin.
+
+The expected behaviour matches the design: **pick N close to the
+cardinality of the filter level you care about most**. N = 4 for an
+org-centric workload, N = 64 for a team-centric workload.
+
+### Asymmetry: narrow filters can be rescued, unfilter cannot
+
+The choice of N is **not** symmetric between "too small" and "too large":
+
+* **N too small (e.g. N = 4 for dept/team/project)** — partition is
+  too coarse to isolate narrow filters, but every narrow filter query
+  carries a tag, so it can be **rescued by a tag-aware sidecar that
+  bypasses partition entirely**:
+  - `tagpure_meta.bin` (KV-backed flat scan over all vectors with that
+    tag) — this is exactly why project still hits R = 1.000 / 329 QPS
+    at N = 4. Independent of N.
+  - `sparse_tags.bin` (per-tag posting list) — same idea, currently
+    Bug 2-fixed but still inefficient (Bug B open).
+  - dept / team would also be rescuable today by raising
+    `SPTAG_TAG_PURE_THRESHOLD` above team's 6 373 vec/tag, or by
+    fixing the sparse path to respect nprobe.
+  - **Conclusion: pick N small, then add tag sidecars to patch
+    whichever narrow filters miss.**
+
+* **N too large (e.g. N = 64 for unfilter)** — there is **no
+  sidecar to fall back to**. An unfilter query carries no tag, so
+  neither `tagpure_meta.bin` nor `sparse_tags.bin` can match anything.
+  The only options are:
+  - accept the loss (we measured max R = 0.78 at N = 64),
+  - or maintain a **second, non-partitioned global head BKT**
+    alongside the partitioned one — i.e. roughly double the index
+    storage and build time, equivalent to running global SPANN
+    side-by-side.
+
+* Engineering recommendation: **bias N toward the unfilter / wide-filter
+  needs** (small N like 4 or 16), and use tag-aware sidecars to lift
+  whichever narrow filter levels matter. The reverse — picking large N
+  for narrow filters and hoping to patch unfilter — has no patch
+  available within this architecture.
+
+## Single-query verification (n64, team = 43, 6 373 vectors)
+
+Used to validate Bug 1 and Bug 2 fixes by direct measurement rather
+than aggregate metrics (`diag_n64_team*.py`):
+
+| Config | np | R | latency |
+|--------|----|----|---------|
+| Bug 2 unfixed, sparse path on  | any | 0.938 | 83 ms |
+| Bug 2 fixed,   sparse path on  | any | **1.000** | 84 ms |
+| Bug 2 fixed,   sparse path off | 8   | **0.979** | **3.2 ms** |
+| Bug 2 fixed,   sparse path off | 32  | 0.996 | 6.4 ms |
+| Bug 2 fixed,   sparse path off | 128 | 0.999 | 25 ms  |
+
+Open question: the sparse path is still ~26× slower than dense even
+after Bug 2 — it scans 430 postings exhaustively where dense BKT
+reaches the same recall by probing 8 heads. Either drop the cap
+(`SPTAG_SPARSE_MAX_POSTINGS=0`) at build time, gate the path by a
+cost model, or remove it entirely; that decision is left for the
+next iteration.
+
+## Files
+
+* Indices: `tenant_index_huffman_v3` (N=4), `tenant_index_huffman_n64`
+* Sweep CSVs (post-fix):
+  `huffman_sweeps/sweep_tenant_index_huffman_v3.csv`,
+  `huffman_sweeps/sweep_noproj_tenant_index_huffman_n64.csv`
+* Diagnostics:
+  `huffman_sweeps/diag_one_query.py` (build-drop verification),
+  `huffman_sweeps/diag_n64_team*.py` (sparse path + head-dedup verification)
+* Source fixes:
+  `AnnService/inc/Core/SPANN/ExtraDynamicSearcher.h` (RNGSelection per-subset scan),
+  `AnnService/src/Core/SPANN/SPANNIndex.cpp` (sparse-path head-iteration deduper check)

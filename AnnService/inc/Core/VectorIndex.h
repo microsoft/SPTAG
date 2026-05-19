@@ -252,7 +252,10 @@ public:
 
         int16_t GetHeadNodeBundleNodeId(SizeType p_sampleId) const;
 
-        bool HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, uint32_t p_routedNodeMask) const;
+        // p_routedNodeMask: per-bundle-node allow-list (size = nodeCount, 1=allowed).
+        // Pass an empty vector to disable bundle-node routing (scan all nodes).
+        // Replaces the previous uint32_t bitmask (which silently dropped nodes >= 32).
+        bool HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, const std::vector<uint8_t>& p_routedNodeMask) const;
 
         // Lightweight tag-content gate for heads: returns true iff the head has
         // hier_mask metadata AND that mask MayIntersect the query mask. Unlike
@@ -265,6 +268,9 @@ public:
         struct PostingScanStats {
             uint64_t m_readPostings = 0;
             uint64_t m_matchedPostings = 0;
+            uint64_t m_prePSPostings = 0;
+            uint64_t m_scannedVectors = 0;
+            uint64_t m_matchedVectors = 0;
 
             uint64_t FalsePositivePostings() const
             {
@@ -316,7 +322,10 @@ public:
 
         static void ResetThreadLocalPostingScanStats();
 
-        static void SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings);
+        static void SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings,
+                                                   uint64_t p_prePSPostings = 0,
+                                                   uint64_t p_scannedVectors = 0,
+                                                   uint64_t p_matchedVectors = 0);
 
         static PostingScanStats GetThreadLocalPostingScanStats();
 

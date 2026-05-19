@@ -25,6 +25,8 @@
 #include <sstream>
 #include <cstring>
 #include <unordered_set>
+#include <unordered_map>
+#include <queue>
 #include <limits>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -515,6 +517,84 @@ void CollectNodesForTag(int tagLevel,
     std::sort(outNodes.begin(), outNodes.end());
 }
 
+// Compute latencyCost / recallPenalty / totalCost / nodeSizes for `candidate`,
+// given the candidate's `nodePivotTags` (leaf-level tag sets) and `pivotLevel`.
+// Used both for the legacy single-shot candidate and for per-step Huffman
+// snapshots in the tree-aware merge below.
+void EvaluatePivotEstimatorCandidateCost(PivotEstimatorCandidate& candidate,
+                                         const std::vector<PivotEstimatorLevelData>& levelData,
+                                         const std::vector<double>& levelWeights,
+                                         int numTagsPerVec,
+                                         double totalVectors,
+                                         double recallTarget,
+                                         double lambdaRecall,
+                                         double estimatedRecall)
+{
+    std::unordered_map<uint32_t, int> nodeByPivotTag;
+    BuildNodeByPivotTag(candidate, nodeByPivotTag);
+
+    const int leafLevel = numTagsPerVec - 1;
+    std::unordered_map<uint32_t, int> leafTagCount;
+    if (leafLevel >= 0 && leafLevel < static_cast<int>(levelData.size())) {
+        const auto& leafTags = levelData[leafLevel].uniqueTags;
+        const auto& leafCounts = levelData[leafLevel].counts;
+        leafTagCount.reserve(leafTags.size());
+        for (size_t i = 0; i < leafTags.size() && i < leafCounts.size(); ++i) {
+            leafTagCount[leafTags[i]] = leafCounts[i];
+        }
+    }
+
+    candidate.nodeSizes.assign(candidate.nodeCount, 0);
+    for (int nid = 0; nid < candidate.nodeCount && nid < static_cast<int>(candidate.nodePivotTags.size()); ++nid)
+    {
+        int sz = 0;
+        for (uint32_t pivotTag : candidate.nodePivotTags[nid]) {
+            auto it = leafTagCount.find(pivotTag);
+            if (it != leafTagCount.end()) sz += it->second;
+        }
+        candidate.nodeSizes[nid] = sz;
+    }
+
+    double latencyCost = 0.0;
+    for (int queryLevel = 0; queryLevel < numTagsPerVec; ++queryLevel)
+    {
+        double levelCost = 0.0;
+        const auto& qTags = levelData[queryLevel].uniqueTags;
+        const auto& qCounts = levelData[queryLevel].counts;
+        for (size_t qIdx = 0; qIdx < qTags.size(); ++qIdx)
+        {
+            std::vector<int> touchedNodes;
+            CollectNodesForTag(queryLevel, qTags[qIdx], candidate, levelData, nodeByPivotTag, touchedNodes);
+            if (touchedNodes.empty()) continue;
+
+            // Sum per-node search cost (each touched subindex runs its own graph
+            // traversal). Using sum(log2(node_size)) instead of log2(sum_sizes)
+            // captures per-node IO + traversal overhead and penalises over-fragmentation.
+            double tagLatency = 0.0;
+            for (int nodeId : touchedNodes)
+            {
+                if (nodeId >= 0 && nodeId < static_cast<int>(candidate.nodeSizes.size())) {
+                    double nodeSize = static_cast<double>(candidate.nodeSizes[nodeId]);
+                    if (nodeSize > 0.0) {
+                        tagLatency += std::log2(nodeSize + 1.0);
+                    }
+                }
+            }
+            if (tagLatency <= 0.0) continue;
+
+            double probability = static_cast<double>(qCounts[qIdx]) / totalVectors;
+            levelCost += probability * tagLatency;
+        }
+        if (queryLevel < static_cast<int>(levelWeights.size())) {
+            latencyCost += levelWeights[queryLevel] * levelCost;
+        }
+    }
+
+    candidate.latencyCost = latencyCost;
+    candidate.recallPenalty = lambdaRecall * std::max(0.0, recallTarget - estimatedRecall);
+    candidate.totalCost = candidate.latencyCost + candidate.recallPenalty;
+}
+
 bool BuildPivotEstimatorComputation(const uint32_t* tags,
                                     int numVectors,
                                     int numTagsPerVec,
@@ -623,107 +703,149 @@ bool BuildPivotEstimatorComputation(const uint32_t* tags,
         return false;
     }
 
-    std::sort(leafEntries.begin(), leafEntries.end(), [](const LeafGreedyPlanEntry& left, const LeafGreedyPlanEntry& right) {
-        if (std::lexicographical_compare(left.ancestorPath.begin(), left.ancestorPath.end(),
-                                         right.ancestorPath.begin(), right.ancestorPath.end())) {
-            return true;
-        }
-        if (std::lexicographical_compare(right.ancestorPath.begin(), right.ancestorPath.end(),
-                                         left.ancestorPath.begin(), left.ancestorPath.end())) {
-            return false;
-        }
-        return left.leafTag < right.leafTag;
-    });
-
-    PivotEstimatorCandidate candidate;
-    candidate.pivotLevel = leafLevel;
-
-    std::vector<uint32_t> currentNodeLeafTags;
-    int currentNodeSize = 0;
-    int currentMinLeafCount = std::numeric_limits<int>::max();
-    auto flushCurrentNode = [&]() {
-        if (currentNodeLeafTags.empty()) {
-            return;
-        }
-        std::sort(currentNodeLeafTags.begin(), currentNodeLeafTags.end());
-        candidate.nodePivotTags.push_back(currentNodeLeafTags);
-        currentNodeLeafTags.clear();
-        currentNodeSize = 0;
-        currentMinLeafCount = std::numeric_limits<int>::max();
+    // ----- Tree-aware Huffman greedy merge -----
+    // Each "group" starts as a single leaf and lives at `currentLevel`. At every
+    // step we pop the globally smallest group, find the smallest mergeable
+    // sibling (same parent at currentLevel-1), and merge them. When no sibling
+    // remains under that parent, the group is left aside; after all merges at
+    // currentLevel are done, surviving groups are promoted to currentLevel-1.
+    // After each individual merge we snapshot the partition into out.candidates
+    // so that FindBestPivotEstimatorCandidate picks the lowest-cost stopping
+    // point under the configured cost model.
+    struct HuffGroup {
+        int level;                       // current depth (leafLevel..0)
+        uint32_t anchorTag;              // tag value at `level` representing this group
+        int size;                        // total vector count
+        std::vector<uint32_t> leafTags;  // leaf-level tags covered
+        bool alive;
     };
 
-    for (const auto& leafEntry : leafEntries)
-    {
-        int nextNodeSize = currentNodeSize + leafEntry.leafCount;
-        int nextMinLeafCount = std::min(currentMinLeafCount, leafEntry.leafCount);
-        bool canMerge = currentNodeLeafTags.empty() ||
-            (static_cast<double>(nextMinLeafCount) / static_cast<double>(nextNodeSize) >= kGreedyLeafMinLocalSelectivity);
+    std::vector<HuffGroup> groups;
+    groups.reserve(leafEntries.size());
+    for (const auto& le : leafEntries) {
+        HuffGroup g;
+        g.level = leafLevel;
+        g.anchorTag = le.leafTag;
+        g.size = le.leafCount;
+        g.leafTags = { le.leafTag };
+        g.alive = true;
+        groups.push_back(std::move(g));
+    }
 
-        if (!canMerge) {
-            flushCurrentNode();
-            nextNodeSize = leafEntry.leafCount;
-            nextMinLeafCount = leafEntry.leafCount;
+    auto ancestorAt = [&](uint32_t tag, int fromLevel, int targetLevel) -> uint32_t {
+        if (fromLevel == targetLevel) return tag;
+        uint32_t a = tag;
+        TryGetAncestorTag(tag, fromLevel, targetLevel, out.levelData, a);
+        return a;
+    };
+
+    // Build a candidate snapshot from currently-alive groups and evaluate cost.
+    auto snapshotCandidate = [&]() {
+        PivotEstimatorCandidate cand;
+        cand.pivotLevel = leafLevel;
+        cand.nodePivotTags.reserve(groups.size());
+        for (const auto& g : groups) {
+            if (!g.alive) continue;
+            std::vector<uint32_t> tagsCopy = g.leafTags;
+            std::sort(tagsCopy.begin(), tagsCopy.end());
+            cand.nodePivotTags.push_back(std::move(tagsCopy));
+        }
+        cand.nodeCount = static_cast<int>(cand.nodePivotTags.size());
+        if (cand.nodeCount > 0) {
+            EvaluatePivotEstimatorCandidateCost(cand, out.levelData, out.levelWeights,
+                                                numTagsPerVec, totalVectors,
+                                                recallTarget, lambdaRecall, estimatedRecall);
+            out.candidates.push_back(std::move(cand));
+        }
+    };
+
+    // Snapshot the initial state (every leaf is its own node).
+    snapshotCandidate();
+
+    int currentLevel = leafLevel;
+    while (currentLevel >= 0)
+    {
+        // Bucket alive groups at currentLevel by parent at currentLevel-1.
+        // At currentLevel == 0 (top org-level) everyone shares a virtual root,
+        // so we collapse them into a single bucket and keep merging until one.
+        constexpr uint32_t kVirtualRootTag = std::numeric_limits<uint32_t>::max();
+        std::unordered_map<uint32_t, std::unordered_set<int>> sibBuckets;
+        for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
+            if (!groups[i].alive || groups[i].level != currentLevel) continue;
+            uint32_t parentTag = (currentLevel == 0)
+                ? kVirtualRootTag
+                : ancestorAt(groups[i].anchorTag, currentLevel, currentLevel - 1);
+            sibBuckets[parentTag].insert(i);
         }
 
-        currentNodeLeafTags.push_back(leafEntry.leafTag);
-        currentNodeSize = nextNodeSize;
-        currentMinLeafCount = nextMinLeafCount;
-    }
-    flushCurrentNode();
-
-    candidate.nodeCount = static_cast<int>(candidate.nodePivotTags.size());
-    if (candidate.nodeCount <= 0) {
-        return false;
-    }
-
-    std::unordered_map<uint32_t, int> nodeByPivotTag;
-    BuildNodeByPivotTag(candidate, nodeByPivotTag);
-    candidate.nodeSizes.assign(candidate.nodeCount, 0);
-    for (int vectorId = 0; vectorId < numVectors; ++vectorId)
-    {
-        uint32_t pivotTag = tags[static_cast<size_t>(vectorId) * static_cast<size_t>(numTagsPerVec) + static_cast<size_t>(candidate.pivotLevel)];
-        auto nodeIt = nodeByPivotTag.find(pivotTag);
-        if (nodeIt != nodeByPivotTag.end()) {
-            candidate.nodeSizes[nodeIt->second] += 1;
+        // Global min-heap of alive groups at currentLevel by size, breaking ties by idx.
+        using HeapEntry = std::tuple<int, int, int>;  // (size, version, idx)
+        std::priority_queue<HeapEntry, std::vector<HeapEntry>, std::greater<HeapEntry>> heap;
+        std::vector<int> version(groups.size(), 0);
+        for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
+            if (groups[i].alive && groups[i].level == currentLevel)
+                heap.emplace(groups[i].size, 0, i);
         }
-    }
 
-    double latencyCost = 0.0;
-    for (int queryLevel = 0; queryLevel < numTagsPerVec; ++queryLevel)
-    {
-        double levelCost = 0.0;
-        const auto& qTags = out.levelData[queryLevel].uniqueTags;
-        const auto& qCounts = out.levelData[queryLevel].counts;
+        while (!heap.empty()) {
+            HeapEntry top = heap.top(); heap.pop();
+            int sz = std::get<0>(top);
+            int ver = std::get<1>(top);
+            int idx = std::get<2>(top);
+            if (!groups[idx].alive || groups[idx].level != currentLevel) continue;
+            if (ver != version[idx] || groups[idx].size != sz) continue;  // stale entry
 
-        for (size_t qIdx = 0; qIdx < qTags.size(); ++qIdx)
-        {
-            std::vector<int> touchedNodes;
-            CollectNodesForTag(queryLevel, qTags[qIdx], candidate, out.levelData, nodeByPivotTag, touchedNodes);
-            if (touchedNodes.empty()) continue;
+            uint32_t parentTag = (currentLevel == 0)
+                ? kVirtualRootTag
+                : ancestorAt(groups[idx].anchorTag, currentLevel, currentLevel - 1);
+            auto bIt = sibBuckets.find(parentTag);
+            if (bIt == sibBuckets.end()) continue;
+            auto& sibSet = bIt->second;
 
-            double touchedSize = 0.0;
-            for (int nodeId : touchedNodes)
-            {
-                if (nodeId >= 0 && nodeId < static_cast<int>(candidate.nodeSizes.size())) {
-                    touchedSize += static_cast<double>(candidate.nodeSizes[nodeId]);
+            // Find smallest alive sibling (excluding idx).
+            int bestSib = -1;
+            int bestSibSize = std::numeric_limits<int>::max();
+            for (int s : sibSet) {
+                if (s == idx) continue;
+                if (!groups[s].alive || groups[s].level != currentLevel) continue;
+                if (groups[s].size < bestSibSize) {
+                    bestSibSize = groups[s].size;
+                    bestSib = s;
                 }
             }
-            if (touchedSize <= 0.0) continue;
+            if (bestSib < 0) {
+                // Sole survivor under this parent at this level → cannot merge
+                // further here; remove from bucket so we stop revisiting it.
+                sibSet.erase(idx);
+                continue;
+            }
 
-            double selectivity = std::max(1e-9, static_cast<double>(qCounts[qIdx]) / totalVectors);
-            double baseLatency = std::log2(touchedSize + 1.0);
-            double tagLatency = baseLatency * (1.0 / selectivity);
-            double probability = static_cast<double>(qCounts[qIdx]) / totalVectors;
-            levelCost += probability * tagLatency;
+            // Merge bestSib into idx.
+            groups[idx].size += groups[bestSib].size;
+            groups[idx].leafTags.insert(groups[idx].leafTags.end(),
+                                        groups[bestSib].leafTags.begin(),
+                                        groups[bestSib].leafTags.end());
+            groups[bestSib].alive = false;
+            sibSet.erase(bestSib);
+
+            // Re-push the grown group; bump its version so older entries become stale.
+            version[idx] += 1;
+            heap.emplace(groups[idx].size, version[idx], idx);
+
+            snapshotCandidate();
         }
 
-        latencyCost += out.levelWeights[queryLevel] * levelCost;
-    }
+        if (currentLevel == 0) break;
 
-    candidate.latencyCost = latencyCost;
-    candidate.recallPenalty = lambdaRecall * std::max(0.0, recallTarget - estimatedRecall);
-    candidate.totalCost = candidate.latencyCost + candidate.recallPenalty;
-    out.candidates.push_back(std::move(candidate));
+        // Promote remaining alive groups to the parent level.
+        for (auto& g : groups) {
+            if (!g.alive || g.level != currentLevel) continue;
+            uint32_t newAnchor = ancestorAt(g.anchorTag, currentLevel, currentLevel - 1);
+            g.level = currentLevel - 1;
+            g.anchorTag = newAnchor;
+        }
+        currentLevel -= 1;
+    }
 
     return !out.candidates.empty();
 }
@@ -731,6 +853,24 @@ bool BuildPivotEstimatorComputation(const uint32_t* tags,
 const PivotEstimatorCandidate* FindBestPivotEstimatorCandidate(const std::vector<PivotEstimatorCandidate>& candidates)
 {
     if (candidates.empty()) return nullptr;
+
+    // Optional override: SPTAG_PIVOT_FORCE_NODE_COUNT=N pins the chosen
+    // candidate to the snapshot whose nodeCount is N (smallest |diff| wins).
+    // Useful for ablations (e.g. N=1 reproduces a single-shard "original"
+    // layout while keeping the node-aware code path warm).
+    const char* envForce = std::getenv("SPTAG_PIVOT_FORCE_NODE_COUNT");
+    if (envForce != nullptr && envForce[0] != '\0') {
+        int target = std::atoi(envForce);
+        if (target > 0) {
+            const PivotEstimatorCandidate* pick = &candidates.front();
+            int bestDiff = std::abs(pick->nodeCount - target);
+            for (const auto& c : candidates) {
+                int d = std::abs(c.nodeCount - target);
+                if (d < bestDiff) { bestDiff = d; pick = &c; }
+            }
+            return pick;
+        }
+    }
 
     const PivotEstimatorCandidate* best = &candidates.front();
     for (const auto& candidate : candidates)
@@ -3199,6 +3339,21 @@ uint64_t TenantIndexManager::GetLastPostingMatchCount() const
 uint64_t TenantIndexManager::GetLastPostingFP() const
 {
     return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().FalsePositivePostings();
+}
+
+uint64_t TenantIndexManager::GetLastPostingPrePS() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().m_prePSPostings;
+}
+
+uint64_t TenantIndexManager::GetLastScannedVectors() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().m_scannedVectors;
+}
+
+uint64_t TenantIndexManager::GetLastMatchedVectors() const
+{
+    return SPTAG::VectorIndex::GetThreadLocalPostingScanStats().m_matchedVectors;
 }
 
 bool TenantIndexManager::UnloadTenant(int p_tenantId)

@@ -1423,6 +1423,61 @@ namespace SPTAG::SPANN {
                 p_index->m_pQuantizer->ReconstructVector((const uint8_t*)queryResults.GetTarget(), rec_query.get());
                 queryResults.SetTarget((ValueType*)(rec_query.get()), p_index->m_pQuantizer);
             }
+
+            replicaCount = 0;
+
+            // When an allowed-head mask is given (subset / node-pure build), do a
+            // direct linear scan over only the allowed heads instead of "search
+            // global BKT → filter by mask". The global-search approach asks for
+            // m_internalResultNum (≈32) closest heads anywhere; for small subsets
+            // (e.g. N=256 leaves ~80 heads per subset out of ~27k total) ~88% of
+            // those candidates are masked out, leaving most vectors with 0
+            // replicas and effectively dropped from the index. Per-subset linear
+            // scan guarantees every vector finds its true top-K allowed heads.
+            if (p_allowedHeads != nullptr)
+            {
+                const SizeType numHeads = static_cast<SizeType>(p_allowedHeads->size());
+                std::vector<std::pair<float, SizeType>> candidates;
+                candidates.reserve(64);
+                const void* queryTarget = queryResults.GetTarget();
+                for (SizeType h = 0; h < numHeads; ++h) {
+                    if ((*p_allowedHeads)[static_cast<size_t>(h)] == 0) continue;
+                    const void* headSample = p_index->GetSample(h);
+                    if (headSample == nullptr) continue;
+                    float dist = p_index->ComputeDistance(queryTarget, headSample);
+                    candidates.emplace_back(dist, h);
+                }
+                std::sort(candidates.begin(), candidates.end(),
+                          [](const std::pair<float, SizeType>& a, const std::pair<float, SizeType>& b) {
+                              return a.first < b.first;
+                          });
+
+                for (const auto& cand : candidates) {
+                    if (replicaCount >= m_opt->m_replicaCount) break;
+                    SizeType candVID = cand.second;
+                    float candDist = cand.first;
+                    // RNG dedup check (same as the global path below).
+                    bool rngAccepted = true;
+                    for (int j = 0; j < replicaCount; ++j) {
+                        float nnDist = p_index->ComputeDistance(p_index->GetSample(candVID),
+                                                                p_index->GetSample(selections[j].node));
+                        if (m_opt->m_rngFactor * nnDist <= candDist) {
+                            rngAccepted = false;
+                            break;
+                        }
+                    }
+                    if (!rngAccepted) continue;
+                    selections[replicaCount].node = candVID;
+                    selections[replicaCount].tonode = p_fullID;
+                    selections[replicaCount].distance = candDist;
+                    if (selections[replicaCount].node == checkHeadID) {
+                        return false;
+                    }
+                    ++replicaCount;
+                }
+                return true;
+            }
+
             p_index->SearchIndex(queryResults);
 
             replicaCount = 0;
@@ -1887,10 +1942,13 @@ namespace SPTAG::SPANN {
             // matching ACL/tags BEFORE reading from SSD.
             if (p_exWorkSpace->m_postingFilter) {
                 auto& ids = p_exWorkSpace->m_postingIDs;
+                p_exWorkSpace->m_postingProbeStats.m_prePSPostings += ids.size();
                 ids.erase(
                     std::remove_if(ids.begin(), ids.end(),
                         [&](int pid) { return !p_exWorkSpace->m_postingFilter(pid); }),
                     ids.end());
+            } else {
+                p_exWorkSpace->m_postingProbeStats.m_prePSPostings += p_exWorkSpace->m_postingIDs.size();
             }
 
             if (db->MultiGet(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers, remainLimit, &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success ||
@@ -1946,6 +2004,11 @@ namespace SPTAG::SPANN {
                                 if (vecTags[ti] == p_exWorkSpace->m_queryTags[qi]) tagMatch = true;
                             }
                         }
+                    }
+
+                    if (trackPostingStats) {
+                        ++p_exWorkSpace->m_postingProbeStats.m_scannedVectors;
+                        if (tagMatch) ++p_exWorkSpace->m_postingProbeStats.m_matchedVectors;
                     }
 
                     if (tagMatch) {
@@ -2352,14 +2415,16 @@ namespace SPTAG::SPANN {
 
                                 std::fill(localSelections.begin(), localSelections.end(), Edge());
                                 int localReplicaCount = 0;
-                                // Bundle structure must NOT constrain RNG replica placement:
-                                // posting layout stays globally-optimal (each vector to its top-K
-                                // nearest heads regardless of node). Bundles only carry the head
-                                // graph + tag-routing metadata; ACL routing happens at query time
-                                // via head→node mapping, not via posting partitioning.
+                                // Bundle structure constrains RNG replica placement by default:
+                                // when a per-node assignment is set, every vector in node N is
+                                // only allowed to land on heads that also belong to node N, so
+                                // postings are strictly node-pure and PostingSignature can prune
+                                // effectively. Set SPTAG_NODE_REPLICA_MASK=0 to fall back to
+                                // legacy globally-optimal RNG layout that ignores node identity
+                                // (relies on signature filtering at query time instead).
                                 static const bool s_disableNodeReplicaMask = []() {
                                     const char* v = std::getenv("SPTAG_NODE_REPLICA_MASK");
-                                    return !(v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
+                                    return (v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F'));
                                 }();
                                 const std::vector<uint8_t>* replicaMask = s_disableNodeReplicaMask
                                     ? nullptr

@@ -255,6 +255,9 @@ public:
     uint64_t GetLastPostingReadCount() const;
     uint64_t GetLastPostingMatchCount() const;
     uint64_t GetLastPostingFP() const;
+    uint64_t GetLastPostingPrePS() const;
+    uint64_t GetLastScannedVectors() const;
+    uint64_t GetLastMatchedVectors() const;
 
     // Enable/disable dropping OS page cache on HeadIndex eviction (for benchmarking)
     void SetDropPageCacheOnEvict(bool enable) { m_dropPageCacheOnEvict = enable; }

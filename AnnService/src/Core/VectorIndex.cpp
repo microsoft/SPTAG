@@ -391,17 +391,19 @@ int16_t VectorIndex::GetHeadNodeBundleNodeId(SizeType p_sampleId) const
     return bundleNodeId;
 }
 
-bool VectorIndex::HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, uint32_t p_routedNodeMask) const
+bool VectorIndex::HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, const std::vector<uint8_t>& p_routedNodeMask) const
 {
     // Only consider heads that are head-only (have their own tags)
     if (!IsHeadNodeHeadOnly(p_sampleId)) return false;
 
-    // If routedNodeMask is provided, check bundle node routing
-    if (p_routedNodeMask != 0) {
+    // If routedNodeMask is provided (non-empty), check bundle node routing.
+    // Use per-node byte allow-list so N can exceed 32 (uint32 bitmask broke
+    // node ablations at N=64/256).
+    if (!p_routedNodeMask.empty()) {
         int16_t bundleNodeId = GetHeadNodeBundleNodeId(p_sampleId);
         if (bundleNodeId >= 0) {
-            // Check if this bundle node is in the routed set
-            if (((p_routedNodeMask >> bundleNodeId) & 1) == 0) {
+            if (static_cast<size_t>(bundleNodeId) >= p_routedNodeMask.size() ||
+                p_routedNodeMask[static_cast<size_t>(bundleNodeId)] == 0) {
                 return false;
             }
         }
@@ -425,10 +427,16 @@ void VectorIndex::ResetThreadLocalPostingScanStats()
     g_threadLocalPostingScanStats = PostingScanStats{};
 }
 
-void VectorIndex::SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings)
+void VectorIndex::SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings,
+                                                 uint64_t p_prePSPostings,
+                                                 uint64_t p_scannedVectors,
+                                                 uint64_t p_matchedVectors)
 {
     g_threadLocalPostingScanStats.m_readPostings = p_readPostings;
     g_threadLocalPostingScanStats.m_matchedPostings = p_matchedPostings;
+    g_threadLocalPostingScanStats.m_prePSPostings = p_prePSPostings;
+    g_threadLocalPostingScanStats.m_scannedVectors = p_scannedVectors;
+    g_threadLocalPostingScanStats.m_matchedVectors = p_matchedVectors;
 }
 
 VectorIndex::PostingScanStats VectorIndex::GetThreadLocalPostingScanStats()

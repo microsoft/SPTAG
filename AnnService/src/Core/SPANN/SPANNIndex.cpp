@@ -682,11 +682,20 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         }
     }
 
-    // Build routed node mask from candidateNodeSet
-    uint32_t routedNodeMask = 0;
-    for (int nid : p_candidateNodes) {
-        if (nid >= 0 && nid < 32) {
-            routedNodeMask |= (1u << nid);
+    // Build routed node mask from candidateNodeSet.
+    // Per-node byte allow-list (empty = no routing constraint). The previous
+    // uint32 bitmask silently dropped any node id >= 32, which broke ablations
+    // at nodeCount=64/256 (most queries ended up with no representable mask
+    // → search either rejected every head or skipped routing entirely).
+    std::vector<uint8_t> routedNodeMask;
+    if (!p_candidateNodes.empty()) {
+        int maxNid = -1;
+        for (int nid : p_candidateNodes) if (nid > maxNid) maxNid = nid;
+        if (maxNid >= 0) {
+            routedNodeMask.assign(static_cast<size_t>(maxNid) + 1, 0);
+            for (int nid : p_candidateNodes) {
+                if (nid >= 0) routedNodeMask[static_cast<size_t>(nid)] = 1;
+            }
         }
     }
 
@@ -854,12 +863,14 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
                 SizeType nbr_B = bIt->second;
                 if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
                     // Bundle node routing check (separate from tag content)
-                    if (routedNodeMask != 0) {
+                    if (!routedNodeMask.empty()) {
                         int16_t bundleNodeId = m_index->GetHeadNodeBundleNodeId(nbr_B);
-                        if (bundleNodeId >= 0 &&
-                            ((routedNodeMask >> bundleNodeId) & 1u) == 0) {
-                            ++crossDroppedByTag;
-                            continue;
+                        if (bundleNodeId >= 0) {
+                            if (static_cast<size_t>(bundleNodeId) >= routedNodeMask.size() ||
+                                routedNodeMask[static_cast<size_t>(bundleNodeId)] == 0) {
+                                ++crossDroppedByTag;
+                                continue;
+                            }
                         }
                     }
                     // Tag-content check via posting hier_mask (no IsHeadNodeHeadOnly gate)
@@ -1268,7 +1279,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                                                      m_index, nullptr, nullptr, nullptr);
         SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
             workSpace->m_postingProbeStats.m_readPostings,
-            workSpace->m_postingProbeStats.m_matchedPostings);
+            workSpace->m_postingProbeStats.m_matchedPostings,
+            workSpace->m_postingProbeStats.m_prePSPostings,
+            workSpace->m_postingProbeStats.m_scannedVectors,
+            workSpace->m_postingProbeStats.m_matchedVectors);
 
         if (ret == ErrorCode::Success &&
             queryTags != nullptr &&
@@ -1284,8 +1298,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
             const SizeType sampleCount = m_index->GetHeadNodeMetaSampleCount();
             for (SizeType sampleId = 0; sampleId < sampleCount; ++sampleId) {
-                // Pass routedNodeMask=0 to skip node check (we're scanning all heads)
-                if (!m_index->HeadNodeMatchesQuery(sampleId, queryHierMask, 0)) {
+                // Pass empty routedNodeMask to skip node check (we're scanning all heads)
+                static const std::vector<uint8_t> kNoRouteMask;
+                if (!m_index->HeadNodeMatchesQuery(sampleId, queryHierMask, kNoRouteMask)) {
                     continue;
                 }
 
@@ -1296,6 +1311,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
                 SizeType globalVID = m_index->GetHeadNodeGlobalVID(sampleId);
                 if (globalVID == MaxSize) {
+                    continue;
+                }
+
+                // Dedup against posting-scan results: a head VID that also lives
+                // in a scanned posting (via its replicas) would otherwise be
+                // AddPoint'd twice, pushing valid GT off top-K.
+                if (workSpace->m_deduper.CheckAndSet(globalVID)) {
                     continue;
                 }
 
@@ -1744,9 +1766,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // VID's own tag is NOT guaranteed to match the query even when its
             // posting members do; rejecting them here ensures top-K is sourced
             // only from posting scans (and the rare head-only ghost vectors).
+            static const std::vector<uint8_t> kNoRouteMask;
             return m_index != nullptr &&
                    m_index->HasHeadNodeMeta() &&
-                   m_index->HeadNodeMatchesQuery(localHid, queryHierMask, 0);
+                   m_index->HeadNodeMatchesQuery(localHid, queryHierMask, kNoRouteMask);
         };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
@@ -1838,7 +1861,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
         SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
             workSpace->m_postingProbeStats.m_readPostings,
-            workSpace->m_postingProbeStats.m_matchedPostings);
+            workSpace->m_postingProbeStats.m_matchedPostings,
+            workSpace->m_postingProbeStats.m_prePSPostings,
+            workSpace->m_postingProbeStats.m_scannedVectors,
+            workSpace->m_postingProbeStats.m_matchedVectors);
         if (ret != ErrorCode::Success)
             return ret;
         m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));

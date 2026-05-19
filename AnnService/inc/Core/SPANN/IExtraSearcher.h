@@ -164,11 +164,17 @@ namespace SPTAG {
             struct PostingProbeStats {
                 std::uint64_t m_readPostings = 0;
                 std::uint64_t m_matchedPostings = 0;
+                std::uint64_t m_prePSPostings = 0;
+                std::uint64_t m_scannedVectors = 0;
+                std::uint64_t m_matchedVectors = 0;
 
                 void Reset()
                 {
                     m_readPostings = 0;
                     m_matchedPostings = 0;
+                    m_prePSPostings = 0;
+                    m_scannedVectors = 0;
+                    m_matchedVectors = 0;
                 }
             };
 
