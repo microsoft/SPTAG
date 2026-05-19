@@ -1373,6 +1373,24 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             candidateNodes.push_back(nodeId);
         }
     }
+    else if (searchHeadBundleNodes.empty() && m_headBundleNodes.size() > 1)
+    {
+        // SPTAG_CROSSEDGE_UNFILTER ablation: for queries with no tag scope
+        // (unfilter) treat all bundle nodes as candidates so the cross-edge
+        // unified traversal can replace the per-node serial fanout. This
+        // lets us validate the capacity model unfilter_QPS ≈ narrow_QPS / N
+        // plus a small cross-edge bonus.
+        static const bool s_crossEdgeUnfilter =
+            (std::getenv("SPTAG_CROSSEDGE_UNFILTER") != nullptr);
+        if (s_crossEdgeUnfilter) {
+            candidateNodes.reserve(m_headBundleNodes.size());
+            for (size_t i = 0; i < m_headBundleNodes.size(); ++i) {
+                const auto& bn = m_headBundleNodes[i];
+                if (bn.headCount == 0 || bn.postingCount == 0) continue;
+                candidateNodes.push_back(static_cast<int>(bn.nodeId));
+            }
+        }
+    }
 
     if (adaptiveFilteredNprobeEnabled && filterSelectivity < 1.0f) {
         const double globalTenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : m_index->GetNumSamples());
@@ -1570,15 +1588,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             int scanned = 0;
 
             // Cross-subgraph unified traversal: when (a) cross-edges are
-            // available, (b) the query tag scope spans more than one routing
-            // node, and (c) we have query tags for PS in-filtering, run a
-            // single best-first search across all bundle nodes' BKTs joined
-            // by cross-edges instead of the serial per-node fanout. This
-            // turns nprobe amplification (K_nodes * nprobe) into a single
-            // budget walk while still covering query's true k-NN via cross
-            // shortcut edges.
+            // available, (b) the query spans more than one routing node,
+            // run a single best-first search across all bundle nodes' BKTs
+            // joined by cross-edges instead of the serial per-node fanout.
+            // The tag-aware in-filter inside CrossSubgraphGraphSearch is
+            // self-guarded (no-op when numQueryTags==0), so unfilter queries
+            // engaged via SPTAG_CROSSEDGE_UNFILTER also flow through here.
             bool useCrossSubgraph = (candidateNodes.size() > 1)
-                && (queryTags != nullptr && numQueryTags > 0)
                 && (LoadHeadCrossEdges() == ErrorCode::Success)
                 && (!m_headCrossEdges.empty());
 

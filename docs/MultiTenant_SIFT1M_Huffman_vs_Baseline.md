@@ -205,6 +205,68 @@ reaches the same recall by probing 8 heads. Either drop the cap
 cost model, or remove it entirely; that decision is left for the
 next iteration.
 
+## Cross-edge ablation on unfilter (N=4, May 19)
+
+Generated `head_cross_edges.bin` on the existing N=4 Huffman index
+via `augmentheadgraph -m 10` (10 extra cross-subgraph edges per head,
+27 338 heads). To test whether cross-edge can supply the unfilter
+"capacity bonus" predicted by the model `unfilter_QPS ≈ narrow_QPS / N +
+cross-edge bonus`, the `useCrossSubgraph` gate was relaxed under
+env flag `SPTAG_CROSSEDGE_UNFILTER=1` to also fire for tag-less
+queries (the in-loop tag filters inside `CrossSubgraphGraphSearch`
+already self-guard when `numQueryTags == 0`). For unfilter queries
+all bundle nodes are injected as candidates; for filtered queries
+the existing routing applies (which under N=4 tree-aligned Huffman
+still resolves to a single node, so cross-edge does not engage and
+filtered numbers are unchanged by construction).
+
+| Level | nprobe | Recall | QPS (baseline) | QPS (+cross-edge unfilter) | Δ |
+|-------|-------:|-------:|---------------:|----------------------------:|---:|
+| unfilter | 52 | 0.95 | **79.4** | **78.4** | ≈0 |
+| org      | 16 | 0.96 | 262.1 | 252.8 | noise |
+| dept     | 24 | 0.97 | 172.4 | 173.3 | noise |
+| team     | 32 | 0.96 | 126.2 | 126.8 | noise |
+| project  | 16 | 1.00 | 344.4 | 337.1 | noise |
+
+**Result: cross-edge does not help unfilter at N=4.** The proposed
+capacity model `unfilter ≈ narrow/N + bonus` does not hold here:
+unfilter (79 QPS) is already roughly **2.5× of team/4** (31.5 QPS),
+i.e. unfilter is not bottlenecked by per-node QPS multiplied by N,
+it is bottlenecked by the total posting-scan budget across all four
+nodes. Cross-edges change the *order* in which heads are visited
+(global best-first walk vs. per-node serial fanout) but they do not
+reduce the *total* posting target the SSD has to fetch — and at
+N=4 the per-node BKTs are big enough that the serial fanout already
+finds high-quality heads in each. The shortcut hops just substitute
+for one or two BKT probes per node, which is in the same noise band.
+
+**Implications:**
+
+* For N=4 tree-aligned Huffman, cross-edge is not a useful lever.
+  The unfilter ceiling is set by total `searchInternalResultNum`
+  posting target and SSD bandwidth, not by graph topology.
+* The clean capacity model is more applicable for *large* N where
+  per-node BKT becomes too small to find good heads alone (cross
+  edges then provide the missing global-neighbourhood signal).
+  N=64 / N=256 cross-edge ablations would be a more honest test
+  of the model.
+* For N=4, the lever for narrow-filter QPS remains posting purity
+  (small posting + no merge), which trades head count and replica
+  budget for tag purity. That ablation requires a rebuild and is
+  the next natural step.
+
+Code changes (commit pending):
+
+* `AnnService/src/Core/SPANN/SPANNIndex.cpp` — `candidateNodes`
+  populated for unfilter under `SPTAG_CROSSEDGE_UNFILTER=1`;
+  `useCrossSubgraph` gate no longer requires `numQueryTags > 0`.
+
+Files:
+
+* Sweep with cross-edge enabled: `huffman_sweeps/sweep_tenant_index_huffman_v3_rebuild.csv`
+* Baseline preserved at: `huffman_sweeps/sweep_tenant_index_huffman_v3_rebuild_baseline.csv`
+* Cross-edge file: `tenant_index_huffman_v3_rebuild/tenant_0/HeadIndex/head_cross_edges.bin` (HECH v1, 27 338 × 10)
+
 ## Files
 
 * Indices: `tenant_index_huffman_v3` (N=4), `tenant_index_huffman_n64`
