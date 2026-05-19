@@ -257,13 +257,21 @@ public:
         // Replaces the previous uint32_t bitmask (which silently dropped nodes >= 32).
         bool HeadNodeMatchesQuery(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask, const std::vector<uint8_t>& p_routedNodeMask) const;
 
-        // Lightweight tag-content gate for heads: returns true iff the head has
-        // hier_mask metadata AND that mask MayIntersect the query mask. Unlike
-        // HeadNodeMatchesQuery this does not require IsHeadNodeHeadOnly and does
-        // not check bundle routing, so it can be used both for "real" heads
-        // (whose hier_mask reflects their posting members' tags) and for ghost
-        // head-only vectors (whose hier_mask reflects their own tags).
+        // Lightweight tag-content gate for heads using the head's OWN-tag mask
+        // (post V3 dual-mask: HierMask reflects the head VID's own tags only).
+        // Use this only when you want "head centroid's own tag must match query"
+        // semantics (e.g., gating top-K return of ghost head-only vectors).
+        // For posting-aware pre-filtering (the historic "joint" behaviour where
+        // a head is kept whenever its posting MAY contain a query-matching
+        // member), use HeadPostingHierMaskMayIntersect instead.
         bool HeadHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const;
+
+        // Posting-member-union mask intersect. Safe (no false negatives) head
+        // pre-filter for routed graph search: kept iff the head's posting
+        // MAY contain a query-matching vector. If posting mask is absent
+        // (e.g. legacy/V2 indexes that only stored own-tag), fails open and
+        // returns true so the caller doesn't drop the head spuriously.
+        bool HeadPostingHierMaskMayIntersect(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_queryMask) const;
 
         struct PostingScanStats {
             uint64_t m_readPostings = 0;

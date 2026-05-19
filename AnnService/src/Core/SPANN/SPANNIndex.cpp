@@ -814,7 +814,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // (RNG / cross-edge expansion) regardless so navigation isn't cut.
         bool keepHead = true;
         if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
-            keepHead = m_index->HeadHierMaskMayIntersect(cur.m_idx_B, queryHierMask);
+            keepHead = m_index->HeadPostingHierMaskMayIntersect(cur.m_idx_B, queryHierMask);
         }
         if (keepHead) {
             p_queryResults->AddPoint(cur.m_idx_B, cur.dist);
@@ -874,7 +874,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
                         }
                     }
                     // Tag-content check via posting hier_mask (no IsHeadNodeHeadOnly gate)
-                    if (!m_index->HeadHierMaskMayIntersect(nbr_B, queryHierMask)) {
+                    if (!m_index->HeadPostingHierMaskMayIntersect(nbr_B, queryHierMask)) {
                         ++crossDroppedByTag;
                         continue;
                     }
@@ -1673,7 +1673,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                     SizeType globalHID = localToGlobalHIDs[static_cast<size_t>(nodeResult->VID)];
 
                     if (tagAwareEnabled
-                        && !m_index->HeadHierMaskMayIntersect(globalHID, tagAwareQueryMask)) {
+                        && !m_index->HeadPostingHierMaskMayIntersect(globalHID, tagAwareQueryMask)) {
                         continue;
                     }
 

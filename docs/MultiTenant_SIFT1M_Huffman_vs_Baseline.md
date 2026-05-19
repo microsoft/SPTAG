@@ -45,6 +45,48 @@ SPTAG  = [359930, 389729, 389729, 331537, ..., 317752]   ← 389729 is a head
 Fix: add `if (workSpace->m_deduper.CheckAndSet(globalVID)) continue;`
 before `AddPoint` in the head-iteration loop.
 
+### Bug 3 — Routed head filter used own-tag mask instead of posting-union mask (V3 dual-mask regression)
+
+The `feat(PerTag): V3 dual-mask HeadNodeMeta` refactor split the head
+metadata into two masks:
+
+* `HierMask` — head centroid's **own** tags only (used by
+  `HeadNodeMatchesQuery` to gate top-K return of head-only ghost
+  vectors).
+* `PostingHierMask` — union of all member-vector tags in the head's
+  posting (a safe, no-false-negative pre-filter for posting selection).
+
+V3 updated the two new consumers it added (`HeadNodeMatchesQuery`,
+`m_postingFilter`) to read the right mask, but **three older
+consumers in the routed-head-bundle search were left calling
+`HeadHierMaskMayIntersect`**, which still reads the now-narrowed
+own-tag mask:
+
+* `SPANNIndex.cpp::CrossSubgraphGraphSearch` — "in-filter" gate on which
+  heads commit to the result heap (and thus drive posting I/O).
+* `SPANNIndex.cpp` cross-edge expansion in the cross-subgraph walk.
+* `SPANNIndex.cpp` routed head-bundle per-node fanout (the
+  `tagAwareEnabled` filter on the `tagAwareQueryMask`).
+
+Because real (non-ghost) heads in PerTagBKTMerge carry only **one**
+own-tag, this silently turned the joint "is this head's posting
+relevant to the query?" filter into "is the head centroid's own tag
+equal to the query tag?". For narrow filters that drops almost every
+otherwise-relevant head, and recall collapses.
+
+Symptom (N = 4 v3, sparse off):
+
+| Filter | Before fix       | After fix           |
+|--------|------------------|---------------------|
+| dept   | ❌ max R 0.887   | **R 0.998 @ np 200** |
+| team   | ❌ max R 0.444   | **R 0.999 @ np 160** |
+
+Fix: introduce `VectorIndex::HeadPostingHierMaskMayIntersect`
+(reads the V3 `PostingHierMask`, fail-open for legacy / V2 indexes
+that don't have it) and re-point all three SPANN routed-search call
+sites to it. `HeadHierMaskMayIntersect` is kept for its current
+own-tag semantics and its comment updated to spell out the contract.
+
 ## Sparse path vs dense path
 
 `sparse_tags.bin` materializes tag → posting-id lists for tags whose
@@ -60,15 +102,20 @@ separate `tagpure_meta.bin` fast path (which has its own dedup).
 
 ## Per-filter best operating point at R ≥ 0.95 (post-fix, dense path)
 
-| Filter   | N = 4 (v3)              | N = 64                  |
-|----------|--------------------------|--------------------------|
-| unfilter | R 0.97 @ np 64 → **63 QPS**  | ❌ max 0.78          |
-| org      | R 0.99 @ np 32 → **128 QPS** | R 0.973 @ np 100 → 49 QPS |
-| dept     | ❌ max 0.876               | R 0.952 @ np 24 → **209 QPS** |
-| team     | ❌ max 0.419               | R 0.979 @ np 8  → **519 QPS** |
-| project  | R 1.000 @ np 16 → 329 QPS | R 1.000 @ np 16 → 330 QPS |
+| Filter   | N = 1 (plain)¹           | N = 4 (v3)              | N = 64                  |
+|----------|---------------------------|--------------------------|--------------------------|
+| unfilter | R 0.961 @ np 32 → **168 QPS** | R 0.953 @ np 52 → 79 QPS  | ❌ max 0.78          |
+| org      | R 0.964 @ np 40 → **133 QPS** | R 0.955 @ np 16 → **262 QPS** | R 0.973 @ np 100 → 49 QPS |
+| dept     | R 0.965 @ np 64 → 86 QPS  | R 0.973 @ np 24 → **172 QPS** | R 0.952 @ np 24 → **209 QPS** |
+| team     | R 0.977 @ np 128 → 56 QPS | R 0.963 @ np 32 → **126 QPS** | R 0.979 @ np 8  → **519 QPS** |
+| project  | R 1.000 @ np 16 → 331 QPS | R 1.000 @ np 16 → 344 QPS | R 1.000 @ np 16 → 330 QPS |
 
-Project remains R = 1.000 ≈ 330 QPS at both sizes because it routes
+¹ N = 1 "plain" = single subset (no partitioning), `final_ratio=0.1`,
+`oversample=1.0`, `merge_group=1` — i.e. **no oversample, no merge**.
+Closest setup we have to a baseline non-partitioned SPANN under the same
+build code, used as a sanity floor.
+
+Project remains R = 1.000 ≈ 330 QPS at all sizes because it routes
 through `tagpure_meta.bin` (KV-backed exhaustive top-K) — independent
 of partition count.
 
@@ -76,14 +123,27 @@ of partition count.
 
 Partition size **N** controls which filter level is best served:
 
-* **N = 4** aligns with the org partition. unfilter / org are
-  strongest; dept and team queries route to wrong subsets and cannot
-  reach 0.95 regardless of nprobe.
+* **N = 1 (plain)** behaves like a single-subset baseline: every level
+  is reachable at R ≥ 0.95 (including team, at 56 QPS / np = 128), but
+  no level is fast. It is the "balanced fallback" — useful as a sanity
+  floor and as the QPS curve a partitioned build must beat.
+* **N = 4** aligns with the org partition (each of the 4 subsets =
+  one org, and is internally tree-aligned down to the leaf, so dept
+  / team / project queries all route into exactly one subset). After
+  Bug 3 is fixed, **all four ACL levels** reach R ≥ 0.95 under
+  N = 4 — org is the sweet spot (262 QPS), dept and team are also
+  strong (172 and 126 QPS). Unfilter (np = 52 → 79 QPS) is **slower**
+  than N = 1 plain (168 QPS) — the 4-way fanout dilutes the nprobe
+  budget across subsets, even though it's good for filtered queries.
 * **N = 64** aligns with the team partition. dept and especially team
   become very fast (519 QPS at np = 8 for team) because each team
   query routes into ~1 subset of ~430 heads. unfilter degrades because
   the search has to cover 64 subsets in series — nprobe budget is
-  spread thin.
+  spread thin, recall caps at 0.78 regardless of nprobe.
+
+So the trade-off is monotonic in N: increasing N concentrates effort
+at narrow filters at the cost of wide ones, and the inflection points
+match the filter-level cardinalities (4 / 64 here).
 
 The expected behaviour matches the design: **pick N close to the
 cardinality of the filter level you care about most**. N = 4 for an
@@ -93,20 +153,20 @@ org-centric workload, N = 64 for a team-centric workload.
 
 The choice of N is **not** symmetric between "too small" and "too large":
 
-* **N too small (e.g. N = 4 for dept/team/project)** — partition is
-  too coarse to isolate narrow filters, but every narrow filter query
-  carries a tag, so it can be **rescued by a tag-aware sidecar that
-  bypasses partition entirely**:
+* **N too small** — partition under-covers narrow filters. With the
+  Bug 3 fix (joint posting-mask head filter), N = 4 actually does NOT
+  exhibit this failure on this dataset — dept and team both clear
+  R ≥ 0.95 because every level routes into exactly one subset and the
+  joint filter keeps the right heads. Even if it did, every narrow
+  query carries a tag and can be rescued by a tag-aware sidecar that
+  bypasses partition entirely:
   - `tagpure_meta.bin` (KV-backed flat scan over all vectors with that
-    tag) — this is exactly why project still hits R = 1.000 / 329 QPS
-    at N = 4. Independent of N.
+    tag) — independent of N. This is what keeps project at R = 1.000
+    / ~330 QPS across all N.
   - `sparse_tags.bin` (per-tag posting list) — same idea, currently
-    Bug 2-fixed but still inefficient (Bug B open).
-  - dept / team would also be rescuable today by raising
-    `SPTAG_TAG_PURE_THRESHOLD` above team's 6 373 vec/tag, or by
-    fixing the sparse path to respect nprobe.
-  - **Conclusion: pick N small, then add tag sidecars to patch
-    whichever narrow filters miss.**
+    Bug 2-fixed but still inefficient.
+  - **Conclusion: pick N small, and tag sidecars exist as a backstop
+    if a narrow filter ever does miss.**
 
 * **N too large (e.g. N = 64 for unfilter)** — there is **no
   sidecar to fall back to**. An unfilter query carries no tag, so
@@ -119,10 +179,11 @@ The choice of N is **not** symmetric between "too small" and "too large":
     side-by-side.
 
 * Engineering recommendation: **bias N toward the unfilter / wide-filter
-  needs** (small N like 4 or 16), and use tag-aware sidecars to lift
-  whichever narrow filter levels matter. The reverse — picking large N
-  for narrow filters and hoping to patch unfilter — has no patch
-  available within this architecture.
+  needs** (small N like 4 or 16), relying on the partition's tree
+  alignment to also cover narrower filters, and use tag-aware sidecars
+  to lift whichever narrow filter levels still miss. The reverse —
+  picking large N for narrow filters and hoping to patch unfilter —
+  has no patch available within this architecture.
 
 ## Single-query verification (n64, team = 43, 6 373 vectors)
 
@@ -148,8 +209,9 @@ next iteration.
 
 * Indices: `tenant_index_huffman_v3` (N=4), `tenant_index_huffman_n64`
 * Sweep CSVs (post-fix):
-  `huffman_sweeps/sweep_tenant_index_huffman_v3.csv`,
-  `huffman_sweeps/sweep_noproj_tenant_index_huffman_n64.csv`
+  `huffman_sweeps/sweep_tenant_index_huffman_n1_plain.csv` (N=1, no oversample, no merge),
+  `huffman_sweeps/sweep_tenant_index_huffman_v3.csv` (N=4),
+  `huffman_sweeps/sweep_noproj_tenant_index_huffman_n64.csv` (N=64, sparse off)
 * Diagnostics:
   `huffman_sweeps/diag_one_query.py` (build-drop verification),
   `huffman_sweeps/diag_n64_team*.py` (sparse path + head-dedup verification)
