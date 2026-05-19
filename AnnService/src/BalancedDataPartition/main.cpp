@@ -712,7 +712,9 @@ template <typename T> void Process(MPI_Datatype type)
                 if (metas != nullptr)
                     CHECKIO(metaindexout, WriteBinary, sizeof(SizeType), (char *)(&args.counts[i]));
                 if (globalids != nullptr) {
+                    DimensionType icols = globalids->C();
                     CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&args.counts[i]));
+                    CHECKIO(gidout, WriteBinary, sizeof(DimensionType), (char *)(&icols));
                 }
                 std::uint64_t offset = 0;
                 T *recvbuf = args.newTCenters;
@@ -1270,7 +1272,9 @@ template <typename T> void Partition()
         if (metas != nullptr)
             CHECKIO(metaindexout, WriteBinary, sizeof(SizeType), (char *)(&rows));
         if (globalids != nullptr) {
+            DimensionType icols = globalids->C();
             CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&rows));
+            CHECKIO(gidout, WriteBinary, sizeof(DimensionType), (char *)(&cols));
         }
         std::uint64_t offset = 0;
         SizeType records = 0;
