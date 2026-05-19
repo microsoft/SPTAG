@@ -1274,7 +1274,7 @@ template <typename T> void Partition()
         if (globalids != nullptr) {
             DimensionType icols = globalids->C();
             CHECKIO(gidout, WriteBinary, sizeof(SizeType), (char *)(&rows));
-            CHECKIO(gidout, WriteBinary, sizeof(DimensionType), (char *)(&cols));
+            CHECKIO(gidout, WriteBinary, sizeof(DimensionType), (char *)(&icols));
         }
         std::uint64_t offset = 0;
         SizeType records = 0;
