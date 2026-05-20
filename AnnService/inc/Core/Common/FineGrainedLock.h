@@ -56,10 +56,6 @@ namespace SPTAG
                 return GetLock(idx);
             }
 
-            // Per-posting lock identity. Two indices share a lock iff they are
-            // the same posting, so external callers can use `hash_func(a) ==
-            // hash_func(b)` as a self-lock guard (e.g. in Split, to skip
-            // re-locking the same head VID).
             static inline unsigned hash_func(unsigned idx)
             {
                 return idx;
