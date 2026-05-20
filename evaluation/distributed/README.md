@@ -24,20 +24,23 @@ below).
 ## Architecture
 
 ```
-                    ┌──────────────┐
-                    │   Driver     │  (node 0)
-                    │  RunBenchmark│
-                    │   + Router   │
-                    └──┬───┬───┬──┘
-           TCP Dispatch│   │   │
-              ┌────────┘   │   └────────┐
-              ▼            ▼            ▼
+                    ┌────────────────────┐
+                    │   Driver = Worker 0│  (node 0)
+                    │   + Dispatcher     │
+                    └─┬──┬──┬────────────┘
+       TCP Dispatch  │  │  │       ▲ ▲ ▲
+        (broadcast)  │  │  │       │ │ │  status replies
+              ┌──────┘  │  └──────┐│ │ │
+              ▼         ▼         ▼│ │ │
         ┌──────────┐ ┌──────────┐ ┌──────────┐
         │ Worker 1 │ │ Worker 2 │ │ Worker N │
-        │  + Router│ │  + Router│ │  + Router│
-        └────┬─────┘ └────┬─────┘ └────┬─────┘
-             │            │            │
-             └────────────┼────────────┘
+        └──┬───▲───┘ └──┬───▲───┘ └──┬───▲───┘
+           │   │        │   │        │   │
+           └───┴────────┴───┴────────┴───┘
+              PostingRouter peer-to-peer
+              (remote append / head sync /
+               merge hints, by hash owner)
+                          │
                           ▼
                 ┌───────────────────┐
                 │ Shared TiKV raft  │  N PDs (one raft group) +
@@ -45,15 +48,19 @@ below).
                 └───────────────────┘
 ```
 
-- **Driver** (node 0): builds the index, sends Search/Insert/Stop commands via
-  TCP dispatch.
-- **Workers** (nodes 1..N): receive commands, execute their shard locally,
-  report results back over the dispatch channel.
+- **Driver** (node 0): also runs as **worker 0**. On top of the worker role,
+  it owns the dispatcher: builds the initial index, then broadcasts
+  Search/Insert/Stop commands to the other workers over TCP dispatch.
+- **Workers** (nodes 0..N-1): each owns a shard of the head index by hash.
+  Workers talk to each other peer-to-peer through PostingRouter for remote
+  append, head sync, and merge hints — there is no driver-mediated forwarding.
+  On each `DispatchCommand` they execute the local part of the request and
+  report status back to the dispatcher.
 - **Shared TiKV cluster**: every node runs a PD + TiKV container; all PDs join
   one raft group, all TiKVs point to all PDs. PD routes each key to the store
   that owns its region.
-- **PostingRouter**: hash-based head routing, remote append, head sync,
-  dispatch protocol.
+- **PostingRouter**: hash-based head routing, remote append, head sync, and
+  the TCP dispatch transport used by the dispatcher.
 
 ## TiKV deployment model
 
@@ -213,10 +220,14 @@ What `run` does:
    all postings straight to TiKV via PD-routed RPCs — there is no need for a
    distributed build phase.
 2. **Distribute**: rsync head index + perftest files from driver to each worker.
-3. **Workers**: SSH-launches `SPTAGTest` on each worker with `WORKER_INDEX=i`
-   and the per-node ini (router enabled, `Rebuild=false`).
-4. **Driver**: relaunches `SPTAGTest` with router enabled, `Rebuild=false`.
-   The driver dispatches Insert / Search commands across batches via TCP.
+3. **Workers**: SSH-launches `SPTAGTest` on each remote worker (nodes 1..N-1)
+   with `WORKER_INDEX=i` and the per-node ini (router enabled,
+   `Rebuild=false`). Workers wire PostingRouter so they can reach every peer
+   directly for remote append / head sync.
+4. **Driver**: relaunches `SPTAGTest` on node 0 with router enabled,
+   `Rebuild=false`. The same process acts as **worker 0** (owns its hash
+   shard like any other worker) **and** as the dispatcher (broadcasts Insert
+   / Search / Stop over TCP and waits for status replies).
 5. **Collect**: driver sends Stop, joins worker logs into `benchmark_logs/`.
 
 > The "build on the driver, then distribute and run" split is a workaround:
