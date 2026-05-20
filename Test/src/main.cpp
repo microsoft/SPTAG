@@ -7,9 +7,7 @@
 
 #include <boost/test/tree/visitor.hpp>
 #include <string>
-#ifdef TIKV
 #include <absl/synchronization/mutex.h>
-#endif
 
 using namespace boost::unit_test;
 
@@ -38,9 +36,8 @@ struct GlobalFixture
         // adds GraphCycles bookkeeping under a global spinlock on every Lock();
         // observed to consume ~12% CPU under high worker-thread parallelism in
         // gRPC client paths (perf-recorded 2026-05-06).
-#ifdef TIKV
-    	absl::SetMutexDeadlockDetectionMode(absl::OnDeadlockCycle::kIgnore);
-#endif
+        absl::SetMutexDeadlockDetectionMode(absl::OnDeadlockCycle::kIgnore);
+
         SPTAGVisitor visitor;
         traverse_test_tree(framework::master_test_suite(), visitor, false);
     }

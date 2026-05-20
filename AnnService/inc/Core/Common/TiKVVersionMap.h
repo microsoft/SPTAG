@@ -385,6 +385,58 @@ namespace SPTAG
                 else if (oldVal != 0xfe && version == 0xfe) m_deleted++;
             }
 
+            // Group writes by chunk: 1 ReadChunk + N byte-modifications + 1 WriteChunk
+            // per chunk, instead of N × (ReadChunk + WriteChunk). 
+            void SetVersionBatch(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
+            {
+                size_t n = std::min(vids.size(), versions.size());
+                if (n == 0) return;
+                const SizeType localCount = m_count.load();
+
+                // Group (idx into vids/versions) by chunk id.
+                std::unordered_map<SizeType, std::vector<size_t>> byChunk;
+                byChunk.reserve(n);
+                for (size_t i = 0; i < n; i++) {
+                    SizeType vid = vids[i];
+                    if (vid < 0 || vid >= localCount) continue;
+                    byChunk[ChunkId(vid)].push_back(i);
+                }
+                if (byChunk.empty()) return;
+
+                long deletedDelta = 0;
+                for (auto& kv : byChunk) {
+                    SizeType cid = kv.first;
+                    auto& idxs = kv.second;
+                    std::lock_guard<std::mutex> lock(ChunkMutex(cid));
+                    std::string chunk = ReadChunkCached(cid);
+                    if (chunk.empty()) {
+                        chunk.assign(m_chunkSize, static_cast<char>(0xff));
+                    }
+                    bool dirty = false;
+                    for (size_t i : idxs) {
+                        SizeType vid = vids[i];
+                        uint8_t newVal = versions[i];
+                        int offset = ChunkOffset(vid);
+                        if (offset < 0 || offset >= (int)chunk.size()) continue;
+                        uint8_t oldVal = static_cast<uint8_t>(chunk[offset]);
+                        if (oldVal == newVal) continue;
+                        if (oldVal == 0xfe && newVal != 0xfe) deletedDelta--;
+                        else if (oldVal != 0xfe && newVal == 0xfe) deletedDelta++;
+                        chunk[offset] = static_cast<char>(newVal);
+                        dirty = true;
+                    }
+                    if (dirty) {
+                        auto ret = WriteChunk(cid, chunk);
+                        if (ret != ErrorCode::Success) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "TiKVVersionMap::SetVersionBatch: WriteChunk failed chunk=%d layer=%d\n",
+                                cid, m_layer);
+                        }
+                    }
+                }
+                if (deletedDelta != 0) m_deleted += deletedDelta;
+            }
+
             bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
             {
                 if (key < 0 || key >= m_count.load()) {

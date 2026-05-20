@@ -1227,6 +1227,15 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
             m_extraSearchers.emplace_back(std::make_shared<ExtraDynamicSearcher<T>>(m_options, m_extraSearchers.size(), this, m_db));
         }
 
+        // Hand the routing worker (if any) to the freshly-created searcher
+        // before BuildIndex runs. Build itself no longer routes postings
+        // (shared TiKV cluster — the driver writes straight to TiKV and PD
+        // routes each key to the owning store), but other build-time hooks
+        // that consult m_worker still benefit from seeing a non-null value.
+        if (m_pendingWorker) {
+            m_extraSearchers.back()->SetWorker(m_pendingWorker);
+        }
+
         {
             std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
             if (ptr == nullptr ||
@@ -1862,7 +1871,74 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     }
     workSpace->m_deduper.clear();
     workSpace->m_postingIDs.clear();
-    return m_extraSearchers[0]->AddIndex(workSpace.get(), vectorSet, begin);
+
+    // Use multiple threads for RNGSelection + Append when vector count is large enough.
+    // Each thread fetch_add's one vector and calls ExtraDynamicSearcher::AddIndex with a
+    // single-vector view, so AppendBatchAsync flushes per-vector and pipelines with the
+    // worker side rather than queuing the whole batch behind a single huge flush.
+    if (p_vectorNum > 1 && m_options.m_iSSDNumberOfThreads > 1) {
+        int numThreads = std::min((int)p_vectorNum, m_options.m_iSSDNumberOfThreads);
+        std::atomic_int nextVec{0};
+        std::atomic<ErrorCode> globalError{ErrorCode::Success};
+        int printStep = std::max(1, p_vectorNum / 50);
+
+        auto worker = [&](bool isFirst) {
+            std::unique_ptr<ExtraWorkSpace> ws;
+            ExtraWorkSpace* wsPtr;
+            if (isFirst) {
+                wsPtr = workSpace.get();
+            } else {
+                ws = m_workSpaceFactory->GetWorkSpace();
+                if (!ws) {
+                    ws.reset(new ExtraWorkSpace());
+                    InitWorkSpace(ws.get(), false);
+                } else {
+                    InitWorkSpace(ws.get(), true);
+                }
+                ws->m_deduper.clear();
+                ws->m_postingIDs.clear();
+                wsPtr = ws.get();
+            }
+
+            while (globalError.load(std::memory_order_relaxed) == ErrorCode::Success) {
+                int v = nextVec.fetch_add(1);
+                if (v >= p_vectorNum) break;
+
+                if (v % printStep == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AddIndex bulk: %d/%d (%.1f%%)\n",
+                                 v, p_vectorNum, v * 100.0 / p_vectorNum);
+                    GetDBStat();
+                }
+
+                std::shared_ptr<VectorSet> singleVec = std::make_shared<BasicVectorSet>(
+                    ByteArray((std::uint8_t*)vectorSet->GetVector(v),
+                              sizeof(T) * p_dimension, false),
+                    GetEnumValueType<T>(), p_dimension, 1);
+                ErrorCode ret = m_extraSearchers[0]->AddIndex(wsPtr, singleVec,
+                    m_extraSearchers[0]->AllocateGlobalVID(begin + v));
+                if (ret != ErrorCode::Success) {
+                    globalError.store(ret, std::memory_order_relaxed);
+                }
+            }
+
+            if (!isFirst && ws) {
+                m_workSpaceFactory->ReturnWorkSpace(std::move(ws));
+            }
+        };
+
+        std::vector<std::thread> threads;
+        threads.reserve(numThreads - 1);
+        for (int t = 1; t < numThreads; t++) {
+            threads.emplace_back(worker, false);
+        }
+        worker(true);
+        for (auto& t : threads) t.join();
+
+        return globalError.load();
+    }
+
+    return m_extraSearchers[0]->AddIndex(workSpace.get(), vectorSet,
+        m_extraSearchers[0]->AllocateGlobalVID(begin));
 }
 
 template <typename T>

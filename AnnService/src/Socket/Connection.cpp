@@ -26,10 +26,19 @@ Connection::Connection(ConnectionID p_connectionID, boost::asio::ip::tcp::socket
 
 void Connection::Start()
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
-                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
-                 m_socket.remote_endpoint().address().to_string().c_str(),
-                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+    boost::system::error_code epEc;
+    auto localEp = m_socket.local_endpoint(epEc);
+    auto remoteEp = m_socket.remote_endpoint(epEc);
+    if (!epEc) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Start, local: %u, remote: %s:%u\n",
+                     static_cast<uint32_t>(localEp.port()),
+                     remoteEp.address().to_string().c_str(),
+                     static_cast<uint32_t>(remoteEp.port()));
+    } else {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Connection Start, socket not connected: %s\n",
+                     epEc.message().c_str());
+        return;
+    }
 
     if (!m_stopped.exchange(false))
     {
@@ -42,10 +51,15 @@ void Connection::Start()
 
 void Connection::Stop()
 {
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
-                 static_cast<uint32_t>(m_socket.local_endpoint().port()),
-                 m_socket.remote_endpoint().address().to_string().c_str(),
-                 static_cast<uint32_t>(m_socket.remote_endpoint().port()));
+    boost::system::error_code epEc;
+    auto localEp = m_socket.local_endpoint(epEc);
+    auto remoteEp = m_socket.remote_endpoint(epEc);
+    if (!epEc) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "Connection Stop, local: %u, remote: %s:%u\n",
+                     static_cast<uint32_t>(localEp.port()),
+                     remoteEp.address().to_string().c_str(),
+                     static_cast<uint32_t>(remoteEp.port()));
+    }
 
     if (m_stopped.exchange(true))
     {

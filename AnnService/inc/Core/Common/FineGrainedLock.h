@@ -56,10 +56,27 @@ namespace SPTAG
                 return GetLock(idx);
             }
 
+            // Per-posting lock identity. Two indices share a lock iff they are
+            // the same posting, so external callers can use `hash_func(a) ==
+            // hash_func(b)` as a self-lock guard (e.g. in Split, to skip
+            // re-locking the same head VID).
             static inline unsigned hash_func(unsigned idx)
             {
                 return idx;
             }
+
+            // Bucket index for the internal mutex-sharded unordered_map of
+            // per-posting locks. Exposed for callers that need an array sized
+            // to BucketCount and indexed by the same granularity as the lock
+            // pool (e.g. ExtraDynamicSearcher::m_remoteBucketLocked).
+            static inline unsigned BucketIndex(SizeType idx)
+            {
+                unsigned key = static_cast<unsigned>(idx);
+                return ((unsigned)(key * 99991) + _rotl(key, 2) + 101) & BucketMask;
+            }
+
+            static const int BucketMask = 32767;
+            static const int BucketCount = BucketMask + 1;
         private:
             struct Bucket {
                 std::mutex mutex;
@@ -76,14 +93,6 @@ namespace SPTAG
                 return *iter->second;
             }
 
-            static inline unsigned BucketIndex(SizeType idx)
-            {
-                unsigned key = static_cast<unsigned>(idx);
-                return ((unsigned)(key * 99991) + _rotl(key, 2) + 101) & BucketMask;
-            }
-
-            static const int BucketMask = 32767;
-            static const int BucketCount = BucketMask + 1;
             mutable std::unique_ptr<Bucket[]> m_buckets;
         };
     }

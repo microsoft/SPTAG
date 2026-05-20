@@ -12,6 +12,7 @@
 #include "kvproto/tikvpb.grpc.pb.h"
 #include "kvproto/kvrpcpb.pb.h"
 #include "kvproto/metapb.pb.h"
+#include "kvproto/pdpb.pb.h"
 #include "kvproto/pdpb.grpc.pb.h"
 
 #include <map>

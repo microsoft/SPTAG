@@ -5,6 +5,7 @@
 #define _SPTAG_VECTORINDEX_H_
 
 #include <unordered_set>
+#include <map>
 #include "Common.h"
 #include "Common/WorkSpace.h"
 #include "inc/Helper/DiskIO.h"
@@ -159,6 +160,14 @@ public:
     static std::shared_ptr<VectorIndex> CreateInstance(IndexAlgoType p_algo, VectorValueType p_valuetype);
 
     static ErrorCode LoadIndex(const std::string& p_loaderFilePath, std::shared_ptr<VectorIndex>& p_vectorIndex);
+
+    /// LoadIndex with config overrides applied between LoadIndexConfig and LoadIndexData,
+    /// so settings such as TiKVPDAddresses take effect before the underlying KV connection
+    /// is constructed. Override keys may be section-qualified ("Section.Param"); unqualified
+    /// keys default to the "BuildSSDIndex" section.
+    static ErrorCode LoadIndex(const std::string& p_loaderFilePath,
+                               const std::map<std::string, std::string>& p_paramOverrides,
+                               std::shared_ptr<VectorIndex>& p_vectorIndex);
 
     static ErrorCode LoadIndexFromFile(const std::string& p_file, std::shared_ptr<VectorIndex>& p_vectorIndex);
 

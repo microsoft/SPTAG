@@ -10,6 +10,12 @@ include_directories(${Zstd}/lib)
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
 
+# Include Socket sources in core lib for PostingRouter
+file(GLOB SOCKET_HDR_FILES ${AnnService}/inc/Socket/*.h)
+file(GLOB SOCKET_SRC_FILES ${AnnService}/src/Socket/*.cpp)
+list(APPEND HDR_FILES ${SOCKET_HDR_FILES})
+list(APPEND SRC_FILES ${SOCKET_SRC_FILES})
+
 set(SPDK_LIBRARIES "")
 if (SPDK)
     set(Spdk ${PROJECT_SOURCE_DIR}/ThirdParty/spdk/build)
@@ -73,7 +79,7 @@ endif()
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
 target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES} ${Boost_LIBRARIES})
 
 if (MSVC)
     # SPANNIndex.cpp can exceed COFF section limits in Debug without /bigobj.

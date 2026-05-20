@@ -27,13 +27,47 @@ enum class PacketType : std::uint8_t
 
     SearchRequest = 0x03,
 
+    AppendRequest = 0x04,
+
+    BatchAppendRequest = 0x05,
+
+    HeadSyncRequest = 0x07,
+
+    RemoteLockRequest = 0x08,
+
+    DispatchCommand = 0x09,
+
+    NodeRegisterRequest = 0x0A,
+
+    RingUpdate = 0x0B,
+
+    RingUpdateACK = 0x0C,
+
+    // Cross-node merge hint. Search on node X observes posting H is
+    // underfull, but H is owned by node Y. X sends MergeRequest to Y so
+    // Y can schedule its own MergeAsync(H). Fire-and-forget (no response
+    // packet): the receiver's MergeAsync already dedups via m_mergeList,
+    // a lost notification just means Y discovers H underfull via some
+    // other path (own search, own Append, explicit RefineIndex).
+    MergeRequest = 0x11,
+
     ResponseMask = 0x80,
+
+    NodeRegisterResponse = ResponseMask | NodeRegisterRequest,
 
     HeartbeatResponse = ResponseMask | HeartbeatRequest,
 
     RegisterResponse = ResponseMask | RegisterRequest,
 
-    SearchResponse = ResponseMask | SearchRequest
+    SearchResponse = ResponseMask | SearchRequest,
+
+    AppendResponse = ResponseMask | AppendRequest,
+
+    BatchAppendResponse = ResponseMask | BatchAppendRequest,
+
+    RemoteLockResponse = ResponseMask | RemoteLockRequest,
+
+    DispatchResult = ResponseMask | DispatchCommand,
 };
 
 

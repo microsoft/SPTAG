@@ -22,6 +22,11 @@
 namespace SPTAG {
     namespace SPANN {
 
+        // Forward declaration; the only IExtraSearcher API that touches WorkerNode
+        // is the SetWorker() hook below. Concrete searchers that care
+        // (ExtraDynamicSearcher) include the full header and override.
+        class WorkerNode;
+
         struct SearchStats
         {
             SearchStats()
@@ -589,6 +594,11 @@ namespace SPTAG {
                 SizeType p_begin) { return ErrorCode::Undefined; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
 
+            // Allocate globalVID to this node's BKT counter.
+            // ExtraDynamicSearcher overrides this with
+            // the stripe formula when m_worker is enabled.
+            virtual SizeType AllocateGlobalVID(SizeType p_localVID) const { return p_localVID; }
+
             virtual SizeType GetNumSamples() const = 0;
 
             virtual bool ContainSample(const SizeType idx) const
@@ -624,6 +634,11 @@ namespace SPTAG {
                 return ErrorCode::Undefined;
             }
 
+            // Bind a routing worker (no-op by default). ExtraDynamicSearcher
+            // overrides this to install the cross-node append + put +
+            // fetch-postings callbacks. ExtraStaticSearcher etc. ignore it.
+            virtual void SetWorker(WorkerNode* /*worker*/) {}
+
             virtual bool AllFinished() { return false; }
             virtual void GetDBStats() { return; }
             virtual int64_t GetNumBlocks() { return 0; }
@@ -640,6 +655,8 @@ namespace SPTAG {
             }
 
             virtual ErrorCode Checkpoint(std::string prefix) { return ErrorCode::Success; }
+
+            virtual void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) {}
         };
     } // SPANN
 } // SPTAG

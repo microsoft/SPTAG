@@ -82,6 +82,58 @@ namespace SimpleSerialization
     }
 
 
+    /// Bounds-checked variants of SimpleReadBuffer.
+    /// All return nullptr if a read would overrun [p_buffer, p_bufEnd).
+    /// p_buffer is also returned as nullptr (and p_val left unchanged) if it is already nullptr.
+    template<typename T>
+    inline const std::uint8_t*
+    SafeSimpleReadBuffer(const std::uint8_t* p_buffer, const std::uint8_t* p_bufEnd, T& p_val)
+    {
+        static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
+                      "Only applied for fundanmental type.");
+
+        if (p_buffer == nullptr) return nullptr;
+        if (p_bufEnd != nullptr && static_cast<std::size_t>(p_bufEnd - p_buffer) < sizeof(T)) return nullptr;
+        p_val = *(reinterpret_cast<const T*>(p_buffer));
+        return p_buffer + sizeof(T);
+    }
+
+
+    inline const std::uint8_t*
+    SafeSimpleReadBuffer(const std::uint8_t* p_buffer, const std::uint8_t* p_bufEnd, std::string& p_val)
+    {
+        p_val.clear();
+        if (p_buffer == nullptr) return nullptr;
+        std::uint32_t len = 0;
+        p_buffer = SafeSimpleReadBuffer(p_buffer, p_bufEnd, len);
+        if (p_buffer == nullptr) return nullptr;
+        if (len > 0)
+        {
+            if (p_bufEnd != nullptr && static_cast<std::size_t>(p_bufEnd - p_buffer) < len) return nullptr;
+            p_val.assign(reinterpret_cast<const char*>(p_buffer), len);
+        }
+        return p_buffer + len;
+    }
+
+
+    inline const std::uint8_t*
+    SafeSimpleReadBuffer(const std::uint8_t* p_buffer, const std::uint8_t* p_bufEnd, ByteArray& p_val)
+    {
+        p_val.Clear();
+        if (p_buffer == nullptr) return nullptr;
+        std::uint32_t len = 0;
+        p_buffer = SafeSimpleReadBuffer(p_buffer, p_bufEnd, len);
+        if (p_buffer == nullptr) return nullptr;
+        if (len > 0)
+        {
+            if (p_bufEnd != nullptr && static_cast<std::size_t>(p_bufEnd - p_buffer) < len) return nullptr;
+            p_val = ByteArray::Alloc(len);
+            std::memcpy(p_val.Data(), p_buffer, len);
+        }
+        return p_buffer + len;
+    }
+
+
     template<>
     inline std::size_t
     EstimateBufferSize<std::string>(const std::string& p_val)
