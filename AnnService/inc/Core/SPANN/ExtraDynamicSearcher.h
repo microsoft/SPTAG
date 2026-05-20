@@ -395,10 +395,7 @@ namespace SPTAG::SPANN {
             if (!m_worker || !m_splitThreadPool) return;
             auto pool = m_splitThreadPool;
             m_worker->SetJobSubmitter(m_layer,
-                [pool](Helper::ThreadPool::Job* j, bool high) {
-                    if (high) pool->add_high(j);
-                    else      pool->add(j);
-                });
+                [pool](Helper::ThreadPool::Job* j) { pool->add(j); });
         }
 
         /// Set the external WorkerNode pointer and bind all callbacks
@@ -436,7 +433,7 @@ namespace SPTAG::SPANN {
 
                     // Mirror sender's version map for the records we're about
                     // to persist so MergePostings + SearchIndex don't drop
-                    // them as "stale". See HEAD git history for rationale.
+                    // them as "stale".
                     {
                         const uint8_t* basePtr = reinterpret_cast<const uint8_t*>(appendPosting.data());
                         size_t totalRec = appendPosting.size() / m_vectorInfoSize;
@@ -1713,28 +1710,20 @@ namespace SPTAG::SPANN {
             m_splitThreadPool->add(curJob);
         }
 
-        inline void AppendAsync(SizeType headID, std::shared_ptr<std::string> postingList, bool urgent = false,std::function<void()> p_callback = nullptr)
+        inline void AppendAsync(SizeType headID, std::shared_ptr<std::string> postingList, std::function<void()> p_callback = nullptr)
         {
             auto* curJob = new AppendAsyncJob(this, headID, std::move(postingList), p_callback);
             m_appendJobsInFlight++;
             m_totalAppendSubmitted++;
-            if (urgent) {
-                m_splitThreadPool->addfront(curJob);
-            } else {
-                m_splitThreadPool->add(curJob);
-            }
+            m_splitThreadPool->add(curJob);
         }
 
-        inline void ReassignAsync(std::shared_ptr<std::string> vectorInfo, SizeType headPrev, bool urgent = false, std::function<void()> p_callback = nullptr)
+        inline void ReassignAsync(std::shared_ptr<std::string> vectorInfo, SizeType headPrev, std::function<void()> p_callback = nullptr)
         {
             auto* curJob = new ReassignAsyncJob(this, std::move(vectorInfo), headPrev, p_callback);
             m_reassignJobsInFlight++;
             m_totalReassignSubmitted++;
-            if (urgent) {
-                m_splitThreadPool->addfront(curJob);
-            } else {
-                m_splitThreadPool->add(curJob);
-            }
+            m_splitThreadPool->add(curJob);
         }
 
         ErrorCode CollectReAssign(ExtraWorkSpace *p_exWorkSpace, SizeType headID, std::shared_ptr<std::string> headVec,
@@ -1901,7 +1890,7 @@ namespace SPTAG::SPANN {
             if (m_opt->m_storage == Storage::TIKVIO) ret = BatchAppend(p_exWorkSpace, batchReassign, "CollectReAssign");
             else {
                 for (auto& kv : batchReassign) {
-                    AppendAsync(kv.first, std::make_shared<std::string>(kv.second), true);
+                    AppendAsync(kv.first, std::make_shared<std::string>(kv.second));
                 }
             }
             if (batchReassignCount > 0) {
@@ -2019,7 +2008,7 @@ namespace SPTAG::SPANN {
                     if (m_versionMap->GetVersion(VID) == version) {
                         // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss To ReAssign: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
                         m_stat.m_headMiss++;
-                        ReassignAsync(vectorInfo, headID, true);
+                        ReassignAsync(vectorInfo, headID);
                     }
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss Do Not To ReAssign: VID: %d, version: %d, current version: %d\n", *(int*)(&appendPosting[idx]), m_versionMap->GetVersion(*(int*)(&appendPosting[idx])), version);
                 }
@@ -2185,7 +2174,7 @@ namespace SPTAG::SPANN {
                         uint8_t version = *(uint8_t*)(ptr + sizeof(SizeType));
                         if (m_versionMap->GetVersion(VID) == version) {
                             m_stat.m_headMiss++;
-                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), headID, true);
+                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), headID);
                         }
                     }
                     continue;

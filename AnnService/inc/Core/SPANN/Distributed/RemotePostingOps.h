@@ -95,7 +95,7 @@ namespace SPTAG::SPANN {
         // its own m_splitThreadPool, so BatchAppend items dispatch by the
         // request's m_layer to the matching pool. A single submitter would
         // pile both layers' remote appends into whichever pool wired last.
-        using JobSubmitter = std::function<void(Helper::ThreadPool::Job*, bool /*high*/)>;
+        using JobSubmitter = std::function<void(Helper::ThreadPool::Job*)>;
         void SetJobSubmitter(int layer, JobSubmitter submitter) {
             std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
             EnsureLayerSlot_NoLock(layer);
@@ -756,13 +756,12 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
                 "RemotePostingOps: Received batch of %u appends\n", batchReq->m_count);
 
-            // Submit each item as a high-priority Job to the searcher's
-            // shared compute pool. Pool workers run the local Append callback
-            // exactly like a local insert would. Last completion ACKs the
-            // sender. This puts remote work on the SAME concurrency budget
-            // as local Split/Merge/Reassign — eliminating the over-subscribed
-            // TiKV behaviour of the old separate bg executor + transient
-            // sub-worker threads.
+            // Submit each item as a Job to the searcher's shared compute pool.
+            // Pool workers run the local Append callback exactly like a local
+            // insert would. Last completion ACKs the sender. This puts remote
+            // work on the SAME concurrency budget as local Split/Merge/Reassign
+            // — eliminating the over-subscribed TiKV behaviour of the old
+            // separate bg executor + transient sub-worker threads.
             auto packetPtr = std::make_shared<Socket::Packet>(std::move(packet));
             const size_t total = batchReq->m_items.size();
             if (total == 0) {
@@ -810,15 +809,9 @@ namespace SPTAG::SPANN {
                     // submitter we have.
                     for (auto& s : m_jobSubmitters) { if (s) { sub = &s; break; } }
                 }
-                // Normal priority. Per-layer routing (m_jobSubmitters[layer])
-                // already isolates layer-N append items from other layers'
-                // pools. High priority starved split entirely (split:N
-                // in_flight, 0 completed) because once all 16 worker threads
-                // are running long-tail append items, fresh high-prio appends
-                // keep cutting in front of split. Append throughput per chunk
-                // is limited by pool concurrency × per-item RMW; widen the
-                // pool (AppendThreadNum) instead of using priority hacks.
-                if (sub) (*sub)(job, /*high=*/false);
+                // Per-layer routing (m_jobSubmitters[layer]) isolates layer-N
+                // append items from other layers' pools.
+                if (sub) (*sub)(job);
                 else     { delete job; failCount->fetch_add(1); remaining->fetch_sub(1); }
             }
         }
