@@ -62,94 +62,6 @@ static __attribute__((constructor)) void install_segfault_handler() {
 
 using namespace SPTAG;
 
-// ---------------------------------------------------------------------------
-// Stride sharding (a.k.a. odd/even sharding) experiment
-// ---------------------------------------------------------------------------
-// When the env var SPFRESH_SHARD_STRIDE is set to "1"/"true", each node, instead
-// of inserting a contiguous slice [n*B/N, (n+1)*B/N) of the per-iteration batch,
-// inserts the strided rows {n, n+N, n+2*N, ...} where n=nodeIndex, N=numNodes.
-// This breaks any spatial structure in the input dataset (e.g. SIFT files that
-// are roughly sorted by visual feature), letting us check whether the layer-0
-// split skew (driver 71 vs worker 2 in v18) is caused by contiguous slicing
-// landing similar vectors on the same node and overflowing a small set of heads.
-//
-// The total number of vectors inserted across all nodes per iteration is the
-// same; only the assignment changes. Recall measurement still works because
-// the dataset and ground truth are unchanged — only insert routing differs.
-static bool IsStrideShardEnabled() {
-    const char* e = std::getenv("SPFRESH_SHARD_STRIDE");
-    if (!e) return false;
-    std::string v(e);
-    return v == "1" || v == "true" || v == "TRUE" || v == "yes";
-}
-
-// Compute count of indices i in [0, total) with (i % stride) == offset.
-static SizeType StrideCount(SizeType total, int stride, int offset) {
-    if (stride <= 1) return total;
-    if (offset < 0 || offset >= stride) return 0;
-    if (total <= offset) return 0;
-    return (total - 1 - offset) / stride + 1;
-}
-
-// Build a strided sub-VectorSet by copying every `stride`-th vector starting
-// at `offset` into a contiguous packed ByteArray. Returns a BasicVectorSet.
-static std::shared_ptr<VectorSet> ExtractStridedVectors(
-    const std::shared_ptr<VectorSet>& full, int stride, int offset)
-{
-    if (!full) return nullptr;
-    SizeType totalCount = full->Count();
-    SizeType outCount = StrideCount(totalCount, stride, offset);
-    auto vt = full->GetValueType();
-    auto dim = full->Dimension();
-    size_t perVecSize = full->PerVectorDataSize();
-    if (outCount <= 0) {
-        return std::make_shared<BasicVectorSet>(ByteArray::Alloc(0), vt, dim, 0);
-    }
-    ByteArray buf = ByteArray::Alloc(static_cast<size_t>(outCount) * perVecSize);
-    for (SizeType i = 0; i < outCount; ++i) {
-        SizeType srcIdx = static_cast<SizeType>(offset) + i * static_cast<SizeType>(stride);
-        std::memcpy(buf.Data() + static_cast<size_t>(i) * perVecSize,
-                    full->GetVector(srcIdx),
-                    perVecSize);
-    }
-    return std::make_shared<BasicVectorSet>(buf, vt, dim, outCount);
-}
-
-// Build a strided sub-MetadataSet. Two-pass: first compute offsets, then copy.
-static std::shared_ptr<MetadataSet> ExtractStridedMetadata(
-    const std::shared_ptr<MetadataSet>& full, int stride, int offset)
-{
-    if (!full) return nullptr;
-    SizeType totalCount = full->Count();
-    SizeType outCount = StrideCount(totalCount, stride, offset);
-    if (outCount <= 0) {
-        ByteArray emptyMeta = ByteArray::Alloc(0);
-        ByteArray offBuf = ByteArray::Alloc(sizeof(std::uint64_t));
-        *reinterpret_cast<std::uint64_t*>(offBuf.Data()) = 0ULL;
-        return std::make_shared<MemMetadataSet>(emptyMeta, offBuf, 0);
-    }
-    std::vector<std::uint64_t> offsets(static_cast<size_t>(outCount) + 1, 0ULL);
-    std::uint64_t total = 0;
-    for (SizeType i = 0; i < outCount; ++i) {
-        SizeType srcIdx = static_cast<SizeType>(offset) + i * static_cast<SizeType>(stride);
-        ByteArray meta = full->GetMetadata(srcIdx);
-        offsets[i] = total;
-        total += meta.Length();
-    }
-    offsets[outCount] = total;
-    ByteArray metaBuf = ByteArray::Alloc(total > 0 ? total : 1);
-    for (SizeType i = 0; i < outCount; ++i) {
-        SizeType srcIdx = static_cast<SizeType>(offset) + i * static_cast<SizeType>(stride);
-        ByteArray meta = full->GetMetadata(srcIdx);
-        if (meta.Length() > 0) {
-            std::memcpy(metaBuf.Data() + offsets[i], meta.Data(), meta.Length());
-        }
-    }
-    ByteArray offBuf = ByteArray::Alloc((static_cast<size_t>(outCount) + 1) * sizeof(std::uint64_t));
-    std::memcpy(offBuf.Data(), offsets.data(), offsets.size() * sizeof(std::uint64_t));
-    return std::make_shared<MemMetadataSet>(metaBuf, offBuf, outCount);
-}
-
 // Helper: parse "host:port,host:port,..." into vector of pairs.
 static std::vector<std::pair<std::string, std::string>> ParseNodeAddrs(const std::string& addrStr) {
     std::vector<std::pair<std::string, std::string>> result;
@@ -1098,7 +1010,6 @@ void LoadAndInsertBatch(SPANN::Index<T>* spannIndex,
                         const std::string& paddmetaidx,
                         int dimension,
                         int insertStart, int loadCount, int perNodeBatch,
-                        bool strideShard, int numNodes, int nodeIndex,
                         int numInsertThreads,
                         SPANN::WorkerNode* router,
                         std::shared_ptr<COMMON::IQuantizer> quantizer,
@@ -1121,14 +1032,6 @@ void LoadAndInsertBatch(SPANN::Index<T>* spannIndex,
                                                   addFloat->Count());
     }
     auto addmetaset = TestUtils::TestDataGenerator<T>::LoadMetadataSet(paddmeta, paddmetaidx, insertStart, loadCount);
-    if (strideShard) {
-        addset = ExtractStridedVectors(addset, numNodes, nodeIndex);
-        addmetaset = ExtractStridedMetadata(addmetaset, numNodes, nodeIndex);
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "%s: stride-shard batchStart=%d loadCount=%d -> kept=%d (every %d-th, offset=%d)\n",
-                     logPrefix, insertStart, loadCount,
-                     (int)(addset ? addset->Count() : 0), numNodes, nodeIndex);
-    }
     InsertVectors<T>(spannIndex, numInsertThreads, perNodeBatch,
                      addset, addmetaset,
                      searchDuringInsertThreads, queryset, numQueries, searchK,
@@ -1225,23 +1128,12 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     // Use distributed config for multi-node partitioning
     int nodeIndex = distCfg.workerIndex;
     int numNodes = distCfg.GetNumWorkers();
-    bool strideShard = IsStrideShardEnabled() && numNodes > 1;
-    int myInsertStart, myInsertEnd, perNodeBatch;
-    if (strideShard) {
-        // Stride mode: each node loads the FULL per-iter batch then keeps rows
-        // where (rowIdx % numNodes) == nodeIndex. myInsertStart/End span the
-        // full batch; perNodeBatch is the count of strided rows.
-        myInsertStart = 0;
-        myInsertEnd = insertBatchSize;
-        perNodeBatch = static_cast<int>(StrideCount(insertBatchSize, numNodes, nodeIndex));
-    } else {
-        myInsertStart = (numNodes > 1) ? (nodeIndex * insertBatchSize) / numNodes : 0;
-        myInsertEnd = (numNodes > 1) ? ((nodeIndex + 1) * insertBatchSize) / numNodes : insertBatchSize;
-        perNodeBatch = myInsertEnd - myInsertStart;
-    }
+    int myInsertStart = (numNodes > 1) ? (nodeIndex * insertBatchSize) / numNodes : 0;
+    int myInsertEnd = (numNodes > 1) ? ((nodeIndex + 1) * insertBatchSize) / numNodes : insertBatchSize;
+    int perNodeBatch = myInsertEnd - myInsertStart;
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                 "RunBenchmark: nodeIndex=%d numNodes=%d insertBatchSize=%d myInsertStart=%d myInsertEnd=%d perNodeBatch=%d strideShard=%d\n",
-                 nodeIndex, numNodes, insertBatchSize, myInsertStart, myInsertEnd, perNodeBatch, strideShard ? 1 : 0);
+                 "RunBenchmark: nodeIndex=%d numNodes=%d insertBatchSize=%d myInsertStart=%d myInsertEnd=%d perNodeBatch=%d\n",
+                 nodeIndex, numNodes, insertBatchSize, myInsertStart, myInsertEnd, perNodeBatch);
 
     // Variables to collect JSON output data
     std::ostringstream tmpbenchmark;
@@ -1585,19 +1477,16 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                         SPANN::DispatchCommand::Type::Insert, static_cast<std::uint32_t>(iter));
                 }
 
-                // Each node inserts its partition. Default mode: contiguous slice
-                // [iter*batchSize + myInsertStart, +perNodeBatch). Stride mode:
-                // every numNodes-th row of the full batch starting at nodeIndex
-                // (loads full batch then filters down to perNodeBatch rows).
+                // Each node inserts its contiguous slice
+                // [iter*batchSize + myInsertStart, +perNodeBatch).
                 int insertStart = iter * insertBatchSize + myInsertStart;
-                int loadCount = strideShard ? insertBatchSize : perNodeBatch;
+                int loadCount = perNodeBatch;
                 {
                     std::string driverTag = "RunBenchmark iter=" + std::to_string(iter);
                     start = std::chrono::high_resolution_clock::now();
                     LoadAndInsertBatch<T>(static_cast<SPANN::Index<T>*>(cloneIndex.get()),
                                           paddset, paddmeta, paddmetaidx, M,
                                           insertStart, loadCount, perNodeBatch,
-                                          strideShard, numNodes, nodeIndex,
                                           numInsertThreads, workerPtr,
                                           enableQuantization ? quantizer : nullptr,
                                           numSearchDuringInsertThreads, queryset,
@@ -2914,17 +2803,9 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
     int nodeIndex = distCfg.workerIndex;
     int numNodes = distCfg.GetNumWorkers();
     int insertBatchSize = insertVectorCount / std::max(batches, 1);
-    bool strideShard = IsStrideShardEnabled() && numNodes > 1;
-    int myInsertStart, myInsertEnd, perNodeBatch;
-    if (strideShard) {
-        myInsertStart = 0;
-        myInsertEnd = insertBatchSize;
-        perNodeBatch = static_cast<int>(StrideCount(insertBatchSize, numNodes, nodeIndex));
-    } else {
-        myInsertStart = (numNodes > 1) ? (nodeIndex * insertBatchSize) / numNodes : 0;
-        myInsertEnd = (numNodes > 1) ? ((nodeIndex + 1) * insertBatchSize) / numNodes : insertBatchSize;
-        perNodeBatch = myInsertEnd - myInsertStart;
-    }
+    int myInsertStart = (numNodes > 1) ? (nodeIndex * insertBatchSize) / numNodes : 0;
+    int myInsertEnd = (numNodes > 1) ? ((nodeIndex + 1) * insertBatchSize) / numNodes : insertBatchSize;
+    int perNodeBatch = myInsertEnd - myInsertStart;
 
     BOOST_TEST_MESSAGE("Worker node " << nodeIndex << ": Loading index from " << indexPath);
     std::shared_ptr<VectorIndex> index;
@@ -3035,16 +2916,15 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
 
         if (cmd.m_type == SPANN::DispatchCommand::Type::Insert) {
             int insertStart = cmd.m_round * insertBatchSize + myInsertStart;
-            int loadCount = strideShard ? insertBatchSize : perNodeBatch;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Worker %d: Batch %u - inserting %d vectors (offset %d, strideShard=%d)\n",
-                         nodeIndex, cmd.m_round + 1, perNodeBatch, insertStart, strideShard ? 1 : 0);
+            int loadCount = perNodeBatch;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Worker %d: Batch %u - inserting %d vectors (offset %d)\n",
+                         nodeIndex, cmd.m_round + 1, perNodeBatch, insertStart);
 
             auto t1 = std::chrono::high_resolution_clock::now();
             std::string workerTag =
                 "Worker " + std::to_string(nodeIndex) + " batch=" + std::to_string(cmd.m_round + 1);
             LoadAndInsertBatch<T>(spannIndex, paddset, paddmeta, paddmetaidx, dimension,
                                   insertStart, loadCount, perNodeBatch,
-                                  strideShard, numNodes, nodeIndex,
                                   numInsertThreads, router,
                                   /*quantizer=*/nullptr,
                                   /*searchDuringInsertThreads=*/0,

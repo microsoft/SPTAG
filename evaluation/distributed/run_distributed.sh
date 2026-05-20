@@ -744,7 +744,6 @@ start_remote_worker() {
     ssh -n $(_ssh_opts) "$SSH_USER@$host" \
         "cd $SPTAG_DIR && LD_LIBRARY_PATH=$SPTAG_DIR/Release/runtime_libs:/usr/lib/x86_64-linux-gnu:\${LD_LIBRARY_PATH:-} \
          WORKER_INDEX=${NODE_IDX} BENCHMARK_CONFIG=worker_n${NODE_IDX}.ini \
-         SPFRESH_SHARD_STRIDE=${SPFRESH_SHARD_STRIDE:-0} \
          ./Release/SPTAGTest --run_test=SPFreshTest/BenchmarkFromConfig 2>&1" \
         </dev/null > "$LOG" 2>&1 &
     local ssh_pid=$!
