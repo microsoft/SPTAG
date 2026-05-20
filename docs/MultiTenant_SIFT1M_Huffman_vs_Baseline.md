@@ -267,6 +267,102 @@ Files:
 * Baseline preserved at: `huffman_sweeps/sweep_tenant_index_huffman_v3_rebuild_baseline.csv`
 * Cross-edge file: `tenant_index_huffman_v3_rebuild/tenant_0/HeadIndex/head_cross_edges.bin` (HECH v1, 27 338 × 10)
 
+## Tag-pure no-merge ablation (N=4, r=0.1, May 20)
+
+Setting from prior section: `PerTagBKTMerge` still oversamples 3× per
+tag and merges across tags. Hypothesis: that merge step costs both
+tag purity (mixed tags inside a single posting) and *narrow-filter
+QPS*, because narrow queries scan postings whose vectors are mostly
+not for the queried tag. Direct test: rebuild with `oversample=1.0`,
+`mergeAlpha=0.0`, target `finalRatio=0.1`. With α=0 no candidate
+satisfies `d <= 0` in Phase 2, every Phase 3 group is a singleton,
+the final head set is exactly the per-tag SelectHead output. Posting
+size: ~3.24 M / 39 746 ≈ 82 vecs/posting (well below `PostingVectorLimit=118`).
+
+Index: `tenant_index_huffman_pure_r10/` (39 746 heads, 4 Huffman
+nodes, identical group-target=4 leaf-packing partition as `_v3_rebuild`).
+
+| Level | Baseline (merge on, 27 338 heads) | No-merge r=0.1 (39 746 heads) | Δ |
+|---|---:|---:|---:|
+| unfilter | 79 | **129** | **+63 %** |
+| org      | 262 | **408** | **+56 %** |
+| dept     | 172 | **208** | **+21 %** |
+| team     | 126 | **166** | **+32 %** |
+| project  | 344 | 344 | ≈ noise |
+
+All numbers @ R ≥ 0.95, post-warmup, best-of-3 trials.
+
+Plus cross-edge unfilter on top (`SPTAG_CROSSEDGE_UNFILTER=1`,
+augmentheadgraph -m 10): unfilter 129 → 130, org 408 → 439 (likely
+run-to-run noise in the org column; team/dept/project stable). The
+cross-edge bonus is in the same noise band as before — confirming
+that at N=4 tree-aligned, cross-edges aren't the bottleneck. The
+bottleneck was merge.
+
+**Why merge hurts** (mechanism):
+
+1. Phase 2 of `PerTagBKTMerge` greedily pairs heads from different
+   tag groups whose representatives are within `α · meanNN1`. Each
+   resulting merged head has a posting that draws vectors from all
+   tags whose original heads were folded into it. Even with PerTag
+   posting metadata (single own-tag), the posting *content* still
+   leaks across tags via the replica-assignment step.
+2. For narrow filters (team / project), the SSD scan reads all
+   replicas of a candidate head, but only ~1/64 of them match the
+   query tag. Most I/O is wasted. Filtered nprobe must compensate
+   by sweeping more heads, costing latency.
+3. With merge off, each head was selected from a single tag's
+   sub-BKT — its replicas (8 nearest base vectors) are
+   overwhelmingly same-tag. Narrow filters now hit useful data
+   on the first scan, so a much smaller `nprobe` suffices.
+
+**Capacity model revisited**: at r=0.1 / no-merge, unfilter is
+129 QPS and team is 166 QPS. Predicted `unfilter ≈ narrow/N`
+would give 166/4 = 41 QPS; actual is 129. So unfilter is **3×
+better than the model** — meaning the system is not bottlenecked
+by N-fold per-node fanout but by total useful posting reads. With
+tag-pure postings the same posting budget covers far more relevant
+vectors per query.
+
+**What still costs**: project (cardinality 256) stays at 344 QPS
+(same as baseline). At that selectivity the per-query work is
+dominated by routing + posting fetch overhead, not by posting
+content, so no-merge doesn't help. Acceptable: 344 QPS is already
+near hardware ceiling on this box.
+
+**Build cost**: ~24 min wall (vs ~21 min for v3_rebuild). Slight
+increase from omitting merge dedup (more heads → bigger graph
+build). Storage: similar.
+
+### Reproduction
+
+```bash
+LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 \
+PYTHONPATH=/home/v-mochengli/SPTAG \
+python3 /home/v-mochengli/test/build_tenant0_pertag.py \
+    --index-dir /home/v-mochengli/test/tenant_index_huffman_pure_r10 \
+    --team-tag-file /tmp/tenant0_grp4_tags.txt \
+    --oversample 1.0 --merge-alpha 0.0 \
+    --final-ratio 0.1 --group-target 4
+
+/home/v-mochengli/SPTAG/Release/augmentheadgraph \
+    -d /home/v-mochengli/test/tenant_index_huffman_pure_r10/tenant_0/HeadIndex \
+    -m 10 -t 16 -w true
+
+LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 SPTAG_DISABLE_SPARSE_PATH=1 \
+PYTHONPATH=/home/v-mochengli/SPTAG python3 \
+    /home/v-mochengli/test/huffman_sweeps/strong_sweep_fine.py \
+    /home/v-mochengli/test/tenant_index_huffman_pure_r10
+```
+
+### Files
+
+* Sweep CSVs:
+  `huffman_sweeps/sweep_tenant_index_huffman_pure_r10_nocross.csv` (no cross-edge),
+  `huffman_sweeps/sweep_tenant_index_huffman_pure_r10.csv` (+cross-edge unfilter)
+* Index: `tenant_index_huffman_pure_r10/` (39 746 heads, 4 Huffman nodes,
+  `head_cross_edges.bin` HECH v1, 39 746 × 10)
+
 ## Files
 
 * Indices: `tenant_index_huffman_v3` (N=4), `tenant_index_huffman_n64`
