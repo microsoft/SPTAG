@@ -26,6 +26,15 @@ namespace SPTAG
 
             virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<SPTAG::Helper::PageBuffer<std::uint8_t>>& values, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }
 
+            // Optional truncated variant: per-key, read at most maxBytesPerKey[i] bytes (0 = no limit).
+            // Default impl ignores the limit and calls the regular MultiGet, so backends that
+            // do not support truncation remain correct (just slower).
+            virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<SPTAG::Helper::PageBuffer<std::uint8_t>>& values, const std::vector<std::uint32_t>& maxBytesPerKey, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs)
+            {
+                (void)maxBytesPerKey;
+                return MultiGet(keys, values, timeout, reqs);
+            }
+
             virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) = 0;
 
             virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout, std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }            

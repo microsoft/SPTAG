@@ -436,6 +436,101 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType *> &p_dat
     return true;
 }
 
+// Truncated variant: per-key, cap the read at maxBytesPerKey[i] bytes (0 = no cap).
+// Used by the unfilter-tail layout so filtered queries skip tail block IO.
+bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType *> &p_data,
+                                         std::vector<Helper::PageBuffer<std::uint8_t>> &p_values,
+                                         const std::vector<std::uint32_t> &maxBytesPerKey,
+                                         const std::chrono::microseconds &timeout,
+                                         std::vector<Helper::AsyncReadRequest> *reqs)
+{
+    m_batchReadTimes++;
+    std::uint32_t reqcount = 0;
+    std::uint32_t emptycount = 0;
+    for (size_t i = 0; i < p_data.size(); i++)
+    {
+        AddressType *p_data_i = p_data[i];
+        int numPages = (p_values[i].GetPageSize() >> PageSizeEx);
+
+        if (p_data_i == nullptr || (uintptr_t)p_data_i == 0xffffffffffffffff)
+        {
+            if (p_data_i != nullptr) p_values[i].SetAvailableSize(0);
+            for (std::uint32_t r = 0; r < (std::uint32_t)numPages; r++)
+            {
+                Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+                curr.m_readSize = 0;
+                reqcount++;
+                emptycount++;
+            }
+            continue;
+        }
+
+        std::size_t postingSize = (std::size_t)p_data_i[0];
+        std::uint32_t cap = (i < maxBytesPerKey.size()) ? maxBytesPerKey[i] : 0;
+        if (cap > 0 && (std::size_t)cap < postingSize) postingSize = (std::size_t)cap;
+
+        p_values[i].SetAvailableSize(postingSize);
+        AddressType currOffset = 0;
+        AddressType dataIdx = 1;
+        while (currOffset < postingSize)
+        {
+            if ((int)dataIdx > numPages)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "FileIO::BlockController::ReadBlocks(trunc):  block (%lld) pos:%llu/%llu >= buffer page size (%d)\n",
+                    (long long)dataIdx - 1, (unsigned long long)currOffset,
+                    (unsigned long long)postingSize, numPages);
+                break;
+            }
+
+            if (reqcount >= reqs->size())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "FileIO::BlockController::ReadBlocks(trunc):  req (%u) >= req array size (%u)\n",
+                             reqcount, (std::uint32_t)reqs->size());
+                return false;
+            }
+
+            Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+            curr.m_readSize = (postingSize - currOffset) < PageSize ? (postingSize - currOffset) : PageSize;
+            curr.m_offset = p_data_i[dataIdx] * PageSize;
+            currOffset += PageSize;
+            dataIdx++;
+            reqcount++;
+        }
+
+        // Account for remaining (unread) blocks in this posting's pageBuffer slot.
+        while ((int)dataIdx - 1 < numPages)
+        {
+            if (reqcount >= reqs->size())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "FileIO::BlockController::ReadBlocks(trunc):  req (%u) >= req array size (%u)\n",
+                             reqcount, (std::uint32_t)reqs->size());
+                return false;
+            }
+            Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+            curr.m_readSize = 0;
+            dataIdx++;
+            reqcount++;
+            emptycount++;
+        }
+    }
+
+    std::uint32_t totalReads = m_fileHandle->BatchReadFile(reqs->data(), reqcount, timeout, m_batchSize);
+    read_submit_vec += reqcount - emptycount;
+    read_complete_vec += totalReads;
+    if (totalReads < reqcount - emptycount)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "FileIO::BlockController::ReadBlocks(trunc): %u < %u\n",
+                     totalReads, reqcount - emptycount);
+        m_batchReadTimeouts++;
+        return false;
+    }
+    return true;
+}
+
 bool FileIO::BlockController::WriteBlocks(AddressType *p_data, int p_size, const std::string &p_value,
                                           const std::chrono::microseconds &timeout,
                                           std::vector<Helper::AsyncReadRequest> *reqs)

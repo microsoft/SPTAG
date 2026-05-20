@@ -189,6 +189,14 @@ namespace SPTAG::SPANN {
 
         COMMON::PostingSizeRecord m_postingSizes;
 
+        // Unfilter-tail sidecar: per-head count of "filtered-visible" prefix.
+        // Vectors at indices [0, m_postingPureCounts[h]) are tag-pure and scanned
+        // by filtered queries. Vectors at [m_postingPureCounts[h], m_postingSizes[h])
+        // are unfilter-only replicas, scanned ONLY by unfiltered queries.
+        // Legacy / missing sidecar => pure_count = total_size (no tail, original behaviour).
+        COMMON::PostingSizeRecord m_postingPureCounts;
+        bool m_hasPostingPureCounts = false;
+
         COMMON::Checksum m_checkSum;
         COMMON::Dataset<ChecksumType> m_checkSums;
 
@@ -225,6 +233,60 @@ namespace SPTAG::SPANN {
         void SetHeadVectorOwners(const std::unordered_map<SizeType, int>& headVectorOwners) {
             m_headVectorOwners = headVectorOwners;
         }
+
+        // --- Unfilter-tail sidecar accessors -----------------------------------
+        // Returns the number of records to scan for a query with the given
+        // filter mode. For filtered queries we return pure_count (skip tail);
+        // for unfiltered we return total_size (scan everything).
+        // Defensive: clamp to total to handle stale / corrupt sidecars.
+        inline int GetScanLimit(const SizeType& headID, bool unfiltered) {
+            int total = m_postingSizes.GetSize(headID);
+            if (unfiltered || !m_hasPostingPureCounts) return total;
+            int pure = m_postingPureCounts.GetSize(headID);
+            return (pure <= 0 || pure > total) ? total : pure;
+        }
+        inline int GetPureCount(const SizeType& headID) {
+            int total = m_postingSizes.GetSize(headID);
+            if (!m_hasPostingPureCounts) return total;
+            int pure = m_postingPureCounts.GetSize(headID);
+            return (pure <= 0 || pure > total) ? total : pure;
+        }
+        inline bool HasPostingPureCounts() const { return m_hasPostingPureCounts; }
+        // Used by the build path (PerTagBKTMerge phase 4) to write the sidecar.
+        inline void SetPureCount(const SizeType& headID, int pure_count) {
+            m_postingPureCounts.UpdateSize(headID, pure_count);
+        }
+        // Initialize pure_count = total_size for every head (no-tail fallback).
+        // Safe to call repeatedly.
+        void InitializePureCountsFromTotals(SizeType numHeads) {
+            m_postingPureCounts.Initialize(numHeads, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+            for (SizeType h = 0; h < numHeads; ++h) {
+                m_postingPureCounts.UpdateSize(h, m_postingSizes.GetSize(h));
+            }
+            m_hasPostingPureCounts = true;
+        }
+        // Try to load the sidecar; if absent or unreadable, fall back to totals.
+        void LoadOrInitPostingPureCounts() {
+            std::string path = m_opt->m_indexDirectory + FolderSep + m_opt->m_postingPureCountsFile;
+            if (fileexists(path.c_str())) {
+                if (m_postingPureCounts.Load(path, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity) == ErrorCode::Success) {
+                    m_hasPostingPureCounts = true;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded posting_pure_counts sidecar from %s (numHeads=%d).\n",
+                                 path.c_str(), m_postingPureCounts.GetPostingNum());
+                    return;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Failed to load %s; falling back to pure=total.\n", path.c_str());
+            }
+            InitializePureCountsFromTotals(m_postingSizes.GetPostingNum());
+            m_hasPostingPureCounts = false;  // not loaded => legacy mode; tail effectively absent
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "posting_pure_counts sidecar not present; using pure=total fallback.\n");
+        }
+        void SavePostingPureCounts() {
+            if (!m_hasPostingPureCounts) return;
+            std::string path = m_opt->m_indexDirectory + FolderSep + m_opt->m_postingPureCountsFile;
+            m_postingPureCounts.Save(path);
+        }
+        // -----------------------------------------------------------------------
 
         ExtraDynamicSearcher(SPANN::Options& p_opt) {
             m_opt = &p_opt;
@@ -1813,6 +1875,8 @@ namespace SPTAG::SPANN {
                         m_checkSums.Load(checksumPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
 		    } 
 	    }
+            // Unfilter-tail sidecar: load if present, fall back to pure=total.
+            LoadOrInitPostingPureCounts();
             if (m_opt->m_update) {
                 if (m_splitThreadPool == nullptr) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
@@ -1951,7 +2015,45 @@ namespace SPTAG::SPANN {
                 p_exWorkSpace->m_postingProbeStats.m_prePSPostings += p_exWorkSpace->m_postingIDs.size();
             }
 
-            if (db->MultiGet(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers, remainLimit, &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success ||
+            // Decide unfilter-tail BEFORE issuing IO so filtered queries can
+            // request a shorter read (skip tail blocks) in a single MultiGet.
+            const bool hasInlineTagFilter =
+                m_tagBytesPerVec > 0 &&
+                p_exWorkSpace->m_queryTags != nullptr &&
+                p_exWorkSpace->m_numQueryTags > 0;
+            const bool trackPostingStats = hasInlineTagFilter;
+            static const bool s_unfilterTailEnabled = []() {
+                const char* env = std::getenv("SPTAG_UNFILTER_TAIL");
+                return env && env[0] == '1';
+            }();
+            const bool useUnfilterTail =
+                s_unfilterTailEnabled && m_hasPostingPureCounts && hasInlineTagFilter;
+
+            ErrorCode mgErr;
+            if (useUnfilterTail) {
+                // Build per-posting byte cap = pure_count * vectorInfoSize.
+                // Block layer rounds up to ceil(cap / PageSize) blocks.
+                std::vector<std::uint32_t> maxBytes(p_exWorkSpace->m_postingIDs.size(), 0);
+                for (size_t i = 0; i < maxBytes.size(); ++i) {
+                    SizeType hid = p_exWorkSpace->m_postingIDs[i];
+                    int pure = m_postingPureCounts.GetSize(hid);
+                    if (pure > 0) {
+                        maxBytes[i] = static_cast<std::uint32_t>(pure) *
+                                      static_cast<std::uint32_t>(m_vectorInfoSize);
+                    }
+                }
+                mgErr = db->MultiGet(p_exWorkSpace->m_postingIDs,
+                                     p_exWorkSpace->m_pageBuffers,
+                                     maxBytes,
+                                     remainLimit,
+                                     &(p_exWorkSpace->m_diskRequests));
+            } else {
+                mgErr = db->MultiGet(p_exWorkSpace->m_postingIDs,
+                                     p_exWorkSpace->m_pageBuffers,
+                                     remainLimit,
+                                     &(p_exWorkSpace->m_diskRequests));
+            }
+            if (mgErr != ErrorCode::Success ||
                 !ValidatePostings(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers))
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndex] read postings fail!\n");
@@ -1959,12 +2061,6 @@ namespace SPTAG::SPANN {
             }
             auto readEnd = std::chrono::high_resolution_clock::now();
             readLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count());
-
-            const bool hasInlineTagFilter =
-                m_tagBytesPerVec > 0 &&
-                p_exWorkSpace->m_queryTags != nullptr &&
-                p_exWorkSpace->m_numQueryTags > 0;
-            const bool trackPostingStats = hasInlineTagFilter;
 
             const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
             if (trackPostingStats) {
@@ -1975,6 +2071,11 @@ namespace SPTAG::SPANN {
                 auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
                 char* p_postingListFullData = (char*)(buffer.GetBuffer());
                 int vectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
+                int scanLimit = vectorNum;
+                if (useUnfilterTail) {
+                    int pure = m_postingPureCounts.GetSize(curPostingID);
+                    if (pure > 0 && pure < scanLimit) scanLimit = pure;
+                }
                 bool postingHasExactMatch = false;
 
                 diskIO += ((buffer.GetAvailableSize() + PageSize - 1) >> PageSizeEx);
@@ -1982,9 +2083,9 @@ namespace SPTAG::SPANN {
                 
                 //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d size:%d m_vectorInfoSize:%d vectorNum:%d\n", pi, (int)(postingList.size()), m_vectorInfoSize, vectorNum);
                 int realNum = vectorNum;
-                listElements += vectorNum;
+                listElements += scanLimit;
                 auto compStart = std::chrono::high_resolution_clock::now();
-                for (int i = 0; i < vectorNum; i++) {
+                for (int i = 0; i < scanLimit; i++) {
                     char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
                     int vectorID = *(reinterpret_cast<int*>(vectorInfo));
 
@@ -2702,6 +2803,129 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
+            // ====================================================================
+            // Phase 4 (Unfilter-tail): for each base vector, append K_replica
+            // tag-agnostic nearest-head replicas. These are scanned ONLY by
+            // unfilter queries; filtered queries stop at pure_count.
+            //
+            // Layout trick: tail edges are given a distance of FLT_MAX so they
+            // sort AFTER all pure edges within the same head posting.
+            //   pure region:  edges sorted by distance ascending  (idx < pure_count)
+            //   tail region:  edges with dist=FLT_MAX             (idx >= pure_count)
+            // ====================================================================
+            std::vector<int> pure_count_per_head;
+            {
+                const char* env_k = std::getenv("SPTAG_UNFILTER_TAIL_K_REPLICA");
+                int k_replica = env_k ? std::atoi(env_k) : 0;
+                if (k_replica > 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "Phase 4 (unfilter-tail): K_replica=%d, scanning %d base vectors against %d heads\n",
+                                 k_replica, fullCount, p_headIndex->GetNumSamples());
+
+                    // Snapshot pure counts (post-cut, pre-tail)
+                    pure_count_per_head.resize(postingListSize.size());
+                    for (size_t h = 0; h < postingListSize.size(); ++h) {
+                        pure_count_per_head[h] = postingListSize[h].load();
+                    }
+
+                    // For each vector v, find K_replica nearest heads (tag-agnostic), then
+                    // append (h, v) tail edges. Multi-threaded.
+                    std::mutex append_mtx;  // protects selections.m_selections + postingListSize tail-adds
+                    std::atomic_size_t vec_cursor(0);
+                    std::atomic_size_t tail_added(0), tail_skipped_dup(0), tail_skipped_cap(0);
+                    int n_threads = m_opt->m_iSSDNumberOfThreads;
+                    int relaxLimit = m_postingSizeLimit + m_bufferSizeLimit;
+                    SizeType numHeadsLocal = p_headIndex->GetNumSamples();
+
+                    // Build a per-head set of vector-IDs already present in pure region,
+                    // for fast dup check. Memory: ~ sum(pure_count) * 8 bytes ≈ 400 MB worst case.
+                    // To keep it cheap, we instead do binary-search lookup on the sorted
+                    // `selections.m_selections` (sorted by node first).
+                    auto worker = [&]() {
+                        COMMON::QueryResultSet<ValueType> nearbyHeads(nullptr, k_replica);
+                        std::vector<Edge> local_appends;
+                        local_appends.reserve(4096);
+                        std::vector<int> local_inc;  // (head_id pairs flat: h0, h1, ...) per-head inc accumulator
+                        std::vector<uint32_t> local_head_incs(numHeadsLocal, 0);
+                        const std::vector<Edge>& selsRef = selections.m_selections;
+                        size_t v;
+                        while (true) {
+                            v = vec_cursor.fetch_add(1);
+                            if (v >= (size_t)fullCount) break;
+                            // Skip if v is itself a head (it's already its own posting member)
+                            // — those entries have no "base posting" and don't need a tail.
+                            if (headVectorIDS.count((SizeType)v)) continue;
+
+                            const ValueType* vec_data = (const ValueType*)fullVectors->GetVector((SizeType)v);
+                            if (vec_data == nullptr) continue;
+                            nearbyHeads.SetTarget(vec_data, p_headIndex->m_pQuantizer);
+                            nearbyHeads.Reset();
+                            p_headIndex->SearchIndex(nearbyHeads);
+                            BasicResult* res = nearbyHeads.GetResults();
+                            for (int r = 0; r < k_replica; ++r) {
+                                SizeType h = res[r].VID;
+                                if (h < 0 || h >= numHeadsLocal) continue;
+                                // Dup check: scan pure region of head h's posting
+                                size_t lo = std::lower_bound(selsRef.begin(), selsRef.end(), (int)h,
+                                                              Selection::g_edgeComparer) - selsRef.begin();
+                                size_t pure_end = lo + (size_t)pure_count_per_head[h];
+                                bool dup = false;
+                                for (size_t k = lo; k < pure_end && k < selsRef.size(); ++k) {
+                                    if (selsRef[k].node != h) break;
+                                    if (selsRef[k].tonode == (SizeType)v) { dup = true; break; }
+                                }
+                                if (dup) { ++tail_skipped_dup; continue; }
+                                Edge e; e.node = h; e.tonode = (SizeType)v; e.distance = std::numeric_limits<float>::max();
+                                local_appends.push_back(e);
+                                ++local_head_incs[h];
+                            }
+                            if (local_appends.size() >= 4096) {
+                                std::lock_guard<std::mutex> lk(append_mtx);
+                                for (auto& e : local_appends) {
+                                    int cur = postingListSize[e.node].load();
+                                    if (cur >= relaxLimit) { ++tail_skipped_cap; continue; }
+                                    selections.m_selections.push_back(e);
+                                    ++postingListSize[e.node];
+                                    ++tail_added;
+                                }
+                                local_appends.clear();
+                            }
+                        }
+                        if (!local_appends.empty()) {
+                            std::lock_guard<std::mutex> lk(append_mtx);
+                            for (auto& e : local_appends) {
+                                int cur = postingListSize[e.node].load();
+                                if (cur >= relaxLimit) { ++tail_skipped_cap; continue; }
+                                selections.m_selections.push_back(e);
+                                ++postingListSize[e.node];
+                                ++tail_added;
+                            }
+                        }
+                    };
+
+                    std::vector<std::thread> phase4_threads;
+                    for (int t = 0; t < n_threads; ++t) phase4_threads.emplace_back(worker);
+                    for (auto& th : phase4_threads) th.join();
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "Phase 4 done: tail_added=%zu tail_skipped_dup=%zu tail_skipped_cap=%zu\n",
+                                 tail_added.load(), tail_skipped_dup.load(), tail_skipped_cap.load());
+
+                    // Re-sort: tail edges have dist=FLT_MAX so they end up at the END
+                    // of each head's posting region.
+                    VectorIndex::SortSelections(&selections.m_selections);
+
+                    // Initialize pure_counts sidecar (will be persisted at save).
+                    m_postingPureCounts.Initialize((SizeType)postingListSize.size(),
+                                                   p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
+                    for (size_t h = 0; h < postingListSize.size(); ++h) {
+                        m_postingPureCounts.UpdateSize((SizeType)h, pure_count_per_head[h]);
+                    }
+                    m_hasPostingPureCounts = true;
+                }
+            }
+            // ====================================================================
+
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
             m_versionMap->Initialize(fullCount, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
 
@@ -2756,6 +2980,7 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing SSD Info and checkSum\n");
             m_postingSizes.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdInfoFile);
             m_checkSums.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_checksumFile);
+            SavePostingPureCounts();
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
             m_versionMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile);
@@ -3023,6 +3248,13 @@ namespace SPTAG::SPANN {
             std::string p_checksumPath = prefix + FolderSep + m_opt->m_checksumFile;
             if ((ret = m_checkSums.Save(p_checksumPath)) != ErrorCode::Success)
                 return ret;
+
+            if (m_hasPostingPureCounts) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving posting_pure_counts sidecar\n");
+                std::string p_pureCountsPath = prefix + FolderSep + m_opt->m_postingPureCountsFile;
+                if ((ret = m_postingPureCounts.Save(p_pureCountsPath)) != ErrorCode::Success)
+                    return ret;
+            }
 
             if ((ret = db->Checkpoint(prefix)) != ErrorCode::Success)
                 return ret;
