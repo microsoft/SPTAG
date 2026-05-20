@@ -661,29 +661,39 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
     if (useBulk) {
         func = bulkFunc;
         insertThreadCount = 1;
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "InsertVectors: bulk path - driver launcher=1, internal parallelism comes from "
+                     "[BuildSSDIndex] AppendThreadNum (user-supplied InsertThreadNum=%d is unused on this path)\n",
+                     insertThreads);
     } else {
         func = perVecFunc;
         insertThreadCount = insertThreads;
     }
 
-    if (searchThreads > 0 && queryset != nullptr && numQueries != 0 && benchmarkData != nullptr) {
-        std::vector<float> latencies;
-        std::vector<QueryResult> results;
-        double searchWallSeconds = 0.0;
+    bool withSearch = (searchThreads > 0 && queryset != nullptr && numQueries != 0 && benchmarkData != nullptr);
 
-        for (int j = 0; j < insertThreadCount; j++)
-        {
-            threads.emplace_back(func);
-        }
-        std::thread searchThread([&]() {
+    for (int j = 0; j < insertThreadCount; j++)
+    {
+        threads.emplace_back(func);
+    }
+
+    std::vector<float> latencies;
+    std::vector<QueryResult> results;
+    double searchWallSeconds = 0.0;
+    std::thread searchThread;
+    if (withSearch) {
+        searchThread = std::thread([&]() {
             searchWallSeconds = ExecutePartitionedSearch<ValueType>(
                 p_index, queryset, /*myStart=*/0, numQueries, k, searchThreads,
                 results, &latencies, /*statsOut=*/nullptr);
         });
-        for (auto &thread : threads)
-        {
-            thread.join();
-        }
+    }
+
+    for (auto &thread : threads)
+    {
+        thread.join();
+    }
+    if (withSearch) {
         searchThread.join();
 
         // Calculate statistics
@@ -712,17 +722,6 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         *benchmarkData << "        \"minLatency\": " << minLat << ",\n";
         *benchmarkData << "        \"maxLatency\": " << maxLat << ",\n";
         *benchmarkData << "        \"qps\": " << qps << ",\n";
-    } else {
-        // No search-during-insert path: just run the insert threads.
-        // (Used by worker dispatch and any caller that doesn't need stats.)
-        for (int j = 0; j < insertThreadCount; j++)
-        {
-            threads.emplace_back(func);
-        }
-        for (auto &thread : threads)
-        {
-            thread.join();
-        }
     }
     auto barrierStart = std::chrono::high_resolution_clock::now();
     size_t barrierPolls = 0;
@@ -741,9 +740,6 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
         *benchmarkData << "        \"batch barrier waitSeconds\": " << barrierSeconds << ",\n";
     }
 }
-
-
-
 
 
 template <typename T>
