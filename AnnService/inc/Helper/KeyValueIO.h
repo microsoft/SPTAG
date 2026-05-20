@@ -38,6 +38,12 @@ namespace SPTAG
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;
 
+            virtual ErrorCode MergeWithCAS(const SizeType key, const std::string &value,
+                                           const std::chrono::microseconds &timeout,
+                                           std::vector<Helper::AsyncReadRequest> *reqs, int& size) {
+                return ErrorCode::Undefined;
+            }
+
             virtual ErrorCode MultiMerge(const std::vector<SizeType>& keys, const std::vector<std::string>& values, 
                                          const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, std::vector<int>& sizes) {
                 if (keys.size() != values.size()) {

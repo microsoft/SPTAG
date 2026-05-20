@@ -75,6 +75,12 @@ extern RawBatchPutRequestDefaultTypeInternal _RawBatchPutRequest_default_instanc
 class RawBatchPutResponse;
 struct RawBatchPutResponseDefaultTypeInternal;
 extern RawBatchPutResponseDefaultTypeInternal _RawBatchPutResponse_default_instance_;
+class RawCASRequest;
+struct RawCASRequestDefaultTypeInternal;
+extern RawCASRequestDefaultTypeInternal _RawCASRequest_default_instance_;
+class RawCASResponse;
+struct RawCASResponseDefaultTypeInternal;
+extern RawCASResponseDefaultTypeInternal _RawCASResponse_default_instance_;
 class RawCoprocessorRequest;
 struct RawCoprocessorRequestDefaultTypeInternal;
 extern RawCoprocessorRequestDefaultTypeInternal _RawCoprocessorRequest_default_instance_;
@@ -122,6 +128,8 @@ template<> ::kvrpcpb::RawBatchGetRequest* Arena::CreateMaybeMessage<::kvrpcpb::R
 template<> ::kvrpcpb::RawBatchGetResponse* Arena::CreateMaybeMessage<::kvrpcpb::RawBatchGetResponse>(Arena*);
 template<> ::kvrpcpb::RawBatchPutRequest* Arena::CreateMaybeMessage<::kvrpcpb::RawBatchPutRequest>(Arena*);
 template<> ::kvrpcpb::RawBatchPutResponse* Arena::CreateMaybeMessage<::kvrpcpb::RawBatchPutResponse>(Arena*);
+template<> ::kvrpcpb::RawCASRequest* Arena::CreateMaybeMessage<::kvrpcpb::RawCASRequest>(Arena*);
+template<> ::kvrpcpb::RawCASResponse* Arena::CreateMaybeMessage<::kvrpcpb::RawCASResponse>(Arena*);
 template<> ::kvrpcpb::RawCoprocessorRequest* Arena::CreateMaybeMessage<::kvrpcpb::RawCoprocessorRequest>(Arena*);
 template<> ::kvrpcpb::RawCoprocessorResponse* Arena::CreateMaybeMessage<::kvrpcpb::RawCoprocessorResponse>(Arena*);
 template<> ::kvrpcpb::RawDeleteRangeRequest* Arena::CreateMaybeMessage<::kvrpcpb::RawDeleteRangeRequest>(Arena*);
@@ -3422,6 +3430,471 @@ class RawDeleteRangeResponse final :
 };
 // -------------------------------------------------------------------
 
+class RawCASRequest final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:kvrpcpb.RawCASRequest) */ {
+ public:
+  inline RawCASRequest() : RawCASRequest(nullptr) {}
+  ~RawCASRequest() override;
+  explicit PROTOBUF_CONSTEXPR RawCASRequest(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  RawCASRequest(const RawCASRequest& from);
+  RawCASRequest(RawCASRequest&& from) noexcept
+    : RawCASRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline RawCASRequest& operator=(const RawCASRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline RawCASRequest& operator=(RawCASRequest&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const RawCASRequest& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const RawCASRequest* internal_default_instance() {
+    return reinterpret_cast<const RawCASRequest*>(
+               &_RawCASRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    16;
+
+  friend void swap(RawCASRequest& a, RawCASRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(RawCASRequest* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(RawCASRequest* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  RawCASRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<RawCASRequest>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const RawCASRequest& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const RawCASRequest& from) {
+    RawCASRequest::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(RawCASRequest* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "kvrpcpb.RawCASRequest";
+  }
+  protected:
+  explicit RawCASRequest(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 2,
+    kValueFieldNumber = 3,
+    kPreviousValueFieldNumber = 5,
+    kCfFieldNumber = 6,
+    kContextFieldNumber = 1,
+    kTtlFieldNumber = 7,
+    kPreviousNotExistFieldNumber = 4,
+    kDeleteFieldNumber = 8,
+  };
+  // bytes key = 2;
+  void clear_key();
+  const std::string& key() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_key(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_key();
+  PROTOBUF_NODISCARD std::string* release_key();
+  void set_allocated_key(std::string* key);
+  private:
+  const std::string& _internal_key() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
+  std::string* _internal_mutable_key();
+  public:
+
+  // bytes value = 3;
+  void clear_value();
+  const std::string& value() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_value(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_value();
+  PROTOBUF_NODISCARD std::string* release_value();
+  void set_allocated_value(std::string* value);
+  private:
+  const std::string& _internal_value() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_value(const std::string& value);
+  std::string* _internal_mutable_value();
+  public:
+
+  // bytes previous_value = 5;
+  void clear_previous_value();
+  const std::string& previous_value() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_previous_value(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_previous_value();
+  PROTOBUF_NODISCARD std::string* release_previous_value();
+  void set_allocated_previous_value(std::string* previous_value);
+  private:
+  const std::string& _internal_previous_value() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_previous_value(const std::string& value);
+  std::string* _internal_mutable_previous_value();
+  public:
+
+  // string cf = 6;
+  void clear_cf();
+  const std::string& cf() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_cf(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_cf();
+  PROTOBUF_NODISCARD std::string* release_cf();
+  void set_allocated_cf(std::string* cf);
+  private:
+  const std::string& _internal_cf() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_cf(const std::string& value);
+  std::string* _internal_mutable_cf();
+  public:
+
+  // .kvrpcpb.Context context = 1;
+  bool has_context() const;
+  private:
+  bool _internal_has_context() const;
+  public:
+  void clear_context();
+  const ::kvrpcpb::Context& context() const;
+  PROTOBUF_NODISCARD ::kvrpcpb::Context* release_context();
+  ::kvrpcpb::Context* mutable_context();
+  void set_allocated_context(::kvrpcpb::Context* context);
+  private:
+  const ::kvrpcpb::Context& _internal_context() const;
+  ::kvrpcpb::Context* _internal_mutable_context();
+  public:
+  void unsafe_arena_set_allocated_context(
+      ::kvrpcpb::Context* context);
+  ::kvrpcpb::Context* unsafe_arena_release_context();
+
+  // uint64 ttl = 7;
+  void clear_ttl();
+  uint64_t ttl() const;
+  void set_ttl(uint64_t value);
+  private:
+  uint64_t _internal_ttl() const;
+  void _internal_set_ttl(uint64_t value);
+  public:
+
+  // bool previous_not_exist = 4;
+  void clear_previous_not_exist();
+  bool previous_not_exist() const;
+  void set_previous_not_exist(bool value);
+  private:
+  bool _internal_previous_not_exist() const;
+  void _internal_set_previous_not_exist(bool value);
+  public:
+
+  // bool delete = 8;
+  void clear_delete_();
+  bool delete_() const;
+  void set_delete_(bool value);
+  private:
+  bool _internal_delete_() const;
+  void _internal_set_delete_(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:kvrpcpb.RawCASRequest)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr value_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr previous_value_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr cf_;
+    ::kvrpcpb::Context* context_;
+    uint64_t ttl_;
+    bool previous_not_exist_;
+    bool delete__;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_kvrpcpb_2eproto;
+};
+// -------------------------------------------------------------------
+
+class RawCASResponse final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:kvrpcpb.RawCASResponse) */ {
+ public:
+  inline RawCASResponse() : RawCASResponse(nullptr) {}
+  ~RawCASResponse() override;
+  explicit PROTOBUF_CONSTEXPR RawCASResponse(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  RawCASResponse(const RawCASResponse& from);
+  RawCASResponse(RawCASResponse&& from) noexcept
+    : RawCASResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline RawCASResponse& operator=(const RawCASResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline RawCASResponse& operator=(RawCASResponse&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const RawCASResponse& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const RawCASResponse* internal_default_instance() {
+    return reinterpret_cast<const RawCASResponse*>(
+               &_RawCASResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    17;
+
+  friend void swap(RawCASResponse& a, RawCASResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(RawCASResponse* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(RawCASResponse* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  RawCASResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<RawCASResponse>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const RawCASResponse& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const RawCASResponse& from) {
+    RawCASResponse::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(RawCASResponse* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "kvrpcpb.RawCASResponse";
+  }
+  protected:
+  explicit RawCASResponse(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kErrorFieldNumber = 2,
+    kPreviousValueFieldNumber = 5,
+    kRegionErrorFieldNumber = 1,
+    kSucceedFieldNumber = 3,
+    kPreviousNotExistFieldNumber = 4,
+  };
+  // string error = 2;
+  void clear_error();
+  const std::string& error() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_error(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_error();
+  PROTOBUF_NODISCARD std::string* release_error();
+  void set_allocated_error(std::string* error);
+  private:
+  const std::string& _internal_error() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_error(const std::string& value);
+  std::string* _internal_mutable_error();
+  public:
+
+  // bytes previous_value = 5;
+  void clear_previous_value();
+  const std::string& previous_value() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_previous_value(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_previous_value();
+  PROTOBUF_NODISCARD std::string* release_previous_value();
+  void set_allocated_previous_value(std::string* previous_value);
+  private:
+  const std::string& _internal_previous_value() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_previous_value(const std::string& value);
+  std::string* _internal_mutable_previous_value();
+  public:
+
+  // .errorpb.Error region_error = 1;
+  bool has_region_error() const;
+  private:
+  bool _internal_has_region_error() const;
+  public:
+  void clear_region_error();
+  const ::errorpb::Error& region_error() const;
+  PROTOBUF_NODISCARD ::errorpb::Error* release_region_error();
+  ::errorpb::Error* mutable_region_error();
+  void set_allocated_region_error(::errorpb::Error* region_error);
+  private:
+  const ::errorpb::Error& _internal_region_error() const;
+  ::errorpb::Error* _internal_mutable_region_error();
+  public:
+  void unsafe_arena_set_allocated_region_error(
+      ::errorpb::Error* region_error);
+  ::errorpb::Error* unsafe_arena_release_region_error();
+
+  // bool succeed = 3;
+  void clear_succeed();
+  bool succeed() const;
+  void set_succeed(bool value);
+  private:
+  bool _internal_succeed() const;
+  void _internal_set_succeed(bool value);
+  public:
+
+  // bool previous_not_exist = 4;
+  void clear_previous_not_exist();
+  bool previous_not_exist() const;
+  void set_previous_not_exist(bool value);
+  private:
+  bool _internal_previous_not_exist() const;
+  void _internal_set_previous_not_exist(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:kvrpcpb.RawCASResponse)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr previous_value_;
+    ::errorpb::Error* region_error_;
+    bool succeed_;
+    bool previous_not_exist_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_kvrpcpb_2eproto;
+};
+// -------------------------------------------------------------------
+
 class RawScanRequest final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:kvrpcpb.RawScanRequest) */ {
  public:
@@ -3470,7 +3943,7 @@ class RawScanRequest final :
                &_RawScanRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    18;
 
   friend void swap(RawScanRequest& a, RawScanRequest& b) {
     a.Swap(&b);
@@ -3708,7 +4181,7 @@ class RawScanResponse final :
                &_RawScanResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    19;
 
   friend void swap(RawScanResponse& a, RawScanResponse& b) {
     a.Swap(&b);
@@ -3885,7 +4358,7 @@ class KeyRange final :
                &_KeyRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    20;
 
   friend void swap(KeyRange& a, KeyRange& b) {
     a.Swap(&b);
@@ -4054,7 +4527,7 @@ class RawCoprocessorRequest final :
                &_RawCoprocessorRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    19;
+    21;
 
   friend void swap(RawCoprocessorRequest& a, RawCoprocessorRequest& b) {
     a.Swap(&b);
@@ -4279,7 +4752,7 @@ class RawCoprocessorResponse final :
                &_RawCoprocessorResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    20;
+    22;
 
   friend void swap(RawCoprocessorResponse& a, RawCoprocessorResponse& b) {
     a.Swap(&b);
@@ -7808,6 +8281,589 @@ inline void RawDeleteRangeResponse::set_allocated_error(std::string* error) {
 
 // -------------------------------------------------------------------
 
+// RawCASRequest
+
+// .kvrpcpb.Context context = 1;
+inline bool RawCASRequest::_internal_has_context() const {
+  return this != internal_default_instance() && _impl_.context_ != nullptr;
+}
+inline bool RawCASRequest::has_context() const {
+  return _internal_has_context();
+}
+inline void RawCASRequest::clear_context() {
+  if (GetArenaForAllocation() == nullptr && _impl_.context_ != nullptr) {
+    delete _impl_.context_;
+  }
+  _impl_.context_ = nullptr;
+}
+inline const ::kvrpcpb::Context& RawCASRequest::_internal_context() const {
+  const ::kvrpcpb::Context* p = _impl_.context_;
+  return p != nullptr ? *p : reinterpret_cast<const ::kvrpcpb::Context&>(
+      ::kvrpcpb::_Context_default_instance_);
+}
+inline const ::kvrpcpb::Context& RawCASRequest::context() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.context)
+  return _internal_context();
+}
+inline void RawCASRequest::unsafe_arena_set_allocated_context(
+    ::kvrpcpb::Context* context) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.context_);
+  }
+  _impl_.context_ = context;
+  if (context) {
+    
+  } else {
+    
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:kvrpcpb.RawCASRequest.context)
+}
+inline ::kvrpcpb::Context* RawCASRequest::release_context() {
+  
+  ::kvrpcpb::Context* temp = _impl_.context_;
+  _impl_.context_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::kvrpcpb::Context* RawCASRequest::unsafe_arena_release_context() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASRequest.context)
+  
+  ::kvrpcpb::Context* temp = _impl_.context_;
+  _impl_.context_ = nullptr;
+  return temp;
+}
+inline ::kvrpcpb::Context* RawCASRequest::_internal_mutable_context() {
+  
+  if (_impl_.context_ == nullptr) {
+    auto* p = CreateMaybeMessage<::kvrpcpb::Context>(GetArenaForAllocation());
+    _impl_.context_ = p;
+  }
+  return _impl_.context_;
+}
+inline ::kvrpcpb::Context* RawCASRequest::mutable_context() {
+  ::kvrpcpb::Context* _msg = _internal_mutable_context();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASRequest.context)
+  return _msg;
+}
+inline void RawCASRequest::set_allocated_context(::kvrpcpb::Context* context) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.context_;
+  }
+  if (context) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(context);
+    if (message_arena != submessage_arena) {
+      context = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, context, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.context_ = context;
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASRequest.context)
+}
+
+// bytes key = 2;
+inline void RawCASRequest::clear_key() {
+  _impl_.key_.ClearToEmpty();
+}
+inline const std::string& RawCASRequest::key() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.key)
+  return _internal_key();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASRequest::set_key(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.key_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.key)
+}
+inline std::string* RawCASRequest::mutable_key() {
+  std::string* _s = _internal_mutable_key();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASRequest.key)
+  return _s;
+}
+inline const std::string& RawCASRequest::_internal_key() const {
+  return _impl_.key_.Get();
+}
+inline void RawCASRequest::_internal_set_key(const std::string& value) {
+  
+  _impl_.key_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::_internal_mutable_key() {
+  
+  return _impl_.key_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::release_key() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASRequest.key)
+  return _impl_.key_.Release();
+}
+inline void RawCASRequest::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.key_.IsDefault()) {
+    _impl_.key_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASRequest.key)
+}
+
+// bytes value = 3;
+inline void RawCASRequest::clear_value() {
+  _impl_.value_.ClearToEmpty();
+}
+inline const std::string& RawCASRequest::value() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.value)
+  return _internal_value();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASRequest::set_value(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.value_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.value)
+}
+inline std::string* RawCASRequest::mutable_value() {
+  std::string* _s = _internal_mutable_value();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASRequest.value)
+  return _s;
+}
+inline const std::string& RawCASRequest::_internal_value() const {
+  return _impl_.value_.Get();
+}
+inline void RawCASRequest::_internal_set_value(const std::string& value) {
+  
+  _impl_.value_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::_internal_mutable_value() {
+  
+  return _impl_.value_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::release_value() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASRequest.value)
+  return _impl_.value_.Release();
+}
+inline void RawCASRequest::set_allocated_value(std::string* value) {
+  if (value != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.value_.SetAllocated(value, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.value_.IsDefault()) {
+    _impl_.value_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASRequest.value)
+}
+
+// bool previous_not_exist = 4;
+inline void RawCASRequest::clear_previous_not_exist() {
+  _impl_.previous_not_exist_ = false;
+}
+inline bool RawCASRequest::_internal_previous_not_exist() const {
+  return _impl_.previous_not_exist_;
+}
+inline bool RawCASRequest::previous_not_exist() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.previous_not_exist)
+  return _internal_previous_not_exist();
+}
+inline void RawCASRequest::_internal_set_previous_not_exist(bool value) {
+  
+  _impl_.previous_not_exist_ = value;
+}
+inline void RawCASRequest::set_previous_not_exist(bool value) {
+  _internal_set_previous_not_exist(value);
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.previous_not_exist)
+}
+
+// bytes previous_value = 5;
+inline void RawCASRequest::clear_previous_value() {
+  _impl_.previous_value_.ClearToEmpty();
+}
+inline const std::string& RawCASRequest::previous_value() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.previous_value)
+  return _internal_previous_value();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASRequest::set_previous_value(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.previous_value_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.previous_value)
+}
+inline std::string* RawCASRequest::mutable_previous_value() {
+  std::string* _s = _internal_mutable_previous_value();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASRequest.previous_value)
+  return _s;
+}
+inline const std::string& RawCASRequest::_internal_previous_value() const {
+  return _impl_.previous_value_.Get();
+}
+inline void RawCASRequest::_internal_set_previous_value(const std::string& value) {
+  
+  _impl_.previous_value_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::_internal_mutable_previous_value() {
+  
+  return _impl_.previous_value_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::release_previous_value() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASRequest.previous_value)
+  return _impl_.previous_value_.Release();
+}
+inline void RawCASRequest::set_allocated_previous_value(std::string* previous_value) {
+  if (previous_value != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.previous_value_.SetAllocated(previous_value, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.previous_value_.IsDefault()) {
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASRequest.previous_value)
+}
+
+// string cf = 6;
+inline void RawCASRequest::clear_cf() {
+  _impl_.cf_.ClearToEmpty();
+}
+inline const std::string& RawCASRequest::cf() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.cf)
+  return _internal_cf();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASRequest::set_cf(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.cf_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.cf)
+}
+inline std::string* RawCASRequest::mutable_cf() {
+  std::string* _s = _internal_mutable_cf();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASRequest.cf)
+  return _s;
+}
+inline const std::string& RawCASRequest::_internal_cf() const {
+  return _impl_.cf_.Get();
+}
+inline void RawCASRequest::_internal_set_cf(const std::string& value) {
+  
+  _impl_.cf_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::_internal_mutable_cf() {
+  
+  return _impl_.cf_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASRequest::release_cf() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASRequest.cf)
+  return _impl_.cf_.Release();
+}
+inline void RawCASRequest::set_allocated_cf(std::string* cf) {
+  if (cf != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.cf_.SetAllocated(cf, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.cf_.IsDefault()) {
+    _impl_.cf_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASRequest.cf)
+}
+
+// uint64 ttl = 7;
+inline void RawCASRequest::clear_ttl() {
+  _impl_.ttl_ = uint64_t{0u};
+}
+inline uint64_t RawCASRequest::_internal_ttl() const {
+  return _impl_.ttl_;
+}
+inline uint64_t RawCASRequest::ttl() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.ttl)
+  return _internal_ttl();
+}
+inline void RawCASRequest::_internal_set_ttl(uint64_t value) {
+  
+  _impl_.ttl_ = value;
+}
+inline void RawCASRequest::set_ttl(uint64_t value) {
+  _internal_set_ttl(value);
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.ttl)
+}
+
+// bool delete = 8;
+inline void RawCASRequest::clear_delete_() {
+  _impl_.delete__ = false;
+}
+inline bool RawCASRequest::_internal_delete_() const {
+  return _impl_.delete__;
+}
+inline bool RawCASRequest::delete_() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASRequest.delete)
+  return _internal_delete_();
+}
+inline void RawCASRequest::_internal_set_delete_(bool value) {
+  
+  _impl_.delete__ = value;
+}
+inline void RawCASRequest::set_delete_(bool value) {
+  _internal_set_delete_(value);
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASRequest.delete)
+}
+
+// -------------------------------------------------------------------
+
+// RawCASResponse
+
+// .errorpb.Error region_error = 1;
+inline bool RawCASResponse::_internal_has_region_error() const {
+  return this != internal_default_instance() && _impl_.region_error_ != nullptr;
+}
+inline bool RawCASResponse::has_region_error() const {
+  return _internal_has_region_error();
+}
+inline const ::errorpb::Error& RawCASResponse::_internal_region_error() const {
+  const ::errorpb::Error* p = _impl_.region_error_;
+  return p != nullptr ? *p : reinterpret_cast<const ::errorpb::Error&>(
+      ::errorpb::_Error_default_instance_);
+}
+inline const ::errorpb::Error& RawCASResponse::region_error() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASResponse.region_error)
+  return _internal_region_error();
+}
+inline void RawCASResponse::unsafe_arena_set_allocated_region_error(
+    ::errorpb::Error* region_error) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.region_error_);
+  }
+  _impl_.region_error_ = region_error;
+  if (region_error) {
+    
+  } else {
+    
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:kvrpcpb.RawCASResponse.region_error)
+}
+inline ::errorpb::Error* RawCASResponse::release_region_error() {
+  
+  ::errorpb::Error* temp = _impl_.region_error_;
+  _impl_.region_error_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::errorpb::Error* RawCASResponse::unsafe_arena_release_region_error() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASResponse.region_error)
+  
+  ::errorpb::Error* temp = _impl_.region_error_;
+  _impl_.region_error_ = nullptr;
+  return temp;
+}
+inline ::errorpb::Error* RawCASResponse::_internal_mutable_region_error() {
+  
+  if (_impl_.region_error_ == nullptr) {
+    auto* p = CreateMaybeMessage<::errorpb::Error>(GetArenaForAllocation());
+    _impl_.region_error_ = p;
+  }
+  return _impl_.region_error_;
+}
+inline ::errorpb::Error* RawCASResponse::mutable_region_error() {
+  ::errorpb::Error* _msg = _internal_mutable_region_error();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASResponse.region_error)
+  return _msg;
+}
+inline void RawCASResponse::set_allocated_region_error(::errorpb::Error* region_error) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.region_error_);
+  }
+  if (region_error) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(
+                reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(region_error));
+    if (message_arena != submessage_arena) {
+      region_error = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, region_error, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.region_error_ = region_error;
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASResponse.region_error)
+}
+
+// string error = 2;
+inline void RawCASResponse::clear_error() {
+  _impl_.error_.ClearToEmpty();
+}
+inline const std::string& RawCASResponse::error() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASResponse.error)
+  return _internal_error();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASResponse::set_error(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASResponse.error)
+}
+inline std::string* RawCASResponse::mutable_error() {
+  std::string* _s = _internal_mutable_error();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASResponse.error)
+  return _s;
+}
+inline const std::string& RawCASResponse::_internal_error() const {
+  return _impl_.error_.Get();
+}
+inline void RawCASResponse::_internal_set_error(const std::string& value) {
+  
+  _impl_.error_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASResponse::_internal_mutable_error() {
+  
+  return _impl_.error_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASResponse::release_error() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASResponse.error)
+  return _impl_.error_.Release();
+}
+inline void RawCASResponse::set_allocated_error(std::string* error) {
+  if (error != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.error_.IsDefault()) {
+    _impl_.error_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASResponse.error)
+}
+
+// bool succeed = 3;
+inline void RawCASResponse::clear_succeed() {
+  _impl_.succeed_ = false;
+}
+inline bool RawCASResponse::_internal_succeed() const {
+  return _impl_.succeed_;
+}
+inline bool RawCASResponse::succeed() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASResponse.succeed)
+  return _internal_succeed();
+}
+inline void RawCASResponse::_internal_set_succeed(bool value) {
+  
+  _impl_.succeed_ = value;
+}
+inline void RawCASResponse::set_succeed(bool value) {
+  _internal_set_succeed(value);
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASResponse.succeed)
+}
+
+// bool previous_not_exist = 4;
+inline void RawCASResponse::clear_previous_not_exist() {
+  _impl_.previous_not_exist_ = false;
+}
+inline bool RawCASResponse::_internal_previous_not_exist() const {
+  return _impl_.previous_not_exist_;
+}
+inline bool RawCASResponse::previous_not_exist() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASResponse.previous_not_exist)
+  return _internal_previous_not_exist();
+}
+inline void RawCASResponse::_internal_set_previous_not_exist(bool value) {
+  
+  _impl_.previous_not_exist_ = value;
+}
+inline void RawCASResponse::set_previous_not_exist(bool value) {
+  _internal_set_previous_not_exist(value);
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASResponse.previous_not_exist)
+}
+
+// bytes previous_value = 5;
+inline void RawCASResponse::clear_previous_value() {
+  _impl_.previous_value_.ClearToEmpty();
+}
+inline const std::string& RawCASResponse::previous_value() const {
+  // @@protoc_insertion_point(field_get:kvrpcpb.RawCASResponse.previous_value)
+  return _internal_previous_value();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void RawCASResponse::set_previous_value(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.previous_value_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:kvrpcpb.RawCASResponse.previous_value)
+}
+inline std::string* RawCASResponse::mutable_previous_value() {
+  std::string* _s = _internal_mutable_previous_value();
+  // @@protoc_insertion_point(field_mutable:kvrpcpb.RawCASResponse.previous_value)
+  return _s;
+}
+inline const std::string& RawCASResponse::_internal_previous_value() const {
+  return _impl_.previous_value_.Get();
+}
+inline void RawCASResponse::_internal_set_previous_value(const std::string& value) {
+  
+  _impl_.previous_value_.Set(value, GetArenaForAllocation());
+}
+inline std::string* RawCASResponse::_internal_mutable_previous_value() {
+  
+  return _impl_.previous_value_.Mutable(GetArenaForAllocation());
+}
+inline std::string* RawCASResponse::release_previous_value() {
+  // @@protoc_insertion_point(field_release:kvrpcpb.RawCASResponse.previous_value)
+  return _impl_.previous_value_.Release();
+}
+inline void RawCASResponse::set_allocated_previous_value(std::string* previous_value) {
+  if (previous_value != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.previous_value_.SetAllocated(previous_value, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.previous_value_.IsDefault()) {
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:kvrpcpb.RawCASResponse.previous_value)
+}
+
+// -------------------------------------------------------------------
+
 // RawScanRequest
 
 // .kvrpcpb.Context context = 1;
@@ -8819,6 +9875,10 @@ inline void RawCoprocessorResponse::set_allocated_data(std::string* data) {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

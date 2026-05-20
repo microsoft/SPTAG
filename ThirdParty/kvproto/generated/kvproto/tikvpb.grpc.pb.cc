@@ -29,6 +29,7 @@ static const char* Tikv_method_names[] = {
   "/tikvpb.Tikv/RawDelete",
   "/tikvpb.Tikv/RawBatchDelete",
   "/tikvpb.Tikv/RawDeleteRange",
+  "/tikvpb.Tikv/RawCompareAndSwap",
   "/tikvpb.Tikv/RawScan",
   "/tikvpb.Tikv/RawCoprocessor",
 };
@@ -47,8 +48,9 @@ Tikv::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel, cons
   , rpcmethod_RawDelete_(Tikv_method_names[4], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_RawBatchDelete_(Tikv_method_names[5], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   , rpcmethod_RawDeleteRange_(Tikv_method_names[6], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_RawScan_(Tikv_method_names[7], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_RawCoprocessor_(Tikv_method_names[8], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_RawCompareAndSwap_(Tikv_method_names[7], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_RawScan_(Tikv_method_names[8], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_RawCoprocessor_(Tikv_method_names[9], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
   {}
 
 ::grpc::Status Tikv::Stub::RawGet(::grpc::ClientContext* context, const ::kvrpcpb::RawGetRequest& request, ::kvrpcpb::RawGetResponse* response) {
@@ -212,6 +214,29 @@ void Tikv::Stub::async::RawDeleteRange(::grpc::ClientContext* context, const ::k
   return result;
 }
 
+::grpc::Status Tikv::Stub::RawCompareAndSwap(::grpc::ClientContext* context, const ::kvrpcpb::RawCASRequest& request, ::kvrpcpb::RawCASResponse* response) {
+  return ::grpc::internal::BlockingUnaryCall< ::kvrpcpb::RawCASRequest, ::kvrpcpb::RawCASResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(channel_.get(), rpcmethod_RawCompareAndSwap_, context, request, response);
+}
+
+void Tikv::Stub::async::RawCompareAndSwap(::grpc::ClientContext* context, const ::kvrpcpb::RawCASRequest* request, ::kvrpcpb::RawCASResponse* response, std::function<void(::grpc::Status)> f) {
+  ::grpc::internal::CallbackUnaryCall< ::kvrpcpb::RawCASRequest, ::kvrpcpb::RawCASResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(stub_->channel_.get(), stub_->rpcmethod_RawCompareAndSwap_, context, request, response, std::move(f));
+}
+
+void Tikv::Stub::async::RawCompareAndSwap(::grpc::ClientContext* context, const ::kvrpcpb::RawCASRequest* request, ::kvrpcpb::RawCASResponse* response, ::grpc::ClientUnaryReactor* reactor) {
+  ::grpc::internal::ClientCallbackUnaryFactory::Create< ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(stub_->channel_.get(), stub_->rpcmethod_RawCompareAndSwap_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::kvrpcpb::RawCASResponse>* Tikv::Stub::PrepareAsyncRawCompareAndSwapRaw(::grpc::ClientContext* context, const ::kvrpcpb::RawCASRequest& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc::internal::ClientAsyncResponseReaderHelper::Create< ::kvrpcpb::RawCASResponse, ::kvrpcpb::RawCASRequest, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(channel_.get(), cq, rpcmethod_RawCompareAndSwap_, context, request);
+}
+
+::grpc::ClientAsyncResponseReader< ::kvrpcpb::RawCASResponse>* Tikv::Stub::AsyncRawCompareAndSwapRaw(::grpc::ClientContext* context, const ::kvrpcpb::RawCASRequest& request, ::grpc::CompletionQueue* cq) {
+  auto* result =
+    this->PrepareAsyncRawCompareAndSwapRaw(context, request, cq);
+  result->StartCall();
+  return result;
+}
+
 ::grpc::Status Tikv::Stub::RawScan(::grpc::ClientContext* context, const ::kvrpcpb::RawScanRequest& request, ::kvrpcpb::RawScanResponse* response) {
   return ::grpc::internal::BlockingUnaryCall< ::kvrpcpb::RawScanRequest, ::kvrpcpb::RawScanResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(channel_.get(), rpcmethod_RawScan_, context, request, response);
 }
@@ -332,6 +357,16 @@ Tikv::Service::Service() {
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       Tikv_method_names[7],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< Tikv::Service, ::kvrpcpb::RawCASRequest, ::kvrpcpb::RawCASResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(
+          [](Tikv::Service* service,
+             ::grpc::ServerContext* ctx,
+             const ::kvrpcpb::RawCASRequest* req,
+             ::kvrpcpb::RawCASResponse* resp) {
+               return service->RawCompareAndSwap(ctx, req, resp);
+             }, this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      Tikv_method_names[8],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< Tikv::Service, ::kvrpcpb::RawScanRequest, ::kvrpcpb::RawScanResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(
           [](Tikv::Service* service,
              ::grpc::ServerContext* ctx,
@@ -340,7 +375,7 @@ Tikv::Service::Service() {
                return service->RawScan(ctx, req, resp);
              }, this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      Tikv_method_names[8],
+      Tikv_method_names[9],
       ::grpc::internal::RpcMethod::NORMAL_RPC,
       new ::grpc::internal::RpcMethodHandler< Tikv::Service, ::kvrpcpb::RawCoprocessorRequest, ::kvrpcpb::RawCoprocessorResponse, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(
           [](Tikv::Service* service,
@@ -397,6 +432,13 @@ Tikv::Service::~Service() {
 }
 
 ::grpc::Status Tikv::Service::RawDeleteRange(::grpc::ServerContext* context, const ::kvrpcpb::RawDeleteRangeRequest* request, ::kvrpcpb::RawDeleteRangeResponse* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status Tikv::Service::RawCompareAndSwap(::grpc::ServerContext* context, const ::kvrpcpb::RawCASRequest* request, ::kvrpcpb::RawCASResponse* response) {
   (void) context;
   (void) request;
   (void) response;

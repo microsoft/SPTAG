@@ -278,6 +278,43 @@ struct RawDeleteRangeResponseDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RawDeleteRangeResponseDefaultTypeInternal _RawDeleteRangeResponse_default_instance_;
+PROTOBUF_CONSTEXPR RawCASRequest::RawCASRequest(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.key_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.value_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.previous_value_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.cf_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.context_)*/nullptr
+  , /*decltype(_impl_.ttl_)*/uint64_t{0u}
+  , /*decltype(_impl_.previous_not_exist_)*/false
+  , /*decltype(_impl_.delete__)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct RawCASRequestDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR RawCASRequestDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~RawCASRequestDefaultTypeInternal() {}
+  union {
+    RawCASRequest _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RawCASRequestDefaultTypeInternal _RawCASRequest_default_instance_;
+PROTOBUF_CONSTEXPR RawCASResponse::RawCASResponse(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.error_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.previous_value_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.region_error_)*/nullptr
+  , /*decltype(_impl_.succeed_)*/false
+  , /*decltype(_impl_.previous_not_exist_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct RawCASResponseDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR RawCASResponseDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~RawCASResponseDefaultTypeInternal() {}
+  union {
+    RawCASResponse _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RawCASResponseDefaultTypeInternal _RawCASResponse_default_instance_;
 PROTOBUF_CONSTEXPR RawScanRequest::RawScanRequest(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.start_key_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -358,7 +395,7 @@ struct RawCoprocessorResponseDefaultTypeInternal {
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RawCoprocessorResponseDefaultTypeInternal _RawCoprocessorResponse_default_instance_;
 }  // namespace kvrpcpb
-static ::_pb::Metadata file_level_metadata_kvrpcpb_2eproto[21];
+static ::_pb::Metadata file_level_metadata_kvrpcpb_2eproto[23];
 static const ::_pb::EnumDescriptor* file_level_enum_descriptors_kvrpcpb_2eproto[2];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_kvrpcpb_2eproto = nullptr;
 
@@ -524,6 +561,31 @@ const uint32_t TableStruct_kvrpcpb_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(
   PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawDeleteRangeResponse, _impl_.region_error_),
   PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawDeleteRangeResponse, _impl_.error_),
   ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.context_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.key_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.value_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.previous_not_exist_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.previous_value_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.cf_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.ttl_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASRequest, _impl_.delete__),
+  ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _impl_.region_error_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _impl_.error_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _impl_.succeed_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _impl_.previous_not_exist_),
+  PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawCASResponse, _impl_.previous_value_),
+  ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::kvrpcpb::RawScanRequest, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
@@ -590,11 +652,13 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 134, -1, -1, sizeof(::kvrpcpb::RawBatchDeleteResponse)},
   { 142, -1, -1, sizeof(::kvrpcpb::RawDeleteRangeRequest)},
   { 152, -1, -1, sizeof(::kvrpcpb::RawDeleteRangeResponse)},
-  { 160, -1, -1, sizeof(::kvrpcpb::RawScanRequest)},
-  { 173, -1, -1, sizeof(::kvrpcpb::RawScanResponse)},
-  { 181, -1, -1, sizeof(::kvrpcpb::KeyRange)},
-  { 189, -1, -1, sizeof(::kvrpcpb::RawCoprocessorRequest)},
-  { 200, -1, -1, sizeof(::kvrpcpb::RawCoprocessorResponse)},
+  { 160, -1, -1, sizeof(::kvrpcpb::RawCASRequest)},
+  { 174, -1, -1, sizeof(::kvrpcpb::RawCASResponse)},
+  { 185, -1, -1, sizeof(::kvrpcpb::RawScanRequest)},
+  { 198, -1, -1, sizeof(::kvrpcpb::RawScanResponse)},
+  { 206, -1, -1, sizeof(::kvrpcpb::KeyRange)},
+  { 214, -1, -1, sizeof(::kvrpcpb::RawCoprocessorRequest)},
+  { 225, -1, -1, sizeof(::kvrpcpb::RawCoprocessorResponse)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -614,6 +678,8 @@ static const ::_pb::Message* const file_default_instances[] = {
   &::kvrpcpb::_RawBatchDeleteResponse_default_instance_._instance,
   &::kvrpcpb::_RawDeleteRangeRequest_default_instance_._instance,
   &::kvrpcpb::_RawDeleteRangeResponse_default_instance_._instance,
+  &::kvrpcpb::_RawCASRequest_default_instance_._instance,
+  &::kvrpcpb::_RawCASResponse_default_instance_._instance,
   &::kvrpcpb::_RawScanRequest_default_instance_._instance,
   &::kvrpcpb::_RawScanResponse_default_instance_._instance,
   &::kvrpcpb::_KeyRange_default_instance_._instance,
@@ -668,24 +734,32 @@ const char descriptor_table_protodef_kvrpcpb_2eproto[] PROTOBUF_SECTION_VARIABLE
   "text\030\001 \001(\0132\020.kvrpcpb.Context\022\021\n\tstart_ke"
   "y\030\002 \001(\014\022\017\n\007end_key\030\003 \001(\014\022\n\n\002cf\030\004 \001(\t\"M\n\026"
   "RawDeleteRangeResponse\022$\n\014region_error\030\001"
-  " \001(\0132\016.errorpb.Error\022\r\n\005error\030\002 \001(\t\"\225\001\n\016"
-  "RawScanRequest\022!\n\007context\030\001 \001(\0132\020.kvrpcp"
-  "b.Context\022\021\n\tstart_key\030\002 \001(\014\022\r\n\005limit\030\003 "
-  "\001(\r\022\020\n\010key_only\030\004 \001(\010\022\n\n\002cf\030\005 \001(\t\022\017\n\007rev"
-  "erse\030\006 \001(\010\022\017\n\007end_key\030\007 \001(\014\"U\n\017RawScanRe"
-  "sponse\022$\n\014region_error\030\001 \001(\0132\016.errorpb.E"
-  "rror\022\034\n\003kvs\030\002 \003(\0132\017.kvrpcpb.KvPair\".\n\010Ke"
-  "yRange\022\021\n\tstart_key\030\001 \001(\014\022\017\n\007end_key\030\002 \001"
-  "(\014\"\230\001\n\025RawCoprocessorRequest\022!\n\007context\030"
-  "\001 \001(\0132\020.kvrpcpb.Context\022\021\n\tcopr_name\030\002 \001"
-  "(\t\022\030\n\020copr_version_req\030\003 \001(\t\022!\n\006ranges\030\004"
-  " \003(\0132\021.kvrpcpb.KeyRange\022\014\n\004data\030\005 \001(\014\"[\n"
-  "\026RawCoprocessorResponse\022$\n\014region_error\030"
-  "\001 \001(\0132\016.errorpb.Error\022\r\n\005error\030\002 \001(\t\022\014\n\004"
-  "data\030\003 \001(\014*+\n\nCommandPri\022\n\n\006Normal\020\000\022\007\n\003"
-  "Low\020\001\022\010\n\004High\020\002*/\n\016IsolationLevel\022\006\n\002SI\020"
-  "\000\022\006\n\002RC\020\001\022\r\n\tRCCheckTS\020\002B\022\n\020org.tikv.kvp"
-  "rotob\006proto3"
+  " \001(\0132\016.errorpb.Error\022\r\n\005error\030\002 \001(\t\"\253\001\n\r"
+  "RawCASRequest\022!\n\007context\030\001 \001(\0132\020.kvrpcpb"
+  ".Context\022\013\n\003key\030\002 \001(\014\022\r\n\005value\030\003 \001(\014\022\032\n\022"
+  "previous_not_exist\030\004 \001(\010\022\026\n\016previous_val"
+  "ue\030\005 \001(\014\022\n\n\002cf\030\006 \001(\t\022\013\n\003ttl\030\007 \001(\004\022\016\n\006del"
+  "ete\030\010 \001(\010\"\212\001\n\016RawCASResponse\022$\n\014region_e"
+  "rror\030\001 \001(\0132\016.errorpb.Error\022\r\n\005error\030\002 \001("
+  "\t\022\017\n\007succeed\030\003 \001(\010\022\032\n\022previous_not_exist"
+  "\030\004 \001(\010\022\026\n\016previous_value\030\005 \001(\014\"\225\001\n\016RawSc"
+  "anRequest\022!\n\007context\030\001 \001(\0132\020.kvrpcpb.Con"
+  "text\022\021\n\tstart_key\030\002 \001(\014\022\r\n\005limit\030\003 \001(\r\022\020"
+  "\n\010key_only\030\004 \001(\010\022\n\n\002cf\030\005 \001(\t\022\017\n\007reverse\030"
+  "\006 \001(\010\022\017\n\007end_key\030\007 \001(\014\"U\n\017RawScanRespons"
+  "e\022$\n\014region_error\030\001 \001(\0132\016.errorpb.Error\022"
+  "\034\n\003kvs\030\002 \003(\0132\017.kvrpcpb.KvPair\".\n\010KeyRang"
+  "e\022\021\n\tstart_key\030\001 \001(\014\022\017\n\007end_key\030\002 \001(\014\"\230\001"
+  "\n\025RawCoprocessorRequest\022!\n\007context\030\001 \001(\013"
+  "2\020.kvrpcpb.Context\022\021\n\tcopr_name\030\002 \001(\t\022\030\n"
+  "\020copr_version_req\030\003 \001(\t\022!\n\006ranges\030\004 \003(\0132"
+  "\021.kvrpcpb.KeyRange\022\014\n\004data\030\005 \001(\014\"[\n\026RawC"
+  "oprocessorResponse\022$\n\014region_error\030\001 \001(\013"
+  "2\016.errorpb.Error\022\r\n\005error\030\002 \001(\t\022\014\n\004data\030"
+  "\003 \001(\014*+\n\nCommandPri\022\n\n\006Normal\020\000\022\007\n\003Low\020\001"
+  "\022\010\n\004High\020\002*/\n\016IsolationLevel\022\006\n\002SI\020\000\022\006\n\002"
+  "RC\020\001\022\r\n\tRCCheckTS\020\002B\022\n\020org.tikv.kvprotob"
+  "\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_kvrpcpb_2eproto_deps[2] = {
   &::descriptor_table_errorpb_2eproto,
@@ -693,9 +767,9 @@ static const ::_pbi::DescriptorTable* const descriptor_table_kvrpcpb_2eproto_dep
 };
 static ::_pbi::once_flag descriptor_table_kvrpcpb_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_kvrpcpb_2eproto = {
-    false, false, 2532, descriptor_table_protodef_kvrpcpb_2eproto,
+    false, false, 2847, descriptor_table_protodef_kvrpcpb_2eproto,
     "kvrpcpb.proto",
-    &descriptor_table_kvrpcpb_2eproto_once, descriptor_table_kvrpcpb_2eproto_deps, 2, 21,
+    &descriptor_table_kvrpcpb_2eproto_once, descriptor_table_kvrpcpb_2eproto_deps, 2, 23,
     schemas, file_default_instances, TableStruct_kvrpcpb_2eproto::offsets,
     file_level_metadata_kvrpcpb_2eproto, file_level_enum_descriptors_kvrpcpb_2eproto,
     file_level_service_descriptors_kvrpcpb_2eproto,
@@ -5774,6 +5848,824 @@ void RawDeleteRangeResponse::InternalSwap(RawDeleteRangeResponse* other) {
 
 // ===================================================================
 
+class RawCASRequest::_Internal {
+ public:
+  static const ::kvrpcpb::Context& context(const RawCASRequest* msg);
+};
+
+const ::kvrpcpb::Context&
+RawCASRequest::_Internal::context(const RawCASRequest* msg) {
+  return *msg->_impl_.context_;
+}
+RawCASRequest::RawCASRequest(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:kvrpcpb.RawCASRequest)
+}
+RawCASRequest::RawCASRequest(const RawCASRequest& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  RawCASRequest* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.key_){}
+    , decltype(_impl_.value_){}
+    , decltype(_impl_.previous_value_){}
+    , decltype(_impl_.cf_){}
+    , decltype(_impl_.context_){nullptr}
+    , decltype(_impl_.ttl_){}
+    , decltype(_impl_.previous_not_exist_){}
+    , decltype(_impl_.delete__){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.key_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.key_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_key().empty()) {
+    _this->_impl_.key_.Set(from._internal_key(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_value().empty()) {
+    _this->_impl_.value_.Set(from._internal_value(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.previous_value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_previous_value().empty()) {
+    _this->_impl_.previous_value_.Set(from._internal_previous_value(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.cf_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.cf_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_cf().empty()) {
+    _this->_impl_.cf_.Set(from._internal_cf(), 
+      _this->GetArenaForAllocation());
+  }
+  if (from._internal_has_context()) {
+    _this->_impl_.context_ = new ::kvrpcpb::Context(*from._impl_.context_);
+  }
+  ::memcpy(&_impl_.ttl_, &from._impl_.ttl_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.delete__) -
+    reinterpret_cast<char*>(&_impl_.ttl_)) + sizeof(_impl_.delete__));
+  // @@protoc_insertion_point(copy_constructor:kvrpcpb.RawCASRequest)
+}
+
+inline void RawCASRequest::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.key_){}
+    , decltype(_impl_.value_){}
+    , decltype(_impl_.previous_value_){}
+    , decltype(_impl_.cf_){}
+    , decltype(_impl_.context_){nullptr}
+    , decltype(_impl_.ttl_){uint64_t{0u}}
+    , decltype(_impl_.previous_not_exist_){false}
+    , decltype(_impl_.delete__){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.key_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.key_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.previous_value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.cf_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.cf_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+RawCASRequest::~RawCASRequest() {
+  // @@protoc_insertion_point(destructor:kvrpcpb.RawCASRequest)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void RawCASRequest::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.key_.Destroy();
+  _impl_.value_.Destroy();
+  _impl_.previous_value_.Destroy();
+  _impl_.cf_.Destroy();
+  if (this != internal_default_instance()) delete _impl_.context_;
+}
+
+void RawCASRequest::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void RawCASRequest::Clear() {
+// @@protoc_insertion_point(message_clear_start:kvrpcpb.RawCASRequest)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.key_.ClearToEmpty();
+  _impl_.value_.ClearToEmpty();
+  _impl_.previous_value_.ClearToEmpty();
+  _impl_.cf_.ClearToEmpty();
+  if (GetArenaForAllocation() == nullptr && _impl_.context_ != nullptr) {
+    delete _impl_.context_;
+  }
+  _impl_.context_ = nullptr;
+  ::memset(&_impl_.ttl_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.delete__) -
+      reinterpret_cast<char*>(&_impl_.ttl_)) + sizeof(_impl_.delete__));
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* RawCASRequest::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // .kvrpcpb.Context context = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_context(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes key = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_key();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes value = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_value();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool previous_not_exist = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.previous_not_exist_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes previous_value = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_previous_value();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string cf = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 50)) {
+          auto str = _internal_mutable_cf();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, "kvrpcpb.RawCASRequest.cf"));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 ttl = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.ttl_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool delete = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
+          _impl_.delete__ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* RawCASRequest::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:kvrpcpb.RawCASRequest)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .kvrpcpb.Context context = 1;
+  if (this->_internal_has_context()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::context(this),
+        _Internal::context(this).GetCachedSize(), target, stream);
+  }
+
+  // bytes key = 2;
+  if (!this->_internal_key().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_key(), target);
+  }
+
+  // bytes value = 3;
+  if (!this->_internal_value().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_value(), target);
+  }
+
+  // bool previous_not_exist = 4;
+  if (this->_internal_previous_not_exist() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_previous_not_exist(), target);
+  }
+
+  // bytes previous_value = 5;
+  if (!this->_internal_previous_value().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_previous_value(), target);
+  }
+
+  // string cf = 6;
+  if (!this->_internal_cf().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_cf().data(), static_cast<int>(this->_internal_cf().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "kvrpcpb.RawCASRequest.cf");
+    target = stream->WriteStringMaybeAliased(
+        6, this->_internal_cf(), target);
+  }
+
+  // uint64 ttl = 7;
+  if (this->_internal_ttl() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(7, this->_internal_ttl(), target);
+  }
+
+  // bool delete = 8;
+  if (this->_internal_delete_() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(8, this->_internal_delete_(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:kvrpcpb.RawCASRequest)
+  return target;
+}
+
+size_t RawCASRequest::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:kvrpcpb.RawCASRequest)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes key = 2;
+  if (!this->_internal_key().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_key());
+  }
+
+  // bytes value = 3;
+  if (!this->_internal_value().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_value());
+  }
+
+  // bytes previous_value = 5;
+  if (!this->_internal_previous_value().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_previous_value());
+  }
+
+  // string cf = 6;
+  if (!this->_internal_cf().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_cf());
+  }
+
+  // .kvrpcpb.Context context = 1;
+  if (this->_internal_has_context()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.context_);
+  }
+
+  // uint64 ttl = 7;
+  if (this->_internal_ttl() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_ttl());
+  }
+
+  // bool previous_not_exist = 4;
+  if (this->_internal_previous_not_exist() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool delete = 8;
+  if (this->_internal_delete_() != 0) {
+    total_size += 1 + 1;
+  }
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData RawCASRequest::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    RawCASRequest::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*RawCASRequest::GetClassData() const { return &_class_data_; }
+
+
+void RawCASRequest::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<RawCASRequest*>(&to_msg);
+  auto& from = static_cast<const RawCASRequest&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:kvrpcpb.RawCASRequest)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_key().empty()) {
+    _this->_internal_set_key(from._internal_key());
+  }
+  if (!from._internal_value().empty()) {
+    _this->_internal_set_value(from._internal_value());
+  }
+  if (!from._internal_previous_value().empty()) {
+    _this->_internal_set_previous_value(from._internal_previous_value());
+  }
+  if (!from._internal_cf().empty()) {
+    _this->_internal_set_cf(from._internal_cf());
+  }
+  if (from._internal_has_context()) {
+    _this->_internal_mutable_context()->::kvrpcpb::Context::MergeFrom(
+        from._internal_context());
+  }
+  if (from._internal_ttl() != 0) {
+    _this->_internal_set_ttl(from._internal_ttl());
+  }
+  if (from._internal_previous_not_exist() != 0) {
+    _this->_internal_set_previous_not_exist(from._internal_previous_not_exist());
+  }
+  if (from._internal_delete_() != 0) {
+    _this->_internal_set_delete_(from._internal_delete_());
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void RawCASRequest::CopyFrom(const RawCASRequest& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:kvrpcpb.RawCASRequest)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool RawCASRequest::IsInitialized() const {
+  return true;
+}
+
+void RawCASRequest::InternalSwap(RawCASRequest* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.key_, lhs_arena,
+      &other->_impl_.key_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.value_, lhs_arena,
+      &other->_impl_.value_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.previous_value_, lhs_arena,
+      &other->_impl_.previous_value_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.cf_, lhs_arena,
+      &other->_impl_.cf_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(RawCASRequest, _impl_.delete__)
+      + sizeof(RawCASRequest::_impl_.delete__)
+      - PROTOBUF_FIELD_OFFSET(RawCASRequest, _impl_.context_)>(
+          reinterpret_cast<char*>(&_impl_.context_),
+          reinterpret_cast<char*>(&other->_impl_.context_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata RawCASRequest::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
+      file_level_metadata_kvrpcpb_2eproto[16]);
+}
+
+// ===================================================================
+
+class RawCASResponse::_Internal {
+ public:
+  static const ::errorpb::Error& region_error(const RawCASResponse* msg);
+};
+
+const ::errorpb::Error&
+RawCASResponse::_Internal::region_error(const RawCASResponse* msg) {
+  return *msg->_impl_.region_error_;
+}
+void RawCASResponse::clear_region_error() {
+  if (GetArenaForAllocation() == nullptr && _impl_.region_error_ != nullptr) {
+    delete _impl_.region_error_;
+  }
+  _impl_.region_error_ = nullptr;
+}
+RawCASResponse::RawCASResponse(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:kvrpcpb.RawCASResponse)
+}
+RawCASResponse::RawCASResponse(const RawCASResponse& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  RawCASResponse* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.error_){}
+    , decltype(_impl_.previous_value_){}
+    , decltype(_impl_.region_error_){nullptr}
+    , decltype(_impl_.succeed_){}
+    , decltype(_impl_.previous_not_exist_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.error_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.error_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_error().empty()) {
+    _this->_impl_.error_.Set(from._internal_error(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.previous_value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_previous_value().empty()) {
+    _this->_impl_.previous_value_.Set(from._internal_previous_value(), 
+      _this->GetArenaForAllocation());
+  }
+  if (from._internal_has_region_error()) {
+    _this->_impl_.region_error_ = new ::errorpb::Error(*from._impl_.region_error_);
+  }
+  ::memcpy(&_impl_.succeed_, &from._impl_.succeed_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.previous_not_exist_) -
+    reinterpret_cast<char*>(&_impl_.succeed_)) + sizeof(_impl_.previous_not_exist_));
+  // @@protoc_insertion_point(copy_constructor:kvrpcpb.RawCASResponse)
+}
+
+inline void RawCASResponse::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.error_){}
+    , decltype(_impl_.previous_value_){}
+    , decltype(_impl_.region_error_){nullptr}
+    , decltype(_impl_.succeed_){false}
+    , decltype(_impl_.previous_not_exist_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.error_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.error_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.previous_value_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.previous_value_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+RawCASResponse::~RawCASResponse() {
+  // @@protoc_insertion_point(destructor:kvrpcpb.RawCASResponse)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void RawCASResponse::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.error_.Destroy();
+  _impl_.previous_value_.Destroy();
+  if (this != internal_default_instance()) delete _impl_.region_error_;
+}
+
+void RawCASResponse::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void RawCASResponse::Clear() {
+// @@protoc_insertion_point(message_clear_start:kvrpcpb.RawCASResponse)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.error_.ClearToEmpty();
+  _impl_.previous_value_.ClearToEmpty();
+  if (GetArenaForAllocation() == nullptr && _impl_.region_error_ != nullptr) {
+    delete _impl_.region_error_;
+  }
+  _impl_.region_error_ = nullptr;
+  ::memset(&_impl_.succeed_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.previous_not_exist_) -
+      reinterpret_cast<char*>(&_impl_.succeed_)) + sizeof(_impl_.previous_not_exist_));
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* RawCASResponse::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // .errorpb.Error region_error = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_region_error(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string error = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_error();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, "kvrpcpb.RawCASResponse.error"));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool succeed = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.succeed_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool previous_not_exist = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.previous_not_exist_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes previous_value = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_previous_value();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* RawCASResponse::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:kvrpcpb.RawCASResponse)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .errorpb.Error region_error = 1;
+  if (this->_internal_has_region_error()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::region_error(this),
+        _Internal::region_error(this).GetCachedSize(), target, stream);
+  }
+
+  // string error = 2;
+  if (!this->_internal_error().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_error().data(), static_cast<int>(this->_internal_error().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "kvrpcpb.RawCASResponse.error");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_error(), target);
+  }
+
+  // bool succeed = 3;
+  if (this->_internal_succeed() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_succeed(), target);
+  }
+
+  // bool previous_not_exist = 4;
+  if (this->_internal_previous_not_exist() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_previous_not_exist(), target);
+  }
+
+  // bytes previous_value = 5;
+  if (!this->_internal_previous_value().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_previous_value(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:kvrpcpb.RawCASResponse)
+  return target;
+}
+
+size_t RawCASResponse::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:kvrpcpb.RawCASResponse)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string error = 2;
+  if (!this->_internal_error().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_error());
+  }
+
+  // bytes previous_value = 5;
+  if (!this->_internal_previous_value().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_previous_value());
+  }
+
+  // .errorpb.Error region_error = 1;
+  if (this->_internal_has_region_error()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.region_error_);
+  }
+
+  // bool succeed = 3;
+  if (this->_internal_succeed() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool previous_not_exist = 4;
+  if (this->_internal_previous_not_exist() != 0) {
+    total_size += 1 + 1;
+  }
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData RawCASResponse::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    RawCASResponse::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*RawCASResponse::GetClassData() const { return &_class_data_; }
+
+
+void RawCASResponse::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<RawCASResponse*>(&to_msg);
+  auto& from = static_cast<const RawCASResponse&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:kvrpcpb.RawCASResponse)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_error().empty()) {
+    _this->_internal_set_error(from._internal_error());
+  }
+  if (!from._internal_previous_value().empty()) {
+    _this->_internal_set_previous_value(from._internal_previous_value());
+  }
+  if (from._internal_has_region_error()) {
+    _this->_internal_mutable_region_error()->::errorpb::Error::MergeFrom(
+        from._internal_region_error());
+  }
+  if (from._internal_succeed() != 0) {
+    _this->_internal_set_succeed(from._internal_succeed());
+  }
+  if (from._internal_previous_not_exist() != 0) {
+    _this->_internal_set_previous_not_exist(from._internal_previous_not_exist());
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void RawCASResponse::CopyFrom(const RawCASResponse& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:kvrpcpb.RawCASResponse)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool RawCASResponse::IsInitialized() const {
+  return true;
+}
+
+void RawCASResponse::InternalSwap(RawCASResponse* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.error_, lhs_arena,
+      &other->_impl_.error_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.previous_value_, lhs_arena,
+      &other->_impl_.previous_value_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(RawCASResponse, _impl_.previous_not_exist_)
+      + sizeof(RawCASResponse::_impl_.previous_not_exist_)
+      - PROTOBUF_FIELD_OFFSET(RawCASResponse, _impl_.region_error_)>(
+          reinterpret_cast<char*>(&_impl_.region_error_),
+          reinterpret_cast<char*>(&other->_impl_.region_error_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata RawCASResponse::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
+      file_level_metadata_kvrpcpb_2eproto[17]);
+}
+
+// ===================================================================
+
 class RawScanRequest::_Internal {
  public:
   static const ::kvrpcpb::Context& context(const RawScanRequest* msg);
@@ -6187,7 +7079,7 @@ void RawScanRequest::InternalSwap(RawScanRequest* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata RawScanRequest::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
-      file_level_metadata_kvrpcpb_2eproto[16]);
+      file_level_metadata_kvrpcpb_2eproto[18]);
 }
 
 // ===================================================================
@@ -6420,7 +7312,7 @@ void RawScanResponse::InternalSwap(RawScanResponse* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata RawScanResponse::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
-      file_level_metadata_kvrpcpb_2eproto[17]);
+      file_level_metadata_kvrpcpb_2eproto[19]);
 }
 
 // ===================================================================
@@ -6663,7 +7555,7 @@ void KeyRange::InternalSwap(KeyRange* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata KeyRange::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
-      file_level_metadata_kvrpcpb_2eproto[18]);
+      file_level_metadata_kvrpcpb_2eproto[20]);
 }
 
 // ===================================================================
@@ -7037,7 +7929,7 @@ void RawCoprocessorRequest::InternalSwap(RawCoprocessorRequest* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata RawCoprocessorRequest::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
-      file_level_metadata_kvrpcpb_2eproto[19]);
+      file_level_metadata_kvrpcpb_2eproto[21]);
 }
 
 // ===================================================================
@@ -7333,7 +8225,7 @@ void RawCoprocessorResponse::InternalSwap(RawCoprocessorResponse* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata RawCoprocessorResponse::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_kvrpcpb_2eproto_getter, &descriptor_table_kvrpcpb_2eproto_once,
-      file_level_metadata_kvrpcpb_2eproto[20]);
+      file_level_metadata_kvrpcpb_2eproto[22]);
 }
 
 // @@protoc_insertion_point(namespace_scope)
@@ -7402,6 +8294,14 @@ Arena::CreateMaybeMessage< ::kvrpcpb::RawDeleteRangeRequest >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::kvrpcpb::RawDeleteRangeResponse*
 Arena::CreateMaybeMessage< ::kvrpcpb::RawDeleteRangeResponse >(Arena* arena) {
   return Arena::CreateMessageInternal< ::kvrpcpb::RawDeleteRangeResponse >(arena);
+}
+template<> PROTOBUF_NOINLINE ::kvrpcpb::RawCASRequest*
+Arena::CreateMaybeMessage< ::kvrpcpb::RawCASRequest >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::kvrpcpb::RawCASRequest >(arena);
+}
+template<> PROTOBUF_NOINLINE ::kvrpcpb::RawCASResponse*
+Arena::CreateMaybeMessage< ::kvrpcpb::RawCASResponse >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::kvrpcpb::RawCASResponse >(arena);
 }
 template<> PROTOBUF_NOINLINE ::kvrpcpb::RawScanRequest*
 Arena::CreateMaybeMessage< ::kvrpcpb::RawScanRequest >(Arena* arena) {

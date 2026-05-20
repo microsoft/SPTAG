@@ -29,7 +29,7 @@ static constexpr ::_pbi::MigrationSchema* schemas = nullptr;
 static constexpr ::_pb::Message* const* file_default_instances = nullptr;
 
 const char descriptor_table_protodef_tikvpb_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
-  "\n\014tikvpb.proto\022\006tikvpb\032\rkvrpcpb.proto2\235\005"
+  "\n\014tikvpb.proto\022\006tikvpb\032\rkvrpcpb.proto2\345\005"
   "\n\004Tikv\022;\n\006RawGet\022\026.kvrpcpb.RawGetRequest"
   "\032\027.kvrpcpb.RawGetResponse\"\000\022J\n\013RawBatchG"
   "et\022\033.kvrpcpb.RawBatchGetRequest\032\034.kvrpcp"
@@ -43,18 +43,20 @@ const char descriptor_table_protodef_tikvpb_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\032\037.kvrpcpb.RawBatchDeleteResponse\"\000\022S\n\016R"
   "awDeleteRange\022\036.kvrpcpb.RawDeleteRangeRe"
   "quest\032\037.kvrpcpb.RawDeleteRangeResponse\"\000"
-  "\022>\n\007RawScan\022\027.kvrpcpb.RawScanRequest\032\030.k"
-  "vrpcpb.RawScanResponse\"\000\022S\n\016RawCoprocess"
-  "or\022\036.kvrpcpb.RawCoprocessorRequest\032\037.kvr"
-  "pcpb.RawCoprocessorResponse\"\000B\022\n\020org.tik"
-  "v.kvprotob\006proto3"
+  "\022F\n\021RawCompareAndSwap\022\026.kvrpcpb.RawCASRe"
+  "quest\032\027.kvrpcpb.RawCASResponse\"\000\022>\n\007RawS"
+  "can\022\027.kvrpcpb.RawScanRequest\032\030.kvrpcpb.R"
+  "awScanResponse\"\000\022S\n\016RawCoprocessor\022\036.kvr"
+  "pcpb.RawCoprocessorRequest\032\037.kvrpcpb.Raw"
+  "CoprocessorResponse\"\000B\022\n\020org.tikv.kvprot"
+  "ob\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_tikvpb_2eproto_deps[1] = {
   &::descriptor_table_kvrpcpb_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_tikvpb_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_tikvpb_2eproto = {
-    false, false, 737, descriptor_table_protodef_tikvpb_2eproto,
+    false, false, 809, descriptor_table_protodef_tikvpb_2eproto,
     "tikvpb.proto",
     &descriptor_table_tikvpb_2eproto_once, descriptor_table_tikvpb_2eproto_deps, 1, 0,
     schemas, file_default_instances, TableStruct_tikvpb_2eproto::offsets,
