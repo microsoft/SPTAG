@@ -167,40 +167,6 @@ curl -s "http://10.0.1.1:23791/pd/api/v1/stores" \
 # Expected: ['Up', 'Up'] (one entry per TiKV store).
 ```
 
-### Pre-split & scatter (optional but recommended)
-
-For the insert-dominant workload, pre-split the keyspace so writes spread
-evenly across regions and stores. Boundaries derive from
-`DBKey(headID) = MaxID*layer + headID` little-endian byte 0; the TiKV raw key
-is `TiKVKeyPrefix + "_" + uint32_le(DBKey)`. We split *only* on the head-key
-prefix so all chunk/count variants for a head share a region. Used split
-points: `0x02, 0x04, …, 0xfe` (127 split points → 128 regions).
-
-Since the cluster is shared, run the helper **once** against any PD endpoint:
-
-```bash
-PREFIX="bench_insert_dominant_2node"   # keep in sync with KEY_PREFIX in run_distributed.sh
-PD="http://10.0.1.1:23791"
-PDCTL=(docker run --rm --network host --entrypoint /pd-ctl pingcap/pd:v8.5.1 -u "$PD")
-python3 - "$PREFIX" "${PDCTL[@]}" <<'PY'
-import json, subprocess, sys
-prefix = sys.argv[1].encode() + b'_'
-pdctl = sys.argv[2:]
-def run(args): return subprocess.check_output(pdctl + args, text=True)
-def region_for(hex_key): return json.loads(run(['region', 'key', '--format=hex', hex_key]))['id']
-for b in range(2, 256, 2):
-    key = (prefix + bytes([b, 0, 0, 0])).hex()
-    rid = region_for(key)
-    run(['operator', 'add', 'split-region', str(rid), '--policy=usekey', '--keys', key])
-for r in json.loads(run(['region', 'scan']))['regions']:
-    run(['operator', 'add', 'scatter-region', str(r['id'])])
-PY
-```
-
-Skip this on the very first run if you don't have load skew — `start-tikv`
-works without it. For 1B-scale insert-dominant runs it materially reduces
-head-region hot-spotting.
-
 ## Step 4 — Run the benchmark
 
 ```bash
