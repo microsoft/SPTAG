@@ -386,7 +386,10 @@ namespace SPTAG
             }
 
             // Group writes by chunk: 1 ReadChunk + N byte-modifications + 1 WriteChunk
-            // per chunk, instead of N × (ReadChunk + WriteChunk). 
+            // per chunk, instead of N × (ReadChunk + WriteChunk). Bypasses the LRU
+            // cache because runs that exercise this path always have
+            // VersionCacheMaxChunks=0; reading TiKV directly removes a layer of
+            // bookkeeping (cache invalidate-on-write) we no longer benefit from.
             void SetVersionBatch(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
             {
                 size_t n = std::min(vids.size(), versions.size());
@@ -408,7 +411,7 @@ namespace SPTAG
                     SizeType cid = kv.first;
                     auto& idxs = kv.second;
                     std::lock_guard<std::mutex> lock(ChunkMutex(cid));
-                    std::string chunk = ReadChunkCached(cid);
+                    std::string chunk = ReadChunk(cid);
                     if (chunk.empty()) {
                         chunk.assign(m_chunkSize, static_cast<char>(0xff));
                     }
