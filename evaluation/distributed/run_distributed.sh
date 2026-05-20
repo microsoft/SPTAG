@@ -751,37 +751,6 @@ start_remote_worker() {
     echo "  Worker n${NODE_IDX} on $host (SSH PID: $ssh_pid, log: $LOG)"
 }
 
-wait_workers_ready() {
-    local SCALE="$1"
-    local NODE_COUNT="$2"
-    local TIMEOUT=120
-
-    echo "Waiting for ${#WORKER_SSH_PIDS[@]} workers to be ready..."
-    for attempt in $(seq 1 $TIMEOUT); do
-        local all_ready=true
-        for i in $(seq 1 $((NODE_COUNT - 1))); do
-            local LOG="$LOGDIR/benchmark_${SCALE}_${NODE_COUNT}node_worker${i}.log"
-            if ! grep -q "Worker.*[Rr]eady\|Waiting for dispatch" "$LOG" 2>/dev/null; then
-                all_ready=false
-            fi
-        done
-        if $all_ready; then
-            echo "  All workers ready (${attempt}s)"
-            return 0
-        fi
-        # Check if any worker SSH process died
-        for idx in "${!WORKER_SSH_PIDS[@]}"; do
-            if ! kill -0 "${WORKER_SSH_PIDS[$idx]}" 2>/dev/null; then
-                echo "  ERROR: Worker SSH PID ${WORKER_SSH_PIDS[$idx]} exited prematurely"
-                return 1
-            fi
-        done
-        sleep 1
-    done
-    echo "  WARNING: Not all workers ready after ${TIMEOUT}s"
-    return 1
-}
-
 stop_remote_workers() {
     # Wait for workers to self-exit (driver sends TCP Stop), then force-kill.
     local TIMEOUT=${1:-30}
@@ -1139,8 +1108,6 @@ cmd_run() {
                     "$SSH_USER@$host:$SPTAG_DIR/Release/runtime_libs/"
             fi
         done
-
-        # Binary already pushed; nothing else to do here.
 
         # --- Phase 3: Start driver first (contains dispatcher), then workers ---
         echo ""

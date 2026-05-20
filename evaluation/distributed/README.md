@@ -1,17 +1,25 @@
 # Distributed Benchmark Evaluation — Insert Dominant
 
 Multi-machine SPTAG SPANN distributed benchmark for an **insert-dominant** workload
-(1M base + 10M inserts in 10 batches, with concurrent search-during-insert) on
-SIFT1B. Each physical node runs its own independent PD + TiKV (no shared Raft
-replication — see "TiKV deployment model" below).
+(1M base + 1M-10M inserts in batches, with concurrent search-during-insert) on
+SIFT1B. All nodes share a single TiKV raft cluster (see "TiKV deployment model"
+below).
 
 ## Files in this folder
 
 | File | Purpose |
 | --- | --- |
-| `configs/benchmark_insert_dominant_template.ini` | Benchmark template; `run_distributed.sh` fills `IndexPath`, `TiKVPDAddresses`, `TiKVKeyPrefix`, and `[Distributed]` from `cluster.conf`. |
-| `run_distributed.sh` | Orchestrator: `deploy` / `start-tikv` / `run` / `stop-tikv` / `cleanup`. |
+| `configs/benchmark_insert_dominant_template.ini` | 1M base + 1M insert, search-during-insert workload. |
+| `configs/benchmark_10m_template.ini` | 9M base + 1M insert, growing-index workload. |
+| `configs/benchmark_100m_template.ini` | 99M base + 1M insert, steady-state/freshness workload. |
+| `configs/cluster_2node.conf`, `configs/cluster_3node.conf` | Example cluster topologies. Pick one (or write your own) and pass to the orchestrator. |
+| `configs/tikv.toml` | TiKV server config baked into the containers. |
+| `run_distributed.sh` | Orchestrator: `deploy` / `setup-bins` / `start-tikv` / `run` / `bench` / `stop-tikv` / `cleanup`. |
+| `bin/` | `tikv-server` + `pd-server` binaries used by the containers (`setup-bins` downloads them if missing). |
 | `README.md` | This file. |
+
+`run_distributed.sh` fills the template's `IndexPath`, `TiKVPDAddresses`,
+`TiKVKeyPrefix`, and `[Distributed]` section from the cluster config.
 
 ## Architecture
 
@@ -29,35 +37,42 @@ replication — see "TiKV deployment model" below).
         │  + Router│ │  + Router│ │  + Router│
         └────┬─────┘ └────┬─────┘ └────┬─────┘
              │            │            │
-             ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  TiKV 1  │ │  TiKV 2  │ │  TiKV N  │ (one PD + one TiKV per node)
-        └──────────┘ └──────────┘ └──────────┘
+             └────────────┼────────────┘
+                          ▼
+                ┌───────────────────┐
+                │ Shared TiKV raft  │  N PDs (one raft group) +
+                │ cluster           │  N TiKV stores (max-replicas=1)
+                └───────────────────┘
 ```
 
-- **Driver** (node 0): Builds the index, sends Search/Insert/Stop commands via TCP dispatch.
-- **Workers** (nodes 1..N): Receive commands, execute their shard locally, report results back.
-- **TiKV (per node)**: Each node runs its own independent PD + TiKV pair. Postings
-  for a head live on the node that owns that head's hash partition.
-- **PostingRouter**: Hash-based head routing, remote append, head sync, dispatch protocol.
+- **Driver** (node 0): builds the index, sends Search/Insert/Stop commands via
+  TCP dispatch.
+- **Workers** (nodes 1..N): receive commands, execute their shard locally,
+  report results back over the dispatch channel.
+- **Shared TiKV cluster**: every node runs a PD + TiKV container; all PDs join
+  one raft group, all TiKVs point to all PDs. PD routes each key to the store
+  that owns its region.
+- **PostingRouter**: hash-based head routing, remote append, head sync,
+  dispatch protocol.
 
 ## TiKV deployment model
 
-Unlike a single-machine multi-docker TiKV (3 PD + 3 TiKV behind 127.0.0.1 ports
-22791-3 / 20161-3 sharing one Raft cluster), in this multi-machine setup **each
-node runs its own isolated PD + TiKV pair** under host networking. Heads are
-routed to nodes by hash, and each node's TiKV stores only its own shard. There
-is no Raft replication between nodes (no cross-node region quorum), which is
-intentional for insert-dominated benchmarks where Raft log overhead would dominate.
+All nodes share **one** TiKV raft cluster: every node's PD joins the same raft
+group, every node's TiKV registers as a store in that cluster, and PD routes
+reads/writes to whichever store owns the region. `max-replicas=1` is set so
+each region lives on exactly one store — we measure benchmark performance
+without 3-way Raft replication. Compute nodes are stateless TiKV clients; they
+read any posting through the shared client, so there is no cross-compute fetch
+RPC during RNGSelection.
 
-Per-node ports (defaults from `cluster.conf`):
+Per-node ports (defaults from `configs/cluster_2node.conf`):
 
-| Service | Port | Notes |
+| Service | Default port | Notes |
 | --- | --- | --- |
-| PD client | `2379` | Local app uses `<node_ip>:2379`. |
-| PD peer | `2380` | Inter-PD; isolated cluster of 1 PD per node. |
-| TiKV client | `20161` | The node-local SPTAG worker connects here. |
-| Router | `30001+` | TCP dispatch / posting routing between nodes. |
+| PD client | `23791` | TiKV client + `pd-ctl` connect here. |
+| PD peer | `23801` | Inter-PD raft traffic. |
+| TiKV client | `20171` | Per-node TiKV listens here. |
+| Router | `30002+` | TCP dispatch / posting routing between nodes. **Driver's `router_port` must NOT be `30001`** — the dispatcher listens on `30001` and a collision will silently break worker registration. The shipped 2-node config uses `30011` on the driver for this reason. |
 
 ## Prerequisites
 
@@ -69,45 +84,47 @@ Per-node ports (defaults from `cluster.conf`):
   cmake .. -DTIKV=ON -DTBB=ON -DCMAKE_BUILD_TYPE=Release -DGPU=OFF
   cmake --build . --target SPTAGTest -j$(nproc)
   ```
-  *Note: building the full project may fail on the Java wrapper (`JAVASPTAGFileIO`)
-  due to a pre-existing `FileIOInterface.h` signature mismatch — the `SPTAGTest`
-  target alone is sufficient.*
-- Passwordless SSH from driver to every other node (configure `ssh_key` in `cluster.conf`).
+  *Note: building the full project may fail on the Java wrapper
+  (`JAVASPTAGFileIO`) due to a pre-existing `FileIOInterface.h` signature
+  mismatch — the `SPTAGTest` target alone is sufficient.*
+- Passwordless SSH from driver to every other node (configure `ssh_key` in
+  the cluster config).
 - Docker installed on every node (TiKV/PD run as containers in host network mode).
 - Same dataset path on every node (default `/mnt/nvme/sift1b/`):
   - `/mnt/nvme/sift1b/bigann_base.u8bin` (1B × 128 × u8)
   - `/mnt/nvme/sift1b/query.10K.u8bin`
-- Same fast-storage path for index + TiKV data on every node (`data_dir` in `cluster.conf`,
-  default `/mnt/nvme`).
+- Same fast-storage path for index + TiKV data on every node (`data_dir` in
+  the cluster config, default `/mnt/nvme`).
 
 ## Step 1 — Cluster config
 
+Pick one of the shipped templates and edit it for your hosts/paths:
+
 ```bash
-cp evaluation/distributed/cluster.conf.example cluster.conf
-vim cluster.conf
+cp evaluation/distributed/configs/cluster_2node.conf my_cluster.conf
+vim my_cluster.conf
 ```
 
-Example:
+Layout:
 
 ```ini
 [cluster]
 ssh_user=superbench
+ssh_key=/home/superbench/.ssh/id_rsa
 sptag_dir=/home/superbench/zhangt/SPTAG
 data_dir=/mnt/nvme
-tikv_version=v7.5.1
-pd_version=v7.5.1
+tikv_version=v8.5.1
+pd_version=v8.5.1
 
 [nodes]
-# host           router_port
-10.0.1.1         30001          # driver (always first)
-10.0.1.2         30002          # worker 1
-10.0.1.3         30003          # worker 2
+# host         router_port    (driver is first; router_port must not equal 30001)
+10.0.1.1       30011          # driver
+10.0.1.2       30002          # worker 1
 
 [tikv]
-# host           pd_client  pd_peer  tikv_port
-10.0.1.1         2379       2380     20161
-10.0.1.2         2379       2380     20161
-10.0.1.3         2379       2380     20161
+# host         pd_client_port  pd_peer_port  tikv_port
+10.0.1.1       23791           23801         20171
+10.0.1.2       23791           23801         20171
 ```
 
 `run_distributed.sh` reads this file to fill the template's `[Distributed]`,
@@ -116,50 +133,49 @@ pd_version=v7.5.1
 ## Step 2 — Deploy
 
 ```bash
-./evaluation/distributed/run_distributed.sh deploy cluster.conf
+./evaluation/distributed/run_distributed.sh deploy      my_cluster.conf
+./evaluation/distributed/run_distributed.sh setup-bins  my_cluster.conf
 ```
 
-This rsyncs `Release/SPTAGTest` (and required shared libs) to every node and
-ensures the per-node TiKV / PD data directories exist under `data_dir`.
+`deploy` rsyncs `Release/SPTAGTest` (and required shared libs) to every node
+and ensures per-node TiKV / PD data directories exist under `data_dir`.
+`setup-bins` downloads `tikv-server` / `pd-server` into `bin/` on every node
+(idempotent; skipped automatically by `start-tikv` if binaries are already
+present).
 
-## Step 3 — Start TiKV (per-node, independent)
+## Step 3 — Start the shared TiKV cluster
 
 ```bash
-./evaluation/distributed/run_distributed.sh start-tikv cluster.conf
+./evaluation/distributed/run_distributed.sh start-tikv my_cluster.conf
 ```
 
-This starts one PD + one TiKV per node in host-network containers. Single-replica
-placement (`max-replicas=1`) is set so we measure benchmark performance without
-3-way Raft replication.
+This starts one PD + one TiKV container per node in host-network mode and
+joins them into a single raft cluster (`max-replicas=1`, no 3-way replication).
 
-Health check (run on driver, repeat per node):
+Health check (single PD endpoint is enough — the cluster is shared):
 
 ```bash
-for ip in 10.0.1.1 10.0.1.2 10.0.1.3; do
-  curl -s "http://$ip:2379/pd/api/v1/stores" \
-    | python3 -c 'import json,sys; print([s["store"]["state_name"] for s in json.load(sys.stdin)["stores"]])'
-done
-# Each node should report ['Up'].
+curl -s "http://10.0.1.1:23791/pd/api/v1/stores" \
+  | python3 -c 'import json,sys; print([s["store"]["state_name"] for s in json.load(sys.stdin)["stores"]])'
+# Expected: ['Up', 'Up'] (one entry per TiKV store).
 ```
 
 ### Pre-split & scatter (optional but recommended)
 
-For the insert-dominant workload to spread region writes evenly across regions
-within a node's TiKV, pre-split the keyspace at boundaries derived from
-`DBKey(headID) = MaxID*layer + headID` little-endian byte 0. The TiKV raw key is
-`TiKVKeyPrefix + "_" + uint32_le(DBKey)`; for multi-chunk it appends `\x00` /
-`\x02` for chunk / count keys, but we split *only* on the head-key prefix so all
-chunk and count variants for a head share a region. Boundaries used: `0x02, 0x04,
-…, 0xfe` (127 split points → 128 regions).
+For the insert-dominant workload, pre-split the keyspace so writes spread
+evenly across regions and stores. Boundaries derive from
+`DBKey(headID) = MaxID*layer + headID` little-endian byte 0; the TiKV raw key
+is `TiKVKeyPrefix + "_" + uint32_le(DBKey)`. We split *only* on the head-key
+prefix so all chunk/count variants for a head share a region. Used split
+points: `0x02, 0x04, …, 0xfe` (127 split points → 128 regions).
 
-Driver-side helper (each PD is independent, so run per node):
+Since the cluster is shared, run the helper **once** against any PD endpoint:
 
 ```bash
-PREFIX="bench_insert_dominant_3node"   # keep in sync with KEY_PREFIX in run_distributed.sh
-for ip in 10.0.1.1 10.0.1.2 10.0.1.3; do
-  PD="http://$ip:2379"
-  PDCTL=(docker run --rm --network host --entrypoint /pd-ctl pingcap/pd:v7.5.1 -u "$PD")
-  python3 - "$PREFIX" "${PDCTL[@]}" <<'PY'
+PREFIX="bench_insert_dominant_2node"   # keep in sync with KEY_PREFIX in run_distributed.sh
+PD="http://10.0.1.1:23791"
+PDCTL=(docker run --rm --network host --entrypoint /pd-ctl pingcap/pd:v8.5.1 -u "$PD")
+python3 - "$PREFIX" "${PDCTL[@]}" <<'PY'
 import json, subprocess, sys
 prefix = sys.argv[1].encode() + b'_'
 pdctl = sys.argv[2:]
@@ -172,48 +188,65 @@ for b in range(2, 256, 2):
 for r in json.loads(run(['region', 'scan']))['regions']:
     run(['operator', 'add', 'scatter-region', str(r['id'])])
 PY
-done
 ```
 
-Skip this on the very first run if you don't have load skew — `start-tikv` works
-without it. For 1B-scale insert-dominant runs on a single node it materially
-reduces head-region hot-spotting.
+Skip this on the very first run if you don't have load skew — `start-tikv`
+works without it. For 1B-scale insert-dominant runs it materially reduces
+head-region hot-spotting.
 
 ## Step 4 — Run the benchmark
 
 ```bash
 # Single scale, explicit node count (driver + (N-1) workers):
-./evaluation/distributed/run_distributed.sh run cluster.conf insert_dominant 3
+./evaluation/distributed/run_distributed.sh run my_cluster.conf insert_dominant 2
 
 # Or sweep 1-node baseline + N-node distributed for one or more scales:
-./evaluation/distributed/run_distributed.sh bench cluster.conf insert_dominant
+./evaluation/distributed/run_distributed.sh bench my_cluster.conf insert_dominant
+./evaluation/distributed/run_distributed.sh bench my_cluster.conf all
 ```
 
 What `run` does:
 
 1. **Build** (driver only): driver builds the index locally with router
-   *disabled* (`Rebuild=true`, no `[Router]`). Output goes to `…_n0/spann_index`.
+   *disabled* (`Rebuild=true`, no `[Distributed]`). Output goes to
+   `…_n0/spann_index`. Because the TiKV cluster is shared, the driver writes
+   all postings straight to TiKV via PD-routed RPCs — there is no need for a
+   distributed build phase.
 2. **Distribute**: rsync head index + perftest files from driver to each worker.
-3. **Workers**: SSH-launches `SPTAGTest` on each worker with `WORKER_INDEX=i` and
-   the per-node ini (router enabled, `Rebuild=false`).
-4. **Driver**: relaunches `SPTAGTest` with router enabled, `Rebuild=false`. The
-   driver dispatches Insert / Search commands across batches via TCP.
+3. **Workers**: SSH-launches `SPTAGTest` on each worker with `WORKER_INDEX=i`
+   and the per-node ini (router enabled, `Rebuild=false`).
+4. **Driver**: relaunches `SPTAGTest` with router enabled, `Rebuild=false`.
+   The driver dispatches Insert / Search commands across batches via TCP.
 5. **Collect**: driver sends Stop, joins worker logs into `benchmark_logs/`.
 
-Useful environment overrides (see header of `run_distributed.sh`):
+> The "build on the driver, then distribute and run" split is a workaround:
+> we don't yet have a real distributed SelectHead/BuildHead implementation, so
+> Phase 1 is single-node-with-shared-TiKV. The `BuildOnly=true` /
+> `RebuildSSDOnly=true` / `SkipSaveLoadCycles=true` /
+> `tikv_switch_to_nocache` / `drop_caches` choreography exists because of
+> this split; it is not a feature of the steady-state design.
 
-- `NOCACHE=1` — disable TiKV block cache, OS pagecache, and `VersionCacheMaxChunks`.
-- `BUILD_WITH_CACHE=1` — build with caches, then drop caches before search/insert (NOCACHE only).
-- `SKIP_TIKV_SWAP=1` — when using `BUILD_WITH_CACHE`, skip the destructive TiKV
-  container restart that has corrupted recall at 100M scale.
-- `SKIP_SAVE_LOAD=1` — skip post-build SaveIndex / per-batch Load+Clone+Save (NOCACHE only).
-- `SKIP_HEAD_BUILD=1` — reuse existing HeadIndex if present (RebuildSSDOnly).
+Useful environment overrides (see the header of `run_distributed.sh` for the
+authoritative list):
+
+- `NOCACHE=1` — disable TiKV block cache, OS pagecache, and
+  `VersionCacheMaxChunks` for the search/insert phase.
+- `BUILD_WITH_CACHE=1` — build with caches enabled, then drop caches before
+  search/insert (requires `NOCACHE=1`). Used at 100M scale where building
+  under nocache is impractical.
+- `SKIP_TIKV_SWAP=1` — with `BUILD_WITH_CACHE`, skip the destructive TiKV
+  container restart that has corrupted recall at 100M scale. Relies on
+  drop_caches + `VersionCacheMaxChunks=0` for nocache semantics.
+- `SKIP_SAVE_LOAD=1` — skip the post-build SaveIndex / per-batch
+  Load+Clone+Save cycle (`SkipSaveLoadCycles=true`). Required at 100M scale.
+- `SKIP_HEAD_BUILD=1` — reuse existing HeadIndex if present
+  (`RebuildSSDOnly=true`); falls back to full build if HeadIndex is missing.
 
 ## Step 5 — Stop / cleanup
 
 ```bash
-./evaluation/distributed/run_distributed.sh stop-tikv cluster.conf
-./evaluation/distributed/run_distributed.sh cleanup cluster.conf   # remove deployed files
+./evaluation/distributed/run_distributed.sh stop-tikv my_cluster.conf
+./evaluation/distributed/run_distributed.sh cleanup   my_cluster.conf   # remove deployed files
 ```
 
 ## Key knobs in `benchmark_insert_dominant_template.ini`
