@@ -23,6 +23,7 @@
 #include "Distributed/RemoteLeaseTable.h"
 #include "Distributed/HeadSyncLog.h"
 #include "Distributed/SplitWAL.h"
+#include "Distributed/BatchAppendWAL.h"
 #include <chrono>
 #include <cstdint>
 #include <algorithm>
@@ -287,6 +288,12 @@ namespace SPTAG::SPANN {
         // Distributed/HeadSyncLog.h and Distributed/SplitWAL.h.
         std::unique_ptr<Distributed::HeadSyncLog> m_headSyncLog;
         std::unique_ptr<Distributed::SplitWAL>    m_splitWAL;
+        // Receiver-side Batch WAL for cross-owner BatchAppend (Option A).
+        // Owned by each layer's searcher but the same TiKV cluster, keyed
+        // by receiver node index; layer-0 is the only owner that wires it
+        // into the WorkerNode (only one WAL per receiver, regardless of
+        // how many layers exist).
+        std::shared_ptr<Distributed::BatchAppendWAL> m_batchAppendWAL;
         std::atomic<std::uint64_t>                m_splitJobIdCounter{ 0 };
 
         IndexStats m_stat;
@@ -521,6 +528,13 @@ namespace SPTAG::SPANN {
                 if (m_layer == 0) {
                     m_headSyncLog = std::make_unique<Distributed::HeadSyncLog>(
                         db, m_worker->GetWorkerNodeIndex());
+                    // Receiver-side Batch WAL is per-receiver, not per-layer.
+                    // Layer-0 owns the install; recovered entries route to
+                    // their original layer via the m_layer field in each
+                    // RemoteAppendRequest.
+                    m_batchAppendWAL = std::make_shared<Distributed::BatchAppendWAL>(
+                        db, m_worker->GetWorkerNodeIndex());
+                    m_worker->SetBatchAppendWAL(m_batchAppendWAL);
                 }
                 m_splitWAL = std::make_unique<Distributed::SplitWAL>(db, m_layer);
             }
@@ -649,6 +663,16 @@ namespace SPTAG::SPANN {
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "WorkerNode bound to ExtraDynamicSearcher (layer %d)\n", m_layer);
+
+            // Layer-0 owns the Batch-Append WAL recovery: the append
+            // callback is now installed and m_jobSubmitters[0] is wired,
+            // so it is safe to replay any pending batches durably accepted
+            // before a previous crash. Recovered items route to their
+            // original layer via the m_layer field; if layer-1's submitter
+            // is not wired yet they fall back to layer-0's pool.
+            if (m_layer == 0 && m_batchAppendWAL) {
+                m_worker->RecoverPendingBatchAppendWAL();
+            }
         }
 
         // Owner-side wait for any in-flight remote lock on this bucket.
@@ -3723,19 +3747,13 @@ namespace SPTAG::SPANN {
                              avgSplitMs, maxSplitMs);
             }
             if (runningJobs == 0 && totalJobs == 0) {
-                // Hold ALL DONE until the outbound remote-append queue and
-                // any in-flight chunks have also drained.  Otherwise users
-                // see "ALL DONE" while the network pump is still shipping
-                // millions of fanned-out items to peers (see ReplicaCount=8
-                // amplification path), giving a misleading "stuck" feel.
-                size_t remoteQ = 0; int remoteInflight = 0;
-                if (m_worker) {
-                    remoteQ = m_worker->GetRemoteQueueSize();
-                    remoteInflight = m_worker->GetInflightAppendFlushes();
-                }
-                if (remoteQ != 0 || remoteInflight != 0) {
-                    return false;
-                }
+                // Note: AllFinished() must return true once the LOCAL pool
+                // is drained; SaveIndexData uses it as the shutdown signal.
+                // We can't gate it on the outbound remote-append queue:
+                // peers may continue routing reassigns back to us during
+                // the drain (feedback loop) so the queue is not
+                // guaranteed to hit zero.  Remote queue depth shows up
+                // in the periodic progress log instead.
                 if (!m_allDonePrinted) {
                     size_t totalSplit = m_totalSplitSubmitted.load();
                     size_t totalMerge = m_totalMergeSubmitted.load();

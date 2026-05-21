@@ -119,6 +119,14 @@ namespace SPTAG::SPANN {
         void SetJobSubmitter(int layer, RemotePostingOps::JobSubmitter s) {
             m_remoteOps.SetJobSubmitter(layer, std::move(s));
         }
+        // Wire the receiver-side durable Batch WAL. See RemotePostingOps
+        // for semantics. Pass a null pointer to disable.
+        void SetBatchAppendWAL(std::shared_ptr<Distributed::BatchAppendWAL> wal) {
+            m_remoteOps.SetBatchAppendWAL(std::move(wal));
+        }
+        void RecoverPendingBatchAppendWAL() {
+            m_remoteOps.RecoverPendingBatches();
+        }
         /// Atomically clear all RPC callbacks (every layer) and wait for any
         /// in-flight invocation to finish.
         void ClearCallbacks() {

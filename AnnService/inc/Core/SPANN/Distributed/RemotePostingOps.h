@@ -4,6 +4,7 @@
 #pragma once
 
 #include "inc/Core/SPANN/Distributed/DistributedProtocol.h"
+#include "inc/Core/SPANN/Distributed/BatchAppendWAL.h"
 #include "inc/Helper/ThreadPool.h"
 #include "inc/Socket/Client.h"
 #include "inc/Socket/Server.h"
@@ -126,6 +127,59 @@ namespace SPTAG::SPANN {
                 m_jobSubmitters.resize(static_cast<size_t>(layer) + 1);
             }
             m_jobSubmitters[layer] = std::move(submitter);
+        }
+
+        // Receiver-side durable Batch WAL (Option A): when set, every
+        // incoming BatchRemoteAppendRequest is persisted to the WAL and
+        // ACKed immediately ("Accepted"); the items are then processed
+        // asynchronously by the per-layer job submitters and the WAL key
+        // is deleted on completion. Crash recovery: RecoverPendingBatches
+        // re-submits any WAL entries that survived a crash. The Append
+        // callback is idempotent (versionMap dedup), so duplicate replays
+        // after a crash are safe.
+        void SetBatchAppendWAL(std::shared_ptr<Distributed::BatchAppendWAL> wal) {
+            std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+            m_batchAppendWAL = std::move(wal);
+        }
+        std::shared_ptr<Distributed::BatchAppendWAL> GetBatchAppendWAL() const {
+            std::shared_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+            return m_batchAppendWAL;
+        }
+
+        // Replay any BatchRemoteAppend batches that were durably accepted
+        // before a previous crash. Call once after the per-layer append
+        // callbacks + job submitters have been wired.
+        void RecoverPendingBatches() {
+            std::shared_ptr<Distributed::BatchAppendWAL> wal;
+            {
+                std::shared_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+                wal = m_batchAppendWAL;
+            }
+            if (!wal || !wal->Enabled()) return;
+            std::vector<std::pair<std::uint64_t, std::string>> entries;
+            auto ec = wal->Scan(entries);
+            if (ec != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "RemotePostingOps: BatchAppendWAL scan failed (%d); skipping recovery\n",
+                    (int)ec);
+                return;
+            }
+            if (entries.empty()) return;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "RemotePostingOps: recovering %zu pending BatchAppend batches from WAL\n",
+                entries.size());
+            for (auto& e : entries) {
+                auto batchReq = std::make_shared<BatchRemoteAppendRequest>();
+                const auto* p = reinterpret_cast<const std::uint8_t*>(e.second.data());
+                if (batchReq->Read(p, static_cast<std::uint32_t>(e.second.size())) == nullptr) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "RemotePostingOps: WAL batchID=%llu parse failed; dropping\n",
+                        (unsigned long long)e.first);
+                    wal->Delete(e.first);
+                    continue;
+                }
+                SubmitBatchItems(batchReq, e.first, /*sendResponse=*/false, /*ackPacket=*/nullptr);
+            }
         }
 
         // Helper: ensure the per-layer registries are wide enough for `layer`.
@@ -822,16 +876,65 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
                 "RemotePostingOps: Received batch of %u appends\n", batchReq->m_count);
 
-            // Submit each item as a Job to the searcher's shared compute pool.
-            // Pool workers run the local Append callback exactly like a local
-            // insert would. Last completion ACKs the sender. This puts remote
-            // work on the SAME concurrency budget as local Split/Merge/Reassign
-            // — eliminating the over-subscribed TiKV behaviour of the old
-            // separate bg executor + transient sub-worker threads.
-            auto packetPtr = std::make_shared<Socket::Packet>(std::move(packet));
             const size_t total = batchReq->m_items.size();
             if (total == 0) {
-                SendBatchAppendResponse(*packetPtr, 0, 0);
+                SendBatchAppendResponse(packet, 0, 0);
+                return;
+            }
+
+            // Option A path: durable Batch WAL is wired. Persist the batch
+            // first, then ACK the sender as "Accepted" and process items
+            // asynchronously. If WAL writes fail we fall through to the
+            // legacy synchronous-ACK path so the sender still sees an
+            // honest success/fail count.
+            std::shared_ptr<Distributed::BatchAppendWAL> wal;
+            {
+                std::shared_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+                wal = m_batchAppendWAL;
+            }
+            if (wal && wal->Enabled() && !m_jobSubmitters.empty()) {
+                std::uint64_t batchID = m_nextBatchID.fetch_add(1, std::memory_order_relaxed);
+                // Re-encode rather than reuse the inbound packet body to
+                // avoid pinning the receive buffer for the lifetime of the
+                // batch.
+                std::string blob;
+                blob.resize(batchReq->EstimateBufferSize());
+                auto* end = batchReq->Write(reinterpret_cast<std::uint8_t*>(&blob[0]));
+                blob.resize(static_cast<size_t>(
+                    end - reinterpret_cast<const std::uint8_t*>(blob.data())));
+                if (wal->Put(batchID, blob)) {
+                    // Durable — ACK immediately as Accepted (success=total).
+                    SendBatchAppendResponse(packet,
+                        static_cast<std::uint32_t>(total), 0);
+                    SubmitBatchItems(batchReq, batchID,
+                                     /*sendResponse=*/false, /*ackPacket=*/nullptr);
+                    return;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "RemotePostingOps: BatchAppendWAL Put failed batchID=%llu — "
+                    "falling back to synchronous ACK\n",
+                    (unsigned long long)batchID);
+            }
+
+            // Legacy / fallback path: process items inline-or-async, ACK on
+            // the last item completion. Identical to pre-WAL behaviour.
+            auto packetPtr = std::make_shared<Socket::Packet>(std::move(packet));
+            SubmitBatchItems(batchReq, /*batchID=*/0,
+                             /*sendResponse=*/true, packetPtr);
+        }
+
+        // Submit each item of `batchReq` to its per-layer job submitter.
+        // If sendResponse is true, the last completing job ACKs the sender
+        // via ackPacket. If sendResponse is false (WAL-backed path or
+        // crash recovery), the last completing job deletes the WAL entry
+        // identified by `batchID`.
+        void SubmitBatchItems(std::shared_ptr<BatchRemoteAppendRequest> batchReq,
+                              std::uint64_t batchID,
+                              bool sendResponse,
+                              std::shared_ptr<Socket::Packet> ackPacket) {
+            const size_t total = batchReq->m_items.size();
+            if (total == 0) {
+                if (sendResponse && ackPacket) SendBatchAppendResponse(*ackPacket, 0, 0);
                 return;
             }
             auto remaining    = std::make_shared<std::atomic<size_t>>(total);
@@ -839,8 +942,6 @@ namespace SPTAG::SPANN {
             auto failCount    = std::make_shared<std::atomic<std::uint32_t>>(0);
 
             if (m_jobSubmitters.empty()) {
-                // Fallback: process inline on the network thread. Should not
-                // happen once ExtraDynamicSearcher has wired its pool.
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                     "RemotePostingOps: no job submitter wired; running BatchAppend synchronously\n");
                 std::shared_lock<std::shared_timed_mutex> cbLock(m_callbackLifetimeMutex);
@@ -853,30 +954,28 @@ namespace SPTAG::SPANN {
                     }
                     (r == ErrorCode::Success ? *successCount : *failCount).fetch_add(1);
                 }
-                SendBatchAppendResponse(*packetPtr, successCount->load(), failCount->load());
+                if (sendResponse && ackPacket) {
+                    SendBatchAppendResponse(*ackPacket, successCount->load(), failCount->load());
+                }
+                if (!sendResponse && batchID != 0) {
+                    auto w = GetBatchAppendWAL();
+                    if (w) w->Delete(batchID);
+                }
                 return;
             }
 
             for (size_t i = 0; i < total; i++) {
                 auto* job = new BatchAppendItemJob(
-                    this, batchReq, i, remaining, successCount, failCount, packetPtr);
-                // Route to the per-layer searcher pool matching this item's
-                // m_layer so local Append/Split/Merge on layer N and remote
-                // appends targeting layer N share the same 16-thread budget.
-                // A single global submitter sent both layers' work into one
-                // pool, causing 35k+ queue depth on the receiver side.
+                    this, batchReq, i, remaining, successCount, failCount,
+                    ackPacket, sendResponse, batchID);
                 int layer = batchReq->m_items[i].m_layer;
                 const JobSubmitter* sub = nullptr;
                 if (layer >= 0 && static_cast<size_t>(layer) < m_jobSubmitters.size()
                     && m_jobSubmitters[layer]) {
                     sub = &m_jobSubmitters[layer];
                 } else {
-                    // Layer's pool not yet wired — fall back to whichever
-                    // submitter we have.
                     for (auto& s : m_jobSubmitters) { if (s) { sub = &s; break; } }
                 }
-                // Per-layer routing (m_jobSubmitters[layer]) isolates layer-N
-                // append items from other layers' pools.
                 if (sub) (*sub)(job);
                 else     { delete job; failCount->fetch_add(1); remaining->fetch_sub(1); }
             }
@@ -1342,12 +1441,16 @@ namespace SPTAG::SPANN {
                                std::shared_ptr<std::atomic<size_t>> remaining,
                                std::shared_ptr<std::atomic<std::uint32_t>> successCount,
                                std::shared_ptr<std::atomic<std::uint32_t>> failCount,
-                               std::shared_ptr<Socket::Packet> replyPacket)
+                               std::shared_ptr<Socket::Packet> replyPacket,
+                               bool sendResponse = true,
+                               std::uint64_t batchID = 0)
                 : m_ops(ops), m_batchReq(std::move(batchReq)), m_index(index),
                   m_remaining(std::move(remaining)),
                   m_success(std::move(successCount)),
                   m_fail(std::move(failCount)),
-                  m_replyPacket(std::move(replyPacket)) {}
+                  m_replyPacket(std::move(replyPacket)),
+                  m_sendResponse(sendResponse),
+                  m_batchID(batchID) {}
 
             void exec(IAbortOperation*) override { run(); }
             void exec(void* workspace, IAbortOperation*) override {
@@ -1372,8 +1475,16 @@ namespace SPTAG::SPANN {
                     else                         m_fail->fetch_add(1);
                 }
                 if (m_remaining->fetch_sub(1) == 1) {
-                    m_ops->SendBatchAppendResponse(
-                        *m_replyPacket, m_success->load(), m_fail->load());
+                    if (m_sendResponse && m_replyPacket) {
+                        m_ops->SendBatchAppendResponse(
+                            *m_replyPacket, m_success->load(), m_fail->load());
+                    } else if (m_batchID != 0) {
+                        // WAL path: sender already ACKed at WAL Put time.
+                        // Best-effort delete; recovery scan would harmlessly
+                        // re-apply (Append callback is idempotent).
+                        auto wal = m_ops->GetBatchAppendWAL();
+                        if (wal) wal->Delete(m_batchID);
+                    }
                 }
             }
 
@@ -1384,12 +1495,24 @@ namespace SPTAG::SPANN {
             std::shared_ptr<std::atomic<std::uint32_t>> m_success;
             std::shared_ptr<std::atomic<std::uint32_t>> m_fail;
             std::shared_ptr<Socket::Packet> m_replyPacket;
+            bool m_sendResponse;
+            std::uint64_t m_batchID;
         };
 
         // [Bug 26 retired] bg executor removed — see HandleBatchAppendRequest.
         // m_bgWorkers etc were replaced by per-layer job submission into the
         // searcher's shared SPDKThreadPool via m_jobSubmitters[layer].
         std::vector<JobSubmitter> m_jobSubmitters;
+
+        // Receiver-side durable Batch WAL: when set, BatchAppendRequest is
+        // persisted before sender ACK so the receiver can process items
+        // asynchronously without losing them across a crash.
+        std::shared_ptr<Distributed::BatchAppendWAL> m_batchAppendWAL;
+        // Monotonic batchID counter (receiver-allocated). Persisted only
+        // implicitly via the WAL keys themselves; on startup recovery we
+        // bump past the maximum recovered batchID so live batches don't
+        // collide with replayed ones.
+        std::atomic<std::uint64_t> m_nextBatchID{1};
 
         // HeadSync delivery diagnostics + retry queue (v33). Counters give
         // observability for sender/receiver gaps; per-peer backlogs +

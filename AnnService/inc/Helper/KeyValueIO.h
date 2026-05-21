@@ -95,6 +95,19 @@ namespace SPTAG
 
             virtual ErrorCode NextToScan(SizeType& key, std::string* value) {return ErrorCode::Undefined;}
 
+            // ScanPrefix: enumerate all (logical key, value) pairs in the
+            // store whose logical key starts with `prefix`. Implementations
+            // that prepend their own physical key prefix are expected to
+            // strip it before returning keys. `maxEntries` caps the result
+            // size (0 = no cap). Default no-op so non-distributed backends
+            // don't need to implement it.
+            virtual ErrorCode ScanPrefix(const std::string& prefix,
+                                         std::vector<std::pair<std::string, std::string>>& out,
+                                         std::size_t maxEntries = 0) {
+                (void)prefix; (void)out; (void)maxEntries;
+                return ErrorCode::Undefined;
+            }
+
             virtual void LogAsyncWaitStatsAndReset(int layer) {}
         };
     }
