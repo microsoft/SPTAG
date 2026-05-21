@@ -5,6 +5,7 @@
 #define _SPTAG_SPANN_WORKERNODE_H_
 
 #include "inc/Core/SPANN/Distributed/NetworkNode.h"
+#include "inc/Core/SPANN/Distributed/AsyncJobWatchdog.h"
 #include "inc/Helper/KeyValueIO.h"
 #include "inc/Helper/CommonHelper.h"
 #include "inc/Socket/SimpleSerialization.h"
@@ -279,8 +280,25 @@ namespace SPTAG::SPANN {
                 while (true) {
                     ErrorCode ret = SendBatchRemoteAppend(nodeIndex, *items);
                     if (ret != ErrorCode::Success) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                            "QueueRemoteAppend auto-flush: batch to node %d failed (%zu items)\n",
+                        // Hand the failed batch to the watchdog. It owns
+                        // backoff/retry until MaxAttempts; RemoteAppend is
+                        // idempotent on the receive side so at-least-once
+                        // delivery is safe.
+                        auto retryItems =
+                            std::make_shared<std::vector<RemoteAppendRequest>>(*items);
+                        int n = nodeIndex;
+                        auto self = this;
+                        std::string tag = "QueueRemoteAppend node=" +
+                            std::to_string(n) + " items=" +
+                            std::to_string(retryItems->size());
+                        uint64_t id = m_asyncWatchdog.Track(
+                            [self, n, retryItems]() {
+                                return self->SendBatchRemoteAppend(n, *retryItems)
+                                    == ErrorCode::Success;
+                            }, std::move(tag));
+                        m_asyncWatchdog.MarkFailureAndScheduleResend(id);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "QueueRemoteAppend auto-flush: batch to node %d failed (%zu items), handed to watchdog\n",
                             nodeIndex, items->size());
                     }
                     items->clear();
@@ -597,6 +615,12 @@ namespace SPTAG::SPANN {
         std::unordered_map<int, int> m_perNodeInflight; // guarded by m_appendQueueMutex
         static constexpr size_t kAutoFlushThreshold = 50000;
         std::atomic<int> m_maxInflightPerNode{4};
+
+        // Resends failed async fire-and-forget batches with exponential
+        // backoff (see AsyncJobWatchdog.h). Constructed last so it tears
+        // down before the queues; declared here so destruction order
+        // matches the design's fault-tolerance contract.
+        Distributed::AsyncJobWatchdog m_asyncWatchdog{3, 200};
 
         std::mutex& GetPerNodeAppendFlushMutex(int nodeIndex) {
             std::lock_guard<std::mutex> lk(m_perNodeAppendFlushMutexMapLock);
