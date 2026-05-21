@@ -125,6 +125,12 @@ DefineSSDParameter(m_versionCacheTTLMs, int, 0, "VersionCacheTTLMs")
 DefineSSDParameter(m_versionCacheMaxChunks, int, 10000, "VersionCacheMaxChunks")
 DefineSSDParameter(m_asyncRpcMaxInflight, int, 0, "AsyncRpcMaxInflight")
 
+// Distributed RemotePostingOps RPC tuning
+DefineSSDParameter(m_remoteAppendChunkSize, int, 3000, "RemoteAppendChunkSize")
+DefineSSDParameter(m_remoteAppendRetry, int, 3, "RemoteAppendRetry")
+DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
+DefineSSDParameter(m_remoteAppendMaxInflight, int, 4, "RemoteAppendMaxInflight")
+
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")
 DefineSSDParameter(m_gpuSSDLeafSize, int, 200, "GPUSSDLeafSize")

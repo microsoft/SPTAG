@@ -127,6 +127,12 @@ namespace SPTAG {
             int m_versionCacheMaxChunks;
             int m_asyncRpcMaxInflight;
 
+            // Distributed RemotePostingOps RPC tuning
+            int m_remoteAppendChunkSize;
+            int m_remoteAppendRetry;
+            int m_remoteAppendTimeoutSec;
+            int m_remoteAppendMaxInflight;
+
             // GPU building
             int m_gpuSSDNumTrees;
             int m_gpuSSDLeafSize;

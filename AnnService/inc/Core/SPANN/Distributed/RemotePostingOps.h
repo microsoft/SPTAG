@@ -87,6 +87,18 @@ namespace SPTAG::SPANN {
 
         void SetNetwork(NetworkAccess* net) { m_net = net; }
 
+        // RPC tuning. All knobs are configurable via SPANN INI options
+        // (RemoteAppend{ChunkSize,Retry,TimeoutSec,MaxInflight}). Defaults
+        // are baked here to keep single-node / unconfigured paths working;
+        // SPANN::ExtraDynamicSearcher::SetWorker() pushes the option-driven
+        // values once the index is bound to a worker.
+        void SetRpcChunkSize(int v) { if (v > 0) m_rpcChunkSize.store(v, std::memory_order_relaxed); }
+        void SetRpcRetry(int v) { if (v > 0) m_rpcRetry.store(v, std::memory_order_relaxed); }
+        void SetRpcTimeoutSec(int v) { if (v > 0) m_rpcTimeoutSec.store(v, std::memory_order_relaxed); }
+        int GetRpcChunkSize() const { return m_rpcChunkSize.load(std::memory_order_relaxed); }
+        int GetRpcRetry() const { return m_rpcRetry.load(std::memory_order_relaxed); }
+        int GetRpcTimeoutSec() const { return m_rpcTimeoutSec.load(std::memory_order_relaxed); }
+
         // Inject the searcher's shared compute pool. Receiver-side BatchAppend
         // work runs as Jobs on this pool so it shares a single bounded-
         // concurrency budget with local Append/Split/Merge/Reassign (instead
@@ -285,26 +297,14 @@ namespace SPTAG::SPANN {
         {
             if (items.empty()) return ErrorCode::Success;
 
-            // Chunk the batch so a single RPC never exceeds kChunkSize items.
-            // Large batches (millions of items) cannot be processed by the
-            // receiver within a single timeout window, causing data loss
-            // when the request is dropped. Chunking keeps each RPC bounded.
-            // [v38] Reduced 50000 → 10000 to (a) shrink end-of-batch drain
-            // tail (final chunk no longer 14s wide) and (b) let multiple
-            // chunks pipeline on the receiver pool.
-            // [v43] Back to 50000 — v42 (10k) was throughput-best (906/s)
-            // but during-insert p50 was 222ms; v43 (50k) trades throughput
-            // (-22% → 704/s) for during-insert p50 (-36% → 141ms) and big
-            // recovery in post-insert r1 QPS (47→85). v44 (100k) blew up
-            // tail drain: a single 100k chunk took 116s on the receiver,
-            // making end-of-batch drain run 40+ min (vs 8 min at 50k).
-            // 50k is the sweet spot.
-            // [v47] With shared-pool receiver (BatchAppendItemJob on
-            // m_splitThreadPool), 50k chunks still occasionally exceed the
-            // 180s wait_for window under contention → "Timeout waiting for
-            // batch response" + retries. Drop to 10k so each RPC's worst-case
-            // receiver wall-clock is ~6× smaller and stays under the timeout.
-            constexpr size_t kChunkSize = 3000;
+            // Chunk the batch so a single RPC never exceeds the configured
+            // chunk size. Large batches (millions of items) cannot be
+            // processed by the receiver within a single timeout window,
+            // causing data loss when the request is dropped. Chunking keeps
+            // each RPC bounded. Tunable via SPANN option
+            // RemoteAppendChunkSize (default 3000).
+            const size_t kChunkSize =
+                std::max<size_t>(1, (size_t)m_rpcChunkSize.load(std::memory_order_relaxed));
             const size_t total = items.size();
             size_t offset = 0;
             std::vector<RemoteAppendRequest> chunk;
@@ -337,13 +337,15 @@ namespace SPTAG::SPANN {
         {
             if (items.empty()) return ErrorCode::Success;
 
-            for (int attempt = 0; attempt < 3; attempt++) {
+            const int kMaxAttempts = std::max(1, m_rpcRetry.load(std::memory_order_relaxed));
+            const int kTimeoutSec = std::max(1, m_rpcTimeoutSec.load(std::memory_order_relaxed));
+            for (int attempt = 0; attempt < kMaxAttempts; attempt++) {
                 Socket::ConnectionID connID = m_net->GetPeerConnection(targetNodeIndex);
                 if (connID == Socket::c_invalidConnectionID) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                         "RemotePostingOps: Cannot connect to node %d for batch (%d items, attempt %d)\n",
                         targetNodeIndex, (int)items.size(), attempt + 1);
-                    if (attempt < 2) continue;
+                    if (attempt < kMaxAttempts - 1) continue;
                     return ErrorCode::Fail;
                 }
 
@@ -381,9 +383,12 @@ namespace SPTAG::SPANN {
                 m_net->GetClient()->SendPacket(connID, std::move(packet),
                     MakeSendFailHandler(resID));
 
-                // Generous timeout: 50k items * (~10ms TiKV roundtrip / 16 worker threads)
-                // = ~31s typical; cap at 180s to allow for lock contention with merges/splits.
-                auto status = future.wait_for(std::chrono::seconds(180));
+                // Wait window comes from SPANN option RemoteAppendTimeoutSec
+                // (default 180s). Sized so a normal-load chunk (chunk_size
+                // items at ~10ms TiKV roundtrip / 16 worker threads ≈ tens of
+                // seconds) completes well under the cap, leaving headroom for
+                // lock contention with merges/splits.
+                auto status = future.wait_for(std::chrono::seconds(kTimeoutSec));
                 auto waitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - waitStart).count();
                 if (status == std::future_status::timeout) {
@@ -397,7 +402,7 @@ namespace SPTAG::SPANN {
                     // are signalled via MakeSendFailHandler (which sets the
                     // promise to Fail, taking the "result != Success" path
                     // below).
-                    if (attempt < 2) continue;
+                    if (attempt < kMaxAttempts - 1) continue;
                     return ErrorCode::Fail;
                 }
 
@@ -1193,6 +1198,14 @@ namespace SPTAG::SPANN {
         // ---- State ----
 
         NetworkAccess* m_net = nullptr;
+
+        // RPC tuning knobs. See SetRpcChunkSize/Retry/TimeoutSec. Defaults
+        // match historical hardcoded values; overridden via SPANN options
+        // by ExtraDynamicSearcher::SetWorker(). Stored as atomics so the
+        // batch sender can read them lock-free.
+        std::atomic<int> m_rpcChunkSize{3000};
+        std::atomic<int> m_rpcRetry{3};
+        std::atomic<int> m_rpcTimeoutSec{180};
 
         // Per-layer callback registries. Indexed by ExtraDynamicSearcher layer
         // (m_layer at the call site). Resized lazily by SetXxxCallback. The

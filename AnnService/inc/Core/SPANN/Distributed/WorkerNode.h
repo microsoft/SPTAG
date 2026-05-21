@@ -134,6 +134,17 @@ namespace SPTAG::SPANN {
         void SetDispatchCallback(DispatchCallback cb) { m_dispatch.SetDispatchCallback(std::move(cb)); }
         void ClearDispatchCallback() { m_dispatch.ClearDispatchCallback(); }
 
+        // RPC tuning forwarders.  See RemotePostingOps for semantics.
+        // MaxInflightPerNode caps how many auto-flush chunks may be on
+        // the wire to a given peer at once; chunk size/retry/timeout
+        // are forwarded directly into RemotePostingOps.
+        void SetRpcChunkSize(int v) { m_remoteOps.SetRpcChunkSize(v); }
+        void SetRpcRetry(int v) { m_remoteOps.SetRpcRetry(v); }
+        void SetRpcTimeoutSec(int v) { m_remoteOps.SetRpcTimeoutSec(v); }
+        void SetRpcMaxInflightPerNode(int v) {
+            if (v > 0) m_maxInflightPerNode.store(v, std::memory_order_relaxed);
+        }
+
         // ---- Routing ----
 
         RouteTarget GetOwner(SizeType headID) {
@@ -246,7 +257,7 @@ namespace SPTAG::SPANN {
                 // wave) can saturate the receiver's bg-executor pool instead of
                 // queueing up serially behind a single per-node mutex.
                 if (q.size() >= kAutoFlushThreshold
-                    && m_perNodeInflight[nodeIndex] < kMaxInflightPerNode) {
+                    && m_perNodeInflight[nodeIndex] < m_maxInflightPerNode.load(std::memory_order_relaxed)) {
                     toFlush.swap(q);
                     m_remoteQueueSize.fetch_sub(toFlush.size(), std::memory_order_relaxed);
                     ++m_perNodeInflight[nodeIndex];
@@ -585,7 +596,7 @@ namespace SPTAG::SPANN {
         std::atomic<int> m_inflightAppendFlushes{0};
         std::unordered_map<int, int> m_perNodeInflight; // guarded by m_appendQueueMutex
         static constexpr size_t kAutoFlushThreshold = 50000;
-        static constexpr int kMaxInflightPerNode = 4;
+        std::atomic<int> m_maxInflightPerNode{4};
 
         std::mutex& GetPerNodeAppendFlushMutex(int nodeIndex) {
             std::lock_guard<std::mutex> lk(m_perNodeAppendFlushMutexMapLock);

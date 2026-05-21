@@ -404,6 +404,19 @@ namespace SPTAG::SPANN {
             m_worker = router;
             if (!m_worker) return;
 
+            // Push RPC tuning from SPANN options (RemoteAppend*) so the
+            // hardcoded defaults in RemotePostingOps/WorkerNode get
+            // overridden by whatever the ini file specified.  Pushing per
+            // SetWorker call (rather than once at WorkerNode construction)
+            // means a hot reconfigure via index reload picks up new
+            // values automatically.
+            if (m_opt) {
+                m_worker->SetRpcChunkSize(m_opt->m_remoteAppendChunkSize);
+                m_worker->SetRpcRetry(m_opt->m_remoteAppendRetry);
+                m_worker->SetRpcTimeoutSec(m_opt->m_remoteAppendTimeoutSec);
+                m_worker->SetRpcMaxInflightPerNode(m_opt->m_remoteAppendMaxInflight);
+            }
+
             WireJobSubmitterIfReady();
 
             // Claim ownership so the matching destructor's IfOwner check
