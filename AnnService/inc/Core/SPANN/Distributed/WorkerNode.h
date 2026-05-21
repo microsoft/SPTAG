@@ -38,6 +38,7 @@ namespace SPTAG::SPANN {
         using DispatchCallback = DispatchCoordinator::DispatchCallback;
         using HeadSyncCallback = RemotePostingOps::HeadSyncCallback;
         using RemoteLockCallback = RemotePostingOps::RemoteLockCallback;
+        using FenceValidator = RemotePostingOps::FenceValidator;
 
         /// Initialize with separate dispatcher/worker/store addresses.
         /// workerIndex is 0-based (0 = driver/local, 1+ = remote).
@@ -111,6 +112,7 @@ namespace SPTAG::SPANN {
         void SetAppendCallback(int layer, AppendCallback cb) { m_remoteOps.SetAppendCallback(layer, std::move(cb)); }
         void SetHeadSyncCallback(int layer, HeadSyncCallback cb) { m_remoteOps.SetHeadSyncCallback(layer, std::move(cb)); }
         void SetRemoteLockCallback(int layer, RemoteLockCallback cb) { m_remoteOps.SetRemoteLockCallback(layer, std::move(cb)); }
+        void SetFenceValidator(int layer, FenceValidator cb) { m_remoteOps.SetFenceValidator(layer, std::move(cb)); }
         // Inject the searcher's shared compute pool so receiver-side
         // BatchAppend work runs there (high-priority Jobs) instead of in a
         // separate executor. Idempotent: safe to call multiple times.
@@ -226,9 +228,24 @@ namespace SPTAG::SPANN {
             m_remoteOps.NoteHeadSyncApplyDelete();
         }
 
-        bool SendRemoteLock(int nodeIndex, int layer, SizeType headID, bool lock) {
-            if (!m_enabled) return false;
-            return m_remoteOps.SendRemoteLock(nodeIndex, layer, headID, lock);
+        // Returns issued fencing token on Lock success (0 = denied),
+        // or 1 on Unlock accepted (0 = rejected / stale token).
+        std::uint64_t SendRemoteLock(int nodeIndex, int layer, SizeType headID,
+                                     bool lock, std::uint64_t token = 0) {
+            if (!m_enabled) return 0;
+            return m_remoteOps.SendRemoteLock(nodeIndex, layer, headID, lock, token);
+        }
+
+        // Synchronous, fenced remote append: includes the fencing token
+        // so the owner can validate that the writer still holds the
+        // bucket lease before applying.  Returns Success/Fail.
+        ErrorCode SendFencedRemoteAppend(int nodeIndex, int layer, SizeType headID,
+                                         const std::shared_ptr<std::string>& headVec,
+                                         int appendNum, std::string& appendPosting,
+                                         std::uint64_t fencingToken) {
+            if (!m_enabled) return ErrorCode::Fail;
+            return m_remoteOps.SendRemoteAppend(nodeIndex, layer, headID, headVec,
+                                                appendNum, appendPosting, fencingToken);
         }
 
         void SetMergeCallback(int layer, RemotePostingOps::MergeCallback cb) {

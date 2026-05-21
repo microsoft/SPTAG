@@ -15,15 +15,20 @@ namespace SPTAG::SPANN {
     /// Serializable request for remote Append operations sent between compute nodes.
     /// MirrorVersion 1 added m_layer to disambiguate which ExtraDynamicSearcher on
     /// the receiver side handles the request. Version 0 packets default m_layer=0.
+    /// MirrorVersion 2 added m_fencingToken: when nonzero the receiver must
+    /// validate the token against its RemoteLeaseTable for the head's bucket
+    /// before applying.  Token 0 means "no fencing required" (used by the
+    /// normal owner-ring auto-route path that does not hold any remote lock).
     struct RemoteAppendRequest {
         static constexpr std::uint16_t MajorVersion() { return 1; }
-        static constexpr std::uint16_t MirrorVersion() { return 1; }
+        static constexpr std::uint16_t MirrorVersion() { return 2; }
 
         SizeType m_headID = 0;
         std::string m_headVec;        // raw head vector bytes
         std::int32_t m_appendNum = 0;
         std::string m_appendPosting;  // serialized posting data
         std::int32_t m_layer = 0;     // originating ExtraDynamicSearcher layer
+        std::uint64_t m_fencingToken = 0;  // 0 = unfenced (legacy path)
 
         std::size_t EstimateBufferSize() const {
             std::size_t size = 0;
@@ -33,6 +38,7 @@ namespace SPTAG::SPANN {
             size += sizeof(std::int32_t);        // appendNum
             size += sizeof(std::uint32_t) + m_appendPosting.size(); // appendPosting (len-prefixed)
             size += sizeof(std::int32_t);        // layer (mirrorVer >= 1)
+            size += sizeof(std::uint64_t);       // fencingToken (mirrorVer >= 2)
             return size;
         }
 
@@ -45,6 +51,7 @@ namespace SPTAG::SPANN {
             p_buffer = SimpleWriteBuffer(m_appendNum, p_buffer);
             p_buffer = SimpleWriteBuffer(m_appendPosting, p_buffer);
             p_buffer = SimpleWriteBuffer(m_layer, p_buffer);
+            p_buffer = SimpleWriteBuffer(m_fencingToken, p_buffer);
             return p_buffer;
         }
 
@@ -66,6 +73,11 @@ namespace SPTAG::SPANN {
                 p_buffer = SafeSimpleReadBuffer(p_buffer, p_bufEnd, m_layer);
             } else {
                 m_layer = 0;
+            }
+            if (mirrorVer >= 2) {
+                p_buffer = SafeSimpleReadBuffer(p_buffer, p_bufEnd, m_fencingToken);
+            } else {
+                m_fencingToken = 0;
             }
             return p_buffer;
         }
@@ -454,18 +466,22 @@ namespace SPTAG::SPANN {
     /// Request to lock/unlock a headID on its owner node (for cross-node Merge).
     /// MirrorVersion 1 added m_layer so multi-layer setups dispatch to the
     /// correct lock pool (each ExtraDynamicSearcher owns its own bucket flags).
+    /// MirrorVersion 2 added m_token for fencing: Lock requests send token=0;
+    /// Unlock requests send the token issued by the prior Lock so a zombie
+    /// holder whose lease expired cannot release a lock now held by someone else.
     struct RemoteLockRequest {
         static constexpr std::uint16_t MajorVersion() { return 1; }
-        static constexpr std::uint16_t MirrorVersion() { return 1; }
+        static constexpr std::uint16_t MirrorVersion() { return 2; }
 
         enum class Op : std::uint8_t { Lock = 0, Unlock = 1 };
         Op m_op = Op::Lock;
         SizeType m_headID = 0;
         std::int32_t m_layer = 0;
+        std::uint64_t m_token = 0;
 
         std::size_t EstimateBufferSize() const {
             return sizeof(std::uint16_t) * 2 + sizeof(std::uint8_t)
-                 + sizeof(SizeType) + sizeof(std::int32_t);
+                 + sizeof(SizeType) + sizeof(std::int32_t) + sizeof(std::uint64_t);
         }
 
         std::uint8_t* Write(std::uint8_t* p_buffer) const {
@@ -475,6 +491,7 @@ namespace SPTAG::SPANN {
             p_buffer = SimpleWriteBuffer(static_cast<std::uint8_t>(m_op), p_buffer);
             p_buffer = SimpleWriteBuffer(m_headID, p_buffer);
             p_buffer = SimpleWriteBuffer(m_layer, p_buffer);
+            p_buffer = SimpleWriteBuffer(m_token, p_buffer);
             return p_buffer;
         }
 
@@ -493,20 +510,29 @@ namespace SPTAG::SPANN {
             } else {
                 m_layer = 0;
             }
+            if (mirrorVer >= 2) {
+                p_buffer = SimpleReadBuffer(p_buffer, m_token);
+            } else {
+                m_token = 0;
+            }
             return p_buffer;
         }
     };
 
     /// Response for remote lock operations.
+    /// MirrorVersion 1 added m_token: the owner returns the issued fencing
+    /// token on a successful Lock so the holder can attach it to subsequent
+    /// lock-protected operations.  Unlock responses return token=0.
     struct RemoteLockResponse {
         static constexpr std::uint16_t MajorVersion() { return 1; }
-        static constexpr std::uint16_t MirrorVersion() { return 0; }
+        static constexpr std::uint16_t MirrorVersion() { return 1; }
 
         enum class Status : std::uint8_t { Granted = 0, Denied = 1 };
         Status m_status = Status::Granted;
+        std::uint64_t m_token = 0;
 
         std::size_t EstimateBufferSize() const {
-            return sizeof(std::uint16_t) * 2 + sizeof(std::uint8_t);
+            return sizeof(std::uint16_t) * 2 + sizeof(std::uint8_t) + sizeof(std::uint64_t);
         }
 
         std::uint8_t* Write(std::uint8_t* p_buffer) const {
@@ -514,6 +540,7 @@ namespace SPTAG::SPANN {
             p_buffer = SimpleWriteBuffer(MajorVersion(), p_buffer);
             p_buffer = SimpleWriteBuffer(MirrorVersion(), p_buffer);
             p_buffer = SimpleWriteBuffer(static_cast<std::uint8_t>(m_status), p_buffer);
+            p_buffer = SimpleWriteBuffer(m_token, p_buffer);
             return p_buffer;
         }
 
@@ -526,6 +553,11 @@ namespace SPTAG::SPANN {
             std::uint8_t rawOp = 0;
             p_buffer = SimpleReadBuffer(p_buffer, rawOp);
             m_status = static_cast<Status>(rawOp);
+            if (mirrorVer >= 1) {
+                p_buffer = SimpleReadBuffer(p_buffer, m_token);
+            } else {
+                m_token = 0;
+            }
             return p_buffer;
         }
     };

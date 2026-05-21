@@ -52,7 +52,18 @@ namespace SPTAG::SPANN {
             std::string& appendPosting)>;
 
         using HeadSyncCallback = std::function<void(const HeadSyncEntry& entry)>;
-        using RemoteLockCallback = std::function<bool(SizeType headID, bool lock)>;
+        // RemoteLockCallback:
+        //   For Lock op:   token argument is 0; returns issued fencing token
+        //                  (>=1 on success, 0 on denial).
+        //   For Unlock op: token argument is the previously-issued token;
+        //                  returns 1 on accepted release, 0 if the token is
+        //                  stale (lease already expired / re-issued).
+        using RemoteLockCallback = std::function<std::uint64_t(SizeType headID, bool lock, std::uint64_t token)>;
+        // Validator for fenced RemoteAppend: receiver checks the request's
+        // m_fencingToken against the lease table for headID's bucket.
+        // Return true to allow the append, false to reject (the response
+        // will carry Failed status).  Unfenced appends (token=0) bypass.
+        using FenceValidator = std::function<bool(SizeType headID, std::uint64_t token)>;
 
         /// Callback for cross-node merge: search on a peer node observed
         /// that posting `headID` (which we own) looks underfull. The peer
@@ -152,6 +163,14 @@ namespace SPTAG::SPANN {
             EnsureLayerSlot_NoLock(layer);
             m_remoteLockCallbacks[layer] = std::move(cb);
         }
+        void SetFenceValidator(int layer, FenceValidator cb) {
+            std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+            EnsureLayerSlot_NoLock(layer);
+            if (static_cast<size_t>(layer) >= m_fenceValidators.size()) {
+                m_fenceValidators.resize(layer + 1);
+            }
+            m_fenceValidators[layer] = std::move(cb);
+        }
         void SetMergeCallback(int layer, MergeCallback cb) {
             std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
             EnsureLayerSlot_NoLock(layer);
@@ -169,6 +188,7 @@ namespace SPTAG::SPANN {
             m_headSyncCallbacks.clear();
             m_remoteLockCallbacks.clear();
             m_mergeCallbacks.clear();
+            m_fenceValidators.clear();
             m_callbackOwners = std::vector<std::atomic<const void*>>();
         }
 
@@ -200,6 +220,9 @@ namespace SPTAG::SPANN {
             if (layer >= 0 && static_cast<size_t>(layer) < m_mergeCallbacks.size()) {
                 m_mergeCallbacks[layer] = nullptr;
             }
+            if (layer >= 0 && static_cast<size_t>(layer) < m_fenceValidators.size()) {
+                m_fenceValidators[layer] = nullptr;
+            }
             m_callbackOwners[layer].store(nullptr, std::memory_order_release);
             return true;
         }
@@ -218,6 +241,11 @@ namespace SPTAG::SPANN {
         const RemoteLockCallback* LookupRemoteLockCallback_Locked(int layer) const {
             if (layer < 0 || static_cast<size_t>(layer) >= m_remoteLockCallbacks.size()) return nullptr;
             const auto& cb = m_remoteLockCallbacks[layer];
+            return cb ? &cb : nullptr;
+        }
+        const FenceValidator* LookupFenceValidator_Locked(int layer) const {
+            if (layer < 0 || static_cast<size_t>(layer) >= m_fenceValidators.size()) return nullptr;
+            const auto& cb = m_fenceValidators[layer];
             return cb ? &cb : nullptr;
         }
         // PutPosting/FetchPosting/DeletePosting RPCs lived here historically.
@@ -240,7 +268,8 @@ namespace SPTAG::SPANN {
             SizeType headID,
             const std::shared_ptr<std::string>& headVec,
             int appendNum,
-            std::string& appendPosting)
+            std::string& appendPosting,
+            std::uint64_t fencingToken = 0)
         {
             Socket::ConnectionID connID = m_net->GetPeerConnection(targetNodeIndex);
             if (connID == Socket::c_invalidConnectionID) {
@@ -256,6 +285,7 @@ namespace SPTAG::SPANN {
             req.m_headVec = *headVec;
             req.m_appendNum = appendNum;
             req.m_appendPosting = appendPosting;
+            req.m_fencingToken = fencingToken;
 
             Socket::ResourceID resID = m_nextResourceId.fetch_add(1);
             auto [future, _] = CreatePendingResponse(resID);
@@ -632,18 +662,25 @@ namespace SPTAG::SPANN {
         //  RemoteLock — synchronous request/response
         // ==================================================================
 
-        bool SendRemoteLock(int nodeIndex, int layer, SizeType headID, bool lock) {
+        // SendRemoteLock: synchronous lock/unlock RPC.
+        //   For Lock (lock=true, token=0):   returns issued fencing token,
+        //                                    0 on denial/timeout.
+        //   For Unlock (lock=false, token=t): returns 1 on accepted release,
+        //                                    0 on rejection/timeout.
+        std::uint64_t SendRemoteLock(int nodeIndex, int layer, SizeType headID,
+                                     bool lock, std::uint64_t token = 0) {
             Socket::ConnectionID connID = m_net->GetPeerConnection(nodeIndex);
             if (connID == Socket::c_invalidConnectionID) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                     "RemotePostingOps: Cannot send remote lock to node %d\n", nodeIndex);
-                return false;
+                return 0;
             }
 
             RemoteLockRequest req;
             req.m_op = lock ? RemoteLockRequest::Op::Lock : RemoteLockRequest::Op::Unlock;
             req.m_headID = headID;
             req.m_layer = layer;
+            req.m_token = token;
 
             Socket::ResourceID rid = m_nextResourceId.fetch_add(1);
             auto [future, _] = CreatePendingResponse(rid);
@@ -666,12 +703,18 @@ namespace SPTAG::SPANN {
             auto status = future.wait_for(std::chrono::milliseconds(5000));
             if (status != std::future_status::ready) {
                 ErasePending(rid);
+                TakePendingLockToken(rid);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                     "RemotePostingOps: Lock timeout for headID %lld on node %d\n",
                     (std::int64_t)headID, nodeIndex);
-                return false;
+                return 0;
             }
-            return future.get() == ErrorCode::Success;
+            ErrorCode ec = future.get();
+            std::uint64_t returnedToken = TakePendingLockToken(rid);
+            if (ec != ErrorCode::Success) return 0;
+            // On Unlock the owner returns token=0 but Success status; map
+            // to a sentinel 1 so callers can distinguish from failure.
+            return lock ? returnedToken : (returnedToken == 0 ? 1 : returnedToken);
         }
 
         // ==================================================================
@@ -701,6 +744,24 @@ namespace SPTAG::SPANN {
             ErrorCode result = ErrorCode::Fail;
             {
                 std::shared_lock<std::shared_timed_mutex> cbLock(m_callbackLifetimeMutex);
+                // Fence validation: if the request carries a nonzero
+                // fencing token, the writer claimed they held the remote
+                // lock for this head when they sent the RPC.  Validate
+                // against our lease table before applying so a zombie
+                // holder's late write (after its lease expired) is
+                // rejected.
+                if (req.m_fencingToken != 0) {
+                    const auto* fv = LookupFenceValidator_Locked(req.m_layer);
+                    if (fv && !(*fv)(req.m_headID, req.m_fencingToken)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "RemotePostingOps: AppendRequest fencing token "
+                            "%llu rejected for headID %lld (stale lease)\n",
+                            (unsigned long long)req.m_fencingToken,
+                            (std::int64_t)req.m_headID);
+                        SendAppendResponse(packet, RemoteAppendResponse::Status::Failed);
+                        return;
+                    }
+                }
                 const auto* cb = LookupAppendCallback_Locked(req.m_layer);
                 if (cb) {
                     auto headVec = std::make_shared<std::string>(std::move(req.m_headVec));
@@ -967,14 +1028,18 @@ namespace SPTAG::SPANN {
 
             RemoteLockResponse resp;
             resp.m_status = RemoteLockResponse::Status::Denied;
+            resp.m_token = 0;
 
             {
                 std::shared_lock<std::shared_timed_mutex> cbLock(m_callbackLifetimeMutex);
                 const auto* cb = LookupRemoteLockCallback_Locked(req.m_layer);
                 if (cb) {
                     bool isLock = (req.m_op == RemoteLockRequest::Op::Lock);
-                    bool success = (*cb)(req.m_headID, isLock);
-                    if (success) resp.m_status = RemoteLockResponse::Status::Granted;
+                    std::uint64_t out = (*cb)(req.m_headID, isLock, req.m_token);
+                    if (out != 0) {
+                        resp.m_status = RemoteLockResponse::Status::Granted;
+                        resp.m_token = isLock ? out : 0;
+                    }
                 } else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                         "RemotePostingOps: RemoteLockRequest layer=%d has no callback registered\n",
@@ -1007,6 +1072,13 @@ namespace SPTAG::SPANN {
                 return;
             }
 
+            // Stash the issued fencing token so SendRemoteLock can pick
+            // it up after the future signals.
+            if (resp.m_status == RemoteLockResponse::Status::Granted && resp.m_token != 0) {
+                std::lock_guard<std::mutex> lk(m_pendingLockTokensMutex);
+                m_pendingLockTokens[rid] = resp.m_token;
+            }
+
             promise->set_value(resp.m_status == RemoteLockResponse::Status::Granted
                 ? ErrorCode::Success : ErrorCode::Fail);
         }
@@ -1024,6 +1096,15 @@ namespace SPTAG::SPANN {
         void ErasePending(Socket::ResourceID resID) {
             std::lock_guard<std::mutex> lock(m_pendingMutex);
             m_pendingResponses.erase(resID);
+        }
+
+        std::uint64_t TakePendingLockToken(Socket::ResourceID rid) {
+            std::lock_guard<std::mutex> lk(m_pendingLockTokensMutex);
+            auto it = m_pendingLockTokens.find(rid);
+            if (it == m_pendingLockTokens.end()) return 0;
+            std::uint64_t tok = it->second;
+            m_pendingLockTokens.erase(it);
+            return tok;
         }
 
         /// Take a pending promise out of the map (returns nullptr if not found).
@@ -1221,6 +1302,7 @@ namespace SPTAG::SPANN {
         std::vector<HeadSyncCallback> m_headSyncCallbacks;
         std::vector<RemoteLockCallback> m_remoteLockCallbacks;
         std::vector<MergeCallback> m_mergeCallbacks;
+        std::vector<FenceValidator> m_fenceValidators;
 
         // Per-layer ownership tokens. Each ExtraDynamicSearcher claims its
         // layer slot at SetWorker time and releases it on destruction; this
@@ -1238,6 +1320,15 @@ namespace SPTAG::SPANN {
         std::atomic<Socket::ResourceID> m_nextResourceId{1};
         std::mutex m_pendingMutex;
         std::unordered_map<Socket::ResourceID, std::promise<ErrorCode>> m_pendingResponses;
+
+        // Side table populated by HandleRemoteLockResponse: maps the
+        // outstanding RPC resource id to the fencing token returned by
+        // the owner.  SendRemoteLock reads this immediately after the
+        // future signals to retrieve the token without needing to widen
+        // the m_pendingResponses promise type (which is shared with the
+        // Append/HeadSync RPCs).
+        std::mutex m_pendingLockTokensMutex;
+        std::unordered_map<Socket::ResourceID, std::uint64_t> m_pendingLockTokens;
 
         // Per-item Job: each remote append request becomes one Job submitted
         // to the searcher's shared SPDKThreadPool. The last completing Job

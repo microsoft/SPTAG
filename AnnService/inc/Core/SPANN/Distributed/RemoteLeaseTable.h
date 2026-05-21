@@ -4,27 +4,18 @@
 // RemoteLeaseTable
 // ----------------
 // Owner-side bookkeeping for cross-node merge / structural-op locks.
-// Backs the per-bucket advisory flag that local Split / Merge consult via
-// WaitForRemoteBucketUnlocked before mutating a head whose ownership is
-// shared with a remote candidate.
+// Each bucket has a TTL-bounded lease AND a monotonically increasing
+// fencing token so a zombie holder that resumes after lease expiry has
+// its late operations rejected (see Async Job Fault Tolerance in the
+// design doc).
 //
-// Design contract (see Async Job Fault Tolerance):
-//   * Each acquired lock carries a bounded TTL.  If the holder crashes or
-//     stops responding, the lease auto-expires and the owner is free to
-//     proceed (or grant the bucket to another holder).
-//   * No keepalive: structural ops are expected to complete in under one
-//     TTL.  If they exceed the TTL, the holder must retry the whole job;
-//     the owner has already released the lease.
+// API:
+//   TryAcquire(bucket)              -> uint64_t token (0 = denied)
+//   Validate(bucket, token)         -> bool, the held token still matches
+//   Release(bucket, token)          -> bool, only releases if token matches
+//   IsLocked(bucket)                -> bool, auto-clears expired entries
 //
-// The TTL is the single configurable knob (default 30s, matching the
-// design's lease-TTL recommendation).  A future iteration can add a
-// fencing token so a zombie holder that resumes after expiry has its
-// late unlock rejected — that requires a protocol bump on
-// RemoteLockRequest/Response, which we'll do once a real owner-restart
-// test exists to validate the change.  For now the in-memory lease
-// table provides the safety net the design requires: zombie holders
-// never indefinitely block the owner.
-
+// The TTL knob is `RemoteLockTtlMs` in SPANN options (default 30s).
 #ifndef _SPTAG_SPANN_DISTRIBUTED_REMOTELEASETABLE_H_
 #define _SPTAG_SPANN_DISTRIBUTED_REMOTELEASETABLE_H_
 
@@ -39,57 +30,73 @@ namespace SPTAG::SPANN {
     public:
         using Clock = std::chrono::steady_clock;
 
-        // bucketCount must match the searcher's lock-pool bucket count
-        // (FineGrainedRWLock::BucketIndex range).  Allocates one slot per
-        // bucket; slots start in the unlocked state (expiry == 0).
         explicit RemoteLeaseTable(std::size_t bucketCount, int ttlMs = 30000)
             : m_count(bucketCount + 1), m_ttlMs(ttlMs)
         {
             m_expiry = std::make_unique<std::atomic<std::int64_t>[]>(m_count);
-            for (std::size_t i = 0; i < m_count; ++i) m_expiry[i].store(0, std::memory_order_relaxed);
+            m_tokens = std::make_unique<std::atomic<std::uint64_t>[]>(m_count);
+            for (std::size_t i = 0; i < m_count; ++i) {
+                m_expiry[i].store(0, std::memory_order_relaxed);
+                m_tokens[i].store(0, std::memory_order_relaxed);
+            }
         }
 
         void SetTtlMs(int ttlMs) { if (ttlMs > 0) m_ttlMs.store(ttlMs, std::memory_order_relaxed); }
         int GetTtlMs() const { return m_ttlMs.load(std::memory_order_relaxed); }
 
-        // Try to grant a lease for bucket.  Succeeds iff bucket is unlocked
+        // Try to grant a lease for bucket. Succeeds iff bucket is unlocked
         // OR the previous holder's lease has expired (auto-reclamation).
-        // Records the new expiry deadline.
-        bool TryAcquire(unsigned bucket) {
-            if (bucket >= m_count) return false;
+        // Returns the fencing token (>= 1) on success, 0 on denial.
+        std::uint64_t TryAcquire(unsigned bucket) {
+            if (bucket >= m_count) return 0;
             const std::int64_t nowNs = NowNs();
             const std::int64_t ttlNs = (std::int64_t)m_ttlMs.load(std::memory_order_relaxed) * 1'000'000LL;
             std::int64_t current = m_expiry[bucket].load(std::memory_order_acquire);
             for (;;) {
-                if (current != 0 && current > nowNs) return false;     // still held by live lease
+                if (current != 0 && current > nowNs) return 0;     // still held by live lease
                 const std::int64_t newExpiry = nowNs + ttlNs;
                 if (m_expiry[bucket].compare_exchange_weak(current, newExpiry,
-                        std::memory_order_acq_rel)) return true;
-                // CAS lost: re-evaluate with the updated `current`.
+                        std::memory_order_acq_rel)) {
+                    std::uint64_t tok = m_nextToken.fetch_add(1, std::memory_order_acq_rel) + 1;
+                    m_tokens[bucket].store(tok, std::memory_order_release);
+                    return tok;
+                }
             }
         }
 
-        // Release the lease unconditionally.  In the current protocol the
-        // caller is trusted (holder cooperates).  When a fencing token is
-        // added, this becomes a token-validated release.
-        void Release(unsigned bucket) {
-            if (bucket >= m_count) return;
-            m_expiry[bucket].store(0, std::memory_order_release);
+        // True iff bucket currently holds `token` AND lease not expired.
+        bool Validate(unsigned bucket, std::uint64_t token) const {
+            if (bucket >= m_count || token == 0) return false;
+            std::int64_t exp = m_expiry[bucket].load(std::memory_order_acquire);
+            if (exp == 0 || exp <= NowNs()) return false;
+            return m_tokens[bucket].load(std::memory_order_acquire) == token;
         }
 
-        // True iff the lease is currently held AND not expired.  Auto-clears
-        // expired entries so a stuck holder doesn't permanently block the
-        // owner's Split/Merge path.
+        // Release the lease only if the caller's token still matches.
+        // Late unlocks from a zombie holder whose lease expired (and was
+        // reacquired by another holder) silently no-op.
+        bool Release(unsigned bucket, std::uint64_t token) {
+            if (bucket >= m_count) return false;
+            std::uint64_t held = m_tokens[bucket].load(std::memory_order_acquire);
+            if (token == 0 || held != token) return false;
+            // Clear token first so a concurrent Validate sees the release
+            // before the expiry window closes.
+            m_tokens[bucket].store(0, std::memory_order_release);
+            m_expiry[bucket].store(0, std::memory_order_release);
+            return true;
+        }
+
+        // True iff the lease is currently held AND not expired.
         bool IsLocked(unsigned bucket) {
             if (bucket >= m_count) return false;
             std::int64_t current = m_expiry[bucket].load(std::memory_order_acquire);
             if (current == 0) return false;
             if (current > NowNs()) return true;
-            // Expired: try to clear (best-effort; loss of race is OK because
-            // a concurrent holder either renewed or is also expired).
             std::int64_t expected = current;
-            m_expiry[bucket].compare_exchange_strong(expected, 0,
-                std::memory_order_acq_rel);
+            if (m_expiry[bucket].compare_exchange_strong(expected, 0,
+                    std::memory_order_acq_rel)) {
+                m_tokens[bucket].store(0, std::memory_order_release);
+            }
             return false;
         }
 
@@ -102,6 +109,8 @@ namespace SPTAG::SPANN {
         std::size_t m_count;
         std::atomic<int> m_ttlMs;
         std::unique_ptr<std::atomic<std::int64_t>[]> m_expiry;
+        std::unique_ptr<std::atomic<std::uint64_t>[]> m_tokens;
+        std::atomic<std::uint64_t> m_nextToken{0};
     };
 
 } // namespace SPTAG::SPANN

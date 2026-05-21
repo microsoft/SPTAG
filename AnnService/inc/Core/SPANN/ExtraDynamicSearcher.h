@@ -596,21 +596,39 @@ namespace SPTAG::SPANN {
                 }
             });
 
-            // Remote lock callback: per-bucket leases with TTL auto-release.
-            m_worker->SetRemoteLockCallback(m_layer, [this](SizeType headID, bool lock) -> bool {
+            // Remote lock callback: per-bucket leases with TTL auto-release
+            // AND a fencing token.  The owner returns a monotonically
+            // increasing token on Lock; subsequent fenced operations
+            // (RemoteAppend with m_fencingToken set) carry that token
+            // and the owner validates it against this lease table before
+            // applying.  A zombie holder whose lease has expired (and
+            // bucket been re-acquired) will have its late operations
+            // rejected.
+            m_worker->SetRemoteLockCallback(m_layer,
+                [this](SizeType headID, bool lock, std::uint64_t token) -> std::uint64_t {
                 unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(headID));
                 if (lock) {
-                    if (!m_remoteLeaseTable->TryAcquire(bucket)) return false;
+                    std::uint64_t tok = m_remoteLeaseTable->TryAcquire(bucket);
+                    if (tok == 0) return 0;
                     if (!m_rwLocks[headID].try_lock()) {
-                        m_remoteLeaseTable->Release(bucket);
-                        return false;
+                        m_remoteLeaseTable->Release(bucket, tok);
+                        return 0;
                     }
                     m_rwLocks[headID].unlock();
-                    return true;
+                    return tok;
                 } else {
-                    m_remoteLeaseTable->Release(bucket);
-                    return true;
+                    return m_remoteLeaseTable->Release(bucket, token) ? 1 : 0;
                 }
+            });
+
+            // Fenced RemoteAppend validator: the receive-side gate for
+            // split's cross-owner posting writes.  A nonzero fencing
+            // token in the request must match the current lease for
+            // that head's bucket.
+            m_worker->SetFenceValidator(m_layer,
+                [this](SizeType headID, std::uint64_t token) -> bool {
+                unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(headID));
+                return m_remoteLeaseTable->Validate(bucket, token);
             });
 
             // Cross-node merge hint callback
