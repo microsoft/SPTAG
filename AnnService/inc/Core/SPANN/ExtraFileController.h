@@ -530,7 +530,7 @@ namespace SPTAG::SPANN {
     public:
         FileIO(SPANN::Options& p_opt) {
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
-            m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + 1;
+            m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + p_opt.m_unfilterTailBufferLength + 1;
             m_bufferLimit = 1024;
             m_shutdownCalled = true;
 

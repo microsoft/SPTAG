@@ -1253,7 +1253,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         const int directPostingCount = static_cast<int>(directPostingIDs.size());
         if (directPostingCount > m_options.m_searchInternalResultNum) {
             int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
-                           + m_options.m_bufferLength) << PageSizeEx;
+                           + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
             workSpace->Clear(directPostingCount, maxPages, true, m_options.m_enableDataCompression);
         }
 
@@ -1743,7 +1743,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // If adaptive nprobe > base, expand workspace buffers
         if (postingTarget > nprobeBase) {
             int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
-                           + m_options.m_bufferLength) << PageSizeEx;
+                           + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
             workSpace->Clear(postingTarget, maxPages, true, m_options.m_enableDataCompression);
         }
 

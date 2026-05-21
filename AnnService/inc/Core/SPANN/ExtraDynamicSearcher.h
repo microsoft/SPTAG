@@ -299,6 +299,15 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting index with posting page limit:%d\n", p_opt.m_postingPageLimit);
             m_postingSizeLimit = p_opt.m_postingPageLimit * PageSize / m_vectorInfoSize;
             m_bufferSizeLimit = p_opt.m_bufferLength * PageSize / m_vectorInfoSize;
+            // Allow env override for unfilter-tail extra buffer pages (per posting), default 0.
+            {
+                const char* env_tb = std::getenv("SPTAG_UNFILTER_TAIL_BUFFER_PAGES");
+                if (env_tb && *env_tb) {
+                    int v = std::atoi(env_tb);
+                    if (v > 0) p_opt.m_unfilterTailBufferLength = v;
+                }
+            }
+            m_tailBufferSizeLimit = p_opt.m_unfilterTailBufferLength * PageSize / m_vectorInfoSize;
 
             if(p_opt.m_storage == Storage::FILEIO) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ExtraDynamicSearcher:UseFileIO\n");
@@ -1584,10 +1593,10 @@ namespace SPTAG::SPANN {
         void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
         {
             if (clear) {
-                p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, (max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit) + m_opt->m_bufferLength) << PageSizeEx, true, m_opt->m_enableDataCompression);
+                p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, (max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit) + m_opt->m_bufferLength + m_opt->m_unfilterTailBufferLength) << PageSizeEx, true, m_opt->m_enableDataCompression);
             }
             else {
-                p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, max(m_opt->m_searchInternalResultNum, m_opt->m_reassignK), (max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit) + m_opt->m_bufferLength) << PageSizeEx, true, m_opt->m_enableDataCompression);
+                p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, max(m_opt->m_searchInternalResultNum, m_opt->m_reassignK), (max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit) + m_opt->m_bufferLength + m_opt->m_unfilterTailBufferLength) << PageSizeEx, true, m_opt->m_enableDataCompression);
                 int wid = 0;
                 if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                 {
@@ -2835,6 +2844,7 @@ namespace SPTAG::SPANN {
                     std::atomic_size_t tail_added(0), tail_skipped_dup(0), tail_skipped_cap(0);
                     int n_threads = m_opt->m_iSSDNumberOfThreads;
                     int relaxLimit = m_postingSizeLimit + m_bufferSizeLimit;
+                    int tailRelaxLimit = relaxLimit + m_tailBufferSizeLimit;  // extra budget for unfilter-tail records
                     SizeType numHeadsLocal = p_headIndex->GetNumSamples();
 
                     // Build a per-head set of vector-IDs already present in pure region,
@@ -2883,7 +2893,7 @@ namespace SPTAG::SPANN {
                                 std::lock_guard<std::mutex> lk(append_mtx);
                                 for (auto& e : local_appends) {
                                     int cur = postingListSize[e.node].load();
-                                    if (cur >= relaxLimit) { ++tail_skipped_cap; continue; }
+                                    if (cur >= tailRelaxLimit) { ++tail_skipped_cap; continue; }
                                     selections.m_selections.push_back(e);
                                     ++postingListSize[e.node];
                                     ++tail_added;
@@ -2895,7 +2905,7 @@ namespace SPTAG::SPANN {
                             std::lock_guard<std::mutex> lk(append_mtx);
                             for (auto& e : local_appends) {
                                 int cur = postingListSize[e.node].load();
-                                if (cur >= relaxLimit) { ++tail_skipped_cap; continue; }
+                                if (cur >= tailRelaxLimit) { ++tail_skipped_cap; continue; }
                                 selections.m_selections.push_back(e);
                                 ++postingListSize[e.node];
                                 ++tail_added;
@@ -3308,6 +3318,7 @@ namespace SPTAG::SPANN {
         int m_postingSizeLimit = INT_MAX;
 
         int m_bufferSizeLimit = INT_MAX;
+        int m_tailBufferSizeLimit = 0;
 
         std::chrono::microseconds m_hardLatencyLimit = std::chrono::microseconds(2000);
 

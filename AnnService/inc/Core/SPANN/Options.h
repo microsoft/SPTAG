@@ -192,6 +192,7 @@ namespace SPTAG {
             int m_spdkBatchSize;
             bool m_stressTest;
             int m_bufferLength;
+            int m_unfilterTailBufferLength;
             int m_maxFileSize;
             int m_startFileSize;
             int m_growthFileSize;
