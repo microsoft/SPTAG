@@ -427,9 +427,41 @@ namespace SPTAG::SPANN {
             return m_initialVectorSize + (localVID - m_initialVectorSize) * numWorkers + GetWorkerNodeIndex();
         }
 
-        // Idempotent: wires the receiver's BatchAppend Jobs onto our shared
+        // Receive-side race coordination: before applying a remote Append
+        // for headID, make sure no local Split or Merge is currently
+        // mutating the same head.  Splits delete the original head and
+        // create new ones; merges delete a loser head.  If we let the
+        // append's wasMissing branch run while a Split/Merge holds the
+        // RWLock, the AddHeadIndex resurrection would race the local
+        // DeleteIndex and we'd briefly bring a dead head back to life
+        // (only papered over by the eventual HeadSync from the structural
+        // op).  Briefly acquiring the RWLock here serializes us behind
+        // the in-flight structural op without forking an explicit
+        // condition-variable channel.  After the structural op completes
+        // its bookkeeping (lists drained, head index updated, HeadSync
+        // broadcast), the callback re-checks ContainSample with a stable
+        // view.  When the head is genuinely gone, sender retries against
+        // the updated head index and routes to the new owner.
+        void HandleRaceCondition(SizeType headID) {
+            bool inSplit = false, inMerge = false;
+            {
+                std::shared_lock<std::shared_timed_mutex> sl(m_splitListLock);
+                inSplit = (m_splitList.find(headID) != m_splitList.end());
+            }
+            {
+                std::shared_lock<std::shared_timed_mutex> sl(m_mergeListLock);
+                inMerge = (m_mergeList.find(headID) != m_mergeList.end());
+            }
+            if (!inSplit && !inMerge) return;
+            // Wait until the structural op releases the per-head RWLock.
+            // Acquire-and-immediately-release; the Append below re-locks.
+            std::unique_lock<std::shared_timed_mutex> w(m_rwLocks[headID]);
+            (void)w;
+        }
+
         // SPDKThreadPool. Called both after pool creation and from
         // SetWorker(); whichever happens last actually binds the submitter.
+        // Idempotent: wires the receiver's BatchAppend Jobs onto our shared
         void WireJobSubmitterIfReady() {
             if (!m_worker || !m_splitThreadPool) return;
             auto pool = m_splitThreadPool;
@@ -467,6 +499,13 @@ namespace SPTAG::SPANN {
             m_worker->SetAppendCallback(m_layer,
                 [this](SizeType headID, std::shared_ptr<std::string> headVec,
                        int appendNum, std::string& appendPosting) -> ErrorCode {
+                    // Per-design HandleRaceCondition: wait for any local
+                    // Split/Merge on this head to commit before we look at
+                    // the head index.  Otherwise the wasMissing branch
+                    // below can resurrect a head that the structural op
+                    // just deleted.
+                    HandleRaceCondition(headID);
+
                     // Reuse SPDKThreadPool's per-worker pre-allocated workspace
                     // when called from BatchAppendItemJob on m_splitThreadPool.
                     ExtraWorkSpace localWorkSpace;
