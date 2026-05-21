@@ -596,11 +596,27 @@ namespace SPTAG::SPANN {
             }
             if (maxVid >= localCount) {
                 SizeType need = maxVid + 1 - localCount;
-                m_versionMap->AddBatch(need);
+                // Design contract: on the interleaved stride scheme each
+                // node owns globalVIDs satisfying VID % numWorkers ==
+                // nodeID. The max VID a remote peer can have produced by
+                // now is approximately localCount * numWorkers, so when
+                // we lag behind we extend by capacity*numWorkers in one
+                // shot.  This keeps capacity growth conflict-free (we
+                // amortize many remote inserts into one extension) and
+                // avoids the per-VID AddBatch(1) thrashing of the old
+                // exact-gap formula.
+                int numWorkers = GetNumWorkerNodes();
+                SizeType extendBy = need;
+                if (numWorkers > 1) {
+                    SizeType strideGrow = localCount * (SizeType)numWorkers;
+                    if (strideGrow > extendBy) extendBy = strideGrow;
+                }
+                m_versionMap->AddBatch(extendBy);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
-                    "%s: extended local versionMap by %lld (head=%lld maxVid=%lld localCount=%lld)\n",
-                    p_caller, (std::int64_t)need, (std::int64_t)p_headID,
-                    (std::int64_t)maxVid, (std::int64_t)localCount);
+                    "%s: extended local versionMap by %lld (head=%lld maxVid=%lld localCount=%lld need=%lld numWorkers=%d)\n",
+                    p_caller, (std::int64_t)extendBy, (std::int64_t)p_headID,
+                    (std::int64_t)maxVid, (std::int64_t)localCount,
+                    (std::int64_t)need, numWorkers);
             }
         }
 
