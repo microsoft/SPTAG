@@ -887,23 +887,33 @@ namespace SPTAG::SPANN {
             // asynchronously. If WAL writes fail we fall through to the
             // legacy synchronous-ACK path so the sender still sees an
             // honest success/fail count.
+            //
+            // Admission control: when the receiver already has more than
+            // `m_walPendingItemsCap` items queued for asynchronous apply,
+            // we DELIBERATELY take the legacy synchronous-ACK path even
+            // though the WAL is wired. That re-engages the natural
+            // backpressure (sender's MaxInflight blocks until current
+            // chunks ACK), preventing unbounded pool queue growth on the
+            // receiver under sustained load. Without this, a fast sender
+            // could ACK 1M items in seconds while the apply pool is still
+            // working through the first 10k.
             std::shared_ptr<Distributed::BatchAppendWAL> wal;
             {
                 std::shared_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
                 wal = m_batchAppendWAL;
             }
-            if (wal && wal->Enabled() && !m_jobSubmitters.empty()) {
+            const std::size_t pendingNow = m_walPendingItems.load(std::memory_order_relaxed);
+            const std::size_t cap = m_walPendingItemsCap.load(std::memory_order_relaxed);
+            const bool overCap = (cap > 0 && pendingNow + total > cap);
+            if (wal && wal->Enabled() && !m_jobSubmitters.empty() && !overCap) {
                 std::uint64_t batchID = m_nextBatchID.fetch_add(1, std::memory_order_relaxed);
-                // Re-encode rather than reuse the inbound packet body to
-                // avoid pinning the receive buffer for the lifetime of the
-                // batch.
                 std::string blob;
                 blob.resize(batchReq->EstimateBufferSize());
                 auto* end = batchReq->Write(reinterpret_cast<std::uint8_t*>(&blob[0]));
                 blob.resize(static_cast<size_t>(
                     end - reinterpret_cast<const std::uint8_t*>(blob.data())));
                 if (wal->Put(batchID, blob)) {
-                    // Durable — ACK immediately as Accepted (success=total).
+                    m_walPendingItems.fetch_add(total, std::memory_order_relaxed);
                     SendBatchAppendResponse(packet,
                         static_cast<std::uint32_t>(total), 0);
                     SubmitBatchItems(batchReq, batchID,
@@ -914,6 +924,14 @@ namespace SPTAG::SPANN {
                     "RemotePostingOps: BatchAppendWAL Put failed batchID=%llu — "
                     "falling back to synchronous ACK\n",
                     (unsigned long long)batchID);
+            } else if (overCap) {
+                static std::atomic<std::uint64_t> sLogCounter{0};
+                if ((sLogCounter.fetch_add(1) % 256) == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "RemotePostingOps: BatchAppendWAL admission-control engaged "
+                        "(pending=%zu+%zu > cap=%zu) — using synchronous ACK\n",
+                        pendingNow, total, cap);
+                }
             }
 
             // Legacy / fallback path: process items inline-or-async, ACK on
@@ -1484,6 +1502,7 @@ namespace SPTAG::SPANN {
                         // re-apply (Append callback is idempotent).
                         auto wal = m_ops->GetBatchAppendWAL();
                         if (wal) wal->Delete(m_batchID);
+                        m_ops->NoteWalPendingItemsDrained(m_batchReq->m_items.size());
                     }
                 }
             }
@@ -1513,6 +1532,35 @@ namespace SPTAG::SPANN {
         // bump past the maximum recovered batchID so live batches don't
         // collide with replayed ones.
         std::atomic<std::uint64_t> m_nextBatchID{1};
+        // Admission control for the WAL-backed path. When the sum of items
+        // already queued for asynchronous apply plus the incoming batch
+        // would exceed `m_walPendingItemsCap`, HandleBatchAppendRequest
+        // falls back to the synchronous-ACK path so the sender's
+        // MaxInflight gate naturally backpressures further chunks. Cap of
+        // 0 disables admission control (always WAL when wired). Default is
+        // ~ChunkSize * MaxInflightPerNode * NumPeers, chosen to absorb one
+        // round-trip's worth of items without unbounded queue growth.
+        std::atomic<std::size_t> m_walPendingItems{0};
+        std::atomic<std::size_t> m_walPendingItemsCap{50000};
+
+    public:
+        void NoteWalPendingItemsDrained(std::size_t n) {
+            if (n == 0) return;
+            std::size_t prev = m_walPendingItems.fetch_sub(n, std::memory_order_relaxed);
+            if (prev < n) {
+                // Saturating clamp (defensive: should never happen because
+                // every increment in HandleBatchAppendRequest is paired
+                // with exactly one decrement in BatchAppendItemJob).
+                m_walPendingItems.store(0, std::memory_order_relaxed);
+            }
+        }
+        void SetBatchAppendWalPendingItemsCap(std::size_t cap) {
+            m_walPendingItemsCap.store(cap, std::memory_order_relaxed);
+        }
+        std::size_t GetBatchAppendWalPendingItems() const {
+            return m_walPendingItems.load(std::memory_order_relaxed);
+        }
+    private:
 
         // HeadSync delivery diagnostics + retry queue (v33). Counters give
         // observability for sender/receiver gaps; per-peer backlogs +

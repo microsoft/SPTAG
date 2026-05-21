@@ -3728,22 +3728,24 @@ namespace SPTAG::SPANN {
                 // stay quiet.
                 size_t remoteQ = 0, remoteTotal = 0;
                 int remoteInflight = 0;
+                std::size_t walPending = 0;
                 if (m_worker) {
                     remoteQ = m_worker->GetRemoteQueueSize();
                     remoteTotal = m_worker->GetTotalRemoteAppendsRouted();
                     remoteInflight = m_worker->GetInflightAppendFlushes();
+                    walPending = m_worker->GetBatchAppendWalPendingItems();
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "layer %d pending queue:%zu split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                              "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                              "total_completed split:%zu merge:%zu reassign:%zu | "
-                             "remote queueDepth:%zu inflightChunks:%d totalRouted:%zu | "
+                             "remote queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
                              "split_latency avg:%.1fms max:%.1fms\n",
                              m_layer, totalJobs, m_splitJobsInFlight.load(),
                              m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
                              m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                              m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
-                             remoteQ, remoteInflight, remoteTotal,
+                             remoteQ, remoteInflight, remoteTotal, walPending,
                              avgSplitMs, maxSplitMs);
             }
             if (runningJobs == 0 && totalJobs == 0) {
