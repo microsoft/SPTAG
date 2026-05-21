@@ -715,6 +715,99 @@ namespace SPTAG::SPANN {
             return true;
         }
 
+        // Synchronous, fenced cross-owner write used by the Split path.
+        // Per the design's Split Happy Path:
+        //   * The split holder already holds the local source-head lock.
+        //   * For the remote child it must acquire the remote lock with a
+        //     try-and-backoff protocol (try-lock-both).  Failure here
+        //     means another node is racing; abort so the caller can
+        //     re-enqueue via SplitAsync.
+        //   * The remote posting write is fenced (token attached) so a
+        //     zombie holder past lease expiry cannot resurrect this
+        //     write after another holder took over.
+        //   * A WAL record is written before the cross-owner posting
+        //     write and cleared on success.  On failure the WAL drives a
+        //     GC pass to delete the orphan partner posting (see
+        //     SplitWAL.h); GC is best-effort and only affects recall.
+        //
+        // Returns Success on both-locked-and-written, Fail otherwise.
+        // On failure the caller should leave any partial state to the
+        // GC pass and re-enqueue the split.
+        ErrorCode TryWriteRemoteSplitChildFenced(SizeType srcHeadID,
+                                                 SizeType remoteChildHeadID,
+                                                 const void* remoteChildHeadVecBytes,
+                                                 int appendNum,
+                                                 std::string& posting) {
+            int ownerNode = -1;
+            if (!IsRemoteOwnedHead(remoteChildHeadID, &ownerNode)) {
+                return ErrorCode::Fail;
+            }
+            if (!m_worker || !m_worker->IsEnabled()) return ErrorCode::Fail;
+
+            // Try-lock-both: acquire remote lock with bounded retry.
+            std::uint64_t token = 0;
+            constexpr int kMaxLockRetries = 5;
+            for (int attempt = 0; attempt < kMaxLockRetries; ++attempt) {
+                token = m_worker->SendRemoteLock(ownerNode, m_layer,
+                                                 remoteChildHeadID, true, 0);
+                if (token != 0) break;
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(5 * (attempt + 1)));
+            }
+            if (token == 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "Split: failed to acquire remote lock for child %lld on node %d "
+                    "after %d retries; abort and re-enqueue\n",
+                    (std::int64_t)remoteChildHeadID, ownerNode, kMaxLockRetries);
+                return ErrorCode::Fail;
+            }
+
+            // Write WAL Begin so a crash after the remote write but
+            // before completion is recoverable via GC.
+            std::uint64_t jobID = m_splitJobIdCounter.fetch_add(1) + 1;
+            if (m_splitWAL) {
+                Distributed::SplitWAL::Record r;
+                r.jobID = jobID;
+                r.srcHeadID = srcHeadID;
+                r.localChildHeadID = 0;
+                r.remoteChildHeadID = remoteChildHeadID;
+                r.remoteOwnerNodeIndex = ownerNode;
+                r.startTimestampSec =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                r.stage = Distributed::SplitWAL::Stage::Begin;
+                m_splitWAL->Write(r);
+            }
+
+            // Fenced sync remote append. Receiver validates the token
+            // against its lease table before applying.
+            auto headVec = std::make_shared<std::string>(
+                static_cast<const char*>(remoteChildHeadVecBytes),
+                m_vectorDataSize);
+            ErrorCode ec = m_worker->SendFencedRemoteAppend(
+                ownerNode, m_layer, remoteChildHeadID, headVec,
+                appendNum, posting, token);
+
+            // Release the remote lock with the issued token.  If our
+            // lease has expired in the meantime, Release will no-op on
+            // the owner side (the new holder's token won't match ours).
+            m_worker->SendRemoteLock(ownerNode, m_layer, remoteChildHeadID,
+                                     false, token);
+
+            if (ec == ErrorCode::Success) {
+                // Clear WAL: both writes done.  (The local-side Put
+                // happens in the caller's loop using the existing
+                // PutPostingToDB path.)
+                if (m_splitWAL) m_splitWAL->Clear(srcHeadID, jobID);
+            } else {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "Split: fenced remote append failed for child %lld "
+                    "on node %d (ec=%d); WAL kept for GC\n",
+                    (std::int64_t)remoteChildHeadID, ownerNode, (int)ec);
+            }
+            return ec;
+        }
+
         // Validate (and lazily extend) the local version map so that
         // every (vid, ver) tuple in a posting we are about to write is
         // representable. Without this, remote-originated postings carrying
@@ -1269,15 +1362,35 @@ namespace SPTAG::SPANN {
                             m_stat.m_splitExistingHeadMergeCount.fetch_add(1, std::memory_order_relaxed);
 
                             // If newHeadVID's owner is a remote node, route
-                            // the new posting via RemoteAppend; the owner
-                            // will merge it into the existing posting list.
-                            if (TryRouteRemoteAppend(
-                                    newHeadVID,
+                            // the new posting via a fenced cross-owner write:
+                            // acquire the remote lock, send a fenced
+                            // RemoteAppend (sync), and let the owner merge
+                            // it into the existing posting list.  See
+                            // TryWriteRemoteSplitChildFenced for the
+                            // try-lock-both + WAL + fencing protocol.
+                            if (IsRemoteOwnedHead(newHeadVID)) {
+                                ErrorCode fec = TryWriteRemoteSplitChildFenced(
+                                    headID, newHeadVID,
+                                    args.centers + k * args._D,
                                     (int)(newPostingLists[k].size() / m_vectorInfoSize),
-                                    newPostingLists[k],
-                                    args.centers + k * args._D)) {
-                                if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
-                                continue;
+                                    newPostingLists[k]);
+                                if (fec == ErrorCode::Success) {
+                                    if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
+                                    continue;
+                                }
+                                // Fall through: on remote-lock contention
+                                // or send failure, fall back to the legacy
+                                // async TryRouteRemoteAppend so we don't
+                                // strand the posting.  Watchdog + WAL GC
+                                // converge eventually.
+                                if (TryRouteRemoteAppend(
+                                        newHeadVID,
+                                        (int)(newPostingLists[k].size() / m_vectorInfoSize),
+                                        newPostingLists[k],
+                                        args.centers + k * args._D)) {
+                                    if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
+                                    continue;
+                                }
                             }
 
                             std::string mergedPostingList;
@@ -1366,19 +1479,33 @@ namespace SPTAG::SPANN {
                                 SplitAsync(newHeadVID, currentLength);
                             }
                         } else {
-                            // If newHeadVID's owner is a remote node, route
-                            // the initial posting via RemoteAppend so it
-                            // ends up in the owner's TiKV. We still add the
+                            // If newHeadVID's owner is a remote node, do the
+                            // fenced cross-owner write: try-lock-both + WAL
+                            // + sync fenced RemoteAppend.  We still add the
                             // head locally and rely on BroadcastHeadSync
                             // (after this loop) to spread the head index
                             // update to all nodes. The receiver's
                             // AppendCallback materializes the head if its
                             // HeadSync hasn't arrived yet.
-                            bool remoteCreated = TryRouteRemoteAppend(
-                                newHeadVID,
-                                (int)(newPostingLists[k].size() / m_vectorInfoSize),
-                                newPostingLists[k],
-                                args.centers + k * args._D);
+                            bool remoteCreated = false;
+                            if (IsRemoteOwnedHead(newHeadVID)) {
+                                ErrorCode fec = TryWriteRemoteSplitChildFenced(
+                                    headID, newHeadVID,
+                                    args.centers + k * args._D,
+                                    (int)(newPostingLists[k].size() / m_vectorInfoSize),
+                                    newPostingLists[k]);
+                                if (fec == ErrorCode::Success) {
+                                    remoteCreated = true;
+                                } else {
+                                    // Fall back to async queue: WAL +
+                                    // watchdog converge eventually.
+                                    remoteCreated = TryRouteRemoteAppend(
+                                        newHeadVID,
+                                        (int)(newPostingLists[k].size() / m_vectorInfoSize),
+                                        newPostingLists[k],
+                                        args.centers + k * args._D);
+                                }
+                            }
 
                             if (!remoteCreated) {
                                 auto splitPutBegin = std::chrono::high_resolution_clock::now();
