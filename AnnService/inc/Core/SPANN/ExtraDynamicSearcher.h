@@ -20,6 +20,7 @@
 #include "inc/Core/Common/TiKVVersionMap.h"
 #include "ExtraFileController.h"
 #include "Distributed/WorkerNode.h"
+#include "Distributed/RemoteLeaseTable.h"
 #include <chrono>
 #include <cstdint>
 #include <algorithm>
@@ -266,9 +267,11 @@ namespace SPTAG::SPANN {
 
         COMMON::FineGrainedRWLock m_rwLocks;
 
-        // Per-bucket flags for remote (cross-node) locking.
+        // Per-bucket lease table for remote (cross-node) locking.  Each
+        // entry carries a TTL so a crashed/disconnected holder doesn't
+        // permanently block Split/Merge here.  See RemoteLeaseTable.h.
         static constexpr int kRemoteLockPoolSize = 32767;
-        std::unique_ptr<std::atomic<bool>[]> m_remoteBucketLocked;
+        std::unique_ptr<RemoteLeaseTable> m_remoteLeaseTable;
 
         IndexStats m_stat;
 
@@ -394,8 +397,11 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "[CONFIG] layer=%d DistributedVersionMap=%s SearchCheckVersionMapOnlyLayer0=%s UseMultiChunkPosting=%s PostingPageLimit=%d\n",
                 layer, p_opt.m_distributedVersionMap ? "true" : "false", p_opt.m_searchCheckVersionMapOnlyLayer0 ? "true" : "false", p_opt.m_useMultiChunkPosting ? "true" : "false", p_opt.m_postingPageLimit);
 
-            // Initialize per-bucket remote lock flags
-            m_remoteBucketLocked.reset(new std::atomic<bool>[kRemoteLockPoolSize + 1]{});
+            // Initialize per-bucket remote lease table.  TTL is picked up
+            // from SPANN option RemoteLockTtlMs (default 30000ms = 30s).
+            m_remoteLeaseTable = std::make_unique<RemoteLeaseTable>(
+                kRemoteLockPoolSize,
+                p_opt.m_remoteLockTtlMs > 0 ? p_opt.m_remoteLockTtlMs : 30000);
         }
 
         ~ExtraDynamicSearcher() {
@@ -570,22 +576,19 @@ namespace SPTAG::SPANN {
                 }
             });
 
-            // Remote lock callback: per-bucket atomic flags
+            // Remote lock callback: per-bucket leases with TTL auto-release.
             m_worker->SetRemoteLockCallback(m_layer, [this](SizeType headID, bool lock) -> bool {
                 unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(headID));
                 if (lock) {
-                    bool expected = false;
-                    if (!m_remoteBucketLocked[bucket].compare_exchange_strong(expected, true)) {
-                        return false;
-                    }
+                    if (!m_remoteLeaseTable->TryAcquire(bucket)) return false;
                     if (!m_rwLocks[headID].try_lock()) {
-                        m_remoteBucketLocked[bucket].store(false);
+                        m_remoteLeaseTable->Release(bucket);
                         return false;
                     }
                     m_rwLocks[headID].unlock();
                     return true;
                 } else {
-                    m_remoteBucketLocked[bucket].store(false);
+                    m_remoteLeaseTable->Release(bucket);
                     return true;
                 }
             });
@@ -600,14 +603,16 @@ namespace SPTAG::SPANN {
         }
 
         // Owner-side wait for any in-flight remote lock on this bucket.
+        // RemoteLeaseTable::IsLocked auto-clears expired leases, so a
+        // zombie holder beyond TTL doesn't stall Split/Merge here.
         void WaitForRemoteBucketUnlocked(SizeType headID) const {
             if (!m_worker || !m_worker->IsEnabled()) return;
             unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(headID));
-            if (!m_remoteBucketLocked[bucket].load(std::memory_order_acquire)) return;
+            if (!m_remoteLeaseTable->IsLocked(bucket)) return;
             constexpr int kMaxRemoteBucketWaitMs = 5000;
             auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::milliseconds(kMaxRemoteBucketWaitMs);
-            while (m_remoteBucketLocked[bucket].load(std::memory_order_acquire)) {
+            while (m_remoteLeaseTable->IsLocked(bucket)) {
                 if (std::chrono::steady_clock::now() > deadline) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                         "WaitForRemoteBucketUnlocked: headID=%lld bucket=%u stuck for %d ms, proceeding\n",

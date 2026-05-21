@@ -138,6 +138,12 @@ namespace SPTAG {
             // Fault Tolerance section.
             int m_asyncJobMaxRetry;
 
+            // Remote lock lease TTL in milliseconds (default 30000).
+            // Bounds how long a crashed or disconnected holder can block
+            // the owner's Split/Merge path; the owner auto-reclaims the
+            // lease on expiry.  Match this to your structural-op p99.
+            int m_remoteLockTtlMs;
+
             // GPU building
             int m_gpuSSDNumTrees;
             int m_gpuSSDLeafSize;
