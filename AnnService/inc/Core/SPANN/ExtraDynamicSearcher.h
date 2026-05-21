@@ -547,6 +547,26 @@ namespace SPTAG::SPANN {
             m_worker->QueueRemoteAppend(nodeIndex, std::move(req));
         }
 
+        // Single source of truth for "this head lives on a different node".
+        // Only the outer (head) layer participates in the owner-ring route;
+        // inner layers (m_layer > 0) hold per-node-local state with no
+        // shared VID space and no cross-node TiKV key contract, so they
+        // always answer false. When true, outNodeIndex (if not null) is
+        // populated with the owner's node index.
+        //
+        // Every Split / Merge / Append code path that might touch a head
+        // it doesn't own MUST gate on this predicate so the invariant
+        // (only owners mutate their own postings) is enforced in exactly
+        // one place.
+        bool IsRemoteOwnedHead(SizeType headID, int* outNodeIndex = nullptr) {
+            if (m_layer != 0) return false;
+            if (!m_worker || !m_worker->IsEnabled()) return false;
+            auto target = m_worker->GetOwner(headID);
+            if (target.isLocal) return false;
+            if (outNodeIndex) *outNodeIndex = target.nodeIndex;
+            return true;
+        }
+
         // If headID is owned by a remote node, queue the append for that
         // node and return true; otherwise return false (caller continues
         // with local write logic).
@@ -554,18 +574,9 @@ namespace SPTAG::SPANN {
                                   int appendNum,
                                   std::string posting,
                                   const void* headVecBytes = nullptr) {
-            if (!m_worker || !m_worker->IsEnabled()) return false;
-            // Only the outer (head) layer participates in the owner-ring
-            // route. Inner layers (m_layer > 0) hold per-node-local state
-            // (no shared head VID space, no cross-node TiKV key naming
-            // contract), so each node services its own inner layer
-            // independently. Without this gate inner-layer appends would
-            // also dispatch RPCs that the receiver can't meaningfully
-            // apply.
-            if (m_layer != 0) return false;
-            auto target = m_worker->GetOwner(headID);
-            if (target.isLocal) return false;
-            EnqueueRemoteAppend(target.nodeIndex, headID, appendNum,
+            int ownerNode = -1;
+            if (!IsRemoteOwnedHead(headID, &ownerNode)) return false;
+            EnqueueRemoteAppend(ownerNode, headID, appendNum,
                                 std::move(posting), headVecBytes);
             return true;
         }
@@ -875,13 +886,10 @@ namespace SPTAG::SPANN {
             // Only the OWNER of headID should run Split. Remote-issued
             // splits get dropped early so we don't mutate a posting that
             // doesn't live on this node.
-            if (m_worker && m_worker->IsEnabled()) {
-                auto target = m_worker->GetOwner(headID);
-                if (!target.isLocal) {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    m_splitList.unsafe_erase(headID);
-                    return ErrorCode::Success;
-                }
+            if (IsRemoteOwnedHead(headID)) {
+                std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
+                m_splitList.unsafe_erase(headID);
+                return ErrorCode::Success;
             }
 
             // Owner-side: wait for any in-flight remote-initiated lock on
@@ -1237,7 +1245,7 @@ namespace SPTAG::SPANN {
                             auto updateHeadBegin = std::chrono::high_resolution_clock::now();
                             if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
-                                if (!remoteCreated && db->Delete(DBKey(newHeadVID)) != ErrorCode::Success) {
+                                if (db->Delete(DBKey(newHeadVID)) != ErrorCode::Success) {
                                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete gc posting %lld\n", (std::int64_t)(newHeadVID));
                                 }
                                 return ret;
@@ -1333,13 +1341,12 @@ namespace SPTAG::SPANN {
         {
             // The owner runs its own merge passes. Skip when this head is
             // owned by another node — we'd just be racing the owner.
-            if (m_worker && m_worker->IsEnabled()) {
-                auto target = m_worker->GetOwner(headID);
-                if (!target.isLocal) {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                    m_mergeList.unsafe_erase(headID);
-                    return ErrorCode::Success;
-                }
+            // (Defense in depth: MergeAsync already filters at enqueue, but
+            // ownership can change between enqueue and execution.)
+            if (IsRemoteOwnedHead(headID)) {
+                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
+                m_mergeList.unsafe_erase(headID);
+                return ErrorCode::Success;
             }
             WaitForRemoteBucketUnlocked(headID);
 
@@ -1667,13 +1674,10 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(SizeType headID, int postingSize, std::function<void()> p_callback = nullptr)
         {
-            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
-            // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
-            // if (m_splitList.find(headIDAccessor, headID)) {
-            //     return;
-            // }
-            // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
-            // m_splitList.insert(workPair);
+            // Don't enqueue split jobs for heads we don't own; the owner
+            // will detect oversize on its own. Skipping here avoids
+            // burning a thread-pool slot only to drop the job in Split().
+            if (IsRemoteOwnedHead(headID)) return;
             {
                 Helper::Concurrent::ConcurrentMap<SizeType, int>::value_type workPair(headID, postingSize);
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
@@ -1694,6 +1698,11 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            // Don't enqueue merge jobs for heads we don't own; the owner
+            // runs its own merge pass. Filtering here is the single
+            // upstream gate so MergePostings's owner check is only a
+            // defense-in-depth net.
+            if (IsRemoteOwnedHead(headID)) return;
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 auto res = m_mergeList.insert(headID);
