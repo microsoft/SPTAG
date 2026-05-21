@@ -126,10 +126,16 @@ DefineSSDParameter(m_versionCacheMaxChunks, int, 10000, "VersionCacheMaxChunks")
 DefineSSDParameter(m_asyncRpcMaxInflight, int, 0, "AsyncRpcMaxInflight")
 
 // Distributed RemotePostingOps RPC tuning
-DefineSSDParameter(m_remoteAppendChunkSize, int, 3000, "RemoteAppendChunkSize")
+// ChunkSize=10000: each in-flight chunk holds enough work to amortize the
+// network roundtrip and grpc framing cost (a 3000-item chunk took ~500ms at
+// 1M-scale; 10000 should hit ~1.5s and roughly 3× the per-second throughput
+// for the same in-flight cap).
+DefineSSDParameter(m_remoteAppendChunkSize, int, 10000, "RemoteAppendChunkSize")
 DefineSSDParameter(m_remoteAppendRetry, int, 3, "RemoteAppendRetry")
 DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
-DefineSSDParameter(m_remoteAppendMaxInflight, int, 4, "RemoteAppendMaxInflight")
+// MaxInflight=8 (was 4): keeps the receiver's 16-thread BatchAppendItemJob pool
+// well-fed even when one chunk straggles on lock contention.
+DefineSSDParameter(m_remoteAppendMaxInflight, int, 8, "RemoteAppendMaxInflight")
 DefineSSDParameter(m_asyncJobMaxRetry, int, 3, "AsyncJobMaxRetry")
 DefineSSDParameter(m_remoteLockTtlMs, int, 30000, "RemoteLockTtlMs")
 

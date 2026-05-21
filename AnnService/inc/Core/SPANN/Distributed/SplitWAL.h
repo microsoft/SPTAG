@@ -66,12 +66,13 @@ public:
         }
     };
 
-    explicit SplitWAL(std::shared_ptr<Helper::KeyValueIO> db) : m_db(std::move(db)) {}
+    explicit SplitWAL(std::shared_ptr<Helper::KeyValueIO> db, int layer = 0)
+        : m_db(std::move(db)), m_layer(layer) {}
 
     // Write or update a WAL record. Stage transitions are monotonic.
     bool Write(const Record& r) {
         if (!m_db) return false;
-        auto ec = m_db->Put(MakeKey(r.srcHeadID, r.jobID), r.Encode(), kTimeout, nullptr);
+        auto ec = m_db->Put(MakeKey(m_layer, r.srcHeadID, r.jobID), r.Encode(), kTimeout, nullptr);
         if (ec != ErrorCode::Success) {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                 "SplitWAL::Write head=%lld job=%llu stage=%u failed (%d)\n",
@@ -85,17 +86,19 @@ public:
     // Remove a completed WAL record after both writes succeeded.
     bool Clear(SizeType srcHeadID, std::uint64_t jobID) {
         if (!m_db) return false;
-        std::vector<std::string> k{ MakeKey(srcHeadID, jobID) };
+        std::vector<std::string> k{ MakeKey(m_layer, srcHeadID, jobID) };
         return m_db->MultiDelete(k, kTimeout) == ErrorCode::Success;
     }
 
-    static std::string MakeKey(SizeType srcHeadID, std::uint64_t jobID) {
-        return "wal/split/" + std::to_string(srcHeadID) + "/" + std::to_string(jobID);
+    static std::string MakeKey(int layer, SizeType srcHeadID, std::uint64_t jobID) {
+        return "wal/split/" + std::to_string(layer) + "/"
+            + std::to_string(srcHeadID) + "/" + std::to_string(jobID);
     }
 
 private:
     static constexpr auto kTimeout = std::chrono::microseconds(2'000'000);
     std::shared_ptr<Helper::KeyValueIO> m_db;
+    int m_layer = 0;
 };
 
 } // namespace Distributed

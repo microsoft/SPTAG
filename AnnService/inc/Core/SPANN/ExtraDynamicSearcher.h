@@ -84,15 +84,19 @@ namespace SPTAG::SPANN {
                         // Async-job fault-tolerance contract: merges are
                         // safe to retry idempotently (the owner check, the
                         // ContainSample liveness gate, and the locked RMW
-                        // all re-evaluate on each attempt). Re-enqueue
-                        // without touching m_mergeJobsInFlight so the
-                        // outer "wait for in-flight" loop still sees us.
-                        ++m_attempts;
+                        // all re-evaluate on each attempt). Enqueue a
+                        // fresh Job carrying the bumped attempt count —
+                        // the ThreadPool worker will `delete` *this* after
+                        // we return, so we cannot re-add the same pointer.
+                        // Keep m_mergeJobsInFlight unchanged: the new job
+                        // takes ownership of the in-flight slot.
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "MergeAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
-                            (std::int64_t)m_headID, m_attempts, (int)ret);
-                        m_extraIndex->m_splitThreadPool->add(this);
-                        return;   // skip cleanup; Job lives on
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                        auto* retryJob = new MergeAsyncJob(m_extraIndex, m_headID, m_callback);
+                        retryJob->m_attempts = m_attempts + 1;
+                        m_extraIndex->m_splitThreadPool->add(retryJob);
+                        return;
                     }
                     m_extraIndex->m_asyncStatus = ret;
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
@@ -137,11 +141,14 @@ namespace SPTAG::SPANN {
                         // See MergeAsyncJob: splits are designed safe to
                         // retry from any compute node (read-deduplicate
                         // during the next attempt handles partial writes).
-                        ++m_attempts;
+                        // Enqueue a fresh Job — the ThreadPool worker will
+                        // `delete` *this* after we return.
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                             "SplitAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
-                            (std::int64_t)m_headID, m_attempts, (int)ret);
-                        m_extraIndex->m_splitThreadPool->add(this);
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                        auto* retryJob = new SplitAsyncJob(m_extraIndex, m_headID, m_callback);
+                        retryJob->m_attempts = m_attempts + 1;
+                        m_extraIndex->m_splitThreadPool->add(retryJob);
                         return;
                     }
                     m_extraIndex->m_asyncStatus = ret;
@@ -504,14 +511,18 @@ namespace SPTAG::SPANN {
             }
 
             // Initialize durable HeadSync log + SplitWAL once we know the
-            // worker (and therefore the node identity).  Both are layer-0
-            // concerns: only layer 0 actually broadcasts HeadSync and
-            // performs cross-owner splits.  See Distributed/HeadSyncLog.h
-            // and Distributed/SplitWAL.h.
-            if (m_layer == 0 && db) {
-                m_headSyncLog = std::make_unique<Distributed::HeadSyncLog>(
-                    db, m_worker->GetWorkerNodeIndex());
-                m_splitWAL = std::make_unique<Distributed::SplitWAL>(db);
+            // worker (and therefore the node identity).  Both layers
+            // perform cross-owner splits, so both layers need a WAL.
+            // HeadSync, however, only broadcasts the layer-0 head topology
+            // (layer-1 centroids are derived from layer-0 splits and reach
+            // peers via the layer-0 HeadSync, so layer 1 doesn't need its
+            // own broadcast log).
+            if (db) {
+                if (m_layer == 0) {
+                    m_headSyncLog = std::make_unique<Distributed::HeadSyncLog>(
+                        db, m_worker->GetWorkerNodeIndex());
+                }
+                m_splitWAL = std::make_unique<Distributed::SplitWAL>(db, m_layer);
             }
 
             WireJobSubmitterIfReady();
@@ -682,18 +693,20 @@ namespace SPTAG::SPANN {
         }
 
         // Single source of truth for "this head lives on a different node".
-        // Only the outer (head) layer participates in the owner-ring route;
-        // inner layers (m_layer > 0) hold per-node-local state with no
-        // shared VID space and no cross-node TiKV key contract, so they
-        // always answer false. When true, outNodeIndex (if not null) is
-        // populated with the owner's node index.
+        // Applies to every layer that has a TiKV-backed posting list, since
+        // DBKey(headID) = m_maxID*m_layer + headID means each layer's keys
+        // live in the same shared TiKV cluster and are owned by whichever
+        // node the owner ring assigns.  Layer 0 (leaf vector postings) and
+        // layer 1+ (centroid postings written by recursive AddHeadIndex /
+        // DeleteIndex during a Split) both go through here.  When true,
+        // outNodeIndex (if not null) is populated with the owner's node
+        // index.
         //
         // Every Split / Merge / Append code path that might touch a head
         // it doesn't own MUST gate on this predicate so the invariant
         // (only owners mutate their own postings) is enforced in exactly
         // one place.
         bool IsRemoteOwnedHead(SizeType headID, int* outNodeIndex = nullptr) {
-            if (m_layer != 0) return false;
             if (!m_worker || !m_worker->IsEnabled()) return false;
             auto target = m_worker->GetOwner(headID);
             if (target.isLocal) return false;
@@ -3685,18 +3698,44 @@ namespace SPTAG::SPANN {
                 size_t completed = m_totalSplitCompleted.load();
                 double avgSplitMs = completed > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completed) : 0;
                 double maxSplitMs = m_maxSplitTimeUs.load() / 1000.0;
+                // Remote queue stats are layer-agnostic (one queue per
+                // WorkerNode covers every layer's outbound appends); only
+                // emit them when m_worker is wired so single-node baselines
+                // stay quiet.
+                size_t remoteQ = 0, remoteTotal = 0;
+                int remoteInflight = 0;
+                if (m_worker) {
+                    remoteQ = m_worker->GetRemoteQueueSize();
+                    remoteTotal = m_worker->GetTotalRemoteAppendsRouted();
+                    remoteInflight = m_worker->GetInflightAppendFlushes();
+                }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "layer %d pending queue:%zu split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                              "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                              "total_completed split:%zu merge:%zu reassign:%zu | "
+                             "remote queueDepth:%zu inflightChunks:%d totalRouted:%zu | "
                              "split_latency avg:%.1fms max:%.1fms\n",
                              m_layer, totalJobs, m_splitJobsInFlight.load(),
                              m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
                              m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                              m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
+                             remoteQ, remoteInflight, remoteTotal,
                              avgSplitMs, maxSplitMs);
             }
             if (runningJobs == 0 && totalJobs == 0) {
+                // Hold ALL DONE until the outbound remote-append queue and
+                // any in-flight chunks have also drained.  Otherwise users
+                // see "ALL DONE" while the network pump is still shipping
+                // millions of fanned-out items to peers (see ReplicaCount=8
+                // amplification path), giving a misleading "stuck" feel.
+                size_t remoteQ = 0; int remoteInflight = 0;
+                if (m_worker) {
+                    remoteQ = m_worker->GetRemoteQueueSize();
+                    remoteInflight = m_worker->GetInflightAppendFlushes();
+                }
+                if (remoteQ != 0 || remoteInflight != 0) {
+                    return false;
+                }
                 if (!m_allDonePrinted) {
                     size_t totalSplit = m_totalSplitSubmitted.load();
                     size_t totalMerge = m_totalMergeSubmitted.load();
@@ -3708,9 +3747,11 @@ namespace SPTAG::SPANN {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                                      "layer %d ALL DONE | total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                                      "total_completed split:%zu merge:%zu reassign:%zu | "
+                                     "remote totalRouted:%zu | "
                                      "split_latency avg:%.1fms max:%.1fms\n",
                                      m_layer, totalSplit, totalMerge, m_totalReassignSubmitted.load(), totalAppend,
                                      m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
+                                     (m_worker ? m_worker->GetTotalRemoteAppendsRouted() : 0),
                                      avgSplitMs, maxSplitMs);
                         // [DIAG] dump diagnostic histograms (lock/RMW/grpc/byte) at every ALL DONE boundary
                         {

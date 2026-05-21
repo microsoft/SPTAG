@@ -262,6 +262,7 @@ namespace SPTAG::SPANN {
                 auto& q = m_appendQueue[nodeIndex];
                 q.push_back(std::move(req));
                 m_remoteQueueSize.fetch_add(1, std::memory_order_relaxed);
+                m_totalRemoteAppendsRouted.fetch_add(1, std::memory_order_relaxed);
                 // [PERF] Auto-flush per node once we have a full chunk worth
                 // (kAutoFlushThreshold items). Without this, every remote
                 // append accumulates until end-of-batch FlushRemoteAppends —
@@ -338,6 +339,19 @@ namespace SPTAG::SPANN {
 
         size_t GetRemoteQueueSize() const {
             return m_remoteQueueSize.load(std::memory_order_relaxed);
+        }
+
+        // Number of remote append items submitted via QueueRemoteAppend over
+        // this WorkerNode's lifetime.  Used by ExtraDynamicSearcher progress
+        // logging so users can tell whether "ALL DONE" on the local pool is
+        // misleading because the remote send queue still has backlog.
+        size_t GetTotalRemoteAppendsRouted() const {
+            return m_totalRemoteAppendsRouted.load(std::memory_order_relaxed);
+        }
+        // In-flight chunk count across all peers (auto-flush async sends
+        // currently running).
+        int GetInflightAppendFlushes() const {
+            return m_inflightAppendFlushes.load(std::memory_order_relaxed);
         }
 
         ErrorCode FlushRemoteAppends() {
@@ -615,6 +629,9 @@ namespace SPTAG::SPANN {
         mutable std::mutex m_appendQueueMutex;
         std::unordered_map<int, std::vector<RemoteAppendRequest>> m_appendQueue;
         std::atomic<size_t> m_remoteQueueSize{0};
+        // Cumulative count of items handed to QueueRemoteAppend over this
+        // worker's lifetime (does not decrement on send completion).
+        std::atomic<size_t> m_totalRemoteAppendsRouted{0};
         // Serializes concurrent FlushRemoteAppends() callers so we don't open
         // hundreds of simultaneous RPC streams to the remote worker (which has
         // only 8 server threads / 256 connection slots). With this mutex, only
