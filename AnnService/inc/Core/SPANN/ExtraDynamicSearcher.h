@@ -21,6 +21,8 @@
 #include "ExtraFileController.h"
 #include "Distributed/WorkerNode.h"
 #include "Distributed/RemoteLeaseTable.h"
+#include "Distributed/HeadSyncLog.h"
+#include "Distributed/SplitWAL.h"
 #include <chrono>
 #include <cstdint>
 #include <algorithm>
@@ -273,6 +275,13 @@ namespace SPTAG::SPANN {
         static constexpr int kRemoteLockPoolSize = 32767;
         std::unique_ptr<RemoteLeaseTable> m_remoteLeaseTable;
 
+        // Durable HeadSync log + per-owner split WAL.  Populated by
+        // SetWorker once we have the shared TiKV handle.  See
+        // Distributed/HeadSyncLog.h and Distributed/SplitWAL.h.
+        std::unique_ptr<Distributed::HeadSyncLog> m_headSyncLog;
+        std::unique_ptr<Distributed::SplitWAL>    m_splitWAL;
+        std::atomic<std::uint64_t>                m_splitJobIdCounter{ 0 };
+
         IndexStats m_stat;
 
         std::shared_ptr<PersistentBuffer> m_wal;
@@ -492,6 +501,17 @@ namespace SPTAG::SPANN {
                 m_worker->SetRpcRetry(m_opt->m_remoteAppendRetry);
                 m_worker->SetRpcTimeoutSec(m_opt->m_remoteAppendTimeoutSec);
                 m_worker->SetRpcMaxInflightPerNode(m_opt->m_remoteAppendMaxInflight);
+            }
+
+            // Initialize durable HeadSync log + SplitWAL once we know the
+            // worker (and therefore the node identity).  Both are layer-0
+            // concerns: only layer 0 actually broadcasts HeadSync and
+            // performs cross-owner splits.  See Distributed/HeadSyncLog.h
+            // and Distributed/SplitWAL.h.
+            if (m_layer == 0 && db) {
+                m_headSyncLog = std::make_unique<Distributed::HeadSyncLog>(
+                    db, m_worker->GetWorkerNodeIndex());
+                m_splitWAL = std::make_unique<Distributed::SplitWAL>(db);
             }
 
             WireJobSubmitterIfReady();
@@ -1406,6 +1426,15 @@ namespace SPTAG::SPANN {
                         headSyncEntries.push_back(std::move(entry));
                     }
                     if (!headSyncEntries.empty()) {
+                        // Durably persist to TiKV first, then broadcast.
+                        // Per design, broadcast is a best-effort latency
+                        // optimization; TiKV is the source of truth.
+                        // Shard = owning node so each owner advances its
+                        // own version counter independently.
+                        if (m_headSyncLog) {
+                            int shard = m_worker->GetWorkerNodeIndex();
+                            m_headSyncLog->Append(shard, headSyncEntries);
+                        }
                         m_worker->BroadcastHeadSync(headSyncEntries);
                     }
                 }
