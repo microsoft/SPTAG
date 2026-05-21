@@ -392,9 +392,11 @@ namespace SPTAG::SPANN {
     };
 
     /// Result from worker back to driver after executing a dispatch command.
+    /// MirrorVersion 2 added m_errorCode so failures can carry SPTAG::ErrorCode
+    /// detail back to the driver instead of collapsing into a boolean.
     struct DispatchResult {
         static constexpr std::uint16_t MajorVersion() { return 1; }
-        static constexpr std::uint16_t MirrorVersion() { return 1; }
+        static constexpr std::uint16_t MirrorVersion() { return 2; }
 
         enum class Status : std::uint8_t { Success = 0, Failed = 1 };
         Status m_status = Status::Success;
@@ -402,11 +404,16 @@ namespace SPTAG::SPANN {
         std::uint32_t m_round = 0;
         double m_wallTime = 0.0;
         std::int32_t m_nodeIndex = -1;  // which worker sent this result
+        // SPTAG::ErrorCode cast to int32 (Success == 0). Populated by the
+        // worker's dispatch callback so the driver can distinguish e.g.
+        // KeyNotFound from disk-full from network-fail. Older peers (mirror
+        // 1) leave this at 0 even when m_status == Failed.
+        std::int32_t m_errorCode = 0;
 
         std::size_t EstimateBufferSize() const {
             return sizeof(std::uint16_t) * 2 + sizeof(std::uint8_t)
                  + sizeof(std::uint64_t) + sizeof(std::uint32_t) + sizeof(double)
-                 + sizeof(std::int32_t);
+                 + sizeof(std::int32_t) * 2;
         }
 
         std::uint8_t* Write(std::uint8_t* p_buffer) const {
@@ -418,6 +425,7 @@ namespace SPTAG::SPANN {
             p_buffer = SimpleWriteBuffer(m_round, p_buffer);
             p_buffer = SimpleWriteBuffer(m_wallTime, p_buffer);
             p_buffer = SimpleWriteBuffer(m_nodeIndex, p_buffer);
+            p_buffer = SimpleWriteBuffer(m_errorCode, p_buffer);
             return p_buffer;
         }
 
@@ -435,6 +443,9 @@ namespace SPTAG::SPANN {
             p_buffer = SimpleReadBuffer(p_buffer, m_wallTime);
             if (mirrorVer >= 1) {
                 p_buffer = SimpleReadBuffer(p_buffer, m_nodeIndex);
+            }
+            if (mirrorVer >= 2) {
+                p_buffer = SimpleReadBuffer(p_buffer, m_errorCode);
             }
             return p_buffer;
         }

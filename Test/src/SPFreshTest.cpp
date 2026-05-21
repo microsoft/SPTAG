@@ -2941,6 +2941,7 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Worker %d: Unknown command type %d\n",
                      nodeIndex, (int)cmd.m_type);
         result.m_status = SPANN::DispatchResult::Status::Failed;
+        result.m_errorCode = static_cast<std::int32_t>(SPTAG::ErrorCode::Undefined);
         return result;
     });
 

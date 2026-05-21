@@ -306,9 +306,10 @@ namespace SPTAG::SPANN {
             }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                "DispatchCoordinator: Result id=%llu round=%u node=%d status=%d wallTime=%.3f\n",
+                "DispatchCoordinator: Result id=%llu round=%u node=%d status=%d errorCode=%d wallTime=%.3f\n",
                 (unsigned long long)result.m_dispatchId, result.m_round,
-                result.m_nodeIndex, (int)result.m_status, result.m_wallTime);
+                result.m_nodeIndex, (int)result.m_status, (int)result.m_errorCode,
+                result.m_wallTime);
 
             std::shared_ptr<PendingDispatch> state;
             {
@@ -325,6 +326,10 @@ namespace SPTAG::SPANN {
 
             if (result.m_status != DispatchResult::Status::Success) {
                 state->errors++;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "DispatchCoordinator: dispatch %llu node=%d failed errorCode=%d\n",
+                    (unsigned long long)result.m_dispatchId, result.m_nodeIndex,
+                    (int)result.m_errorCode);
             }
 
             {
