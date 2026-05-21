@@ -130,6 +130,7 @@ DefineSSDParameter(m_remoteAppendChunkSize, int, 3000, "RemoteAppendChunkSize")
 DefineSSDParameter(m_remoteAppendRetry, int, 3, "RemoteAppendRetry")
 DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
 DefineSSDParameter(m_remoteAppendMaxInflight, int, 4, "RemoteAppendMaxInflight")
+DefineSSDParameter(m_asyncJobMaxRetry, int, 3, "AsyncJobMaxRetry")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

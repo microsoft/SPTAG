@@ -133,6 +133,11 @@ namespace SPTAG {
             int m_remoteAppendTimeoutSec;
             int m_remoteAppendMaxInflight;
 
+            // Async Split/Merge job retry count.  Distributed design
+            // requires async jobs to be safe-to-retry — see Async Job
+            // Fault Tolerance section.
+            int m_asyncJobMaxRetry;
+
             // GPU building
             int m_gpuSSDNumTrees;
             int m_gpuSSDLeafSize;

@@ -63,6 +63,7 @@ namespace SPTAG::SPANN {
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
             SizeType m_headID;
             std::function<void()> m_callback;
+            int m_attempts = 0;
         public:
             MergeAsyncJob(ExtraDynamicSearcher<ValueType>* extraIndex, SizeType headID, std::function<void()> p_callback)
                 : m_extraIndex(extraIndex), m_headID(headID), m_callback(std::move(p_callback)) {}
@@ -73,8 +74,28 @@ namespace SPTAG::SPANN {
             }
             inline void exec(void* p_workSpace, IAbortOperation* p_abort) override {
                 ErrorCode ret = m_extraIndex->MergePostings((ExtraWorkSpace*)p_workSpace, m_headID);
-                if (ret != ErrorCode::Success)
+                if (ret != ErrorCode::Success) {
+                    int maxRetry = m_extraIndex->m_opt
+                        ? m_extraIndex->m_opt->m_asyncJobMaxRetry : 0;
+                    if (m_attempts + 1 < maxRetry) {
+                        // Async-job fault-tolerance contract: merges are
+                        // safe to retry idempotently (the owner check, the
+                        // ContainSample liveness gate, and the locked RMW
+                        // all re-evaluate on each attempt). Re-enqueue
+                        // without touching m_mergeJobsInFlight so the
+                        // outer "wait for in-flight" loop still sees us.
+                        ++m_attempts;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "MergeAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
+                            (std::int64_t)m_headID, m_attempts, (int)ret);
+                        m_extraIndex->m_splitThreadPool->add(this);
+                        return;   // skip cleanup; Job lives on
+                    }
                     m_extraIndex->m_asyncStatus = ret;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "MergeAsyncJob: head=%lld giving up after %d attempts ret=%d\n",
+                        (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                }
                 m_extraIndex->m_mergeJobsInFlight--;
                 m_extraIndex->m_totalMergeCompleted++;
                 if (m_callback != nullptr) {
@@ -89,6 +110,7 @@ namespace SPTAG::SPANN {
             ExtraDynamicSearcher<ValueType>* m_extraIndex;
             SizeType m_headID;
             std::function<void()> m_callback;
+            int m_attempts = 0;
         public:
             SplitAsyncJob(ExtraDynamicSearcher<ValueType>* extraIndex, SizeType headID, std::function<void()> p_callback)
                 : m_extraIndex(extraIndex), m_headID(headID), m_callback(std::move(p_callback)) {}
@@ -105,8 +127,25 @@ namespace SPTAG::SPANN {
                 m_extraIndex->m_totalSplitTimeUs += elapsedUs;
                 uint64_t prevMax = m_extraIndex->m_maxSplitTimeUs.load();
                 while (elapsedUs > prevMax && !m_extraIndex->m_maxSplitTimeUs.compare_exchange_weak(prevMax, elapsedUs));
-                if (ret != ErrorCode::Success)
+                if (ret != ErrorCode::Success) {
+                    int maxRetry = m_extraIndex->m_opt
+                        ? m_extraIndex->m_opt->m_asyncJobMaxRetry : 0;
+                    if (m_attempts + 1 < maxRetry) {
+                        // See MergeAsyncJob: splits are designed safe to
+                        // retry from any compute node (read-deduplicate
+                        // during the next attempt handles partial writes).
+                        ++m_attempts;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "SplitAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
+                            (std::int64_t)m_headID, m_attempts, (int)ret);
+                        m_extraIndex->m_splitThreadPool->add(this);
+                        return;
+                    }
                     m_extraIndex->m_asyncStatus = ret;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "SplitAsyncJob: head=%lld giving up after %d attempts ret=%d\n",
+                        (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                }
                 m_extraIndex->m_splitJobsInFlight--;
                 m_extraIndex->m_totalSplitCompleted++;
                 if (m_callback != nullptr) {
