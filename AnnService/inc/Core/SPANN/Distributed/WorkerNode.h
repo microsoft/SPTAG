@@ -133,6 +133,12 @@ namespace SPTAG::SPANN {
         std::size_t GetBatchAppendWalPendingItems() const {
             return m_remoteOps.GetBatchAppendWalPendingItems();
         }
+        std::size_t GetRemoteOriginPendingItems() const {
+            return m_remoteOps.GetRemoteOriginPendingItems();
+        }
+        std::size_t GetRemoteOriginPendingItems(int layer) const {
+            return m_remoteOps.GetRemoteOriginPendingItems(layer);
+        }
         /// Atomically clear all RPC callbacks (every layer) and wait for any
         /// in-flight invocation to finish.
         void ClearCallbacks() {

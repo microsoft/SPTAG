@@ -389,16 +389,15 @@ namespace SPTAG::SPANN {
             // RemoteAppendChunkSize (default 3000).
             const size_t kChunkSize =
                 std::max<size_t>(1, (size_t)m_rpcChunkSize.load(std::memory_order_relaxed));
-            const size_t total = items.size();
-            size_t offset = 0;
+            size_t kept = 0;
             std::vector<RemoteAppendRequest> chunk;
-            chunk.reserve(std::min(kChunkSize, total));
+            chunk.reserve(std::min(kChunkSize, items.size()));
 
-            while (offset < total) {
-                size_t end = std::min(offset + kChunkSize, total);
+            while (kept < items.size()) {
+                size_t end = std::min(kept + kChunkSize, items.size());
                 chunk.clear();
-                chunk.reserve(end - offset);
-                for (size_t i = offset; i < end; ++i) {
+                chunk.reserve(end - kept);
+                for (size_t i = kept; i < end; ++i) {
                     chunk.push_back(std::move(items[i]));
                 }
 
@@ -406,11 +405,28 @@ namespace SPTAG::SPANN {
                 if (chunkRet != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                         "RemotePostingOps: Chunk send failed to node %d (offset=%zu/%zu, chunk=%zu items)\n",
-                        targetNodeIndex, offset, total, end - offset);
+                        targetNodeIndex, kept, items.size(), end - kept);
+                    // Restore the moved-out items in [kept..end) from the
+                    // still-populated chunk, then drop the already-sent
+                    // prefix [0..kept) so retrying the caller sees only
+                    // the unsent payload. Without this compaction, the
+                    // auto-flush watchdog would resend already-successful
+                    // items whose m_appendPosting/m_headVec strings are
+                    // now empty (moved-out), and the receiver would log
+                    // "empty append posting!" for each such phantom item.
+                    for (size_t i = 0; i < chunk.size() && (kept + i) < items.size(); ++i) {
+                        items[kept + i] = std::move(chunk[i]);
+                    }
+                    if (kept > 0) {
+                        items.erase(items.begin(), items.begin() + kept);
+                    }
                     return chunkRet;
                 }
-                offset = end;
+                kept = end;
             }
+            // All chunks sent successfully — fully drain the input so any
+            // caller-side retry sees an empty vector.
+            items.clear();
             return ErrorCode::Success;
         }
 
@@ -994,7 +1010,10 @@ namespace SPTAG::SPANN {
                 } else {
                     for (auto& s : m_jobSubmitters) { if (s) { sub = &s; break; } }
                 }
-                if (sub) (*sub)(job);
+                if (sub) {
+                    RemoteOriginPendingSlot(layer).fetch_add(1, std::memory_order_relaxed);
+                    (*sub)(job);
+                }
                 else     { delete job; failCount->fetch_add(1); remaining->fetch_sub(1); }
             }
         }
@@ -1492,6 +1511,14 @@ namespace SPTAG::SPANN {
                     if (r == ErrorCode::Success) m_success->fetch_add(1);
                     else                         m_fail->fetch_add(1);
                 }
+                // Decrement per-layer remote-origin pool gauge for every
+                // completed item (paired with increment in SubmitBatchItems).
+                {
+                    int layer = m_batchReq->m_items[m_index].m_layer;
+                    auto& slot = m_ops->RemoteOriginPendingSlot(layer);
+                    std::size_t prev = slot.fetch_sub(1, std::memory_order_relaxed);
+                    if (prev == 0) slot.store(0, std::memory_order_relaxed); // saturating
+                }
                 if (m_remaining->fetch_sub(1) == 1) {
                     if (m_sendResponse && m_replyPacket) {
                         m_ops->SendBatchAppendResponse(
@@ -1543,7 +1570,45 @@ namespace SPTAG::SPANN {
         std::atomic<std::size_t> m_walPendingItems{0};
         std::atomic<std::size_t> m_walPendingItemsCap{50000};
 
+        // Per-layer count of items submitted to the local job pool that
+        // originated from a peer's BatchAppend RPC (covers BOTH the
+        // WAL-backed and legacy synchronous-ACK paths). Lets the periodic
+        // progress log split "pending queue" into local-origin RMWs vs
+        // remote-origin items so operators can tell whether the receiver
+        // is bottlenecked on its own inserts or on serving peers. Indexed
+        // by req.m_layer; sized lazily to max observed layer + 1.
+        mutable std::mutex m_remoteOriginPendingMutex;
+        std::vector<std::atomic<std::size_t>> m_remoteOriginPending;
+
+        std::atomic<std::size_t>& RemoteOriginPendingSlot(int layer) {
+            if (layer < 0) layer = 0;
+            {
+                std::lock_guard<std::mutex> g(m_remoteOriginPendingMutex);
+                if (static_cast<std::size_t>(layer) >= m_remoteOriginPending.size()) {
+                    std::vector<std::atomic<std::size_t>> grown(layer + 1);
+                    for (std::size_t i = 0; i < m_remoteOriginPending.size(); ++i) {
+                        grown[i].store(m_remoteOriginPending[i].load(std::memory_order_relaxed),
+                                       std::memory_order_relaxed);
+                    }
+                    m_remoteOriginPending = std::move(grown);
+                }
+            }
+            return m_remoteOriginPending[layer];
+        }
+
     public:
+        std::size_t GetRemoteOriginPendingItems(int layer) const {
+            std::lock_guard<std::mutex> g(m_remoteOriginPendingMutex);
+            if (layer < 0 || static_cast<std::size_t>(layer) >= m_remoteOriginPending.size()) return 0;
+            return m_remoteOriginPending[layer].load(std::memory_order_relaxed);
+        }
+        // Aggregate across all layers (whole-node view).
+        std::size_t GetRemoteOriginPendingItems() const {
+            std::lock_guard<std::mutex> g(m_remoteOriginPendingMutex);
+            std::size_t sum = 0;
+            for (auto& a : m_remoteOriginPending) sum += a.load(std::memory_order_relaxed);
+            return sum;
+        }
         void NoteWalPendingItemsDrained(std::size_t n) {
             if (n == 0) return;
             std::size_t prev = m_walPendingItems.fetch_sub(n, std::memory_order_relaxed);

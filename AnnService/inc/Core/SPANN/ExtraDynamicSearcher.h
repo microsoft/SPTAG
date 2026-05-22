@@ -2289,12 +2289,19 @@ namespace SPTAG::SPANN {
         ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0)
         {
             auto appendBegin = std::chrono::high_resolution_clock::now();
-            if (appendPosting.empty()) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
-            }
-
-            if (appendNum == 0) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Error!, headID :%lld, appendNum:%d\n", (std::int64_t)headID, appendNum);
+            if (appendPosting.empty() || appendNum == 0) {
+                // Defensive: drop empty/zero-count appends rather than letting
+                // them reach the storage layer (which would log
+                // "TiKVIO::Merge: empty append posting!" and fail). Empty
+                // payloads should never be produced by normal flow, but they
+                // can arise from buggy sender-side retries that resend
+                // already-consumed (moved-from) items.
+                if (appendPosting.empty() && appendNum != 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "Append: dropping empty posting for headID=%lld appendNum=%d\n",
+                        (std::int64_t)headID, appendNum);
+                }
+                return ErrorCode::Success;
             }
 
             // If this head is owned by a remote node, route the append via
@@ -3729,19 +3736,30 @@ namespace SPTAG::SPANN {
                 size_t remoteQ = 0, remoteTotal = 0;
                 int remoteInflight = 0;
                 std::size_t walPending = 0;
+                std::size_t remoteOriginPending = 0;
                 if (m_worker) {
                     remoteQ = m_worker->GetRemoteQueueSize();
                     remoteTotal = m_worker->GetTotalRemoteAppendsRouted();
                     remoteInflight = m_worker->GetInflightAppendFlushes();
                     walPending = m_worker->GetBatchAppendWalPendingItems();
+                    remoteOriginPending = m_worker->GetRemoteOriginPendingItems(m_layer);
                 }
+                // Split the local pool's pending queue into the portion
+                // serving peer-originated BatchAppend items vs the residual
+                // (local-origin RMWs, split/merge/reassign jobs). Helps
+                // operators distinguish "I'm bottlenecked applying remote
+                // work" from "my own inserts are backlogged".
+                size_t localPending = totalJobs > remoteOriginPending
+                                          ? totalJobs - remoteOriginPending
+                                          : 0;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                             "layer %d pending queue:%zu split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
+                             "layer %d pending queue:%zu (local:%zu remote:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                              "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                              "total_completed split:%zu merge:%zu reassign:%zu | "
-                             "remote queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
+                             "remote out queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
                              "split_latency avg:%.1fms max:%.1fms\n",
-                             m_layer, totalJobs, m_splitJobsInFlight.load(),
+                             m_layer, totalJobs, localPending, remoteOriginPending,
+                             m_splitJobsInFlight.load(),
                              m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
                              m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                              m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
@@ -3862,17 +3880,33 @@ namespace SPTAG::SPANN {
             double avgSplitMs = completedSplit > 0 ? (m_totalSplitTimeUs.load() / 1000.0 / completedSplit) : 0;
             double maxSplitMs = m_maxSplitTimeUs.load() / 1000.0;
             size_t totalJobs = m_splitThreadPool ? m_splitThreadPool->jobsize() : 0;
+            size_t remoteQ = 0, remoteTotal = 0;
+            int remoteInflight = 0;
+            std::size_t walPending = 0;
+            std::size_t remoteOriginPending = 0;
+            if (m_worker) {
+                remoteQ = m_worker->GetRemoteQueueSize();
+                remoteTotal = m_worker->GetTotalRemoteAppendsRouted();
+                remoteInflight = m_worker->GetInflightAppendFlushes();
+                walPending = m_worker->GetBatchAppendWalPendingItems();
+                remoteOriginPending = m_worker->GetRemoteOriginPendingItems(m_layer);
+            }
+            size_t localPending = totalJobs > remoteOriginPending
+                                      ? totalJobs - remoteOriginPending
+                                      : 0;
             // if (!ShouldLogProgress(totalJobs)) return;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                         "layer %d pending queue:%zu split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
+                         "layer %d pending queue:%zu (local:%zu remote:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                          "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                          "total_completed split:%zu merge:%zu reassign:%zu | "
+                         "remote out queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
                          "split_latency avg:%.1fms max:%.1fms\n",
-                         m_layer, totalJobs,
+                         m_layer, totalJobs, localPending, remoteOriginPending,
                          m_splitJobsInFlight.load(), m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(),
                          m_splitThreadPool ? static_cast<unsigned int>(m_splitThreadPool->runningJobs()) : 0,
                          m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                          m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
+                         remoteQ, remoteInflight, remoteTotal, walPending,
                          avgSplitMs, maxSplitMs);
         }
 
