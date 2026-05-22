@@ -66,6 +66,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
             // Parse Section
             if (']' != *(nonSpaceSeg.second - 1))
             {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to parse section: %s\n", std::string(nonSpaceSeg.first, nonSpaceSeg.second).c_str());
                 return ErrorCode::ReadIni_FailedParseSection;
             }
 
@@ -73,7 +74,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
 
             if (sectionSeg.second <= sectionSeg.first)
             {
-                // Empty section name.
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty section name.\n");
                 return ErrorCode::ReadIni_FailedParseSection;
             }
 
@@ -87,6 +88,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
             }
             else
             {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Duplicated section: %s\n", currSection.c_str());
                 return ErrorCode::ReadIni_DuplicatedSection;
             }
         }
@@ -108,7 +110,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
 
             if (paramSeg.second <= paramSeg.first)
             {
-                // Empty parameter name.
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Empty parameter name in section: %s\n", currSection.c_str());
                 return ErrorCode::ReadIni_FailedParseParam;
             }
 
@@ -121,6 +123,7 @@ ErrorCode IniReader::LoadIni(std::shared_ptr<Helper::DiskIO> p_input)
             }
             else
             {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Duplicated parameter: %s\n", paramName.c_str());
                 return ErrorCode::ReadIni_DuplicatedParam;
             }
         }

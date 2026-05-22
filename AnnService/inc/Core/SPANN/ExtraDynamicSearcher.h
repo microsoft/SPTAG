@@ -2767,7 +2767,8 @@ namespace SPTAG::SPANN {
                         }
 
                         ErrorCode tmp;
-                        if ((tmp = db->Put(DBKey(postingID), postinglist, MaxTimeout, &(workSpace.m_diskRequests))) !=
+                        int vsize;
+                        if ((tmp = db->MergeWithCAS(DBKey(postingID), postinglist, MaxTimeout, &(workSpace.m_diskRequests), vsize)) !=
                             ErrorCode::Success)
                         {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[WriteDB] Put %lld fail!\n", (std::int64_t)index);
