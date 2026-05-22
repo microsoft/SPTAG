@@ -126,11 +126,14 @@ DefineSSDParameter(m_versionCacheMaxChunks, int, 10000, "VersionCacheMaxChunks")
 DefineSSDParameter(m_asyncRpcMaxInflight, int, 0, "AsyncRpcMaxInflight")
 
 // Distributed RemotePostingOps RPC tuning
-// ChunkSize=10000: each in-flight chunk holds enough work to amortize the
-// network roundtrip and grpc framing cost (a 3000-item chunk took ~500ms at
-// 1M-scale; 10000 should hit ~1.5s and roughly 3× the per-second throughput
-// for the same in-flight cap).
-DefineSSDParameter(m_remoteAppendChunkSize, int, 10000, "RemoteAppendChunkSize")
+// ChunkSize=20000: with the receiver-side BatchAppendLayerJob fast path (one
+// db->MultiMerge per chunk instead of N per-item Merges), larger chunks pay
+// off — they amortize the network roundtrip without exploding the receiver
+// pool depth. 20K is a balance: small enough that ChunkSize × MaxInflight
+// stays under the WAL admission-control cap (so chunks take the WAL-backed
+// fast-ACK path), large enough that the network roundtrip overhead is small
+// vs. per-chunk work. 50K was tried and immediately tripped the WAL cap.
+DefineSSDParameter(m_remoteAppendChunkSize, int, 20000, "RemoteAppendChunkSize")
 DefineSSDParameter(m_remoteAppendRetry, int, 3, "RemoteAppendRetry")
 DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
 // MaxInflight=8 (was 4): keeps the receiver's 16-thread BatchAppendItemJob pool

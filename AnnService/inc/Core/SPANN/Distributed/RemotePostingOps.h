@@ -52,6 +52,19 @@ namespace SPTAG::SPANN {
             int appendNum,
             std::string& appendPosting)>;
 
+        // Receiver-side batched callback: deliver a whole BatchRemoteAppend
+        // request to the searcher so it can group items by head and call
+        // its native BatchAppend / db->MultiMerge path with ONE TiKV op
+        // covering N items, instead of unpacking into N pool jobs that
+        // each issue an individual Merge.  Mirrors the local AddIndex
+        // path which already batches.  outSuccess and outFail accumulate
+        // per-item results so the caller can ACK with the same shape as
+        // the legacy per-item path.
+        using BatchAppendCallback = std::function<void(
+            std::vector<RemoteAppendRequest*>& items,
+            std::uint32_t& outSuccess,
+            std::uint32_t& outFail)>;
+
         using HeadSyncCallback = std::function<void(const HeadSyncEntry& entry)>;
         // RemoteLockCallback:
         //   For Lock op:   token argument is 0; returns issued fencing token
@@ -207,6 +220,14 @@ namespace SPTAG::SPANN {
             EnsureLayerSlot_NoLock(layer);
             m_appendCallbacks[layer] = std::move(cb);
         }
+        void SetBatchAppendCallback(int layer, BatchAppendCallback cb) {
+            std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
+            EnsureLayerSlot_NoLock(layer);
+            if (m_batchAppendCallbacks.size() < static_cast<size_t>(layer) + 1) {
+                m_batchAppendCallbacks.resize(layer + 1);
+            }
+            m_batchAppendCallbacks[layer] = std::move(cb);
+        }
         void SetHeadSyncCallback(int layer, HeadSyncCallback cb) {
             std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
             EnsureLayerSlot_NoLock(layer);
@@ -239,6 +260,7 @@ namespace SPTAG::SPANN {
         void ClearCallbacks() {
             std::unique_lock<std::shared_timed_mutex> lk(m_callbackLifetimeMutex);
             m_appendCallbacks.clear();
+            m_batchAppendCallbacks.clear();
             m_headSyncCallbacks.clear();
             m_remoteLockCallbacks.clear();
             m_mergeCallbacks.clear();
@@ -269,6 +291,9 @@ namespace SPTAG::SPANN {
                 return false;
             }
             m_appendCallbacks[layer] = nullptr;
+            if (layer >= 0 && static_cast<size_t>(layer) < m_batchAppendCallbacks.size()) {
+                m_batchAppendCallbacks[layer] = nullptr;
+            }
             m_headSyncCallbacks[layer] = nullptr;
             m_remoteLockCallbacks[layer] = nullptr;
             if (layer >= 0 && static_cast<size_t>(layer) < m_mergeCallbacks.size()) {
@@ -285,6 +310,11 @@ namespace SPTAG::SPANN {
         const AppendCallback* LookupAppendCallback_Locked(int layer) const {
             if (layer < 0 || static_cast<size_t>(layer) >= m_appendCallbacks.size()) return nullptr;
             const auto& cb = m_appendCallbacks[layer];
+            return cb ? &cb : nullptr;
+        }
+        const BatchAppendCallback* LookupBatchAppendCallback_Locked(int layer) const {
+            if (layer < 0 || static_cast<size_t>(layer) >= m_batchAppendCallbacks.size()) return nullptr;
+            const auto& cb = m_batchAppendCallbacks[layer];
             return cb ? &cb : nullptr;
         }
         const HeadSyncCallback* LookupHeadSyncCallback_Locked(int layer) const {
@@ -957,11 +987,19 @@ namespace SPTAG::SPANN {
                              /*sendResponse=*/true, packetPtr);
         }
 
-        // Submit each item of `batchReq` to its per-layer job submitter.
-        // If sendResponse is true, the last completing job ACKs the sender
-        // via ackPacket. If sendResponse is false (WAL-backed path or
-        // crash recovery), the last completing job deletes the WAL entry
-        // identified by `batchID`.
+        // Submit a BatchAppend request to the local pool for processing.
+        // Two paths:
+        //   * Batched (preferred): if the searcher registered a
+        //     BatchAppendCallback for the request's layer, dispatch ONE
+        //     Job per layer covering all items for that layer.  The
+        //     callback groups by headID and issues db->MultiMerge once,
+        //     matching the local AddIndex throughput profile.
+        //   * Per-item (fallback): legacy path used when no batch
+        //     callback is registered.  Creates one Job per item and the
+        //     last one ACKs.
+        // If sendResponse is true, the LAST completing Job ACKs the
+        // sender via ackPacket; if false (WAL-backed path), the last Job
+        // deletes the WAL entry identified by `batchID` instead.
         void SubmitBatchItems(std::shared_ptr<BatchRemoteAppendRequest> batchReq,
                               std::uint64_t batchID,
                               bool sendResponse,
@@ -971,7 +1009,6 @@ namespace SPTAG::SPANN {
                 if (sendResponse && ackPacket) SendBatchAppendResponse(*ackPacket, 0, 0);
                 return;
             }
-            auto remaining    = std::make_shared<std::atomic<size_t>>(total);
             auto successCount = std::make_shared<std::atomic<std::uint32_t>>(0);
             auto failCount    = std::make_shared<std::atomic<std::uint32_t>>(0);
 
@@ -998,6 +1035,75 @@ namespace SPTAG::SPANN {
                 return;
             }
 
+            // Group item indices by layer. We need the layer split because
+            // each layer has its own job submitter and its own searcher's
+            // batch callback. Within a layer all items go to one Job.
+            std::unordered_map<int, std::vector<size_t>> byLayer;
+            byLayer.reserve(4);
+            for (size_t i = 0; i < total; ++i) {
+                byLayer[batchReq->m_items[i].m_layer].push_back(i);
+            }
+
+            // Check whether every layer in this request has a batch
+            // callback registered. If even one is missing we fall back to
+            // the per-item path for the whole request to keep the
+            // success/fail accounting consistent with the legacy ACK
+            // shape (one fetch_add per item).
+            bool allBatchable = true;
+            {
+                std::shared_lock<std::shared_timed_mutex> cbLock(m_callbackLifetimeMutex);
+                for (const auto& kv : byLayer) {
+                    if (!LookupBatchAppendCallback_Locked(kv.first)) {
+                        allBatchable = false;
+                        break;
+                    }
+                }
+            }
+
+            if (allBatchable) {
+                auto remainingLayers = std::make_shared<std::atomic<size_t>>(byLayer.size());
+                for (auto& kv : byLayer) {
+                    int layer = kv.first;
+                    const JobSubmitter* sub = nullptr;
+                    if (layer >= 0 && static_cast<size_t>(layer) < m_jobSubmitters.size()
+                        && m_jobSubmitters[layer]) {
+                        sub = &m_jobSubmitters[layer];
+                    } else {
+                        for (auto& s : m_jobSubmitters) { if (s) { sub = &s; break; } }
+                    }
+                    if (sub) {
+                        // Per-layer gauge: this Job represents
+                        // kv.second.size() peer-origin items even though
+                        // it's a single Job. Match item count, not Job
+                        // count, so the gauge stays comparable to the
+                        // per-item-path value.
+                        RemoteOriginPendingSlot(layer).fetch_add(kv.second.size(),
+                            std::memory_order_relaxed);
+                        auto* job = new BatchAppendLayerJob(
+                            this, batchReq, std::move(kv.second), layer,
+                            remainingLayers, successCount, failCount,
+                            ackPacket, sendResponse, batchID);
+                        (*sub)(job);
+                    } else {
+                        failCount->fetch_add(kv.second.size());
+                        if (remainingLayers->fetch_sub(1) == 1) {
+                            if (sendResponse && ackPacket) {
+                                SendBatchAppendResponse(*ackPacket,
+                                    successCount->load(), failCount->load());
+                            } else if (batchID != 0) {
+                                auto wal = GetBatchAppendWAL();
+                                if (wal) wal->Delete(batchID);
+                                NoteWalPendingItemsDrained(batchReq->m_items.size());
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            // Fallback: per-item path (legacy). Used until a searcher
+            // installs the batch callback (e.g. during early bring-up).
+            auto remaining = std::make_shared<std::atomic<size_t>>(total);
             for (size_t i = 0; i < total; i++) {
                 auto* job = new BatchAppendItemJob(
                     this, batchReq, i, remaining, successCount, failCount,
@@ -1435,6 +1541,7 @@ namespace SPTAG::SPANN {
         // by request.m_layer is required to avoid routing layer-0 events to
         // layer-1's storage and vice versa.
         std::vector<AppendCallback> m_appendCallbacks;
+        std::vector<BatchAppendCallback> m_batchAppendCallbacks;
         std::vector<HeadSyncCallback> m_headSyncCallbacks;
         std::vector<RemoteLockCallback> m_remoteLockCallbacks;
         std::vector<MergeCallback> m_mergeCallbacks;
@@ -1465,6 +1572,99 @@ namespace SPTAG::SPANN {
         // Append/HeadSync RPCs).
         std::mutex m_pendingLockTokensMutex;
         std::unordered_map<Socket::ResourceID, std::uint64_t> m_pendingLockTokens;
+
+        // Per-LAYER Job: a single Job processes ALL items for one layer
+        // from a BatchRemoteAppend RPC.  Calls the searcher's batched
+        // callback (BatchAppendCallback) which groups items by headID and
+        // issues ONE db->MultiMerge instead of N individual Merges --
+        // mirrors the local AddIndex BatchAppend path so receiver-side
+        // throughput matches sender-side.  Replaces the legacy
+        // BatchAppendItemJob fan-out (one Job per item) when the searcher
+        // has registered a batch callback; otherwise the per-item path is
+        // still used as a fallback.
+        class BatchAppendLayerJob : public Helper::ThreadPool::Job {
+        public:
+            BatchAppendLayerJob(RemotePostingOps* ops,
+                                std::shared_ptr<BatchRemoteAppendRequest> batchReq,
+                                std::vector<size_t> indices,
+                                int layer,
+                                std::shared_ptr<std::atomic<size_t>> remainingLayers,
+                                std::shared_ptr<std::atomic<std::uint32_t>> successCount,
+                                std::shared_ptr<std::atomic<std::uint32_t>> failCount,
+                                std::shared_ptr<Socket::Packet> replyPacket,
+                                bool sendResponse,
+                                std::uint64_t batchID)
+                : m_ops(ops), m_batchReq(std::move(batchReq)),
+                  m_indices(std::move(indices)), m_layer(layer),
+                  m_remaining(std::move(remainingLayers)),
+                  m_success(std::move(successCount)),
+                  m_fail(std::move(failCount)),
+                  m_replyPacket(std::move(replyPacket)),
+                  m_sendResponse(sendResponse),
+                  m_batchID(batchID) {}
+
+            void exec(IAbortOperation*) override { run(); }
+            void exec(void* workspace, IAbortOperation*) override {
+                void* prev = tls_preallocAppendWorkSpace;
+                tls_preallocAppendWorkSpace = workspace;
+                run();
+                tls_preallocAppendWorkSpace = prev;
+            }
+
+        private:
+            void run() {
+                std::vector<RemoteAppendRequest*> items;
+                items.reserve(m_indices.size());
+                for (size_t idx : m_indices) {
+                    items.push_back(&m_batchReq->m_items[idx]);
+                }
+
+                std::uint32_t succ = 0, fail = 0;
+                {
+                    std::shared_lock<std::shared_timed_mutex> cbLock(m_ops->m_callbackLifetimeMutex);
+                    const auto* cb = m_ops->LookupBatchAppendCallback_Locked(m_layer);
+                    if (cb) {
+                        (*cb)(items, succ, fail);
+                    } else {
+                        // Searcher detached between dispatch and run; mark
+                        // everything as failed so the sender can retry.
+                        fail = static_cast<std::uint32_t>(items.size());
+                    }
+                }
+                m_success->fetch_add(succ);
+                m_fail->fetch_add(fail);
+                // Decrement per-layer remote-origin gauge by the count of
+                // items this job represents (paired with the matching
+                // increment in SubmitBatchItems).
+                {
+                    auto& slot = m_ops->RemoteOriginPendingSlot(m_layer);
+                    std::size_t toSub = m_indices.size();
+                    std::size_t prev = slot.fetch_sub(toSub, std::memory_order_relaxed);
+                    if (prev < toSub) slot.store(0, std::memory_order_relaxed);
+                }
+                if (m_remaining->fetch_sub(1) == 1) {
+                    if (m_sendResponse && m_replyPacket) {
+                        m_ops->SendBatchAppendResponse(
+                            *m_replyPacket, m_success->load(), m_fail->load());
+                    } else if (m_batchID != 0) {
+                        auto wal = m_ops->GetBatchAppendWAL();
+                        if (wal) wal->Delete(m_batchID);
+                        m_ops->NoteWalPendingItemsDrained(m_batchReq->m_items.size());
+                    }
+                }
+            }
+
+            RemotePostingOps* m_ops;
+            std::shared_ptr<BatchRemoteAppendRequest> m_batchReq;
+            std::vector<size_t> m_indices;
+            int m_layer;
+            std::shared_ptr<std::atomic<size_t>> m_remaining;
+            std::shared_ptr<std::atomic<std::uint32_t>> m_success;
+            std::shared_ptr<std::atomic<std::uint32_t>> m_fail;
+            std::shared_ptr<Socket::Packet> m_replyPacket;
+            bool m_sendResponse;
+            std::uint64_t m_batchID;
+        };
 
         // Per-item Job: each remote append request becomes one Job submitted
         // to the searcher's shared SPDKThreadPool. The last completing Job

@@ -290,18 +290,16 @@ namespace SPTAG::SPANN {
             }
         };
 
-    private:
-        std::atomic<int> m_workspaceCount = 0;
-
-        std::shared_ptr<Helper::KeyValueIO> db;
-        WorkerNode* m_worker = nullptr;  // externally owned, set via SetWorker()
-
     public:
         // Expose the underlying KV handle so a standalone WorkerNode can be wired to the
         // same DB this searcher already opened, instead of opening a second one.
         std::shared_ptr<Helper::KeyValueIO> GetDB() const { return db; }
 
     private:
+        std::atomic<int> m_workspaceCount = 0;
+        std::shared_ptr<Helper::KeyValueIO> db;
+        WorkerNode* m_worker = nullptr;  // externally owned, set via SetWorker()
+
         SPANN::Index<ValueType>* m_headIndex;
         std::unique_ptr<COMMON::IVersionMap> m_versionMap;
         Options* m_opt;
@@ -321,11 +319,7 @@ namespace SPTAG::SPANN {
         // Distributed/HeadSyncLog.h and Distributed/SplitWAL.h.
         std::unique_ptr<Distributed::HeadSyncLog> m_headSyncLog;
         std::unique_ptr<Distributed::SplitWAL>    m_splitWAL;
-        // Receiver-side Batch WAL for cross-owner BatchAppend (Option A).
-        // Owned by each layer's searcher but the same TiKV cluster, keyed
-        // by receiver node index; layer-0 is the only owner that wires it
-        // into the WorkerNode (only one WAL per receiver, regardless of
-        // how many layers exist).
+        // Receiver-side Batch WAL for cross-owner BatchAppend
         std::shared_ptr<Distributed::BatchAppendWAL> m_batchAppendWAL;
         std::atomic<std::uint64_t>                m_splitJobIdCounter{ 0 };
 
@@ -351,6 +345,15 @@ namespace SPTAG::SPANN {
         std::atomic_size_t m_totalAppendSubmitted{ 0 };
         std::atomic_size_t m_totalAppendCompleted{ 0 };
         std::atomic_size_t m_totalAppendCount{ 0 };
+
+        // Routing counters for local AddIndex calls so we can verify
+        // GetOwner is partitioning work evenly. Incremented in
+        // BatchAppend()/Append() based on whether TryRouteRemoteAppend
+        // shipped the head to a peer or it stayed local.
+        std::atomic_size_t m_routedLocalHeads{ 0 };
+        std::atomic_size_t m_routedRemoteHeads{ 0 };
+        std::atomic_size_t m_routedLocalItems{ 0 };
+        std::atomic_size_t m_routedRemoteItems{ 0 };
 
         std::atomic_size_t m_reassignJobsInFlight{ 0 };
         std::atomic_size_t m_totalReassignSubmitted{ 0 };
@@ -504,7 +507,14 @@ namespace SPTAG::SPANN {
         // broadcast), the callback re-checks ContainSample with a stable
         // view.  When the head is genuinely gone, sender retries against
         // the updated head index and routes to the new owner.
-        void HandleRaceCondition(SizeType headID) {
+        //
+        // Returns true if a structural op was observed (the head was in
+        // m_splitList or m_mergeList at check time).  The AppendCallback
+        // uses this to refuse resurrecting a head that was likely just
+        // deleted by the wait-on-RWLock'd structural op: resurrecting
+        // would race against the merge's HeadSync Delete broadcast and
+        // leave a zombie head until the next merge round drops it again.
+        bool HandleRaceCondition(SizeType headID) {
             bool inSplit = false, inMerge = false;
             {
                 std::shared_lock<std::shared_timed_mutex> sl(m_splitListLock);
@@ -514,11 +524,12 @@ namespace SPTAG::SPANN {
                 std::shared_lock<std::shared_timed_mutex> sl(m_mergeListLock);
                 inMerge = (m_mergeList.find(headID) != m_mergeList.end());
             }
-            if (!inSplit && !inMerge) return;
+            if (!inSplit && !inMerge) return false;
             // Wait until the structural op releases the per-head RWLock.
             // Acquire-and-immediately-release; the Append below re-locks.
             std::unique_lock<std::shared_timed_mutex> w(m_rwLocks[headID]);
             (void)w;
+            return true;
         }
 
         // SPDKThreadPool. Called both after pool creation and from
@@ -548,6 +559,13 @@ namespace SPTAG::SPANN {
                 m_worker->SetRpcRetry(m_opt->m_remoteAppendRetry);
                 m_worker->SetRpcTimeoutSec(m_opt->m_remoteAppendTimeoutSec);
                 m_worker->SetRpcMaxInflightPerNode(m_opt->m_remoteAppendMaxInflight);
+                // Size the receiver's WAL admission cap so a normal in-flight
+                // window (ChunkSize × MaxInflight) fits before backpressure
+                // engages. A too-low cap forces every chunk down the slow
+                // synchronous-ACK path; too-high removes the safety net.
+                const std::size_t chunk = (std::size_t)std::max(1, m_opt->m_remoteAppendChunkSize);
+                const std::size_t inflight = (std::size_t)std::max(1, m_opt->m_remoteAppendMaxInflight);
+                m_worker->SetBatchAppendWalPendingItemsCap(chunk * inflight * 2);
             }
 
             // Initialize durable HeadSync log + SplitWAL once we know the
@@ -588,7 +606,7 @@ namespace SPTAG::SPANN {
                     // the head index.  Otherwise the wasMissing branch
                     // below can resurrect a head that the structural op
                     // just deleted.
-                    HandleRaceCondition(headID);
+                    bool observedStructural = HandleRaceCondition(headID);
 
                     // Reuse SPDKThreadPool's per-worker pre-allocated workspace
                     // when called from BatchAppendItemJob on m_splitThreadPool.
@@ -599,6 +617,21 @@ namespace SPTAG::SPANN {
                         ws = &localWorkSpace;
                     }
                     bool wasMissing = !m_headIndex->ContainSample(headID, m_layer + 1);
+                    if (wasMissing && observedStructural) {
+                        // We waited for an in-flight Split/Merge and the
+                        // head is gone afterwards -- the structural op
+                        // deleted it on purpose.  Resurrecting via
+                        // AddHeadIndex would race the structural op's
+                        // HeadSync Delete broadcast and leave a zombie
+                        // head until the next merge round drops it again.
+                        // Refuse the append; the sender's retry path will
+                        // re-resolve once HeadSync propagates the
+                        // deletion to its head index.
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
+                            "AppendCallback: head=%lld deleted by local structural op; refusing resurrection\n",
+                            (std::int64_t)headID);
+                        return ErrorCode::Fail;
+                    }
                     if (wasMissing && headVec && !headVec->empty()) {
                         DimensionType dim = static_cast<DimensionType>(
                             headVec->size() / sizeof(ValueType));
@@ -636,6 +669,111 @@ namespace SPTAG::SPANN {
                         }
                     }
                     return Append(ws, headID, appendNum, appendPosting, 0);
+                });
+
+            // Batch append callback: receiver-side fast path.  Replaces
+            // the per-item job fan-out with a single Job per layer that
+            // groups items by headID and issues ONE db->MultiMerge,
+            // matching the local AddIndex BatchAppend throughput profile.
+            // Without this, a single 10k-item peer RPC inflates the
+            // receiver's pool by 10k jobs and 10k Merge calls -- the
+            // dominant receiver-side bottleneck observed in 2-node tests.
+            m_worker->SetBatchAppendCallback(m_layer,
+                [this](std::vector<RemoteAppendRequest*>& items,
+                       std::uint32_t& outSuccess, std::uint32_t& outFail) {
+                    outSuccess = 0;
+                    outFail = 0;
+                    if (items.empty()) return;
+
+                    ExtraWorkSpace localWorkSpace;
+                    ExtraWorkSpace* ws = static_cast<ExtraWorkSpace*>(tls_preallocAppendWorkSpace);
+                    if (!ws) {
+                        m_headIndex->InitWorkSpace(&localWorkSpace);
+                        ws = &localWorkSpace;
+                    }
+
+                    // Phase 1: per-head prep (race-condition wait,
+                    // resurrection or refusal) and per-item versionMap
+                    // mirroring.  Items refused at this phase count as
+                    // failures and are excluded from the MultiMerge.
+                    std::vector<bool> alive(items.size(), true);
+                    for (size_t i = 0; i < items.size(); ++i) {
+                        auto* req = items[i];
+                        if (req->m_appendPosting.empty() || req->m_appendNum == 0) {
+                            // Defensive drop (matches Append()'s gate).
+                            alive[i] = false;
+                            ++outSuccess;
+                            continue;
+                        }
+                        bool observedStructural = HandleRaceCondition(req->m_headID);
+                        bool wasMissing = !m_headIndex->ContainSample(req->m_headID, m_layer + 1);
+                        if (wasMissing && observedStructural) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
+                                "BatchAppendCallback: head=%lld deleted by local structural op; refusing\n",
+                                (std::int64_t)req->m_headID);
+                            alive[i] = false;
+                            ++outFail;
+                            continue;
+                        }
+                        if (wasMissing && !req->m_headVec.empty()) {
+                            DimensionType dim = static_cast<DimensionType>(
+                                req->m_headVec.size() / sizeof(ValueType));
+                            m_headIndex->AddHeadIndex(req->m_headVec.data(),
+                                req->m_headID, 0, dim, m_layer + 1, ws);
+                        }
+
+                        // Mirror sender's versionMap for the records we're
+                        // about to persist (otherwise MergePostings /
+                        // SearchIndex would drop them as stale).
+                        const uint8_t* basePtr =
+                            reinterpret_cast<const uint8_t*>(req->m_appendPosting.data());
+                        size_t totalRec = req->m_appendPosting.size() / m_vectorInfoSize;
+                        EnsureVersionMapCoversPosting(basePtr, totalRec,
+                            "BatchAppendCallback", req->m_headID);
+                        const SizeType localCount = m_versionMap->Count();
+                        std::vector<SizeType> batchVids;
+                        std::vector<uint8_t> batchVers;
+                        batchVids.reserve(totalRec);
+                        batchVers.reserve(totalRec);
+                        for (size_t k = 0; k < totalRec; ++k) {
+                            const uint8_t* p = basePtr + k * m_vectorInfoSize;
+                            SizeType vid = *reinterpret_cast<const SizeType*>(p);
+                            uint8_t recVer = *(p + sizeof(SizeType));
+                            if (vid < 0 || vid >= localCount) continue;
+                            if (recVer == 0xfe) continue;
+                            uint8_t curVer = m_versionMap->GetVersion(vid);
+                            if (curVer == 0xfe) continue;
+                            if (curVer == recVer) continue;
+                            batchVids.push_back(vid);
+                            batchVers.push_back(recVer);
+                        }
+                        if (!batchVids.empty()) {
+                            m_versionMap->SetVersionBatch(batchVids, batchVers);
+                        }
+                    }
+
+                    // Phase 2: group surviving items by headID, then
+                    // hand the grouped map to BatchAppend so it issues
+                    // a single db->MultiMerge for all heads.
+                    std::unordered_map<SizeType, std::string> headAppends;
+                    headAppends.reserve(items.size());
+                    size_t aliveCount = 0;
+                    for (size_t i = 0; i < items.size(); ++i) {
+                        if (!alive[i]) continue;
+                        auto* req = items[i];
+                        auto& dst = headAppends[req->m_headID];
+                        if (dst.empty()) dst = std::move(req->m_appendPosting);
+                        else             dst.append(req->m_appendPosting);
+                        ++aliveCount;
+                    }
+                    if (headAppends.empty()) return;
+
+                    ErrorCode ret = BatchAppend(ws, headAppends, "PeerBatch");
+                    if (ret == ErrorCode::Success) {
+                        outSuccess += static_cast<std::uint32_t>(aliveCount);
+                    } else {
+                        outFail += static_cast<std::uint32_t>(aliveCount);
+                    }
                 });
 
             // Head sync callback: apply head index updates from peers
@@ -1196,17 +1334,10 @@ namespace SPTAG::SPANN {
             uint64_t splitPostingVectors = 0;
             uint64_t splitNewHeadCount = 0;
 
-            // Only the OWNER of headID should run Split. Remote-issued
-            // splits get dropped early so we don't mutate a posting that
-            // doesn't live on this node.
-            if (IsRemoteOwnedHead(headID)) {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                m_splitList.unsafe_erase(headID);
-                return ErrorCode::Success;
-            }
-
-            // Owner-side: wait for any in-flight remote-initiated lock on
-            // this bucket to release the advisory flag before we mutate.
+            // Ownership filtering is the single gate inside SplitAsync; by
+            // the time we get here the head is guaranteed local-owned. No
+            // re-check needed (hash ring is static once initialized, and
+            // only layer 0 routes anyway).
             WaitForRemoteBucketUnlocked(headID);
 
             {
@@ -1695,15 +1826,10 @@ namespace SPTAG::SPANN {
 
         ErrorCode MergePostings(ExtraWorkSpace *p_exWorkSpace, SizeType headID)
         {
-            // The owner runs its own merge passes. Skip when this head is
-            // owned by another node — we'd just be racing the owner.
-            // (Defense in depth: MergeAsync already filters at enqueue, but
-            // ownership can change between enqueue and execution.)
-            if (IsRemoteOwnedHead(headID)) {
-                std::unique_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
-                m_mergeList.unsafe_erase(headID);
-                return ErrorCode::Success;
-            }
+            // Ownership filtering is the single gate inside MergeAsync; by
+            // the time we get here the head is guaranteed local-owned. No
+            // re-check needed (hash ring is static once initialized, and
+            // only layer 0 routes anyway).
             WaitForRemoteBucketUnlocked(headID);
 
             std::unique_lock<std::shared_timed_mutex> lock(m_rwLocks[headID]);
@@ -1723,6 +1849,16 @@ namespace SPTAG::SPANN {
 
             std::string mergedPostingList;
             std::set<SizeType> vectorIdSet;
+
+            // Tracks the loser VID after a successful merge so we can
+            // broadcast a HeadSync Delete entry to peers after releasing
+            // the per-head RWLock.  Split mirrors this pattern at
+            // line ~1620 with both Add (new heads) and Delete (original
+            // head) entries.  Without this broadcast, peers keep routing
+            // BatchAppend traffic to the deleted head -- the receiver's
+            // AppendCallback wasMissing branch would then resurrect a
+            // dead head, leaving a zombie until the next merge round.
+            SizeType deletedHeadVID = -1;
 
             std::string currentPostingList;
             ErrorCode ret;
@@ -1927,6 +2063,7 @@ namespace SPTAG::SPANN {
                                 return ret;
                             }
                         }
+                        deletedHeadVID = queryResult->VID;
                         nextHeadID = headID;
                         nextHeadVec = headVec;
                         deletedHeadVec = resultVec;
@@ -1960,6 +2097,7 @@ namespace SPTAG::SPANN {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting %lld in Merge\n", (std::int64_t)(headID));
                             return ret;
                         }
+                        deletedHeadVID = headID;
                         nextHeadID = queryResult->VID;
                         nextHeadVec = resultVec;
                         deletedHeadVec = headVec;
@@ -2008,6 +2146,30 @@ namespace SPTAG::SPANN {
                         MergeAsync(nextHeadID);
                     }
                 }
+
+                // Broadcast HeadSync Delete for the merge loser so peer
+                // compute nodes drop it from their in-memory head index.
+                // Without this, peers keep routing BatchAppend traffic to
+                // the deleted head; the receiver's AppendCallback then
+                // either resurrects it (zombie) or refuses (sender retry
+                // loop) until the next merge round happens to delete it
+                // again.  Mirrors the Split broadcast at line ~1620.
+                // Skipped when our layer is disk-backed (TiKV is source
+                // of truth there) or when no worker is wired.
+                if (deletedHeadVID != -1 && m_worker && m_worker->IsEnabled()
+                    && m_headIndex->GetDiskIndex(m_layer + 1) == nullptr) {
+                    std::vector<HeadSyncEntry> headSyncEntries;
+                    HeadSyncEntry entry;
+                    entry.op = HeadSyncEntry::Op::Delete;
+                    entry.headVID = deletedHeadVID;
+                    entry.m_layer = m_layer;
+                    headSyncEntries.push_back(std::move(entry));
+                    if (m_headSyncLog) {
+                        int shard = m_worker->GetWorkerNodeIndex();
+                        m_headSyncLog->Append(shard, headSyncEntries);
+                    }
+                    m_worker->BroadcastHeadSync(headSyncEntries);
+                }
                 m_stat.m_mergeNum++;
                 return ErrorCode::Success;
             }
@@ -2030,9 +2192,11 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(SizeType headID, int postingSize, std::function<void()> p_callback = nullptr)
         {
-            // Don't enqueue split jobs for heads we don't own; the owner
-            // will detect oversize on its own. Skipping here avoids
-            // burning a thread-pool slot only to drop the job in Split().
+            // Single authoritative ownership gate. Sources of remote-owned
+            // headIDs that legitimately reach here: RefineIndex full scan,
+            // Search→MergeAsync via search result, Split-internal re-enqueue
+            // for new-head VIDs, MergePostings re-merge of survivor. Drop
+            // them so the owner runs its own structural pass.
             if (IsRemoteOwnedHead(headID)) return;
             {
                 Helper::Concurrent::ConcurrentMap<SizeType, int>::value_type workPair(headID, postingSize);
@@ -2054,10 +2218,11 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
-            // Don't enqueue merge jobs for heads we don't own; the owner
-            // runs its own merge pass. Filtering here is the single
-            // upstream gate so MergePostings's owner check is only a
-            // defense-in-depth net.
+            // Single authoritative ownership gate. Sources of remote-owned
+            // headIDs that legitimately reach here: RefineIndex full scan,
+            // Search→MergeAsync via search result, MergePostings re-merge of
+            // survivor (nextHeadID). Drop them so the owner runs its own
+            // merge pass.
             if (IsRemoteOwnedHead(headID)) return;
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
@@ -2531,8 +2696,16 @@ namespace SPTAG::SPANN {
                                              (int)(posting.size() / m_vectorInfoSize),
                                              posting,
                                              headVecBytes)) {
+                        m_routedRemoteHeads.fetch_add(1, std::memory_order_relaxed);
+                        m_routedRemoteItems.fetch_add(
+                            posting.size() / m_vectorInfoSize,
+                            std::memory_order_relaxed);
                         continue;
                     }
+                    m_routedLocalHeads.fetch_add(1, std::memory_order_relaxed);
+                    m_routedLocalItems.fetch_add(
+                        posting.size() / m_vectorInfoSize,
+                        std::memory_order_relaxed);
                 }
 
                 std::unique_lock<std::shared_timed_mutex> headLock(m_rwLocks[headID]);
@@ -3777,25 +3950,48 @@ namespace SPTAG::SPANN {
                     walPending = m_worker->GetBatchAppendWalPendingItems();
                     remoteOriginPending = m_worker->GetRemoteOriginPendingItems(m_layer);
                 }
-                // Split the local pool's pending queue into the portion
-                // serving peer-originated BatchAppend items vs the residual
-                // (local-origin RMWs, split/merge/reassign jobs). Helps
-                // operators distinguish "I'm bottlenecked applying remote
-                // work" from "my own inserts are backlogged".
-                size_t localPending = totalJobs > remoteOriginPending
+                // Split the local pool's pending queue by ORIGIN of the
+                // work, not by processing site. Both buckets are being
+                // processed locally on this node's SPDKThreadPool:
+                //   selfOrig: jobs the local AddIndex generated (own
+                //             splits/merges/reassigns/appends).
+                //   peerOrig: BatchAppendItemJob unpacked from BatchAppend
+                //             RPCs that peers routed to us because we own
+                //             the head.  When peer A sends 10000 items to
+                //             us they land here, not in A's queue.
+                // Items WE dispatched to peers (and are waiting on their
+                // response) are reported separately as "remote out
+                // queueDepth" + "inflightChunks" + "walPendingItems".
+                //
+                // Asymmetry note: selfOrig is usually near 0 even when
+                // GetOwner is perfectly balanced.  Local AddIndex calls
+                // for LOCAL-owned heads bypass the pool entirely (one
+                // synchronous db->MultiMerge per BatchAppend batch
+                // covers them all).  Peer-originated BatchAppend
+                // requests, by contrast, unpack into ONE pool job per
+                // item, so a single 10k-item RPC inflates peerOrig by
+                // 10k.  Use "addIndex route" below to verify owner
+                // partitioning is healthy.
+                size_t selfOrigPending = totalJobs > remoteOriginPending
                                           ? totalJobs - remoteOriginPending
                                           : 0;
+                size_t routedLocalH = m_routedLocalHeads.load();
+                size_t routedRemoteH = m_routedRemoteHeads.load();
+                size_t routedLocalI = m_routedLocalItems.load();
+                size_t routedRemoteI = m_routedRemoteItems.load();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                             "layer %d pending queue:%zu (local:%zu remote:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
+                             "layer %d pending queue:%zu (selfOrig:%zu peerOrig:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                              "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                              "total_completed split:%zu merge:%zu reassign:%zu | "
+                             "addIndex route heads(local:%zu remote:%zu) items(local:%zu remote:%zu) | "
                              "remote out queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
                              "split_latency avg:%.1fms max:%.1fms\n",
-                             m_layer, totalJobs, localPending, remoteOriginPending,
+                             m_layer, totalJobs, selfOrigPending, remoteOriginPending,
                              m_splitJobsInFlight.load(),
                              m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(), runningJobs,
                              m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                              m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
+                             routedLocalH, routedRemoteH, routedLocalI, routedRemoteI,
                              remoteQ, remoteInflight, remoteTotal, walPending,
                              avgSplitMs, maxSplitMs);
             }
@@ -3924,21 +4120,27 @@ namespace SPTAG::SPANN {
                 walPending = m_worker->GetBatchAppendWalPendingItems();
                 remoteOriginPending = m_worker->GetRemoteOriginPendingItems(m_layer);
             }
-            size_t localPending = totalJobs > remoteOriginPending
+            size_t selfOrigPending = totalJobs > remoteOriginPending
                                       ? totalJobs - remoteOriginPending
                                       : 0;
+            size_t routedLocalH = m_routedLocalHeads.load();
+            size_t routedRemoteH = m_routedRemoteHeads.load();
+            size_t routedLocalI = m_routedLocalItems.load();
+            size_t routedRemoteI = m_routedRemoteItems.load();
             // if (!ShouldLogProgress(totalJobs)) return;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                         "layer %d pending queue:%zu (local:%zu remote:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
+                         "layer %d pending queue:%zu (selfOrig:%zu peerOrig:%zu) split:%zu merge:%zu append:%zu reassign:%zu running:%u | "
                          "total_submitted split:%zu merge:%zu reassign:%zu append:%zu | "
                          "total_completed split:%zu merge:%zu reassign:%zu | "
+                         "addIndex route heads(local:%zu remote:%zu) items(local:%zu remote:%zu) | "
                          "remote out queueDepth:%zu inflightChunks:%d totalRouted:%zu walPendingItems:%zu | "
                          "split_latency avg:%.1fms max:%.1fms\n",
-                         m_layer, totalJobs, localPending, remoteOriginPending,
+                         m_layer, totalJobs, selfOrigPending, remoteOriginPending,
                          m_splitJobsInFlight.load(), m_mergeJobsInFlight.load(), m_appendJobsInFlight.load(), m_reassignJobsInFlight.load(),
                          m_splitThreadPool ? static_cast<unsigned int>(m_splitThreadPool->runningJobs()) : 0,
                          m_totalSplitSubmitted.load(), m_totalMergeSubmitted.load(), m_totalReassignSubmitted.load(), m_totalAppendCount.load(),
                          m_totalSplitCompleted.load(), m_totalMergeCompleted.load(), m_totalReassignCompleted.load(),
+                         routedLocalH, routedRemoteH, routedLocalI, routedRemoteI,
                          remoteQ, remoteInflight, remoteTotal, walPending,
                          avgSplitMs, maxSplitMs);
         }

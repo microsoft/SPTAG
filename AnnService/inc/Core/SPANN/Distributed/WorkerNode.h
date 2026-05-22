@@ -35,6 +35,7 @@ namespace SPTAG::SPANN {
     class WorkerNode : public NetworkNode {
     public:
         using AppendCallback = RemotePostingOps::AppendCallback;
+        using BatchAppendCallback = RemotePostingOps::BatchAppendCallback;
         using DispatchCallback = DispatchCoordinator::DispatchCallback;
         using HeadSyncCallback = RemotePostingOps::HeadSyncCallback;
         using RemoteLockCallback = RemotePostingOps::RemoteLockCallback;
@@ -110,6 +111,7 @@ namespace SPTAG::SPANN {
         // request.m_layer.
 
         void SetAppendCallback(int layer, AppendCallback cb) { m_remoteOps.SetAppendCallback(layer, std::move(cb)); }
+        void SetBatchAppendCallback(int layer, BatchAppendCallback cb) { m_remoteOps.SetBatchAppendCallback(layer, std::move(cb)); }
         void SetHeadSyncCallback(int layer, HeadSyncCallback cb) { m_remoteOps.SetHeadSyncCallback(layer, std::move(cb)); }
         void SetRemoteLockCallback(int layer, RemoteLockCallback cb) { m_remoteOps.SetRemoteLockCallback(layer, std::move(cb)); }
         void SetFenceValidator(int layer, FenceValidator cb) { m_remoteOps.SetFenceValidator(layer, std::move(cb)); }
