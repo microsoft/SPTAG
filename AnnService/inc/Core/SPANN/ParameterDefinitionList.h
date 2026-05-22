@@ -136,7 +136,7 @@ DefineSSDParameter(m_remoteAppendTimeoutSec, int, 180, "RemoteAppendTimeoutSec")
 // MaxInflight=8 (was 4): keeps the receiver's 16-thread BatchAppendItemJob pool
 // well-fed even when one chunk straggles on lock contention.
 DefineSSDParameter(m_remoteAppendMaxInflight, int, 8, "RemoteAppendMaxInflight")
-DefineSSDParameter(m_asyncJobMaxRetry, int, 3, "AsyncJobMaxRetry")
+DefineSSDParameter(m_asyncJobMaxRetry, int, 8, "AsyncJobMaxRetry")
 DefineSSDParameter(m_remoteLockTtlMs, int, 30000, "RemoteLockTtlMs")
 
 // GPU Building

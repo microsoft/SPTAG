@@ -24,6 +24,7 @@
 #include "Distributed/HeadSyncLog.h"
 #include "Distributed/SplitWAL.h"
 #include "Distributed/BatchAppendWAL.h"
+#include "Distributed/DelayedJobScheduler.h"
 #include <chrono>
 #include <cstdint>
 #include <algorithm>
@@ -79,30 +80,54 @@ namespace SPTAG::SPANN {
             inline void exec(void* p_workSpace, IAbortOperation* p_abort) override {
                 ErrorCode ret = m_extraIndex->MergePostings((ExtraWorkSpace*)p_workSpace, m_headID);
                 if (ret != ErrorCode::Success) {
+                    // Classify before retrying: transient errors (TiKV
+                    // region_error, timeout, generic Fail from the IO
+                    // layer) deserve a bounded retry with exponential
+                    // backoff; permanent errors (data inconsistency,
+                    // unknown ErrorCode) cannot be repaired by retry and
+                    // get dropped with a warning so we don't burn
+                    // pool slots in a hot fail loop.
                     int maxRetry = m_extraIndex->m_opt
                         ? m_extraIndex->m_opt->m_asyncJobMaxRetry : 0;
-                    if (m_attempts + 1 < maxRetry) {
+                    bool transient = Distributed::IsTransientAsyncJobError(ret);
+                    if (transient && m_attempts + 1 < maxRetry) {
                         // Async-job fault-tolerance contract: merges are
                         // safe to retry idempotently (the owner check, the
                         // ContainSample liveness gate, and the locked RMW
                         // all re-evaluate on each attempt). Enqueue a
-                        // fresh Job carrying the bumped attempt count —
-                        // the ThreadPool worker will `delete` *this* after
-                        // we return, so we cannot re-add the same pointer.
-                        // Keep m_mergeJobsInFlight unchanged: the new job
+                        // fresh Job carrying the bumped attempt count via
+                        // the delayed-retry scheduler so backoff happens
+                        // OFF the pool worker — the ThreadPool worker
+                        // will `delete` *this* after we return, so we
+                        // cannot re-add the same pointer. Keep
+                        // m_mergeJobsInFlight unchanged: the new job
                         // takes ownership of the in-flight slot.
+                        int backoffMs = Distributed::AsyncJobRetryBackoffMs(m_attempts);
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                            "MergeAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
-                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                            "MergeAsyncJob: head=%lld attempt=%d failed ret=%d (transient), backoff=%dms\n",
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret, backoffMs);
                         auto* retryJob = new MergeAsyncJob(m_extraIndex, m_headID, m_callback);
                         retryJob->m_attempts = m_attempts + 1;
-                        m_extraIndex->m_splitThreadPool->add(retryJob);
+                        m_extraIndex->GetOrCreateDelayedRetryScheduler().Schedule(
+                            m_extraIndex->m_splitThreadPool, retryJob, backoffMs);
                         return;
                     }
-                    m_extraIndex->m_asyncStatus = ret;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                        "MergeAsyncJob: head=%lld giving up after %d attempts ret=%d\n",
-                        (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                    if (!transient) {
+                        // Permanent: log once and drop. Do not promote to
+                        // m_asyncStatus — these are usually local data
+                        // inconsistencies (e.g. version skew) that the
+                        // next caller-driven recovery will repair, and
+                        // poisoning m_asyncStatus would surface them as
+                        // a process-wide failure.
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "MergeAsyncJob: head=%lld permanent failure ret=%d, dropping\n",
+                            (std::int64_t)m_headID, (int)ret);
+                    } else {
+                        m_extraIndex->m_asyncStatus = ret;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "MergeAsyncJob: head=%lld giving up after %d attempts ret=%d (transient exhausted)\n",
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                    }
                 }
                 m_extraIndex->m_mergeJobsInFlight--;
                 m_extraIndex->m_totalMergeCompleted++;
@@ -136,26 +161,34 @@ namespace SPTAG::SPANN {
                 uint64_t prevMax = m_extraIndex->m_maxSplitTimeUs.load();
                 while (elapsedUs > prevMax && !m_extraIndex->m_maxSplitTimeUs.compare_exchange_weak(prevMax, elapsedUs));
                 if (ret != ErrorCode::Success) {
+                    // Same classification scheme as MergeAsyncJob.
+                    // Splits are designed safe to retry idempotently
+                    // (read-deduplicate during the next attempt handles
+                    // partial writes from a previously-crashed attempt).
                     int maxRetry = m_extraIndex->m_opt
                         ? m_extraIndex->m_opt->m_asyncJobMaxRetry : 0;
-                    if (m_attempts + 1 < maxRetry) {
-                        // See MergeAsyncJob: splits are designed safe to
-                        // retry from any compute node (read-deduplicate
-                        // during the next attempt handles partial writes).
-                        // Enqueue a fresh Job — the ThreadPool worker will
-                        // `delete` *this* after we return.
+                    bool transient = Distributed::IsTransientAsyncJobError(ret);
+                    if (transient && m_attempts + 1 < maxRetry) {
+                        int backoffMs = Distributed::AsyncJobRetryBackoffMs(m_attempts);
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                            "SplitAsyncJob: head=%lld attempt=%d failed ret=%d, re-enqueueing\n",
-                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                            "SplitAsyncJob: head=%lld attempt=%d failed ret=%d (transient), backoff=%dms\n",
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret, backoffMs);
                         auto* retryJob = new SplitAsyncJob(m_extraIndex, m_headID, m_callback);
                         retryJob->m_attempts = m_attempts + 1;
-                        m_extraIndex->m_splitThreadPool->add(retryJob);
+                        m_extraIndex->GetOrCreateDelayedRetryScheduler().Schedule(
+                            m_extraIndex->m_splitThreadPool, retryJob, backoffMs);
                         return;
                     }
-                    m_extraIndex->m_asyncStatus = ret;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                        "SplitAsyncJob: head=%lld giving up after %d attempts ret=%d\n",
-                        (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                    if (!transient) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "SplitAsyncJob: head=%lld permanent failure ret=%d, dropping\n",
+                            (std::int64_t)m_headID, (int)ret);
+                    } else {
+                        m_extraIndex->m_asyncStatus = ret;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "SplitAsyncJob: head=%lld giving up after %d attempts ret=%d (transient exhausted)\n",
+                            (std::int64_t)m_headID, m_attempts + 1, (int)ret);
+                    }
                 }
                 m_extraIndex->m_splitJobsInFlight--;
                 m_extraIndex->m_totalSplitCompleted++;
@@ -4027,6 +4060,22 @@ namespace SPTAG::SPANN {
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;
+
+        // Single-threaded scheduler used by MergeAsyncJob / SplitAsyncJob
+        // to re-enqueue retries after exponential backoff (transient
+        // TiKV/IO failures). Lazily created on first retry to avoid the
+        // worker thread in single-node / build-only paths that never
+        // exercise async retries.
+        std::mutex m_delayedRetrySchedulerMutex;
+        std::unique_ptr<Distributed::DelayedJobScheduler> m_delayedRetryScheduler;
+
+        Distributed::DelayedJobScheduler& GetOrCreateDelayedRetryScheduler() {
+            std::lock_guard<std::mutex> g(m_delayedRetrySchedulerMutex);
+            if (!m_delayedRetryScheduler) {
+                m_delayedRetryScheduler.reset(new Distributed::DelayedJobScheduler());
+            }
+            return *m_delayedRetryScheduler;
+        }
     };
 } // namespace SPTAG
 #endif // _SPTAG_SPANN_EXTRADYNAMICSEARCHER_H_
