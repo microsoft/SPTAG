@@ -1825,18 +1825,22 @@ namespace SPTAG::SPANN {
 
                             // Bounded retry: a fencing-token rejection means the
                             // owner's lease TTL expired between our acquire and
-                            // our send (rare; lease TTL is 30 s).  Release the
-                            // stale token, re-acquire, and resend.  After 3
-                            // attempts (10/20/40 ms backoff) we surface the
-                            // failure to the caller so they can retry the
-                            // whole AddIndex op at the user level instead of
-                            // silently dropping the cluster vectors.
-                            constexpr int kFenceRetries = 3;
+                            // our send (rare; lease TTL is 30 s), or the owner
+                            // is momentarily backed up on a TiKV Deadline.
+                            // Release the stale token, re-acquire, and resend.
+                            // Matches the local lock-acquire retry budget (20
+                            // attempts, linear 3*(attempt) ms backoff, ~570 ms
+                            // worst-case) so transient TiKV slowness doesn't
+                            // force a Split rollback.  After 20 attempts we
+                            // surface the failure to the caller so they can
+                            // retry the whole AddIndex op at the user level
+                            // instead of silently dropping cluster vectors.
+                            constexpr int kFenceRetries = 20;
                             ErrorCode ec = ErrorCode::Fail;
                             for (int attempt = 0; attempt < kFenceRetries; ++attempt) {
                                 if (attempt > 0) {
                                     std::this_thread::sleep_for(
-                                        std::chrono::milliseconds(10 << (attempt - 1)));
+                                        std::chrono::milliseconds(3 * attempt));
                                     // Release the stale lease (best-effort:
                                     // the owner may have auto-released it via
                                     // TTL already, in which case this no-ops).
