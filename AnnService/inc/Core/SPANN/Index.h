@@ -96,14 +96,6 @@ namespace SPTAG
             std::shared_ptr<Helper::Concurrent::ConcurrentQueue<int>> m_freeWorkSpaceIds;
             std::atomic<int> m_workspaceCount = 0;
 
-            // Single split/append thread pool shared by all extraSearchers
-            // (one per layer). Lazily populated by the first layer that
-            // initializes its pool inside LoadIndex; subsequent layers
-            // adopt the same shared instance so the total worker count
-            // is AppendThreadNum (not AppendThreadNum * layers).
-            mutable std::mutex m_sharedSplitPoolMutex;
-            std::shared_ptr<Helper::ThreadPool> m_sharedSplitPool;
-
         public:
             Index()
             {
@@ -154,15 +146,6 @@ namespace SPTAG
                 }
             }
             inline WorkerNode* GetPendingWorker() const { return m_pendingWorker; }
-
-            inline std::shared_ptr<Helper::ThreadPool> GetSharedSplitPool() const {
-                std::lock_guard<std::mutex> lk(m_sharedSplitPoolMutex);
-                return m_sharedSplitPool;
-            }
-            inline void SetSharedSplitPool(std::shared_ptr<Helper::ThreadPool> pool) {
-                std::lock_guard<std::mutex> lk(m_sharedSplitPoolMutex);
-                m_sharedSplitPool = std::move(pool);
-            }
 
             inline SizeType GetNumSamples() const { return GetNumSamples(0); }
             inline SizeType GetNumSamples(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumSamples(); else return m_topIndex->GetNumSamples(); }

@@ -317,8 +317,8 @@ namespace SPTAG::SPANN {
 
         // Routing counters for local AddIndex calls so we can verify
         // GetOwner is partitioning work evenly. Incremented in
-        // BatchAppend()/Append() based on whether TryRouteRemoteAppend
-        // shipped the head to a peer or it stayed local.
+        // BatchAppend()/Append() based on whether IsRemoteOwnedHead
+        // routed the head to a peer or it stayed local.
         std::atomic_size_t m_routedLocalHeads{ 0 };
         std::atomic_size_t m_routedRemoteHeads{ 0 };
         std::atomic_size_t m_routedLocalItems{ 0 };
@@ -853,18 +853,24 @@ namespace SPTAG::SPANN {
             return true;
         }
 
-        // If headID is owned by a remote node, queue the append for that
-        // node and return true; otherwise return false (caller continues
-        // with local write logic).
-        bool TryRouteRemoteAppend(SizeType headID,
-                                  int appendNum,
-                                  std::string posting,
-                                  const void* headVecBytes = nullptr) {
-            int ownerNode = -1;
-            if (!IsRemoteOwnedHead(headID, &ownerNode)) return false;
-            EnqueueRemoteAppend(ownerNode, headID, appendNum,
-                                std::move(posting), headVecBytes);
-            return true;
+        // Scan a posting buffer for an entry whose VID matches headID
+        // (the head's own self-entry).  Returns a pointer into the buffer
+        // at the start of the vector bytes (skipping VID + version +
+        // padding), or nullptr if no self-entry is present.  Used by
+        // remote-append callers so the receiver can materialize a missing
+        // head index without waiting for BroadcastHeadSync.
+        const void* FindSelfEntryVectorBytes(SizeType headID,
+                                             const std::string& posting,
+                                             int recCount) const {
+            const uint8_t* basePtr =
+                reinterpret_cast<const uint8_t*>(posting.data());
+            for (int i = 0; i < recCount; ++i) {
+                const uint8_t* p = basePtr + i * m_vectorInfoSize;
+                if (*reinterpret_cast<const SizeType*>(p) == headID) {
+                    return p + m_metaDataSize;
+                }
+            }
+            return nullptr;
         }
 
         // Synchronous, fenced cross-owner write used by the Split path.
@@ -954,8 +960,9 @@ namespace SPTAG::SPANN {
             } else {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                     "Split: fenced remote append failed for child %lld "
-                    "on node %d (ec=%d); WAL kept for GC\n",
-                    (std::int64_t)remoteChildHeadID, ownerNode, (int)ec);
+                    "on node %d (ec=%s); WAL kept for GC\n",
+                    (std::int64_t)remoteChildHeadID, ownerNode,
+                    Helper::Convert::ConvertToString(ec).c_str());
             }
             return ec;
         }
@@ -1615,8 +1622,9 @@ namespace SPTAG::SPANN {
                                 MaxTimeout, nullptr);
                             if (rret != ErrorCode::Success) {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                    "Split rollback: failed to restore srcHead %lld posting (ec=%d); recall may drop until next Merge\n",
-                                    (std::int64_t)headID, (int)rret);
+                                    "Split rollback: failed to restore srcHead %lld posting (ec=%s); recall may drop until next Merge\n",
+                                    (std::int64_t)headID,
+                                    Helper::Convert::ConvertToString(rret).c_str());
                             }
                             theSameHead = false;
                             break;
@@ -1860,9 +1868,10 @@ namespace SPTAG::SPANN {
                                     newPostingLists[k], token);
                                 if (ec == ErrorCode::Success) break;
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                    "Split: fenced remote append attempt %d/%d failed for child %lld on node %d (ec=%d)\n",
+                                    "Split: fenced remote append attempt %d/%d failed for child %lld on node %d (ec=%s)\n",
                                     attempt + 1, kFenceRetries,
-                                    (std::int64_t)newHeadVID, plans[k].ownerNode, (int)ec);
+                                    (std::int64_t)newHeadVID, plans[k].ownerNode,
+                                    Helper::Convert::ConvertToString(ec).c_str());
                             }
 
                             if (ec == ErrorCode::Success) {
@@ -2093,6 +2102,22 @@ namespace SPTAG::SPANN {
             m_headIndex->SearchHeadIndex(queryResults, m_layer + 1, p_exWorkSpace);
 
             std::string nextPostingList;
+            // Re-queue this Merge job and exit cleanly.  Counts as a new
+            // submission so MergeAsyncJob::exec()'s m_mergeJobsInFlight-- /
+            // m_totalMergeCompleted++ stays balanced -- without these
+            // increments m_mergeJobsInFlight underflows to a huge uint64
+            // and m_totalMergeCompleted exceeds m_totalMergeSubmitted.
+            auto reenqueueMerge = [&](const char* reason) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "MergePostings: re-queueing headID=%lld (%s)\n",
+                             (std::int64_t)headID, reason);
+                auto* curJob = new MergeAsyncJob(this, headID, nullptr);
+                m_mergeJobsInFlight++;
+                m_totalMergeSubmitted++;
+                m_splitThreadPool->add(curJob);
+                return ErrorCode::Success;
+            };
+
             for (int i = 1; i < queryResults.GetResultNum(); ++i)
             {
                 BasicResult* queryResult = queryResults.GetResult(i);
@@ -2106,38 +2131,25 @@ namespace SPTAG::SPANN {
                 std::set<SizeType> nextVectorIdSet;
                 int deletedLength = 0;
                 {
+                    RemoteLeaseGuard remoteLease;
                     std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID], std::defer_lock);
 
-                    RemoteLeaseGuard remoteLease;
                     bool isRemoteCandidate = false;
                     int remoteNodeIndex = -1;
                     if (m_worker && m_worker->IsEnabled()) {
                         auto target = m_worker->GetOwner(queryResult->VID);
-                        if (!target.isLocal) {
-                            isRemoteCandidate = true;
-                            remoteNodeIndex = target.nodeIndex;
-                            if (!remoteLease.acquire(m_worker, remoteNodeIndex, m_layer, queryResult->VID)) {
-                                // Advisory remote lease busy; skip this
-                                // candidate.
-                                continue;
-                            }
-                        }
+                        isRemoteCandidate = !target.isLocal;
+                        remoteNodeIndex = target.nodeIndex;
                     }
 
-                    if (!isRemoteCandidate) {
-                        // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Locked: %d, to be lock: %d\n", headID, queryResult->VID);
+                    if (isRemoteCandidate) {
+                        if (!remoteLease.acquire(m_worker, remoteNodeIndex, m_layer, queryResult->VID)) {
+                            return reenqueueMerge("remote lease busy");
+                        }
+                    } else {
                         if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) {
                             if (!anotherLock.try_lock()) {
-                                auto* curJob = new MergeAsyncJob(this, headID, nullptr);
-                                // Re-queue counts as a new submission; matched by the
-                                // m_mergeJobsInFlight-- / m_totalMergeCompleted++ in
-                                // MergeAsyncJob::exec(). Without these increments
-                                // m_mergeJobsInFlight underflows to a huge uint64
-                                // and m_totalMergeCompleted exceeds m_totalMergeSubmitted.
-                                m_mergeJobsInFlight++;
-                                m_totalMergeSubmitted++;
-                                m_splitThreadPool->add(curJob);
-                                return ErrorCode::Success;
+                                return reenqueueMerge("local lock busy");
                             }
                         }
                         if (!m_headIndex->ContainSample(queryResult->VID, m_layer + 1)) continue;
@@ -2155,8 +2167,9 @@ namespace SPTAG::SPANN {
                         }
                         // Real IO failure -- propagate, do not silently skip.
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                        "Fail to get to be merged posting: %lld, get size:%d (ec=%d)\n",
-                                        (std::int64_t)(queryResult->VID), (int)(nextPostingList.size()), (int)ret);
+                                        "Fail to get to be merged posting: %lld, get size:%d (ec=%s)\n",
+                                        (std::int64_t)(queryResult->VID), (int)(nextPostingList.size()),
+                                        Helper::Convert::ConvertToString(ret).c_str());
                         PrintErrorInPosting(nextPostingList, queryResult->VID);
                         return ret;
                     }
@@ -2178,14 +2191,6 @@ namespace SPTAG::SPANN {
                         nextLength++;
                     }
                     if (resultVec == nullptr) {
-                        if (isRemoteCandidate) {
-                            // Stale fetch / version skew on remote side. Skip
-                            // and let the next merge round retry.
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                "MergePostings: remote candidate %lld has no head record in fetched posting, skipping\n",
-                                (std::int64_t)(queryResult->VID));
-                            continue;
-                        }
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail: cannot find another head vector in posting! headID:%lld\n", (std::int64_t)(queryResult->VID));
                         return ErrorCode::Fail;
                     }
@@ -2201,25 +2206,19 @@ namespace SPTAG::SPANN {
                             return ret;
                         }
                         CheckCentroid(headID, mergedPostingList, "MergePostings-currentLength >= nextLength");
-                        if (isRemoteCandidate) {
-                            // Survivor is local; delete remote loser first
-                            // (so we don't have duplicate VID across nodes),
-                            // then drop local head-index entry.
-                            if ((ret=db->Delete(DBKey(queryResult->VID))) != ErrorCode::Success
-                                && ret != ErrorCode::Key_NotFound) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                    "MergePostings: remote-loser Delete(%lld) failed; survivor %lld is durable\n",
-                                    (std::int64_t)queryResult->VID, (std::int64_t)headID);
-                                return ret;
-                            }
-                            m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1);
-                        } else {
-                            m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1);
-                            if ((ret=db->Delete(DBKey(queryResult->VID))) != ErrorCode::Success)
-                            {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting %lld in Merge\n", (std::int64_t)(queryResult->VID));
-                                return ret;
-                            }
+                        m_headIndex->DeleteIndex(queryResult->VID, m_layer + 1);
+                        if ((ret=db->Delete(DBKey(queryResult->VID))) != ErrorCode::Success)
+                        {
+                            std::string location = isRemoteCandidate
+                                ? ("node" + std::to_string(remoteNodeIndex))
+                                : std::string("local");
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "MergePostings: failed to delete old posting %lld in Merge (ec=%s), location=%s; survivor %lld is durable\n",
+                                (std::int64_t)queryResult->VID,
+                                Helper::Convert::ConvertToString(ret).c_str(),
+                                location.c_str(),
+                                (std::int64_t)headID);
+                            return ret;
                         }
                         deletedHeadVID = queryResult->VID;
                         nextHeadID = headID;
@@ -2233,12 +2232,6 @@ namespace SPTAG::SPANN {
                             mergedPostingList += *resultVec;
                         }
                         if ((ret=db->Put(DBKey(queryResult->VID), mergedPostingList, MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
-                            if (isRemoteCandidate) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                    "MergePostings: remote-survivor Put(%lld) failed; no state mutated, next round will retry\n",
-                                    (std::int64_t)queryResult->VID);
-                                return ret;
-                            }
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail to override posting %lld after merge\n", (std::int64_t)(queryResult->VID));
                             return ret;
                         }
@@ -2246,12 +2239,6 @@ namespace SPTAG::SPANN {
                         m_headIndex->DeleteIndex(headID, m_layer + 1);
                         if ((ret = db->Delete(DBKey(headID))) != ErrorCode::Success)
                         {
-                            if (isRemoteCandidate) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                    "MergePostings: local-loser Delete(%lld) failed; remote survivor %lld is durable\n",
-                                    (std::int64_t)headID, (std::int64_t)queryResult->VID);
-                                return ret;
-                            }
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting %lld in Merge\n", (std::int64_t)(headID));
                             return ret;
                         }
@@ -2345,11 +2332,14 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(SizeType headID, int postingSize, std::function<void()> p_callback = nullptr)
         {
-            // Single authoritative ownership gate. Sources of remote-owned
-            // headIDs that legitimately reach here: RefineIndex full scan,
-            // Search→MergeAsync via search result, Split-internal re-enqueue
-            // for new-head VIDs, MergePostings re-merge of survivor. Drop
-            // them so the owner runs its own structural pass.
+            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
+            // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
+            // if (m_splitList.find(headIDAccessor, headID)) {
+            //     return;
+            // }
+            // tbb::concurrent_hash_map<SizeType, SizeType>::value_type workPair(headID, headID);
+            // m_splitList.insert(workPair);
+            // Single authoritative ownership gate.
             if (IsRemoteOwnedHead(headID)) return;
             {
                 Helper::Concurrent::ConcurrentMap<SizeType, int>::value_type workPair(headID, postingSize);
@@ -2371,11 +2361,7 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
-            // Single authoritative ownership gate. Sources of remote-owned
-            // headIDs that legitimately reach here: RefineIndex full scan,
-            // Search→MergeAsync via search result, MergePostings re-merge of
-            // survivor (nextHeadID). Drop them so the owner runs its own
-            // merge pass.
+            // Single authoritative ownership gate.
             if (IsRemoteOwnedHead(headID)) return;
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
@@ -2393,20 +2379,28 @@ namespace SPTAG::SPANN {
             m_splitThreadPool->add(curJob);
         }
 
-        inline void AppendAsync(SizeType headID, std::shared_ptr<std::string> postingList, std::function<void()> p_callback = nullptr)
+        inline void AppendAsync(SizeType headID, std::shared_ptr<std::string> postingList, bool urgent = false,std::function<void()> p_callback = nullptr)
         {
             auto* curJob = new AppendAsyncJob(this, headID, std::move(postingList), p_callback);
             m_appendJobsInFlight++;
             m_totalAppendSubmitted++;
-            m_splitThreadPool->add(curJob);
+            if (urgent) {
+                m_splitThreadPool->addfront(curJob);
+            } else {
+                m_splitThreadPool->add(curJob);
+            }
         }
 
-        inline void ReassignAsync(std::shared_ptr<std::string> vectorInfo, SizeType headPrev, std::function<void()> p_callback = nullptr)
+        inline void ReassignAsync(std::shared_ptr<std::string> vectorInfo, SizeType headPrev, bool urgent = false, std::function<void()> p_callback = nullptr)
         {
             auto* curJob = new ReassignAsyncJob(this, std::move(vectorInfo), headPrev, p_callback);
             m_reassignJobsInFlight++;
             m_totalReassignSubmitted++;
-            m_splitThreadPool->add(curJob);
+            if (urgent) {
+                m_splitThreadPool->addfront(curJob);
+            } else {
+                m_splitThreadPool->add(curJob);
+            }
         }
 
         ErrorCode CollectReAssign(ExtraWorkSpace *p_exWorkSpace, SizeType headID, std::shared_ptr<std::string> headVec,
@@ -2573,7 +2567,7 @@ namespace SPTAG::SPANN {
             if (m_opt->m_storage == Storage::TIKVIO) ret = BatchAppend(p_exWorkSpace, batchReassign, "CollectReAssign");
             else {
                 for (auto& kv : batchReassign) {
-                    AppendAsync(kv.first, std::make_shared<std::string>(kv.second));
+                    AppendAsync(kv.first, std::make_shared<std::string>(kv.second), true);
                 }
             }
             if (batchReassignCount > 0) {
@@ -2640,52 +2634,39 @@ namespace SPTAG::SPANN {
         ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0)
         {
             auto appendBegin = std::chrono::high_resolution_clock::now();
-            if (appendPosting.empty() || appendNum == 0) {
-                // Defensive: drop empty/zero-count appends rather than letting
-                // them reach the storage layer (which would log
-                // "TiKVIO::Merge: empty append posting!" and fail). Empty
-                // payloads should never be produced by normal flow, but they
-                // can arise from buggy sender-side retries that resend
-                // already-consumed (moved-from) items.
-                if (appendPosting.empty() && appendNum != 0) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                        "Append: dropping empty posting for headID=%lld appendNum=%d\n",
-                        (std::int64_t)headID, appendNum);
-                }
-                return ErrorCode::Success;
+            if (appendPosting.empty()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Error! empty append posting!\n");
             }
 
-            // If this head is owned by a remote node, route the append via
-            // QueueRemoteAppend instead of touching local TiKV. appendNum is
-            // captured BEFORE std::move(appendPosting) to avoid use-after-move.
-            // If the batch carries the head's own self-entry (VID == headID),
-            // forward its vector bytes so the receiver can materialize the
-            // head index before the BroadcastHeadSync arrives. See the
-            // matching scan in BatchAppend() for rationale.
-            {
-                const uint8_t* basePtr =
-                    reinterpret_cast<const uint8_t*>(appendPosting.data());
-                const void* headVecBytes = nullptr;
-                for (int i = 0; i < appendNum; ++i) {
-                    const uint8_t* p = basePtr + i * m_vectorInfoSize;
-                    SizeType vid = *reinterpret_cast<const SizeType*>(p);
-                    if (vid == headID) {
-                        headVecBytes = p + m_metaDataSize;
-                        break;
-                    }
-                }
-                if (TryRouteRemoteAppend(headID, appendNum, appendPosting, headVecBytes)) {
+            if (appendNum == 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Error!, headID :%lld, appendNum:%d\n", (std::int64_t)headID, appendNum);
+            }
+
+            // Distributed routing gate.
+            if (m_worker && m_worker->IsEnabled()) {
+                int ownerNode = -1;
+                if (IsRemoteOwnedHead(headID, &ownerNode)) {
+                    // Remote-owned head: pack + enqueue for that node.
+                    // Scan posting for self-entry so the receiver can
+                    // materialize a missing head index without waiting
+                    // for BroadcastHeadSync.
+                    const void* headVecBytes = FindSelfEntryVectorBytes(
+                        headID, appendPosting, appendNum);
+                    EnqueueRemoteAppend(ownerNode, headID, appendNum,
+                                        std::move(appendPosting), headVecBytes);
                     if (!reassignThreshold) {
                         m_totalAppendCount++;
                         m_stat.m_appendTaskNum++;
                     }
                     return ErrorCode::Success;
+                } else {
+                    // Local-owned head: wait out any in-flight remote
+                    // initiator that holds an advisory fenced-lease on our
+                    // bucket (e.g. another node mid-Split) before we acquire
+                    // the per-head lock and write.
+                    WaitForRemoteBucketUnlocked(headID);
                 }
             }
-
-            // If a remote initiator is currently holding the advisory lock
-            // on this bucket, wait it out before we touch the posting.
-            WaitForRemoteBucketUnlocked(headID);
 
         checkDeleted:
             if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
@@ -2698,7 +2679,7 @@ namespace SPTAG::SPANN {
                     if (m_versionMap->GetVersion(VID) == version) {
                         // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss To ReAssign: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
                         m_stat.m_headMiss++;
-                        ReassignAsync(vectorInfo, headID);
+                        ReassignAsync(vectorInfo, headID, true);
                     }
                     // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss Do Not To ReAssign: VID: %d, version: %d, current version: %d\n", *(int*)(&appendPosting[idx]), m_versionMap->GetVersion(*(int*)(&appendPosting[idx])), version);
                 }
@@ -2818,47 +2799,24 @@ namespace SPTAG::SPANN {
                 auto appendIt = headAppends.find(headID);
                 if (appendIt == headAppends.end()) continue;
 
-                // Owner gate: forward heads owned by a remote node via the
-                // batched RemoteAppend queue. Local heads fall through to
-                // the standard MultiMerge path below. Without this hook,
-                // every node writes to every head's TiKV key and the owner
-                // ring is ignored (no remote RPC, no route stats).
-                //
-                // Pass headVecBytes when this batch carries the head's own
-                // self-entry (VID == headID). During Build-time seed the
-                // receiver may not yet have the head index entry; without
-                // headVecBytes its AppendCallback can't materialize the head
-                // and falls into the ReassignAsync redirect path, dropping
-                // the self-entry from the posting and later causing
-                // "MergePostings fail: cannot find head vector in posting!".
-                {
-                    const std::string& posting = appendIt->second;
-                    const uint8_t* basePtr =
-                        reinterpret_cast<const uint8_t*>(posting.data());
-                    size_t totalRec = posting.size() / m_vectorInfoSize;
-                    const void* headVecBytes = nullptr;
-                    for (size_t i = 0; i < totalRec; ++i) {
-                        const uint8_t* p = basePtr + i * m_vectorInfoSize;
-                        SizeType vid = *reinterpret_cast<const SizeType*>(p);
-                        if (vid == headID) {
-                            headVecBytes = p + m_metaDataSize;
-                            break;
-                        }
-                    }
-                    if (TryRouteRemoteAppend(headID,
-                                             (int)(posting.size() / m_vectorInfoSize),
-                                             posting,
-                                             headVecBytes)) {
+                // Distributed routing gate (mirrors Append())
+                const std::string& posting = appendIt->second;
+                size_t totalRec = posting.size() / m_vectorInfoSize;
+                if (m_worker && m_worker->IsEnabled()) {
+                    int ownerNode = -1;
+                    if (IsRemoteOwnedHead(headID, &ownerNode)) {
+                        const void* headVecBytes = FindSelfEntryVectorBytes(
+                            headID, posting, (int)totalRec);
+                        EnqueueRemoteAppend(ownerNode, headID, (int)totalRec,
+                                            posting, headVecBytes);
                         m_routedRemoteHeads.fetch_add(1, std::memory_order_relaxed);
-                        m_routedRemoteItems.fetch_add(
-                            posting.size() / m_vectorInfoSize,
-                            std::memory_order_relaxed);
+                        m_routedRemoteItems.fetch_add(totalRec, std::memory_order_relaxed);
                         continue;
+                    } else {
+                        m_routedLocalHeads.fetch_add(1, std::memory_order_relaxed);
+                        m_routedLocalItems.fetch_add(totalRec, std::memory_order_relaxed);
+                        WaitForRemoteBucketUnlocked(headID);
                     }
-                    m_routedLocalHeads.fetch_add(1, std::memory_order_relaxed);
-                    m_routedLocalItems.fetch_add(
-                        posting.size() / m_vectorInfoSize,
-                        std::memory_order_relaxed);
                 }
 
                 std::unique_lock<std::shared_timed_mutex> headLock(m_rwLocks[headID]);
@@ -2872,7 +2830,7 @@ namespace SPTAG::SPANN {
                         uint8_t version = *(uint8_t*)(ptr + sizeof(SizeType));
                         if (m_versionMap->GetVersion(VID) == version) {
                             m_stat.m_headMiss++;
-                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), headID);
+                            ReassignAsync(std::make_shared<std::string>((char*)ptr, m_vectorInfoSize), headID, true);
                         }
                     }
                     continue;
@@ -2965,20 +2923,28 @@ namespace SPTAG::SPANN {
                 //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
                 for (int i = 0; i < replicaCount && m_versionMap->GetVersion(VID) == version; i++) {
                     //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
-                    if (TryRouteRemoteAppend(selections[i].VID, 1, *vectorInfo,
-                                             selections[i].Vec.Data())) {
-                        continue;
-                    }
-                    // [FIX H3] use reassignThreshold=0 so that an oversized
-                    // target posting triggers SplitAsync (not a synchronous
-                    // Split on this worker thread). This matches the
-                    // CollectReAssign batch path and avoids a single merge-
-                    // path reassign blocking a worker for the full duration
-                    // of a Split (observed up to tens of seconds).
-                    ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 0);
-                    if (ErrorCode::Success != tmp) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
-                        return tmp;
+                    int ownerNode = -1;
+                    bool isRemote = (m_worker && m_worker->IsEnabled()
+                                     && IsRemoteOwnedHead(selections[i].VID, &ownerNode));
+                    if (!isRemote) {
+                        // [FIX H3] use reassignThreshold=0 so that an oversized
+                        // target posting triggers SplitAsync (not a synchronous
+                        // Split on this worker thread). This matches the
+                        // CollectReAssign batch path and avoids a single merge-
+                        // path reassign blocking a worker for the full duration
+                        // of a Split (observed up to tens of seconds).
+                        ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 0);
+                        if (ErrorCode::Success != tmp) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
+                            return tmp;
+                        }
+                    } else {
+                        // Centroid bytes are already in selections[i],
+                        // so no self-entry scan needed.
+                        EnqueueRemoteAppend(ownerNode, selections[i].VID, 1,
+                                            *vectorInfo,
+                                            selections[i].Vec.Data());
+                        
                     }
                 }
             }
@@ -3083,30 +3049,13 @@ namespace SPTAG::SPANN {
 	    }
             if (m_opt->m_update) {
                 if (m_splitThreadPool == nullptr) {
-                    // Only layer 0 participates in the shared-pool slot:
-                    // it both adopts (if a sibling published first) and
-                    // publishes (so the WorkerNode receiver and any later
-                    // layer-0 instance can reuse the same threads).
-                    // Inner layers (m_layer > 0) always create their own
-                    // pool, matching qianxi's per-instance pool design.
-                    if (m_layer == 0 && m_headIndex) {
-                        auto shared = m_headIndex->GetSharedSplitPool();
-                        if (shared) {
-                            m_splitThreadPool = std::static_pointer_cast<SPDKThreadPool>(shared);
-                        }
-                    }
-                    if (m_splitThreadPool == nullptr) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
 
-                        m_splitThreadPool = std::make_shared<SPDKThreadPool>();
-                        m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
-                        //m_reassignThreadPool = std::make_shared<SPDKThreadPool>();
-                        //m_reassignThreadPool->initSPDK(m_opt->m_reassignThreadNum, this);
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
-                        if (m_layer == 0 && m_headIndex) m_headIndex->SetSharedSplitPool(m_splitThreadPool);
-                    } else {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: adopted shared split pool from sibling layer\n");
-                    }
+                    m_splitThreadPool = std::make_shared<SPDKThreadPool>();
+                    m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
+                    //m_reassignThreadPool = std::make_shared<SPDKThreadPool>();
+                    //m_reassignThreadPool->initSPDK(m_opt->m_reassignThreadNum, this);
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization\n");
                     // Pool is now ready: re-attempt wiring the worker's job
                     // submitter (may have been set before pool was alive).
                     WireJobSubmitterIfReady();
@@ -3759,20 +3708,10 @@ namespace SPTAG::SPANN {
 
             if (m_opt->m_update && !m_opt->m_allowZeroReplica && zeroReplicaCount > 0)
             {
-                if (m_splitThreadPool == nullptr && m_layer == 0 && m_headIndex) {
-                    auto shared = m_headIndex->GetSharedSplitPool();
-                    if (shared) {
-                        m_splitThreadPool = std::static_pointer_cast<SPDKThreadPool>(shared);
-                    }
-                }
-                if (m_splitThreadPool == nullptr) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
-                    m_splitThreadPool = std::make_shared<SPDKThreadPool>();
-                    m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization, zeroReplicaCount:%zu\n", zeroReplicaCount);
-                    if (m_layer == 0 && m_headIndex) m_headIndex->SetSharedSplitPool(m_splitThreadPool);
-                }
-                WireJobSubmitterIfReady();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
+                m_splitThreadPool = std::make_shared<SPDKThreadPool>();
+                m_splitThreadPool->initSPDK(m_opt->m_appendThreadNum, this);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: finish initialization, zeroReplicaCount:%zu\n", zeroReplicaCount);
 
                 uint32_t splitNumBeforeZeroReplica = m_stat.m_splitNum;
                 uint32_t reassignNumBeforeZeroReplica = m_stat.m_reAssignNum;
@@ -4149,13 +4088,6 @@ namespace SPTAG::SPANN {
                              avgSplitMs, maxSplitMs);
             }
             if (runningJobs == 0 && totalJobs == 0) {
-                // Note: AllFinished() must return true once the LOCAL pool
-                // is drained; SaveIndexData uses it as the shutdown signal.
-                // We can't gate it on the outbound remote-append queue:
-                // peers may continue routing reassigns back to us during
-                // the drain (feedback loop) so the queue is not
-                // guaranteed to hit zero.  Remote queue depth shows up
-                // in the periodic progress log instead.
                 if (!m_allDonePrinted) {
                     size_t totalSplit = m_totalSplitSubmitted.load();
                     size_t totalMerge = m_totalMergeSubmitted.load();
