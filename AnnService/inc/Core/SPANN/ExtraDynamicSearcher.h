@@ -620,7 +620,8 @@ namespace SPTAG::SPANN {
                             m_versionMap->SetVersionBatch(batchVids, batchVers);
                         }
                     }
-                    return Append(ws, headID, appendNum, appendPosting, 0);
+                    return Append(ws, headID, appendNum, appendPosting, 0,
+                                  /*p_skipRemoteBucketWait=*/fencingToken != 0);
                 });
 
             // Batch append callback: receiver-side fast path.
@@ -704,17 +705,20 @@ namespace SPTAG::SPANN {
                     std::unordered_map<SizeType, std::string> headAppends;
                     headAppends.reserve(items.size());
                     size_t aliveCount = 0;
+                    bool anyFenced = false;
                     for (size_t i = 0; i < items.size(); ++i) {
                         if (!alive[i]) continue;
                         auto* req = items[i];
                         auto& dst = headAppends[req->m_headID];
                         if (dst.empty()) dst = std::move(req->m_appendPosting);
                         else             dst.append(req->m_appendPosting);
+                        if (req->m_fencingToken != 0) anyFenced = true;
                         ++aliveCount;
                     }
                     if (headAppends.empty()) return;
 
-                    ErrorCode ret = BatchAppend(ws, headAppends, "PeerBatch");
+                    ErrorCode ret = BatchAppend(ws, headAppends, "PeerBatch",
+                                                /*p_skipRemoteBucketWait=*/anyFenced);
                     if (ret == ErrorCode::Success) {
                         outSuccess += static_cast<std::uint32_t>(aliveCount);
                     } else {
@@ -2640,7 +2644,8 @@ namespace SPTAG::SPANN {
         }
 
 
-        ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0)
+        ErrorCode Append(ExtraWorkSpace* p_exWorkSpace, SizeType headID, int appendNum, std::string& appendPosting, int reassignThreshold = 0,
+                         bool p_skipRemoteBucketWait = false)
         {
             auto appendBegin = std::chrono::high_resolution_clock::now();
             if (appendPosting.empty()) {
@@ -2668,11 +2673,19 @@ namespace SPTAG::SPANN {
                         m_stat.m_appendTaskNum++;
                     }
                     return ErrorCode::Success;
-                } else {
+                } else if (!p_skipRemoteBucketWait) {
                     // Local-owned head: wait out any in-flight remote
                     // initiator that holds an advisory fenced-lease on our
                     // bucket (e.g. another node mid-Split) before we acquire
                     // the per-head lock and write.
+                    //
+                    // Skip this wait when the caller is the receiver-side
+                    // handler for a fenced RemoteAppend: fence validation
+                    // upstream has already proven the sender holds the
+                    // very lease this wait would block on, so we would be
+                    // waiting for our own caller's lease to expire (TTL,
+                    // ~30 s).  That self-block was the dominant cause of
+                    // "lease busy" cascades on adjacent splits.
                     WaitForRemoteBucketUnlocked(headID);
                 }
             }
@@ -2786,7 +2799,8 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
         
-        ErrorCode BatchAppend(ExtraWorkSpace* p_exWorkSpace, std::unordered_map<SizeType, std::string>& headAppends, const char* caller)
+        ErrorCode BatchAppend(ExtraWorkSpace* p_exWorkSpace, std::unordered_map<SizeType, std::string>& headAppends, const char* caller,
+                              bool p_skipRemoteBucketWait = false)
         {
             if (headAppends.empty()) return ErrorCode::Success;
 
@@ -2824,7 +2838,11 @@ namespace SPTAG::SPANN {
                     } else {
                         m_routedLocalHeads.fetch_add(1, std::memory_order_relaxed);
                         m_routedLocalItems.fetch_add(totalRec, std::memory_order_relaxed);
-                        WaitForRemoteBucketUnlocked(headID);
+                        // Skip the self-wait for receiver-side fenced
+                        // BatchAppend (see Append() for the rationale).
+                        if (!p_skipRemoteBucketWait) {
+                            WaitForRemoteBucketUnlocked(headID);
+                        }
                     }
                 }
 
