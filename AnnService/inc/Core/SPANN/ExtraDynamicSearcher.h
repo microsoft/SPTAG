@@ -799,7 +799,15 @@ namespace SPTAG::SPANN {
             if (!m_worker || !m_worker->IsEnabled()) return;
             unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(headID));
             if (!m_remoteLeaseTable->IsLocked(bucket)) return;
-            constexpr int kMaxRemoteBucketWaitMs = 5000;
+            // Bound the wait by the lease TTL.  A shorter cap (we used
+            // 5 s previously) makes the local writer barge in while the
+            // remote Split is still mid-flight: if Split then broadcasts
+            // a HeadSync Delete on srcHead, the items we just appended
+            // disappear with the head and recall drops silently.  After
+            // TTL, IsLocked auto-reclaims the lease so this loop exits
+            // naturally; the "stuck" log path is now truly anomalous.
+            const int kMaxRemoteBucketWaitMs =
+                m_remoteLeaseTable->GetTtlMs();
             auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::milliseconds(kMaxRemoteBucketWaitMs);
             while (m_remoteLeaseTable->IsLocked(bucket)) {
