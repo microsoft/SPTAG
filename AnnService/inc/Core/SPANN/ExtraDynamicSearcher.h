@@ -556,7 +556,8 @@ namespace SPTAG::SPANN {
             // Append callback: routes incoming remote appends to local Append()
             m_worker->SetAppendCallback(m_layer,
                 [this](SizeType headID, std::shared_ptr<std::string> headVec,
-                       int appendNum, std::string& appendPosting) -> ErrorCode {
+                       int appendNum, std::string& appendPosting,
+                       std::uint64_t fencingToken) -> ErrorCode {
 
                     // Reuse SPDKThreadPool's per-worker pre-allocated workspace
                     // when called from BatchAppendItemJob on m_splitThreadPool.
@@ -568,25 +569,26 @@ namespace SPTAG::SPANN {
                     }
                     bool wasMissing = !m_headIndex->ContainSample(headID, m_layer + 1);
                     if (wasMissing) {
-                        // We waited for an in-flight Split/Merge and the
-                        // head is gone afterwards -- the structural op
-                        // deleted it on purpose.  Resurrecting via
-                        // AddHeadIndex would race the structural op's
-                        // HeadSync Delete broadcast and leave a zombie
-                        // head until the next merge round drops it again.
-                        // Refuse the append; the sender's retry path will
-                        // re-resolve once HeadSync propagates the
-                        // deletion to its head index.
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
-                            "AppendCallback: head=%lld deleted by local structural op; refusing resurrection\n",
-                            (std::int64_t)headID);
-                        return ErrorCode::Fail;
-                    }
-                    if (wasMissing && headVec && !headVec->empty()) {
-                        DimensionType dim = static_cast<DimensionType>(
-                            headVec->size() / sizeof(ValueType));
-                        m_headIndex->AddHeadIndex(headVec->data(), headID, 0,
-                            dim, m_layer + 1, ws);
+                        // A nonzero fencingToken means the sender (Split)
+                        // holds an authoritative bucket lease on this VID
+                        // and is publishing a brand-new head — fence
+                        // validation already passed above, so resurrection
+                        // here is the legitimate "publish new head" path.
+                        // For unfenced appends (token == 0), refuse:
+                        // resurrecting a head a concurrent Merge/Split
+                        // just deleted would leave a zombie head until
+                        // the next merge round drops it again.
+                        if (fencingToken != 0 && headVec && !headVec->empty()) {
+                            DimensionType dim = static_cast<DimensionType>(
+                                headVec->size() / sizeof(ValueType));
+                            m_headIndex->AddHeadIndex(headVec->data(), headID, 0,
+                                dim, m_layer + 1, ws);
+                        } else {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
+                                "AppendCallback: head=%lld deleted by local structural op; refusing resurrection\n",
+                                (std::int64_t)headID);
+                            return ErrorCode::Fail;
+                        }
                     }
 
                     // Mirror sender's version map for the records we're about

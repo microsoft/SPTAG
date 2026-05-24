@@ -46,11 +46,18 @@ namespace SPTAG::SPANN {
     /// *where* to send, RemotePostingOps handles *how*.
     class RemotePostingOps {
     public:
+        // fencingToken is forwarded from the request: a nonzero token means
+        // the caller (Split) holds an authoritative bucket lease and is
+        // publishing a brand-new head — the callback may resurrect/create
+        // a missing head in that case.  A zero token (ordinary Append)
+        // must refuse resurrection to avoid racing a concurrent
+        // Merge/Split that just deleted the head.
         using AppendCallback = std::function<ErrorCode(
             SizeType headID,
             std::shared_ptr<std::string> headVec,
             int appendNum,
-            std::string& appendPosting)>;
+            std::string& appendPosting,
+            std::uint64_t fencingToken)>;
 
         // Receiver-side batched callback: deliver a whole BatchRemoteAppend
         // request to the searcher so it can group items by head and call
@@ -866,7 +873,8 @@ namespace SPTAG::SPANN {
                 if (cb) {
                     auto headVec = std::make_shared<std::string>(std::move(req.m_headVec));
                     result = (*cb)(
-                        req.m_headID, headVec, req.m_appendNum, req.m_appendPosting);
+                        req.m_headID, headVec, req.m_appendNum, req.m_appendPosting,
+                        req.m_fencingToken);
                 } else {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                         "RemotePostingOps: AppendRequest layer=%d has no callback registered\n",
@@ -1021,7 +1029,8 @@ namespace SPTAG::SPANN {
                     const auto* cb = LookupAppendCallback_Locked(req.m_layer);
                     if (cb) {
                         auto hv = std::make_shared<std::string>(std::move(req.m_headVec));
-                        r = (*cb)(req.m_headID, hv, req.m_appendNum, req.m_appendPosting);
+                        r = (*cb)(req.m_headID, hv, req.m_appendNum, req.m_appendPosting,
+                                  req.m_fencingToken);
                     }
                     (r == ErrorCode::Success ? *successCount : *failCount).fetch_add(1);
                 }
@@ -1706,7 +1715,8 @@ namespace SPTAG::SPANN {
                     const auto* cb = m_ops->LookupAppendCallback_Locked(req.m_layer);
                     if (cb) {
                         auto hv = std::make_shared<std::string>(std::move(req.m_headVec));
-                        r = (*cb)(req.m_headID, hv, req.m_appendNum, req.m_appendPosting);
+                        r = (*cb)(req.m_headID, hv, req.m_appendNum, req.m_appendPosting,
+                                  req.m_fencingToken);
                     }
                     if (r == ErrorCode::Success) m_success->fetch_add(1);
                     else                         m_fail->fetch_add(1);
