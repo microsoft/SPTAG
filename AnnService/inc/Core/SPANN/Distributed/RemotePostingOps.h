@@ -397,7 +397,21 @@ namespace SPTAG::SPANN {
             m_net->GetClient()->SendPacket(connID, std::move(packet),
                 MakeSendFailHandler(resID));
 
-            auto status = future.wait_for(std::chrono::seconds(30));
+            // Wait long enough that a successful response is not racing
+            // the lease TTL.  Append timeout == lease TTL deadlocks the
+            // fence-retry path: when TiKV is backed up and the receiver
+            // takes ~30 s on a single append, the sender's 30 s timeout
+            // fires at the same moment the receiver-side lease auto-
+            // expires.  The retry then calls SendRemoteLock again, but
+            // by the time the request lands another Split has acquired
+            // the bucket, and the entire 20-attempt budget is spent
+            // failing to re-acquire.  Pick 4 x TTL so that a real
+            // timeout unambiguously means the lease has been
+            // recoverable for long enough that any concurrent
+            // acquisition has had a chance to release; the only
+            // remaining cause is a hung / crashed peer.
+            constexpr int kAppendRpcTimeoutSec = 120;
+            auto status = future.wait_for(std::chrono::seconds(kAppendRpcTimeoutSec));
             if (status == std::future_status::timeout) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                     "RemotePostingOps: Timeout waiting for append response for headID %lld from node %d\n",
