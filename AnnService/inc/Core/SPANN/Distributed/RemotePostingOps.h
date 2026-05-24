@@ -807,7 +807,19 @@ namespace SPTAG::SPANN {
             m_net->GetClient()->SendPacket(connID, std::move(pkt),
                 MakeSendFailHandler(rid));
 
-            auto status = future.wait_for(std::chrono::milliseconds(5000));
+            // Wait up to the receiver-side lease TTL (RemoteLeaseTable
+            // default 30000 ms; see RemoteLeaseTable.h:33).  Any lease
+            // the owner issues for this request auto-expires by the time
+            // we return, so a late-arriving Grant response on a
+            // timed-out RPC cannot leave the owner holding an orphaned
+            // lease that blocks subsequent retries (a problem we
+            // observed with shorter timeouts during 2-node benchmark
+            // runs).  The receiver sends a response synchronously after
+            // processing, so the only paths to this timeout are a dead
+            // peer or a network partition lasting >= TTL -- in both
+            // cases waiting longer would not have helped anyway.
+            constexpr int kLockWaitMs = 30000;
+            auto status = future.wait_for(std::chrono::milliseconds(kLockWaitMs));
             if (status != std::future_status::ready) {
                 ErasePending(rid);
                 TakePendingLockToken(rid);
