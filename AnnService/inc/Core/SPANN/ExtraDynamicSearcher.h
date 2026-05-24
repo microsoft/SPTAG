@@ -2108,21 +2108,16 @@ namespace SPTAG::SPANN {
             m_headIndex->SearchHeadIndex(queryResults, m_layer + 1, p_exWorkSpace);
 
             std::string nextPostingList;
-            // Re-queue this Merge job and exit cleanly.  Counts as a new
-            // submission so MergeAsyncJob::exec()'s m_mergeJobsInFlight-- /
-            // m_totalMergeCompleted++ stays balanced -- without these
-            // increments m_mergeJobsInFlight underflows to a huge uint64
-            // and m_totalMergeCompleted exceeds m_totalMergeSubmitted.
-            auto reenqueueMerge = [&](const char* reason) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                             "MergePostings: re-queueing headID=%lld (%s)\n",
-                             (std::int64_t)headID, reason);
-                auto* curJob = new MergeAsyncJob(this, headID, nullptr);
-                m_mergeJobsInFlight++;
-                m_totalMergeSubmitted++;
-                m_splitThreadPool->add(curJob);
-                return ErrorCode::Success;
-            };
+            // If a candidate is unavailable (remote lease busy or local
+            // lock held by a peer op), skip it and try the next neighbor
+            // instead of re-enqueueing the whole Merge job.  Re-enqueue
+            // is a livelock trap when two adjacent heads pick each other
+            // as the top merge candidate -- each fails to lock the other,
+            // both re-enqueue, and the new copies race back through the
+            // same path with zero backoff.  Skipping degrades to "no
+            // merge this round", which is fine: the head will become
+            // merge-eligible again in the next round once its posting
+            // list crosses the threshold.
 
             for (int i = 1; i < queryResults.GetResultNum(); ++i)
             {
@@ -2150,12 +2145,12 @@ namespace SPTAG::SPANN {
 
                     if (isRemoteCandidate) {
                         if (!remoteLease.acquire(m_worker, remoteNodeIndex, m_layer, queryResult->VID)) {
-                            return reenqueueMerge("remote lease busy");
+                            continue;
                         }
                     } else {
                         if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) {
                             if (!anotherLock.try_lock()) {
-                                return reenqueueMerge("local lock busy");
+                                continue;
                             }
                         }
                         if (!m_headIndex->ContainSample(queryResult->VID, m_layer + 1)) continue;
