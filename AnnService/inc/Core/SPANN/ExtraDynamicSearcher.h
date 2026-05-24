@@ -1528,107 +1528,124 @@ namespace SPTAG::SPANN {
                     return ErrorCode::Success;
                 };
 
-                // C.1 Local newHead locks (ascending VID order to avoid GlobalLock deadlock)
+                // C. Acquire newHead locks (one pass over plans[]).
+                // Local children: try_lock with up to 20 retries + 3*N ms backoff.
+                // Remote children: SendRemoteLock (receiver-side TryAcquire)
+                //   with the same retry schedule; coalesce same-(owner,bucket)
+                //   via remoteTokens so two children on one bucket share a lease.
+                // Any acquisition failure bails to reenqueueAndExit -- that is
+                // itself the retry mechanism (job re-queues via SplitAsync),
+                // which also breaks any potential lock cycle.  Acquisition
+                // order is therefore irrelevant.
                 {
-                    std::vector<SizeType> localVids;
+                    SizeType prevLocalVid = -1;
                     for (int k = 0; k < 2; ++k) {
-                        if (!plans[k].active || plans[k].isRemote || plans[k].isSameHead) continue;
-                        if (plans[k].newHeadVID == headID) continue;
-                        localVids.push_back(plans[k].newHeadVID);
-                    }
-                    std::sort(localVids.begin(), localVids.end());
-                    localVids.erase(std::unique(localVids.begin(), localVids.end()), localVids.end());
+                        const auto& p = plans[k];
+                        if (!p.active || p.isSameHead) continue;
 
-                    for (SizeType vid : localVids) {
-                        std::unique_lock<std::shared_timed_mutex> ul(m_rwLocks[vid], std::defer_lock);
-                        int rtry = 0;
-                        while (!ul.try_lock() && rtry < 20) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                         "Split: local newHead VID %lld lock busy (attempt %d)\n",
-                                         (std::int64_t)vid, rtry + 1);
-                            rtry++;
-                            std::this_thread::sleep_for(std::chrono::milliseconds(3 * rtry));
+                        if (p.isRemote) {
+                            unsigned bucket = COMMON::FineGrainedRWLock::BucketIndex(
+                                static_cast<unsigned>(p.newHeadVID));
+                            auto key = std::make_pair(p.ownerNode, bucket);
+                            auto it = remoteTokens.find(key);
+                            if (it != remoteTokens.end()) {
+                                // Same (owner,bucket) already leased by a prior
+                                // child; reuse the token and bump refcount.
+                                it->second.refcount++;
+                                continue;
+                            }
+                            std::uint64_t token = 0;
+                            for (int attempt = 0; attempt < 20; ++attempt) {
+                                token = m_worker->SendRemoteLock(p.ownerNode, m_layer,
+                                                                 p.newHeadVID, true, 0);
+                                if (token != 0) break;
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                             "Split: remote newHead VID %lld owner=%d bucket=%u lease busy (attempt %d)\n",
+                                             (std::int64_t)p.newHeadVID, p.ownerNode, bucket, attempt + 1);
+                                std::this_thread::sleep_for(std::chrono::milliseconds(3 * (attempt + 1)));
+                            }
+                            if (token == 0) {
+                                return reenqueueAndExit("remote child lock");
+                            }
+                            remoteTokens[key] = { token, 1, p.newHeadVID };
+                        } else {
+                            if (p.newHeadVID == headID) continue;          // srcHead already held
+                            if (p.newHeadVID == prevLocalVid) continue;    // dedupe k=1 vs k=0
+
+                            std::unique_lock<std::shared_timed_mutex> ul(m_rwLocks[p.newHeadVID], std::defer_lock);
+                            int rtry = 0;
+                            while (!ul.try_lock() && rtry < 20) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                             "Split: local newHead VID %lld lock busy (attempt %d)\n",
+                                             (std::int64_t)p.newHeadVID, rtry + 1);
+                                rtry++;
+                                std::this_thread::sleep_for(std::chrono::milliseconds(3 * rtry));
+                            }
+                            if (!ul.owns_lock()) {
+                                return reenqueueAndExit("local child lock");
+                            }
+                            localChildLocks.push_back(std::move(ul));
+                            prevLocalVid = p.newHeadVID;
                         }
-                        if (!ul.owns_lock()) {
-                            return reenqueueAndExit("local child lock");
-                        }
-                        localChildLocks.push_back(std::move(ul));
                     }
                 }
 
-                // C.2 Remote newHead locks (ascending (ownerNode, bucket) order)
-                {
-                    struct RemoteSlot { int k; int owner; unsigned bucket; };
-                    std::vector<RemoteSlot> slots;
-                    for (int k = 0; k < 2; ++k) {
-                        if (!plans[k].active || !plans[k].isRemote) continue;
-                        slots.push_back({k, plans[k].ownerNode,
-                            COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(plans[k].newHeadVID))});
-                    }
-                    std::sort(slots.begin(), slots.end(),
-                        [](const RemoteSlot& a, const RemoteSlot& b) {
-                            return std::tie(a.owner, a.bucket) < std::tie(b.owner, b.bucket);
-                        });
-                    for (auto& slot : slots) {
-                        auto key = std::make_pair(slot.owner, slot.bucket);
-                        auto it = remoteTokens.find(key);
-                        if (it != remoteTokens.end()) {
-                            // Same (ownerNode, bucket) as a previously-acquired
-                            // child; the owner's per-bucket lease covers both
-                            // children, so reuse the token and bump refcount.
-                            it->second.refcount++;
-                            continue;
-                        }
-                        std::uint64_t token = 0;
-                        constexpr int kMaxLockRetries = 20;
-                        for (int attempt = 0; attempt < kMaxLockRetries; ++attempt) {
-                            token = m_worker->SendRemoteLock(slot.owner, m_layer,
-                                                             plans[slot.k].newHeadVID, true, 0);
-                            if (token != 0) break;
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                         "Split: remote newHead VID %lld owner=%d bucket=%u lease busy (attempt %d)\n",
-                                         (std::int64_t)plans[slot.k].newHeadVID, slot.owner, slot.bucket, attempt + 1);
-                            std::this_thread::sleep_for(std::chrono::milliseconds(3 * (attempt + 1)));
-                        }
-                        if (token == 0) {
-                            return reenqueueAndExit("remote child lock");
-                        }
-                        remoteTokens[key] = { token, 1, plans[slot.k].newHeadVID };
-                    }
-                }
-
-                // Invariant: every child that needs a lock has one held.
-                // Failure paths in C.1/C.2 already early-returned via
-                // reenqueueAndExit, so reaching here means all required
-                // locks (local per-VID + remote per-(owner,bucket) lease)
-                // are acquired.  Assert this explicitly for debug builds.
-                {
-                    size_t expectedLocal = 0;
-                    std::set<std::pair<int, unsigned>> expectedRemoteBuckets;
-                    std::set<SizeType> expectedLocalVids;
-                    for (int k = 0; k < 2; ++k) {
-                        if (!plans[k].active) continue;
-                        if (plans[k].isSameHead) continue;
-                        if (plans[k].isRemote) {
-                            expectedRemoteBuckets.insert(std::make_pair(plans[k].ownerNode,
-                                COMMON::FineGrainedRWLock::BucketIndex(static_cast<unsigned>(plans[k].newHeadVID))));
-                        } else if (plans[k].newHeadVID != headID) {
-                            expectedLocalVids.insert(plans[k].newHeadVID);
-                        }
-                    }
-                    expectedLocal = expectedLocalVids.size();
-                    assert(localChildLocks.size() == expectedLocal &&
-                           "Split Phase C invariant: local child locks count mismatch");
-                    assert(remoteTokens.size() == expectedRemoteBuckets.size() &&
-                           "Split Phase C invariant: remote lease count mismatch");
-                    (void)expectedLocal; // silence -Wunused in NDEBUG builds
-                }
 
                 // === Phase D: execute per-child writes (all locks held) ===
-                // Plan-1 best-effort semantics: an IO failure on k=0 after
-                // k=0 already wrote is accepted as-is; the WAL + watchdog
-                // converge.  We never fall through from a failed remote
-                // fenced write to a wrong local db Put.
+                // On any unrecoverable failure we walk `committed` in
+                // reverse to undo the prior children of THIS Split and
+                // return ErrorCode::Fail so the caller (Append → AddIndex
+                // → BatchAppend) sees the failure and can retry from the
+                // top.  srcHead is intentionally preserved: the trailing
+                // `if (!theSameHead) DeleteIndex(headID)` block is gated
+                // behind us returning Success.
+                struct CommittedChildRecord {
+                    enum class Kind { SameHead, LocalNew, LocalExisting, Remote };
+                    Kind kind;
+                    SizeType vid;
+                };
+                std::vector<CommittedChildRecord> committed;
+                auto rollbackCommitted = [&]() {
+                    for (auto it = committed.rbegin(); it != committed.rend(); ++it) {
+                        switch (it->kind) {
+                        case CommittedChildRecord::Kind::SameHead: {
+                            // Restore srcHead's pre-Split posting that we
+                            // overwrote with cluster-k's subset.
+                            auto rret = db->Put(DBKey(headID), postingList,
+                                MaxTimeout, nullptr);
+                            if (rret != ErrorCode::Success) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                    "Split rollback: failed to restore srcHead %lld posting (ec=%d); recall may drop until next Merge\n",
+                                    (std::int64_t)headID, (int)rret);
+                            }
+                            theSameHead = false;
+                            break;
+                        }
+                        case CommittedChildRecord::Kind::LocalNew:
+                            m_headIndex->DeleteIndex(it->vid, m_layer + 1);
+                            (void)db->Delete(DBKey(it->vid));
+                            break;
+                        case CommittedChildRecord::Kind::LocalExisting:
+                            // The merged posting overwrote an existing head;
+                            // we did not stash its prior contents so we
+                            // cannot cheaply restore it.  srcHead still
+                            // holds the original vectors (we did not delete
+                            // it), so a search dedupes the duplication via
+                            // the version map.  Best-effort.
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "Split rollback: local-existing head %lld merged-posting NOT restored; duplication with srcHead %lld accepted\n",
+                                (std::int64_t)it->vid, (std::int64_t)headID);
+                            break;
+                        case CommittedChildRecord::Kind::Remote:
+                            m_headIndex->DeleteIndex(it->vid, m_layer + 1);
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "Split rollback: remote head %lld removed from local BKT; stale owner-side posting will be GC'd by next Merge round\n",
+                                (std::int64_t)it->vid);
+                            break;
+                        }
+                    }
+                    committed.clear();
+                };
                 SizeType newHeadVID = -1;
                 for (int k : ks) {
                     if (!plans[k].active) continue;
@@ -1641,6 +1658,7 @@ namespace SPTAG::SPANN {
                         auto splitPutBegin = std::chrono::high_resolution_clock::now();
                         if ((ret=db->Put(DBKey(newHeadVID), newPostingLists[k], MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to override posting %lld\n", (std::int64_t)(newHeadVID));
+                            rollbackCommitted();
                             releaseRemoteTokens();
                             return ret;
                         }
@@ -1650,183 +1668,250 @@ namespace SPTAG::SPANN {
                         m_stat.m_putCost += elapsedMSeconds;
                         m_stat.m_theSameHeadNum++;
                         m_stat.m_splitSameHeadCount.fetch_add(1, std::memory_order_relaxed);
-                        continue;
-                    }
+                        committed.push_back({CommittedChildRecord::Kind::SameHead, newHeadVID});
+                    } else {
+                        newHeadVID = plans[k].newHeadVID;
+                        uint8_t version = plans[k].version;
+                        newHeadsID[k] = newHeadVID;
+                        newHeadsVec[k] = std::make_shared<std::string>((char *)(args.centers + k * args._D), m_vectorDataSize);
 
-                    newHeadVID = plans[k].newHeadVID;
-                    uint8_t version = plans[k].version;
-                    newHeadsID[k] = newHeadVID;
-                    newHeadsVec[k] = std::make_shared<std::string>((char *)(args.centers + k * args._D), m_vectorDataSize);
+                        bool headExistsInIndex = m_headIndex->ContainSample(newHeadVID, m_layer + 1);
 
-                    bool headExistsInIndex = m_headIndex->ContainSample(newHeadVID, m_layer + 1);
-
-                    if (plans[k].isRemote) {
-                        // Remote-owned newHead: write posting via fenced
-                        // RemoteAppend to the owner.  Local BKT head index
-                        // is still updated here for not-yet-known heads;
-                        // peers learn via BroadcastHeadSync below.
-                        auto leaseIt = remoteTokens.find(bucketKey(plans[k].ownerNode, newHeadVID));
-                        std::uint64_t token = (leaseIt != remoteTokens.end()) ? leaseIt->second.token : 0;
-
-                        std::uint64_t jobID = m_splitJobIdCounter.fetch_add(1) + 1;
-                        if (m_splitWAL) {
-                            Distributed::SplitWAL::Record r;
-                            r.jobID = jobID;
-                            r.srcHeadID = headID;
-                            r.localChildHeadID = 0;
-                            r.remoteChildHeadID = newHeadVID;
-                            r.remoteOwnerNodeIndex = plans[k].ownerNode;
-                            r.startTimestampSec =
-                                std::chrono::duration_cast<std::chrono::seconds>(
-                                    std::chrono::system_clock::now().time_since_epoch()).count();
-                            r.stage = Distributed::SplitWAL::Stage::Begin;
-                            m_splitWAL->Write(r);
-                        }
-
-                        auto remoteHeadVec = std::make_shared<std::string>(
-                            (const char *)(args.centers + k * args._D), m_vectorDataSize);
-                        ErrorCode ec = m_worker->SendFencedRemoteAppend(
-                            plans[k].ownerNode, m_layer, newHeadVID, remoteHeadVec,
-                            (int)(newPostingLists[k].size() / m_vectorInfoSize),
-                            newPostingLists[k], token);
-
-                        if (ec == ErrorCode::Success) {
-                            if (m_splitWAL) m_splitWAL->Clear(headID, jobID);
+                        if (!plans[k].isRemote) {
+                            // Local-owned newHead path (lock already held in localChildLocks)
                             if (headExistsInIndex) {
                                 m_stat.m_splitExistingHeadMergeCount.fetch_add(1, std::memory_order_relaxed);
+
+                                std::string mergedPostingList;
+                                std::set<SizeType> vectorIdSet;
+                                std::string currentPostingList;
+                                if ((ret = db->Get(DBKey(newHeadVID), &currentPostingList, MaxTimeout,
+                                                   &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to get posting %lld\n",
+                                                 (std::int64_t)(newHeadVID));
+                                    rollbackCommitted();
+                                    releaseRemoteTokens();
+                                    return ret;
+                                }
+
+                                auto *postingO = reinterpret_cast<uint8_t *>(newPostingLists[k].data());
+                                size_t postVectorNumO = newPostingLists[k].size() / m_vectorInfoSize;
+                                int currentLength = 0;
+                                bool hasHeadO = false;
+                                for (int j = 0; j < (int)postVectorNumO; j++, postingO += m_vectorInfoSize) {
+                                    SizeType VID = *((SizeType *)(postingO));
+                                    if (vectorIdSet.insert(VID).second) {
+                                        mergedPostingList += newPostingLists[k].substr(j * m_vectorInfoSize, m_vectorInfoSize);
+                                        currentLength++;
+                                        if (VID == newHeadVID) hasHeadO = true;
+                                    }
+                                }
+
+                                if (!hasHeadO) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Split: after merging head VID %lld, the head vector is missing in posting list. Add head vector back to posting list.\n", (std::int64_t)(newHeadVID));
+                                    vectorIdSet.insert(newHeadVID);
+                                    mergedPostingList = postingList.substr(args.clusterIdx[k] * m_vectorInfoSize, m_vectorInfoSize) + mergedPostingList;
+                                    currentLength++;
+                                }
+
+                                auto *postingK = reinterpret_cast<uint8_t *>(currentPostingList.data());
+                                size_t newPostVectorNum = currentPostingList.size() / m_vectorInfoSize;
+                                for (int j = 0; j < (int)newPostVectorNum; j++, postingK += m_vectorInfoSize) {
+                                    SizeType VID = *((SizeType *)(postingK));
+                                    uint8_t verK = *(postingK + sizeof(SizeType));
+                                    if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != verK) continue;
+                                    if (vectorIdSet.find(VID) != vectorIdSet.end()) continue;
+                                    vectorIdSet.insert(VID);
+                                    mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
+                                    currentLength++;
+                                }
+
+                                if (currentLength > (m_postingSizeLimit + m_bufferSizeLimit) && m_opt->m_storage == Storage::FILEIO) {
+                                    /*
+                                    SPTAGLIB_LOG(
+                                        Helper::LogLevel::LL_Warning,
+                                        "Split: merged posting list length %d exceeds hard limit %d after merging head "
+                                        "VID %lld. Cut to limit and put back to db.\n",
+                                        currentLength, m_postingSizeLimit + m_bufferSizeLimit, (std::int64_t)(newHeadVID));
+                                    */
+                                    mergedPostingList.resize((m_postingSizeLimit + m_bufferSizeLimit) * m_vectorInfoSize);
+                                    currentLength = m_postingSizeLimit + m_bufferSizeLimit;
+                                }
+
+                                auto splitPutBegin = std::chrono::high_resolution_clock::now();
+                                if ((ret = db->Put(DBKey(newHeadVID), mergedPostingList, MaxTimeout,
+                                                   &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put posting %lld\n",
+                                                 (std::int64_t)(newHeadVID));
+                                    rollbackCommitted();
+                                    releaseRemoteTokens();
+                                    return ret;
+                                }
+                                CheckCentroid(newHeadVID, mergedPostingList, "Split-MergePosting");
+                                auto splitPutEnd = std::chrono::high_resolution_clock::now();
+                                elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
+                                m_stat.m_putCost += elapsedMSeconds;
+
+                                committed.push_back({CommittedChildRecord::Kind::LocalExisting, newHeadVID});
+
+                                if (currentLength > m_postingSizeLimit) {
+                                    m_stat.m_splitExistingHeadMergeResplitCount.fetch_add(1, std::memory_order_relaxed);
+                                    SplitAsync(newHeadVID, currentLength);
+                                }
+                            } else {
+                                auto splitPutBegin = std::chrono::high_resolution_clock::now();
+                                if ((ret = db->Put(DBKey(newHeadVID), newPostingLists[k], MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to add new posting %lld\n", (std::int64_t)(newHeadVID));
+                                    rollbackCommitted();
+                                    releaseRemoteTokens();
+                                    return ret;
+                                }
+                                CheckCentroid(newHeadVID, newPostingLists[k], "Split-NewPosting");
+                                auto splitPutEnd = std::chrono::high_resolution_clock::now();
+                                elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
+                                m_stat.m_putCost += elapsedMSeconds;
+
+                                auto updateHeadBegin = std::chrono::high_resolution_clock::now();
+                                if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
+                                    if (db->Delete(DBKey(newHeadVID)) != ErrorCode::Success) {
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete gc posting %lld\n", (std::int64_t)(newHeadVID));
+                                    }
+                                    rollbackCommitted();
+                                    releaseRemoteTokens();
+                                    return ret;
+                                }
+                                splitNewHeadCount++;
+                                m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
+                                auto updateHeadEnd = std::chrono::high_resolution_clock::now();
+                                elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
+                                m_stat.m_updateHeadCost += elapsedMSeconds;
+
+                                committed.push_back({CommittedChildRecord::Kind::LocalNew, newHeadVID});
                             }
                         } else {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                "Split: fenced remote append failed for child %lld on node %d (ec=%d); WAL kept for GC\n",
-                                (std::int64_t)newHeadVID, plans[k].ownerNode, (int)ec);
-                        }
+                            // Remote-owned newHead: write posting via fenced
+                            // RemoteAppend to the owner.  Local BKT head index
+                            // is still updated here for not-yet-known heads;
+                            // peers learn via BroadcastHeadSync below.
+                            auto leaseIt = remoteTokens.find(bucketKey(plans[k].ownerNode, newHeadVID));
+                            std::uint64_t token = (leaseIt != remoteTokens.end()) ? leaseIt->second.token : 0;
 
-                        // Release this child's remote lease as soon as the
-                        // remote write is done (refcount-aware for the rare
-                        // case both children share a bucket).
-                        if (leaseIt != remoteTokens.end()) {
-                            if (--leaseIt->second.refcount <= 0) {
-                                m_worker->SendRemoteLock(plans[k].ownerNode, m_layer,
-                                                         leaseIt->second.sampleVID,
-                                                         false, leaseIt->second.token);
-                                remoteTokens.erase(leaseIt);
+                            std::uint64_t jobID = m_splitJobIdCounter.fetch_add(1) + 1;
+                            if (m_splitWAL) {
+                                Distributed::SplitWAL::Record r;
+                                r.jobID = jobID;
+                                r.srcHeadID = headID;
+                                r.localChildHeadID = 0;
+                                r.remoteChildHeadID = newHeadVID;
+                                r.remoteOwnerNodeIndex = plans[k].ownerNode;
+                                r.startTimestampSec =
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                        std::chrono::system_clock::now().time_since_epoch()).count();
+                                r.stage = Distributed::SplitWAL::Stage::Begin;
+                                m_splitWAL->Write(r);
                             }
-                        }
 
-                        // For a new head we still need to register it in the
-                        // local BKT so head-search can route to it; HeadSync
-                        // below broadcasts to peers.
-                        if (!headExistsInIndex) {
-                            auto updateHeadBegin = std::chrono::high_resolution_clock::now();
-                            if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
+                            auto remoteHeadVec = std::make_shared<std::string>(
+                                (const char *)(args.centers + k * args._D), m_vectorDataSize);
+
+                            // Bounded retry: a fencing-token rejection means the
+                            // owner's lease TTL expired between our acquire and
+                            // our send (rare; lease TTL is 30 s).  Release the
+                            // stale token, re-acquire, and resend.  After 3
+                            // attempts (10/20/40 ms backoff) we surface the
+                            // failure to the caller so they can retry the
+                            // whole AddIndex op at the user level instead of
+                            // silently dropping the cluster vectors.
+                            constexpr int kFenceRetries = 3;
+                            ErrorCode ec = ErrorCode::Fail;
+                            for (int attempt = 0; attempt < kFenceRetries; ++attempt) {
+                                if (attempt > 0) {
+                                    std::this_thread::sleep_for(
+                                        std::chrono::milliseconds(10 << (attempt - 1)));
+                                    // Release the stale lease (best-effort:
+                                    // the owner may have auto-released it via
+                                    // TTL already, in which case this no-ops).
+                                    if (leaseIt != remoteTokens.end()) {
+                                        m_worker->SendRemoteLock(
+                                            plans[k].ownerNode, m_layer,
+                                            leaseIt->second.sampleVID,
+                                            false, leaseIt->second.token);
+                                        leaseIt->second.token = 0;
+                                    }
+                                    std::uint64_t newTok = m_worker->SendRemoteLock(
+                                        plans[k].ownerNode, m_layer,
+                                        plans[k].newHeadVID, true, 0);
+                                    if (newTok == 0) {
+                                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                            "Split: fenced retry %d/%d cannot re-acquire lease for child %lld on node %d\n",
+                                            attempt + 1, kFenceRetries,
+                                            (std::int64_t)newHeadVID, plans[k].ownerNode);
+                                        continue;
+                                    }
+                                    token = newTok;
+                                    if (leaseIt != remoteTokens.end()) {
+                                        leaseIt->second.token = newTok;
+                                    }
+                                }
+                                ec = m_worker->SendFencedRemoteAppend(
+                                    plans[k].ownerNode, m_layer, newHeadVID, remoteHeadVec,
+                                    (int)(newPostingLists[k].size() / m_vectorInfoSize),
+                                    newPostingLists[k], token);
+                                if (ec == ErrorCode::Success) break;
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                    "Split: fenced remote append attempt %d/%d failed for child %lld on node %d (ec=%d)\n",
+                                    attempt + 1, kFenceRetries,
+                                    (std::int64_t)newHeadVID, plans[k].ownerNode, (int)ec);
+                            }
+
+                            if (ec == ErrorCode::Success) {
+                                if (m_splitWAL) m_splitWAL->Clear(headID, jobID);
+                                if (headExistsInIndex) {
+                                    m_stat.m_splitExistingHeadMergeCount.fetch_add(1, std::memory_order_relaxed);
+                                }
+                            } else {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                    "Split: fenced remote append exhausted %d retries for child %lld on node %d; rolling back srcHead %lld and returning Fail\n",
+                                    kFenceRetries, (std::int64_t)newHeadVID,
+                                    plans[k].ownerNode, (std::int64_t)headID);
+                                if (m_splitWAL) m_splitWAL->Clear(headID, jobID);
+                                rollbackCommitted();
                                 releaseRemoteTokens();
-                                return ret;
+                                return ErrorCode::Fail;
                             }
-                            splitNewHeadCount++;
-                            m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
-                            auto updateHeadEnd = std::chrono::high_resolution_clock::now();
-                            elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
-                            m_stat.m_updateHeadCost += elapsedMSeconds;
-                        }
-                        continue;
-                    }
 
-                    // Local-owned newHead path (lock already held in localChildLocks)
-                    if (headExistsInIndex) {
-                        m_stat.m_splitExistingHeadMergeCount.fetch_add(1, std::memory_order_relaxed);
-
-                        std::string mergedPostingList;
-                        std::set<SizeType> vectorIdSet;
-                        std::string currentPostingList;
-                        if ((ret = db->Get(DBKey(newHeadVID), &currentPostingList, MaxTimeout,
-                                           &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to get posting %lld\n",
-                                         (std::int64_t)(newHeadVID));
-                            releaseRemoteTokens();
-                            return ret;
-                        }
-
-                        auto *postingO = reinterpret_cast<uint8_t *>(newPostingLists[k].data());
-                        size_t postVectorNumO = newPostingLists[k].size() / m_vectorInfoSize;
-                        int currentLength = 0;
-                        bool hasHeadO = false;
-                        for (int j = 0; j < (int)postVectorNumO; j++, postingO += m_vectorInfoSize) {
-                            SizeType VID = *((SizeType *)(postingO));
-                            if (vectorIdSet.insert(VID).second) {
-                                mergedPostingList += newPostingLists[k].substr(j * m_vectorInfoSize, m_vectorInfoSize);
-                                currentLength++;
-                                if (VID == newHeadVID) hasHeadO = true;
+                            // Release this child's remote lease as soon as the
+                            // remote write is done (refcount-aware for the rare
+                            // case both children share a bucket).
+                            if (leaseIt != remoteTokens.end()) {
+                                if (--leaseIt->second.refcount <= 0) {
+                                    m_worker->SendRemoteLock(plans[k].ownerNode, m_layer,
+                                                             leaseIt->second.sampleVID,
+                                                             false, leaseIt->second.token);
+                                    remoteTokens.erase(leaseIt);
+                                }
                             }
-                        }
 
-                        if (!hasHeadO) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Split: after merging head VID %lld, the head vector is missing in posting list. Add head vector back to posting list.\n", (std::int64_t)(newHeadVID));
-                            vectorIdSet.insert(newHeadVID);
-                            mergedPostingList = postingList.substr(args.clusterIdx[k] * m_vectorInfoSize, m_vectorInfoSize) + mergedPostingList;
-                            currentLength++;
-                        }
-
-                        auto *postingK = reinterpret_cast<uint8_t *>(currentPostingList.data());
-                        size_t newPostVectorNum = currentPostingList.size() / m_vectorInfoSize;
-                        for (int j = 0; j < (int)newPostVectorNum; j++, postingK += m_vectorInfoSize) {
-                            SizeType VID = *((SizeType *)(postingK));
-                            uint8_t verK = *(postingK + sizeof(SizeType));
-                            if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != verK) continue;
-                            if (vectorIdSet.find(VID) != vectorIdSet.end()) continue;
-                            vectorIdSet.insert(VID);
-                            mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
-                            currentLength++;
-                        }
-
-                        if (currentLength > (m_postingSizeLimit + m_bufferSizeLimit) && m_opt->m_storage == Storage::FILEIO) {
-                            mergedPostingList.resize((m_postingSizeLimit + m_bufferSizeLimit) * m_vectorInfoSize);
-                            currentLength = m_postingSizeLimit + m_bufferSizeLimit;
-                        }
-
-                        auto splitPutBegin = std::chrono::high_resolution_clock::now();
-                        if ((ret = db->Put(DBKey(newHeadVID), mergedPostingList, MaxTimeout,
-                                           &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to put posting %lld\n",
-                                         (std::int64_t)(newHeadVID));
-                            releaseRemoteTokens();
-                            return ret;
-                        }
-                        CheckCentroid(newHeadVID, mergedPostingList, "Split-MergePosting");
-                        auto splitPutEnd = std::chrono::high_resolution_clock::now();
-                        elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
-                        m_stat.m_putCost += elapsedMSeconds;
-
-                        if (currentLength > m_postingSizeLimit) {
-                            m_stat.m_splitExistingHeadMergeResplitCount.fetch_add(1, std::memory_order_relaxed);
-                            SplitAsync(newHeadVID, currentLength);
-                        }
-                    } else {
-                        auto splitPutBegin = std::chrono::high_resolution_clock::now();
-                        if ((ret = db->Put(DBKey(newHeadVID), newPostingLists[k], MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to add new posting %lld\n", (std::int64_t)(newHeadVID));
-                            releaseRemoteTokens();
-                            return ret;
-                        }
-                        CheckCentroid(newHeadVID, newPostingLists[k], "Split-NewPosting");
-                        auto splitPutEnd = std::chrono::high_resolution_clock::now();
-                        elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(splitPutEnd - splitPutBegin).count();
-                        m_stat.m_putCost += elapsedMSeconds;
-
-                        auto updateHeadBegin = std::chrono::high_resolution_clock::now();
-                        if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
-                            if (db->Delete(DBKey(newHeadVID)) != ErrorCode::Success) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete gc posting %lld\n", (std::int64_t)(newHeadVID));
+                            // For a new head we still need to register it in the
+                            // local BKT so head-search can route to it; HeadSync
+                            // below broadcasts to peers.
+                            if (!headExistsInIndex) {
+                                auto updateHeadBegin = std::chrono::high_resolution_clock::now();
+                                if ((ret = m_headIndex->AddHeadIndex(args.centers + k * args._D, newHeadVID, version, m_opt->m_dim, m_layer + 1, p_exWorkSpace)) != ErrorCode::Success) {
+                                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to update head index %lld\n", (std::int64_t)(newHeadVID));
+                                    rollbackCommitted();
+                                    releaseRemoteTokens();
+                                    return ret;
+                                }
+                                splitNewHeadCount++;
+                                m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
+                                auto updateHeadEnd = std::chrono::high_resolution_clock::now();
+                                elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
+                                m_stat.m_updateHeadCost += elapsedMSeconds;
                             }
-                            releaseRemoteTokens();
-                            return ret;
+                            committed.push_back({CommittedChildRecord::Kind::Remote, newHeadVID});
                         }
-                        splitNewHeadCount++;
-                        m_stat.m_splitCreatedNewHeadCount.fetch_add(1, std::memory_order_relaxed);
-                        auto updateHeadEnd = std::chrono::high_resolution_clock::now();
-                        elapsedMSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(updateHeadEnd - updateHeadBegin).count();
-                        m_stat.m_updateHeadCost += elapsedMSeconds;
                     }
                 }
 
