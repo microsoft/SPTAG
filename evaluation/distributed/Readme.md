@@ -25,32 +25,34 @@ create a myhosts file:
 ```
 run distributed clustering example:
 ```bash
-mpirun -np 3 ./balanceddatapartition 
--d 128          # Dimension
---filetype DEFAULT # Input file format (bin)
---vectortype UInt8 # Data type
--i              /mnt/md0/qi/distributed_build/vectors.bin.\*,/mnt/md0/qi/distributed_build/meta.bin.\*,/mnt/md0/qi/distributed_build/metaidx.bin.\* # Input data pattern
--c 3            # Number of centers
--t 48            # Number of threads
--l 0.0000005    # Balanced clustering parameter (higher = more balanced)
--s 10000        # Initial clustering samples
--m L2           # Similarity metric
--e 0            # Random seed
--x 3            # Init iterations
--r 100          # K-means iterations
--a 4            # Assign to the 4 closest shards
---closurescale 1.03 # Assignment limit: only assign to shards within 1.3x distance
---vectorscale 1.2   # Shard capacity limit: max 1.2x original size
---hard 0        # Hard limit for vectorscale (0 = ensure at least one replica per vector)
---gid          /mnt/md0/qi/distributed_build/vid.bin.\*
---centers      /mnt/md0/qi/distributed_build/centersNew.bin # Output center file
---labels       /mnt/md0/qi/distributed_build/labelsNew.bin   # Output label file
---stage Clustering #Clustering/LocalPartition, default Clustering
+#mpirun -np 3 ./balanceddatapartition 
+#-d 128          # Dimension
+#--filetype DEFAULT # Input file format (bin)
+#--vectortype UInt8 # Data type
+#-i              /mnt/md0/qi/distributed_build/vectors.bin.\*,/mnt/md0/qi/distributed_build/meta.bin.\*,/mnt/md0/qi/distributed_build/metaidx.bin.\* # Input data pattern
+#-c 3            # Number of centers
+#-t 48            # Number of threads
+#-l 0.0000005    # Balanced clustering parameter (higher = more balanced)
+#-s 10000        # Initial clustering samples
+#-m L2           # Similarity metric
+#-e 0            # Random seed
+#-x 3            # Init iterations
+#-r 100          # K-means iterations
+#-a 4            # Assign to the 4 closest shards
+#--closurescale 1.03 # Assignment limit: only assign to shards within 1.3x distance
+#--vectorscale 1.2   # Shard capacity limit: max 1.2x original size
+#--hard 0        # Hard limit for vectorscale (0 = ensure at least one replica per vector)
+#--gid          /mnt/md0/qi/distributed_build/vid.bin.\*
+#--centers      /mnt/md0/qi/distributed_build/centersNew.bin # Output center file
+#--labels       /mnt/md0/qi/distributed_build/labelsNew.bin   # Output label file
+#--stage Clustering #Clustering/LocalPartition, default Clustering
 
+# generate centroids and labels
 (mpirun --mca btl_tcp_if_include eth0 --hostfile myhosts -np 3 ./balanceddatapartition -d 128 --filetype DEFAULT --vectortype UInt8 -i /mnt/md0/qi/distributed_build/vectors.bin.\*,/mnt/md0/qi/distributed_build/meta.bin.\*,/mnt/md0/qi/distributed_build/metaidx.bin.\* -c 6 -t 32 -l 0.00000005 -s 10000 -m L2 -e 0 -x 3 -r 100 -a 4 --closurescale 1.03 --vectorscale 1.2 --hard 0 --gid /mnt/md0/qi/distributed_build/vid.bin.\* --centers /mnt/md0/qi/distributed_build/centersNew.bin --labels /mnt/md0/qi/distributed_build/labelsNew.bin &> test_log &)
 
 mpirun --mca btl_tcp_if_include eth0 --hostfile myhosts -np 3 /bin/bash -c "rm -rf /mnt/md0/qi/distributed_build/clustered/*"
 
+#generate clustered data
 (mpirun --mca btl_tcp_if_include eth0 --hostfile myhosts -np 3 ./balanceddatapartition -d 128 --filetype DEFAULT --vectortype UInt8 -i /mnt/md0/qi/distributed_build/vectors.bin.\*,/mnt/md0/qi/distributed_build/meta.bin.\*,/mnt/md0/qi/distributed_build/metaidx.bin.\* -c 6 -t 32 -l 0.00000005 -s 10000 -m L2 -e 0 -x 3 -r 100 -a 4 --closurescale 1.03 --vectorscale 1.2 --hard 0 --gid /mnt/md0/qi/distributed_build/vid.bin.\* --centers /mnt/md0/qi/distributed_build/centersNew.bin --labels /mnt/md0/qi/distributed_build/labelsNew.bin.\* --stage LocalPartition --outdir /mnt/md0/qi/distributed_build/clustered &> test_log &)
 ```
 
@@ -122,6 +124,7 @@ LatencyLimit=100
 MaxCheck=8192
 UseMultiChunkPosting=false
 VersionCacheMaxChunks=100000
+MaxID=2000000000
 Storage=TIKVIO
 TiKVPDAddresses=annservicFX071Y:2379,annservicKFECPH:2379,annservicP92MC8:2379
 TiKVKeyPrefix=qi_1b_l2
@@ -136,7 +139,53 @@ mpirun --mca btl_tcp_if_include eth0 --hostfile myhosts -np 3 ./indexbuilder --d
 ```bash
 python3 merge_head.py /mnt/md0/qi/distributed_build/SPANN /mnt/md0/qi/distributed_build/mergedhead myhosts q
 ./indexbuilder --dimension 128 --vectortype UInt8 --filetype DEFAULT --outputfolder /mnt/md0/qi/distributed_build/mergedhead/HeadIndex --algo BKT --thread 32 --input /mnt/md0/qi/distributed_build/mergedhead/vectors.bin Index.AddCountForRebuild=10000 Index.ParallelBKTBuild=true
-# replace HeadIndex and SPTAGHeadVectorIDs.bin
+# replace HeadIndex and SPTAGHeadVectorIDs.bin in SPANN index folder
 ```
 
 ## 5. Use SPFreshTest to test recall
+prepare a configure file benchmark.ini
+```bash
+[Benchmark]
+VectorPath=sift1b/base.1B.u8bin
+QueryPath=sift1b/query.public.10K.u8bin
+TruthPath=truth
+IndexPath=/mnt/md0/qi/distributed_build/SPANN
+ValueType=UInt8
+Dimension=128
+BaseVectorCount=999000000
+InsertVectorCount=1000000
+DeleteVectorCount=0
+BatchNum=10
+TopK=5
+NumSearchThreads=4
+NumInsertThreads=16
+AppendThreadNum=48
+NumSearchDuringInsertThreads=1
+NumQueries=200
+DistMethod=L2
+Rebuild=false
+Resume=-1
+Layers=2
+
+
+[SelectHead]
+ParallelBKTBuild=true
+
+[BuildSSDIndex]
+LatencyLimit=100
+MaxCheck=8192
+SearchInternalResultNum=64
+UseMultiChunkPosting=false
+ReassignK=64
+AsyncMergeInSearch=true
+VersionCacheMaxChunks=100000
+MaxID=2000000000
+Storage=TIKVIO
+TiKVPDAddresses=annservicFX071Y:2379,annservicKFECPH:2379,annservicP92MC8:2379
+TiKVKeyPrefix=qi_1b_l2
+```
+Test Recall:
+```bash
+export BENCHMARK_CONFIG=benchmark.ini
+SPTAGTest --run_test=SPFreshTest/RunBenchmarkFromConfig
+```

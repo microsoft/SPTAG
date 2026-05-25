@@ -207,8 +207,8 @@ if __name__ == "__main__":
     tmpfolder = inputfolder + "_tmp"
 
     
-    #partitions = pack(inputfolder, clusternumber)
-    #shuffle(inputfolder, tmpfolder, partitions, hostfile)
-    #comm.Barrier()
-    #merge(tmpfolder, str(rank), outputfolder, packtype)
+    partitions = pack(inputfolder, clusternumber)
+    shuffle(inputfolder, tmpfolder, partitions, hostfile)
+    comm.Barrier()
+    merge(tmpfolder, str(rank), outputfolder, packtype)
     prepare(configure_file)
