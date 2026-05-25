@@ -35,6 +35,7 @@ namespace SPTAG
 
         template <typename T>
         struct KmeansArgs {
+            std::shared_ptr<IQuantizer> m_pQuantizer;
             int _K;
             int _DK;
             DimensionType _D;
@@ -52,8 +53,7 @@ namespace SPTAG
             float* clusterDist;
             float* weightedCounts;
             float* newWeightedCounts;
-            std::function<float(const T*, const T*, DimensionType)> fComputeDistance;
-            const std::shared_ptr<IQuantizer>& m_pQuantizer;
+            std::function<float(const T*, const T*, DimensionType)> fComputeDistance;            
 
             KmeansArgs(int k, DimensionType dim, SizeType datasize, int threadnum, DistCalcMethod distMethod, const std::shared_ptr<IQuantizer>& quantizer = nullptr) : _K(k), _DK(k), _D(dim), _RD(dim), _TH(threadnum), _M(distMethod), m_pQuantizer(quantizer), reconstructVectors(nullptr) {                            
                 if (m_pQuantizer) {
@@ -243,9 +243,9 @@ namespace SPTAG
                     float *iweightedCounts = args.newWeightedCounts + tid * args._K;
                     float idist = 0;
                     R *reconstructVector = nullptr;
-                    if (args.m_pQuantizer)
+                    if (args.m_pQuantizer) {
                         reconstructVector = (R *)(args.reconstructVectors + tid * args.m_pQuantizer->ReconstructSize());
-
+                    }
                     for (SizeType i = istart; i < iend; i++)
                     {
                         int clusterid = 0;

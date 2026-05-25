@@ -518,44 +518,67 @@ template <typename T> void Process(MPI_Datatype type)
     COMMON::Dataset<T> data(vectors->Count(), vectors->Dimension(), 1024 * 1024, vectors->Count() + 1,
                             (T *)vectors->GetData());
     COMMON::KmeansArgs<T> args(options.m_clusterNum, vectors->Dimension(), vectors->Count(), options.m_threadNum,
-                               options.m_distMethod);
+                               options.m_distMethod, nullptr);
     COMMON::Dataset<LabelType> label(vectors->Count(), options.m_clusterassign, vectors->Count(), vectors->Count());
 
     std::vector<SizeType> localindices(data.R(), 0);
-    for (SizeType i = 0; i < data.R(); i++)
-        localindices[i] = i;
+    {
+        std::vector<std::thread> tmpthreads;
+        SizeType tsize = (data.R() + options.m_threadNum - 1) / options.m_threadNum;
+        for (int t = 0; t < options.m_threadNum; t++)
+        {
+            tmpthreads.emplace_back([&](int tid) {
+                SizeType start = tid * tsize;
+                SizeType end = std::min((tid + 1) * tsize, data.R());
+                for (SizeType i = start; i < end; i++)
+                    localindices[i] = i;
+            }, t);
+        }
+        for (auto &t : tmpthreads) 
+        {
+            t.join();
+        }
+    }
     unsigned long long localCount = data.R(), totalCount;
     MPI_Allreduce(&localCount, &totalCount, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
-    totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
 
-    if (rank == 0 && options.m_maxIter > 0 && options.m_lambda < -1e-6f)
-    {
-        float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
-        options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
-    }
-    MPI_Bcast(&(options.m_lambda), 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                 "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d "
-                 "maxcountperpartition:%d\n",
-                 rank, data.R(), data.C(), size, options.m_clusterNum, ((int)options.m_inputValueType),
-                 options.m_threadNum, options.m_lambda, options.m_localSamples, totalCount);
+    float currDiff = 1.0, d = 0.0, currDist, minClusterDist = MaxDist;
+    int iteration = options.m_recoveriter;
+    int noImprovement = 0;
 
-    if (rank == 0)
+    if (rank == 0 && iteration < 0)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank 0 init centers\n");
-        if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda)))
+        if (!LoadCenters(args.newTCenters, args._K, args._D, options.m_centers, &(options.m_lambda), &currDiff, &minClusterDist, &noImprovement))
         {
             if (options.m_seed >= 0)
                 std::srand(options.m_seed);
+            if (options.m_maxIter > 0 && options.m_lambda < -1e-6f)
+            {
+                float fBalanceFactor = COMMON::DynamicFactorSelect<T>(data, localindices, 0, data.R(), args, data.R());
+                options.m_lambda = COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() / fBalanceFactor / data.R();
+            }
             COMMON::InitCenters<T, T>(data, localindices, 0, data.R(), args, options.m_localSamples,
                                       options.m_initIter);
         }
     }
+    if (iteration < 0) iteration = 0;
+    else SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "recover from iteration:%d\n", iteration);
+    
+    MPI_Bcast(args.centers, args._K * args._D, type, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&(options.m_lambda), 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&currDiff, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&minClusterDist, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&noImprovement, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    float currDiff = 1.0, d, currDist, minClusterDist = MaxDist;
-    int iteration = 0;
-    int noImprovement = 0;
-    while (currDiff > options.m_stopDifference && iteration < options.m_maxIter)
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "rank %d  data:(%d,%d) machines:%d clusters:%d type:%d threads:%d lambda:%f samples:%d "
+                 "maxcountperpartition:%d\n",
+                 rank, data.R(), data.C(), size, options.m_clusterNum, ((int)options.m_inputValueType),
+                 options.m_threadNum, options.m_lambda, options.m_localSamples,
+                 static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor));
+
+    while (noImprovement < 10 && currDiff > options.m_stopDifference && iteration < options.m_maxIter)
     {
         if (rank == 0)
         {
@@ -615,6 +638,7 @@ template <typename T> void Process(MPI_Datatype type)
         }
     }
     d = 0;
+    totalCount = static_cast<unsigned long long>(totalCount * 1.0 / args._K * options.m_vectorfactor);
     for (SizeType i = 0; i < data.R(); i++)
         localindices[i] = i;
     std::vector<SizeType> myLimit(
@@ -684,7 +708,8 @@ template <typename T> void Process(MPI_Datatype type)
                 std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + std::to_string(i);
                 std::string metaindexfile =
                     options.m_outdir + "/" + options.m_outmetaindexfile + "." + std::to_string(i);
-                std::string gidfile = options.m_outdir + "/" + options.m_gidfile + "." + std::to_string(i);
+                std::string gidfile = (options.m_gidfile.find_last_of(FolderSep) != std::string::npos) ? options.m_gidfile.substr(options.m_gidfile.find_last_of(FolderSep) + 1) : options.m_gidfile;
+                gidfile = options.m_outdir + "/" + gidfile.substr(0, gidfile.find_last_of("bin") + 3) + "." + std::to_string(i);
                 std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO(), gidout = f_createIO();
                 if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out))
                 {
@@ -1045,9 +1070,22 @@ template <typename T> void ProcessWithoutMPI()
                                options.m_distMethod);
     COMMON::Dataset<LabelType> label(vectors->Count(), options.m_clusterassign, vectors->Count(), vectors->Count());
     std::vector<SizeType> localindices(data.R(), 0);
-    for (SizeType i = 0; i < data.R(); i++)
     {
-        localindices[i] = i;
+        std::vector<std::thread> tmpthreads;
+        SizeType tsize = (data.R() + options.m_threadNum - 1) / options.m_threadNum;
+        for (int t = 0; t < options.m_threadNum; t++)
+        {
+            tmpthreads.emplace_back([&](int tid) {
+                SizeType start = tid * tsize;
+                SizeType end = std::min((tid + 1) * tsize, data.R());
+                for (SizeType i = start; i < end; i++)
+                    localindices[i] = i;
+            }, t);
+        }
+        for (auto &t : tmpthreads) 
+        {
+            t.join();
+        }
     }
     args.ClearCounts();
 
@@ -1205,7 +1243,21 @@ template <typename T> void Partition()
     if (options.m_outdir.compare("-") == 0)
         return;
 
+    int rank;
+    bool mpi = false;
+    std::string rankstr = options.m_labels.substr(options.m_labels.rfind(".") + 1);
+    if (rankstr.compare("*") != 0) {
+        rank = std::stoi(rankstr);
+    }
+    else {
+        MPI_Init(NULL, NULL);
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        mpi = true;
+    }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rank:%d\n", rank);
+
     auto vectorReader = Helper::VectorSetReader::CreateInstance(std::make_shared<Helper::ReaderOptions>(options));
+    options.m_inputFiles = Helper::StrUtils::ReplaceAll(options.m_inputFiles, "*", std::to_string(rank));
     if (ErrorCode::Success != vectorReader->LoadFile(options.m_inputFiles))
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read input file.\n");
@@ -1220,6 +1272,7 @@ template <typename T> void Partition()
                             (T *)vectors->GetData());
 
     COMMON::Dataset<LabelType> label;
+    options.m_labels = Helper::StrUtils::ReplaceAll(options.m_labels, "*", std::to_string(rank));
     if (label.Load(options.m_labels, vectors->Count(), vectors->Count()) != ErrorCode::Success)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read labels.\n");
@@ -1228,6 +1281,7 @@ template <typename T> void Partition()
     std::shared_ptr<COMMON::Dataset<SizeType>> globalids = nullptr;
     if (options.m_gidfile.compare("-") != 0)
     {
+        options.m_gidfile = Helper::StrUtils::ReplaceAll(options.m_gidfile, "*", std::to_string(rank));
         globalids = std::make_shared<COMMON::Dataset<SizeType>>();
         if (ErrorCode::Success != globalids->Load(options.m_gidfile, 1024 * 1024, vectors->Count() + 1))
         {
@@ -1235,14 +1289,15 @@ template <typename T> void Partition()
             exit(1);
         }
     }
-    std::string taskId = options.m_labels.substr(options.m_labels.rfind(".") + 1);
+    std::string taskId = std::to_string(rank);
     for (int i = 0; i < options.m_clusterNum; i++)
     {
         std::string vecfile = options.m_outdir + "/" + options.m_outfile + "." + taskId + "." + std::to_string(i);
         std::string metafile = options.m_outdir + "/" + options.m_outmetafile + "." + taskId + "." + std::to_string(i);
         std::string metaindexfile =
             options.m_outdir + "/" + options.m_outmetaindexfile + "." + taskId + "." + std::to_string(i);
-        std::string gidfile = options.m_outdir + "/" + options.m_gidfile + "." + taskId + "." + std::to_string(i);
+        std::string gidfile = (options.m_gidfile.find_last_of(FolderSep) != std::string::npos) ? options.m_gidfile.substr(options.m_gidfile.find_last_of(FolderSep) + 1) : options.m_gidfile;
+        gidfile = options.m_outdir + "/" + gidfile + "." + std::to_string(i);
         std::shared_ptr<Helper::DiskIO> out = f_createIO(), metaout = f_createIO(), metaindexout = f_createIO(), gidout = f_createIO();
         if (out == nullptr || !out->Initialize(vecfile.c_str(), std::ios::binary | std::ios::out))
         {
@@ -1315,6 +1370,7 @@ template <typename T> void Partition()
         metaindexout->ShutDown();
         if (globalids != nullptr) gidout->ShutDown();
     }
+    if (mpi) MPI_Finalize();
 }
 
 int main(int argc, char *argv[])
