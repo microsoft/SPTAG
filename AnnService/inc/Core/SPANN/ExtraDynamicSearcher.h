@@ -265,7 +265,6 @@ namespace SPTAG::SPANN {
         std::shared_ptr<Helper::KeyValueIO> GetDB() const { return db; }
 
     private:
-        std::atomic<int> m_workspaceCount = 0;
         std::shared_ptr<Helper::KeyValueIO> db;
         WorkerNode* m_worker = nullptr;  // externally owned, set via SetWorker()
 
