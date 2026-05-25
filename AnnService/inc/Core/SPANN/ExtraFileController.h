@@ -922,6 +922,17 @@ namespace SPTAG::SPANN {
             return Put(std::stoi(key), value, timeout, reqs, true);
         }
 
+        // FileIO is single-process: no cross-process CAS is needed. Internal thread-safety
+        // is already handled by Put (per-key lock + InterlockedCompareExchange). Delegate to Put
+        // so callers that target the unified KeyValueIO interface (e.g. WriteDownAllPostingToDB)
+        // also work for the FILEIO storage backend.
+        ErrorCode MergeWithCAS(const SizeType key, const std::string& value,
+                               const std::chrono::microseconds& timeout,
+                               std::vector<Helper::AsyncReadRequest>* reqs, int& size) override {
+            size = static_cast<int>(value.size());
+            return Put(key, value, timeout, reqs, true);
+        }
+
         ErrorCode Check(const SizeType key, std::vector<std::uint8_t> *visited) override
         {
             int64_t *postingSize = (int64_t *)GetKey(key);

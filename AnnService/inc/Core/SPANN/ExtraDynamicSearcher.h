@@ -246,12 +246,12 @@ namespace SPTAG::SPANN {
         bool m_allDonePrinted = false;
 
         std::mutex m_progressLogMutex;
-        std::chrono::steady_clock::time_point m_lastProgressLogTime = std::chrono::steady_clock::time_point::min();
-        size_t m_lastProgressLogQueueSize = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogSplit = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogMerge = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogAppend = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogReassign = std::numeric_limits<size_t>::max();
+        std::chrono::steady_clock::time_point m_lastProgressLogTime = (std::chrono::steady_clock::time_point::min)();
+        size_t m_lastProgressLogQueueSize = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogSplit = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogMerge = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogAppend = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogReassign = (std::numeric_limits<size_t>::max)();
 
         bool ShouldLogProgress(size_t totalJobs, bool force = false) {
             auto now = std::chrono::steady_clock::now();
@@ -278,7 +278,7 @@ namespace SPTAG::SPANN {
             }
 
             bool enoughTimeElapsed =
-                (m_lastProgressLogTime == std::chrono::steady_clock::time_point::min()) ||
+                (m_lastProgressLogTime == (std::chrono::steady_clock::time_point::min)()) ||
                 (std::chrono::duration_cast<std::chrono::seconds>(now - m_lastProgressLogTime).count() >= 5);
 
             bool shouldLog = queueChanged && enoughTimeElapsed;
@@ -2565,9 +2565,9 @@ namespace SPTAG::SPANN {
                 uint32_t reassignNumBeforeZeroReplica = m_stat.m_reAssignNum;
                 uint32_t headMissBeforeZeroReplica = m_stat.m_headMiss.load();
 
-                int zeroReplicaWorkerNum = std::max(1, std::min(static_cast<int>(zeroReplicaCount), m_opt->m_appendThreadNum));
+                int zeroReplicaWorkerNum = (std::max)(1, (std::min)(static_cast<int>(zeroReplicaCount), m_opt->m_appendThreadNum));
                 size_t zeroReplicaBatchSize = 4096;
-                size_t zeroReplicaQueueLimit = std::max(static_cast<size_t>(4), static_cast<size_t>(zeroReplicaWorkerNum) * 2);
+                size_t zeroReplicaQueueLimit = (std::max)(static_cast<size_t>(4), static_cast<size_t>(zeroReplicaWorkerNum) * 2);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "SPFresh: zero-replica refill workers:%d batchSize:%zu queueLimit:%zu\n",
                              zeroReplicaWorkerNum, zeroReplicaBatchSize, zeroReplicaQueueLimit);
