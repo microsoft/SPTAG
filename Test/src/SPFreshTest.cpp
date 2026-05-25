@@ -29,6 +29,8 @@
 #include <ctime>
 #include <tuple>
 #include <vector>
+
+#ifndef _MSC_VER
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
@@ -52,6 +54,7 @@ static __attribute__((constructor)) void install_segfault_handler() {
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
 }
+#endif
 
 using namespace SPTAG;
 

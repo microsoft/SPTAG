@@ -127,6 +127,17 @@ InterlockedCompareExchange(
     return (char)_InterlockedCompareExchange8(Destination, Exchange, Comperand);
 }
 
+FORCEINLINE
+int64_t
+InterlockedCompareExchange(
+    _Inout_ int64_t volatile* Destination,
+    _In_ int64_t Exchange,
+    _In_ int64_t Comperand
+)
+{
+    return (int64_t)InterlockedCompareExchange64((LONGLONG volatile*)Destination, (LONGLONG)Exchange, (LONGLONG)Comperand);
+}
+
 #endif
 
 inline int64_t filesize(const char* path) {

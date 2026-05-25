@@ -314,7 +314,7 @@ namespace SPTAG {
         { \
             VarName = tmp; \
         } \
-    } else \
+    }
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
@@ -369,7 +369,7 @@ namespace SPTAG {
         if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
         { \
             return SPTAG::Helper::Convert::ConvertToString(VarName); \
-        } else \
+        }
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter

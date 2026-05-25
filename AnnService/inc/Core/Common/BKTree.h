@@ -621,8 +621,8 @@ break;
                         }
                         else { // clustering the data into BKTKmeansK clusters
                             if (dynamicK) {
-                                args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
-                                args._DK = std::max<int>(args._DK, 2);
+                                args._DK = (std::min<int>)((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
+                                args._DK = (std::max<int>)(args._DK, 2);
                             }
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
@@ -753,13 +753,13 @@ break;
                                         // when many nodes, use 1 thread per k-means (parallelism at node level).
                                         // IMPORTANT: Must use full dataset size because KmeansAssign uses absolute indices
                                         // (args.label[i] where i ranges from first to last, not 0 to rangeSize)
-                                        int threadsPerNode = std::max(1, numOfThreads / (int)levelSize);
+                                        int threadsPerNode = (std::max)(1, numOfThreads / (int)levelSize);
                                         KmeansArgs<T> localArgs(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), threadsPerNode, distMethod, m_pQuantizer);
 
                                         int dk = m_iBKTKmeansK;
                                         if (dynamicK) {
-                                            dk = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
-                                            dk = std::max<int>(dk, 2);
+                                            dk = (std::min<int>)((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
+                                            dk = (std::max<int>)(dk, 2);
                                             localArgs._DK = dk;
                                         }
 
@@ -795,7 +795,7 @@ break;
                         std::vector<std::thread> mythreads;
                         // When nodes are few, each k-means uses multiple threads internally,
                         // so limit outer parallelism to avoid thread over-subscription.
-                        int outerThreads = std::min(numOfThreads, (int)levelSize);
+                        int outerThreads = (std::min)(numOfThreads, (int)levelSize);
                         mythreads.reserve(outerThreads);
                         for (int tid = 0; tid < outerThreads; tid++)
                         {
