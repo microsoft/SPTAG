@@ -103,6 +103,59 @@ namespace SPTAG::SPANN {
     public:
         bool Start() { return StartNetwork(); }
 
+        // Gate + drain shutdown:
+        //   1. Reject new QueueRemoteAppend producers via m_acceptingNewRequests.
+        //   2. Wait for any in-flight auto-flush detached threads to exit.
+        //      With the gate set, each thread is bounded by its current
+        //      SendBatchRemoteAppend call (~kTimeoutSec, default 180s) plus
+        //      one more loop iteration that will see an empty queue (no
+        //      new producers) and break. So worst-case wall time is one
+        //      gRPC timeout, regardless of concurrency.
+        //   3. Member destruction runs after this body: m_asyncWatchdog's own
+        //      destructor (AsyncJobWatchdog.h:48) joins its loop thread, then
+        //      mutex/queue members tear down cleanly.
+        // Callers are expected to have invoked FlushRemoteAppends() before
+        // destruction; any residue in m_appendQueue is dropped with a warning.
+        //
+        // The wait is unbounded by design: a hard timeout here would let
+        // threads outlive the members they captured (m_appendQueueMutex /
+        // m_appendQueue / m_asyncWatchdog) and immediately UAF — strictly
+        // worse than a slow shutdown. If shutdown ever stays stuck past a
+        // gRPC timeout in production, the diagnostic to chase is "gRPC
+        // client is wedged", not "tune the destructor timeout".
+        ~WorkerNode() {
+            m_acceptingNewRequests.store(false, std::memory_order_release);
+
+            // Log every 2x RPC timeout: that gives one full RPC cycle as
+            // the healthy-drain upper bound (gate -> each in-flight thread
+            // bounded by exactly one SendBatchRemoteAppend cycle), plus a
+            // second cycle of buffer so a slightly slow-but-healthy drain
+            // doesn't false-alarm. Past 2x is firmly into "gRPC client is
+            // wedged" territory and worth a LL_Warning.
+            const auto logInterval = std::chrono::seconds(
+                2 * std::max(1, m_remoteOps.GetRpcTimeoutSec()));
+
+            auto lastLogged = std::chrono::steady_clock::now();
+            while (m_inflightAppendFlushes.load(std::memory_order_acquire) > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - lastLogged >= logInterval) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "~WorkerNode: still waiting on %d in-flight auto-flush thread(s) "
+                        "(exceeded 2x RPC timeout, gRPC may be wedged)\n",
+                        m_inflightAppendFlushes.load(std::memory_order_relaxed));
+                    lastLogged = now;
+                }
+                std::this_thread::sleep_for(kShutdownPollInterval);
+            }
+
+            const size_t residue = m_remoteQueueSize.load(std::memory_order_relaxed);
+            if (residue > 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "~WorkerNode: dropping %zu queued RemoteAppend item(s) at destruction; "
+                    "caller should have invoked FlushRemoteAppends() first\n", residue);
+            }
+        }
+
         // ---- Callbacks ----
         //
         // ExtraDynamicSearcher passes its m_layer when binding callbacks so
@@ -277,6 +330,12 @@ namespace SPTAG::SPANN {
         // ---- Append queue ----
 
         void QueueRemoteAppend(int nodeIndex, RemoteAppendRequest req) {
+            if (!m_acceptingNewRequests.load(std::memory_order_acquire)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "WorkerNode: rejecting QueueRemoteAppend to node %d during shutdown\n",
+                    nodeIndex);
+                return;
+            }
             std::vector<RemoteAppendRequest> toFlush;
             bool didReserveSlot = false;
             {
@@ -671,6 +730,20 @@ namespace SPTAG::SPANN {
         std::unordered_map<int, int> m_perNodeInflight; // guarded by m_appendQueueMutex
         static constexpr size_t kAutoFlushThreshold = 50000;
         std::atomic<int> m_maxInflightPerNode{4};
+
+        // Gate: producers (QueueRemoteAppend) consult this; the destructor
+        // sets it to false to drain in-flight auto-flush threads to zero
+        // without new threads being spawned.
+        std::atomic<bool> m_acceptingNewRequests{true};
+
+        // Shutdown wait tuning (used only by ~WorkerNode).
+        //   - kShutdownPollInterval: how often the destructor wakes to
+        //     re-check m_inflightAppendFlushes. 20ms keeps p50 shutdown
+        //     latency tight when threads exit between polls.
+        //   - The progress-log cadence is derived at destruction time
+        //     from m_remoteOps.GetRpcTimeoutSec() — see ~WorkerNode().
+        static constexpr auto kShutdownPollInterval =
+            std::chrono::milliseconds(20);
 
         // Resends failed async fire-and-forget batches with exponential
         // backoff (see AsyncJobWatchdog.h). Constructed last so it tears
