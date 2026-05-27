@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,14 +55,56 @@ public:
         std::int64_t  startTimestampSec;
         Stage         stage;
 
+        // Wire layout: each field appended sequentially with no padding,
+        // stage written as a fixed std::uint8_t. Field-by-field memcpy
+        // avoids leaking uninitialized struct padding into the WAL and
+        // keeps the encoding stable if fields are reordered in source.
+        // Field widths still follow the build-config-bound SizeType
+        // (int32 by default, int64 with -DLARGEVID); a deployment must
+        // not toggle LARGEVID between WAL writer and reader.
+        static constexpr std::size_t kEncodedSize =
+            sizeof(std::uint64_t) /* jobID */
+          + sizeof(SizeType)      /* srcHeadID */
+          + sizeof(SizeType)      /* localChildHeadID */
+          + sizeof(SizeType)      /* remoteChildHeadID */
+          + sizeof(int)           /* remoteOwnerNodeIndex */
+          + sizeof(std::int64_t)  /* startTimestampSec */
+          + sizeof(std::uint8_t); /* stage */
+
         std::string Encode() const {
-            std::string s(sizeof(Record), '\0');
-            memcpy(&s[0], this, sizeof(Record));
+            std::string s(kEncodedSize, '\0');
+            std::size_t off = 0;
+            auto put = [&](const void* src, std::size_t n) {
+                std::memcpy(&s[off], src, n);
+                off += n;
+            };
+            put(&jobID, sizeof(jobID));
+            put(&srcHeadID, sizeof(srcHeadID));
+            put(&localChildHeadID, sizeof(localChildHeadID));
+            put(&remoteChildHeadID, sizeof(remoteChildHeadID));
+            put(&remoteOwnerNodeIndex, sizeof(remoteOwnerNodeIndex));
+            put(&startTimestampSec, sizeof(startTimestampSec));
+            std::uint8_t st = static_cast<std::uint8_t>(stage);
+            put(&st, sizeof(st));
             return s;
         }
+
         bool Decode(const std::string& s) {
-            if (s.size() < sizeof(Record)) return false;
-            memcpy(this, s.data(), sizeof(Record));
+            if (s.size() < kEncodedSize) return false;
+            std::size_t off = 0;
+            auto get = [&](void* dst, std::size_t n) {
+                std::memcpy(dst, s.data() + off, n);
+                off += n;
+            };
+            get(&jobID, sizeof(jobID));
+            get(&srcHeadID, sizeof(srcHeadID));
+            get(&localChildHeadID, sizeof(localChildHeadID));
+            get(&remoteChildHeadID, sizeof(remoteChildHeadID));
+            get(&remoteOwnerNodeIndex, sizeof(remoteOwnerNodeIndex));
+            get(&startTimestampSec, sizeof(startTimestampSec));
+            std::uint8_t st = 0;
+            get(&st, sizeof(st));
+            stage = static_cast<Stage>(st);
             return true;
         }
     };
