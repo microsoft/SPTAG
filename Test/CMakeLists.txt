@@ -24,7 +24,12 @@ if (NOT LIBRARYONLY)
     file(GLOB TEST_HDR_FILES ${PROJECT_SOURCE_DIR}/Test/inc/Test.h)
     file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
     add_executable(SPTAGTest ${TEST_SRC_FILES} ${TEST_HDR_FILES})
-    target_link_libraries(SPTAGTest SPTAGLibStatic ssdservingLib ${Boost_LIBRARIES} ${TiKV_LIBRARIES} absl_synchronization absl_cord absl_cordz_info absl_cord_internal absl_cordz_functions absl_cordz_handle)
+    target_link_libraries(SPTAGTest SPTAGLibStatic ssdservingLib ${Boost_LIBRARIES} ${TiKV_LIBRARIES})
+    if (TIKV)
+        # gRPC's static libs require these absl symbols; only link when the
+        # TiKV backend (and thus gRPC) is in the dependency closure.
+        target_link_libraries(SPTAGTest absl_synchronization absl_cord absl_cordz_info absl_cord_internal absl_cordz_functions absl_cordz_handle)
+    endif()
 
     install(TARGETS SPTAGTest
       RUNTIME DESTINATION bin  
