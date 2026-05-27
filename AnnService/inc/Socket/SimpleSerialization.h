@@ -23,7 +23,7 @@ namespace SimpleSerialization
     SimpleWriteBuffer(const T& p_val, std::uint8_t* p_buffer)
     {
         static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "Only applied for fundanmental type.");
+                      "Only applied for fundamental type.");
 
         *(reinterpret_cast<T*>(p_buffer)) = p_val;
         return p_buffer + sizeof(T);
@@ -35,7 +35,7 @@ namespace SimpleSerialization
     SimpleReadBuffer(const std::uint8_t* p_buffer, T& p_val)
     {
         static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "Only applied for fundanmental type.");
+                      "Only applied for fundamental type.");
 
         p_val = *(reinterpret_cast<const T*>(p_buffer));
         return p_buffer + sizeof(T);
@@ -47,7 +47,7 @@ namespace SimpleSerialization
     EstimateBufferSize(const T& p_val)
     {
         static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "Only applied for fundanmental type.");
+                      "Only applied for fundamental type.");
 
         return sizeof(T);
     }
@@ -90,7 +90,7 @@ namespace SimpleSerialization
     SafeSimpleReadBuffer(const std::uint8_t* p_buffer, const std::uint8_t* p_bufEnd, T& p_val)
     {
         static_assert(std::is_fundamental<T>::value || std::is_enum<T>::value,
-                      "Only applied for fundanmental type.");
+                      "Only applied for fundamental type.");
 
         if (p_buffer == nullptr) return nullptr;
         if (p_bufEnd != nullptr && static_cast<std::size_t>(p_bufEnd - p_buffer) < sizeof(T)) return nullptr;
