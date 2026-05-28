@@ -382,6 +382,10 @@ namespace SPTAG {
             }
 
             virtual ErrorCode Checkpoint(std::string prefix) { return ErrorCode::Success; }
+
+            // Dual-pool: return true if the head at ordinal headOrd is unfilter-only (role==1).
+            virtual bool IsUnfilterOnlyHead(int headOrd) const { return false; }
+            virtual bool HasHeadRoles() const { return false; }
         };
     } // SPANN
 } // SPTAG

@@ -1375,26 +1375,21 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     }
     else if (searchHeadBundleNodes.empty() && m_headBundleNodes.size() > 1)
     {
-        // SPTAG_CROSSEDGE_UNFILTER ablation: for queries with no tag scope
-        // (unfilter) treat all bundle nodes as candidates so the cross-edge
-        // unified traversal can replace the per-node serial fanout. This
-        // lets us validate the capacity model unfilter_QPS ≈ narrow_QPS / N
-        // plus a small cross-edge bonus.
-        static const bool s_crossEdgeUnfilter =
-            (std::getenv("SPTAG_CROSSEDGE_UNFILTER") != nullptr);
-        if (s_crossEdgeUnfilter) {
-            candidateNodes.reserve(m_headBundleNodes.size());
-            for (size_t i = 0; i < m_headBundleNodes.size(); ++i) {
-                const auto& bn = m_headBundleNodes[i];
-                if (bn.headCount == 0 || bn.postingCount == 0) continue;
-                candidateNodes.push_back(static_cast<int>(bn.nodeId));
-            }
+        // v5: unfilter (no tag scope) always routes through cross-edge unified
+        // traversal across all per-bundle subgraphs. The global m_index is no
+        // longer used for navigation in any code path.
+        candidateNodes.reserve(m_headBundleNodes.size());
+        for (size_t i = 0; i < m_headBundleNodes.size(); ++i) {
+            const auto& bn = m_headBundleNodes[i];
+            if (bn.headCount == 0 || bn.postingCount == 0) continue;
+            candidateNodes.push_back(static_cast<int>(bn.nodeId));
         }
     }
 
     if (adaptiveFilteredNprobeEnabled && filterSelectivity < 1.0f) {
-        const double globalTenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : m_index->GetNumSamples());
-        const SizeType globalPostingCount = std::max<SizeType>(1, m_index->GetNumSamples());
+        const SizeType totalHeads = TotalHeadSampleCount();
+        const double globalTenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : totalHeads);
+        const SizeType globalPostingCount = std::max<SizeType>(1, totalHeads);
         const double globalAvgPosting = std::max(1.0, globalTenantSize / static_cast<double>(globalPostingCount));
 
         float recallTarget = m_options.m_filteredSearchTargetRecall;
@@ -1526,7 +1521,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     {
         int fixedNprobe = GetFixedNprobeOverride();
         if (fixedNprobe > 0) {
-            SizeType cap = m_index ? m_index->GetNumSamples() : fixedNprobe;
+            SizeType cap = HasHeadBundleNodes() ? TotalHeadSampleCount() : (m_index ? m_index->GetNumSamples() : fixedNprobe);
             if (!candidateNodes.empty()) {
                 SizeType candidateCap = 0;
                 for (int nodeId : candidateNodes) {
@@ -1548,7 +1543,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             static_cast<double>(m_options.m_filteredSearchCoverageExponent),
             nprobeBase,
             candidateNodes.size(),
-            static_cast<int>(m_index->GetNumSamples()),
+            static_cast<int>(TotalHeadSampleCount()),
             postingTarget);
     }
 

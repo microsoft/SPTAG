@@ -111,6 +111,7 @@ namespace SPTAG {
             float m_preReassignRatio;
             bool m_enableWAL;
             bool m_disableCheckpoint;
+            std::string m_headRoleFile;
 
             // Per-vector tags embedded in posting metadata
             int m_numTagsPerVec;

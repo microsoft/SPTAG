@@ -108,6 +108,7 @@ DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_unfilterTailBufferLength, int, 0, "UnfilterTailBufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
+DefineSSDParameter(m_headRoleFile, std::string, std::string("head_role.bin"), "HeadRoleFile")
 DefineSSDParameter(m_numTagsPerVec, int, 0, "NumTagsPerVec")
 
 // GPU Building

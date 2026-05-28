@@ -215,6 +215,10 @@ namespace SPTAG::SPANN {
         int m_numTagsPerVec = 0;
         int m_tagBytesPerVec = 0;  // m_numTagsPerVec * sizeof(uint32_t)
 
+        // Dual-pool v3: head role sidecar (role==0: H1 filter+unfilter, role==1: U_extra unfilter-only)
+        std::vector<uint8_t> m_headRole;
+        bool m_hasHeadRole = false;
+
     public:
         void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
             m_numTagsPerVec = numTagsPerVec;
@@ -233,6 +237,37 @@ namespace SPTAG::SPANN {
         void SetHeadVectorOwners(const std::unordered_map<SizeType, int>& headVectorOwners) {
             m_headVectorOwners = headVectorOwners;
         }
+
+        // Dual-pool v3: head role sidecar management
+        void SetHeadRoles(const std::vector<uint8_t>& roles) {
+            m_headRole = roles;
+            m_hasHeadRole = !roles.empty();
+        }
+        void LoadHeadRole() {
+            std::string path = m_opt->m_indexDirectory + FolderSep + m_opt->m_headRoleFile;
+            if (!fileexists(path.c_str())) {
+                m_hasHeadRole = false;
+                return;
+            }
+            FILE* fp = fopen(path.c_str(), "rb");
+            if (!fp) { m_hasHeadRole = false; return; }
+            fseek(fp, 0, SEEK_END);
+            long sz = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            if (sz <= 0) { fclose(fp); m_hasHeadRole = false; return; }
+            m_headRole.resize(static_cast<size_t>(sz));
+            size_t nread = fread(m_headRole.data(), 1, static_cast<size_t>(sz), fp);
+            fclose(fp);
+            m_hasHeadRole = (nread == static_cast<size_t>(sz));
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "DualPool: loaded head_role.bin (%zu heads, hasRole=%d)\n",
+                m_headRole.size(), (int)m_hasHeadRole);
+        }
+        bool IsUnfilterOnlyHead(int headOrd) const override {
+            if (!m_hasHeadRole || headOrd < 0 || headOrd >= (int)m_headRole.size()) return false;
+            return m_headRole[headOrd] == 1;
+        }
+        bool HasHeadRoles() const override { return m_hasHeadRole; }
 
         // --- Unfilter-tail sidecar accessors -----------------------------------
         // Returns the number of records to scan for a query with the given
@@ -1886,6 +1921,8 @@ namespace SPTAG::SPANN {
 	    }
             // Unfilter-tail sidecar: load if present, fall back to pure=total.
             LoadOrInitPostingPureCounts();
+            // Dual-pool v3: head role sidecar (optional; absent = all heads are H1).
+            LoadHeadRole();
             if (m_opt->m_update) {
                 if (m_splitThreadPool == nullptr) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize thread pools, append: %d, reassign %d\n", m_opt->m_appendThreadNum, m_opt->m_reassignThreadNum);
@@ -2453,12 +2490,20 @@ namespace SPTAG::SPANN {
 
                     std::vector<std::vector<uint8_t>> allowedHeadMasks(plannedNodeVectors.size(), std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
                     std::vector<size_t> nodeHeadCounts(plannedNodeVectors.size(), 0);
+                    // Dual-pool v3: collect U_extra head ordinals per node (skipped from normal RNGSelection)
+                    std::vector<std::vector<SizeType>> uExtraOrdPerNode(plannedNodeVectors.size());
                     for (SizeType headId = 0; headId < static_cast<SizeType>(headToNode.size()); ++headId)
                     {
                         int nodeId = headToNode[headId];
                         if (nodeId >= 0 && nodeId < static_cast<int>(allowedHeadMasks.size())) {
-                            allowedHeadMasks[static_cast<size_t>(nodeId)][static_cast<size_t>(headId)] = 1;
-                            ++nodeHeadCounts[static_cast<size_t>(nodeId)];
+                            // Exclude U_extra (role==1) from the RNG selection mask; they get
+                            // postings via separate k-NN below so H1 catchments are preserved.
+                            if (m_hasHeadRole && IsUnfilterOnlyHead(static_cast<int>(headId))) {
+                                uExtraOrdPerNode[static_cast<size_t>(nodeId)].push_back(headId);
+                            } else {
+                                allowedHeadMasks[static_cast<size_t>(nodeId)][static_cast<size_t>(headId)] = 1;
+                                ++nodeHeadCounts[static_cast<size_t>(nodeId)];
+                            }
                         }
                     }
                     for (size_t nodeId = 0; nodeId < allowedHeadMasks.size(); ++nodeId)
@@ -2577,6 +2622,68 @@ namespace SPTAG::SPANN {
                                  "Node-aware candidate search finished with %zu node/vector assignments across %zu nodes.\n",
                                  assignmentEntries.size(),
                                  plannedNodeVectors.size());
+
+                    // Dual-pool v3: build U_extra postings via k-NN within each bundle.
+                    // For each U_extra head u in bundle N, find m_opt->m_replicaCount nearest
+                    // base vectors from plannedNodeVectors[N] and add them as postings.
+                    // This gives U_extra their own coverage without stealing from H1 postings.
+                    if (m_hasHeadRole) {
+                        size_t totalUExtra = 0;
+                        for (auto& v : uExtraOrdPerNode) totalUExtra += v.size();
+                        if (totalUExtra > 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "DualPool v3: building U_extra postings via k-NN (%zu total U_extra heads)\n",
+                                totalUExtra);
+                            int K = m_opt->m_replicaCount;
+                            // Grow selections to accommodate U_extra postings
+                            size_t origSize = assignmentEntries.size();
+                            size_t newSize = origSize + totalUExtra;
+                            selections.m_selections.resize(newSize * static_cast<size_t>(K));
+                            // Update m_end so operator[] bounds check covers U_extra entries.
+                            selections.m_totalsize = newSize * static_cast<size_t>(K);
+                            selections.m_end = newSize * static_cast<size_t>(K);
+
+                            size_t uExtraOffset = origSize;
+                            for (size_t nodeId = 0; nodeId < uExtraOrdPerNode.size(); ++nodeId) {
+                                const auto& uOrdList = uExtraOrdPerNode[nodeId];
+                                if (uOrdList.empty()) continue;
+                                const auto& nodeVecs = plannedNodeVectors[nodeId];
+                                for (SizeType uOrd : uOrdList) {
+                                    const ValueType* uVec = (const ValueType*)p_headIndex->GetSample(uOrd);
+                                    if (!uVec) { ++uExtraOffset; continue; }
+                                    // Find K nearest base vectors in this bundle via brute force
+                                    using PFV = std::pair<float, SizeType>;
+                                    std::priority_queue<PFV> topK;
+                                    for (SizeType vid : nodeVecs) {
+                                        const ValueType* bVec = (const ValueType*)fullVectors->GetVector(vid);
+                                        if (!bVec) continue;
+                                        float d = (float)p_headIndex->ComputeDistance(
+                                            static_cast<const void*>(uVec),
+                                            static_cast<const void*>(bVec));
+                                        if ((int)topK.size() < K)
+                                            topK.push({d, vid});
+                                        else if (d < topK.top().first) {
+                                            topK.pop(); topK.push({d, vid});
+                                        }
+                                    }
+                                    size_t selOff = uExtraOffset * static_cast<size_t>(K);
+                                    int kk = 0;
+                                    while (!topK.empty() && kk < K) {
+                                        auto [d, vid] = topK.top(); topK.pop();
+                                        Edge& e = selections.m_selections[selOff + kk];
+                                        e.node = uOrd;
+                                        e.tonode = vid;
+                                        e.distance = d;
+                                        ++postingListSize[uOrd];
+                                        ++kk;
+                                    }
+                                    ++uExtraOffset;
+                                }
+                            }
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "DualPool v3: U_extra posting build done.\n");
+                        }
+                    }
                 }
                 else
                 {

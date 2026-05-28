@@ -99,6 +99,10 @@ namespace SPTAG
             std::vector<std::vector<SizeType>> m_pendingNodeHeadSelections;
             std::unordered_map<SizeType, int> m_pendingHeadVectorOwners;
 
+            // Dual-pool v3: per-bundle U_extra VID lists and head role vector
+            std::vector<std::vector<SizeType>> m_pendingNodeUExtraSelections;
+            std::vector<uint8_t> m_pendingHeadRoles;
+
  
 
         public:
@@ -117,6 +121,26 @@ namespace SPTAG
             inline Options* GetOptions() { return &m_options; }
             inline const std::vector<HeadBundleNodeInfo>& GetHeadBundleNodes() const { return m_headBundleNodes; }
             inline bool HasHeadBundleNodes() const { return !m_headBundleNodes.empty(); }
+
+            // v5: Σ bundle.headCount — canonical "total head count" after cross-edges unified
+            // the per-bundle subgraphs into one logical graph. Replaces m_index->GetNumSamples()
+            // at sites where the value means "how many heads exist", not "navigate via m_index".
+            inline SizeType TotalHeadSampleCount() const {
+                SizeType n = 0;
+                for (const auto& bn : m_headBundleNodes) n += bn.headCount;
+                return n;
+            }
+
+            // Dual-pool v3: role-based head classification using loaded head_role.bin sidecar.
+            inline bool HasHeadRoles() const {
+                return m_extraSearcher && m_extraSearcher->HasHeadRoles();
+            }
+            inline bool IsHeadRoleUnfilterOnly(SizeType globalHeadVID) const {
+                if (!m_extraSearcher) return false;
+                auto bIt = m_globalHeadVIDToLocalHID.find(globalHeadVID);
+                if (bIt == m_globalHeadVIDToLocalHID.end()) return false;
+                return m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(bIt->second));
+            }
 
             // Set per-vector tags to be embedded in posting metadata during build
             void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
