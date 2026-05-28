@@ -64,7 +64,6 @@ BOOST_AUTO_TEST_SUITE(VersionMapTest)
 BOOST_AUTO_TEST_CASE(Local_InitializeAndCount)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
     BOOST_CHECK_EQUAL(vm->Count(), 100);
     BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 }
@@ -72,7 +71,6 @@ BOOST_AUTO_TEST_CASE(Local_InitializeAndCount)
 BOOST_AUTO_TEST_CASE(Local_DeleteAndDeleted)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(50, 1, 50);
 
     BOOST_CHECK(!vm->Deleted(0));
     BOOST_CHECK(vm->Delete(0));
@@ -87,7 +85,6 @@ BOOST_AUTO_TEST_CASE(Local_DeleteAndDeleted)
 BOOST_AUTO_TEST_CASE(Local_GetSetVersion)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     // VersionLabel initializes to 0xff (not 0, not deleted=0xfe)
     BOOST_CHECK_EQUAL(vm->GetVersion(0), 0xff);
@@ -99,7 +96,6 @@ BOOST_AUTO_TEST_CASE(Local_GetSetVersion)
 BOOST_AUTO_TEST_CASE(Local_IncVersion)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     // VersionLabel initial value is 0xff, so first Inc gives (0xff+1)&0x7f = 0
     uint8_t newVer = 0;
@@ -117,7 +113,6 @@ BOOST_AUTO_TEST_CASE(Local_IncVersion)
 BOOST_AUTO_TEST_CASE(Local_IncVersionWraparound)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(10, 1, 10);
 
     // Set version to 0x7e (126), one below max
     vm->SetVersion(0, 0x7e);
@@ -130,20 +125,9 @@ BOOST_AUTO_TEST_CASE(Local_IncVersionWraparound)
     BOOST_CHECK_EQUAL(newVer, 0x00);
 }
 
-BOOST_AUTO_TEST_CASE(Local_AddBatch)
-{
-    auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 200);
-
-    BOOST_CHECK_EQUAL(vm->Count(), 100);
-    vm->AddBatch(50);
-    BOOST_CHECK_EQUAL(vm->Count(), 150);
-}
-
 BOOST_AUTO_TEST_CASE(Local_DeleteAll)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(20, 1, 20);
 
     vm->DeleteAll();
     for (int i = 0; i < 20; i++) {
@@ -154,7 +138,6 @@ BOOST_AUTO_TEST_CASE(Local_DeleteAll)
 BOOST_AUTO_TEST_CASE(Local_BatchGetVersions)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     vm->SetVersion(5, 10);
     vm->SetVersion(10, 20);
@@ -363,33 +346,6 @@ BOOST_AUTO_TEST_CASE(TiKV_IncVersionWraparound)
 
     BOOST_CHECK(vm->IncVersion(0, &newVer));
     BOOST_CHECK_EQUAL(newVer, 0x00);
-}
-
-BOOST_AUTO_TEST_CASE(TiKV_AddBatch)
-{
-    auto vm = MakeTiKVVersionMap("AddBatch");
-    if (!vm) return;
-
-    vm->Initialize(100, 1, 100);
-    BOOST_CHECK_EQUAL(vm->Count(), 100);
-
-    vm->AddBatch(50);
-    BOOST_CHECK_EQUAL(vm->Count(), 150);
-
-    // Old VIDs should still be alive
-    BOOST_CHECK(!vm->Deleted(0));
-    BOOST_CHECK(!vm->Deleted(99));
-
-    // VIDs in newly created chunks (beyond old last chunk) should be deleted
-    // With chunkSize=64: old chunks are 0,1. NewLastChunk = ChunkId(149)=2.
-    // VIDs 128-149 are in chunk 2, which is newly created as 0xfe.
-    BOOST_CHECK(vm->Deleted(128));
-    BOOST_CHECK(vm->Deleted(149));
-
-    // VIDs 100-127 are in chunk 1 (existing), initialized as 0x00 by Initialize
-    // They remain 0x00 after AddBatch (not overwritten)
-    BOOST_CHECK(!vm->Deleted(100));
-    BOOST_CHECK(!vm->Deleted(127));
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_DeleteAll)

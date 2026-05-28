@@ -618,11 +618,6 @@ namespace SPTAG {
             {
                 return ErrorCode::Undefined;
             }
-            
-            virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) 
-            {
-                return ErrorCode::Undefined;
-            }
 
             virtual bool AllFinished() { return false; }
             virtual void GetDBStats() { return; }

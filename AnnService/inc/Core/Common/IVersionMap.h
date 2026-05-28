@@ -28,17 +28,17 @@ namespace SPTAG
         public:
             virtual ~IVersionMap() = default;
 
-            virtual void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr) = 0;
             virtual void DeleteAll() = 0;
 
-            virtual SizeType Count() const = 0;
-            virtual SizeType GetDeleteCount() const = 0;
-            virtual SizeType GetVectorNum() = 0;
-            virtual std::uint64_t BufferSize() const = 0;
+            virtual SizeType Count() = 0;
+            virtual SizeType GetDeleteCount() = 0;
+            virtual std::uint64_t BufferSize() = 0;
 
-            virtual bool Deleted(const SizeType& key) const = 0;
-            virtual bool Deleted(const SizeType& key, VersionReadPolicy policy) const { return Deleted(key); }
+            virtual bool Deleted(const SizeType& key) = 0;
+            virtual bool Deleted(const SizeType& key, VersionReadPolicy policy) { return Deleted(key); }
             virtual bool Delete(const SizeType& key) = 0;
+
+            virtual ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) = 0;
 
             virtual uint8_t GetVersion(const SizeType& key) = 0;
             virtual uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) { return GetVersion(key); }
@@ -50,25 +50,10 @@ namespace SPTAG
             ///   If 0xff, just increment whatever the current value is (no check).
             virtual bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) = 0;
 
-            virtual ErrorCode AddBatch(SizeType num) = 0;
-            virtual ErrorCode AddBatch(SizeType num, bool deleted)
-            {
-                SizeType begin = Count();
-                auto ret = AddBatch(num);
-                if (ret == ErrorCode::Success && deleted) {
-                    for (SizeType i = begin; i < begin + num; i++) {
-                        Delete(i);
-                    }
-                }
-                return ret;
-            }
-            virtual void SetR(SizeType num) = 0;
-
             virtual ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) = 0;
             virtual ErrorCode Save(const std::string& filename) = 0;
             virtual ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity) = 0;
             virtual ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) = 0;
-            virtual ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity) = 0;
 
             /// Batch version check for a set of VIDs.
             /// Returns a vector of versions (0xfe = deleted) in the same order as vids.

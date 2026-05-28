@@ -225,7 +225,7 @@ namespace SPTAG
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr) override
+            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)
             {
                 m_count = size;
 
@@ -307,6 +307,10 @@ namespace SPTAG
                     m_layer, size, totalChunks, m_deleted.load(), (globalIDs && globalIDs->R() > 0) ? globalIDs->R() : 0);
             }
 
+            ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override {
+                return ErrorCode::Success;
+            }
+            
             void DeleteAll() override
             {
                 SizeType totalChunks = (m_count.load() + m_chunkSize - 1) / m_chunkSize;
@@ -317,17 +321,16 @@ namespace SPTAG
                 m_deleted = m_count.load();
             }
 
-            SizeType Count() const override { return m_count.load(); }
-            SizeType GetDeleteCount() const override { return m_deleted.load(); }
-            SizeType GetVectorNum() override { return m_count.load(); }
-            std::uint64_t BufferSize() const override { return static_cast<std::uint64_t>(m_count.load()) + sizeof(SizeType); }
+            SizeType Count() override { return m_count.load(); }
+            SizeType GetDeleteCount() override { return m_deleted.load(); }
+            std::uint64_t BufferSize() override { return static_cast<std::uint64_t>(m_count.load()) + sizeof(SizeType); }
 
-            bool Deleted(const SizeType& key) const override
+            bool Deleted(const SizeType& key) override
             {
                 return Deleted(key, VersionReadPolicy::UseCache);
             }
 
-            bool Deleted(const SizeType& key, VersionReadPolicy policy) const override
+            bool Deleted(const SizeType& key, VersionReadPolicy policy) override
             {
                 if (key < 0 || key >= m_count.load()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Deleted: invalid key %d (max %d)\n", key, m_count.load());
@@ -433,56 +436,6 @@ namespace SPTAG
                 return false;
             }
 
-            ErrorCode AddBatch(SizeType num) override
-            {
-                return AddBatch(num, false);
-            }
-
-            ErrorCode AddBatch(SizeType num, bool deleted) override
-            {
-                if (num <= 0) return ErrorCode::Success;
-
-                SizeType oldCount = m_count.load();
-                SizeType newCount = oldCount + num;
-
-                // Create any new chunks needed (init to 0xff = uninitialized, matching VersionLabel)
-                SizeType oldLastChunk = (oldCount > 0) ? ChunkId(oldCount - 1) : -1;
-                SizeType newLastChunk = ChunkId(newCount - 1);
-
-                if (!deleted) {
-                    for (SizeType c = oldLastChunk + 1; c <= newLastChunk; c++) {
-                        std::string newChunk(m_chunkSize, static_cast<char>(0xff));
-                        WriteChunk(c, newChunk);
-                    }
-                } else {
-                    SizeType firstChunk = ChunkId(oldCount);
-                    for (SizeType c = firstChunk; c <= newLastChunk; c++) {
-                        std::lock_guard<std::mutex> lock(ChunkMutex(c));
-                        std::string chunk = (c <= oldLastChunk) ? ReadChunk(c) : std::string();
-                        if (chunk.empty()) {
-                            chunk.assign(m_chunkSize, static_cast<char>(0xff));
-                        }
-
-                        int beginOffset = (c == firstChunk) ? ChunkOffset(oldCount) : 0;
-                        int endOffset = (c == newLastChunk) ? ChunkOffset(newCount - 1) + 1 : m_chunkSize;
-                        std::fill(chunk.begin() + beginOffset, chunk.begin() + endOffset, static_cast<char>(0xfe));
-
-                        WriteChunk(c, chunk);
-                    }
-                    m_deleted.fetch_add(num, std::memory_order_relaxed);
-                }
-
-                m_count = newCount;
-                SaveCount();
-                return ErrorCode::Success;
-            }
-
-            void SetR(SizeType num) override
-            {
-                m_count = num;
-                SaveCount();
-            }
-
             // Save/Load: For TiKV mode, data is already persisted in TiKV.
             // These are no-ops for TiKV mode.
             ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) override
@@ -504,11 +457,6 @@ namespace SPTAG
             }
 
             ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) override
-            {
-                return LoadCountFromTiKV();
-            }
-
-            ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity) override
             {
                 return LoadCountFromTiKV();
             }

@@ -5,7 +5,8 @@
 #define _SPTAG_COMMON_LOCALVERSIONMAP_H_
 
 #include "IVersionMap.h"
-#include "VersionLabel.h"
+#include "inc/Helper/ConcurrentSet.h"
+#include <shared_mutex>
 
 namespace SPTAG
 {
@@ -16,37 +17,100 @@ namespace SPTAG
         class LocalVersionMap : public IVersionMap
         {
         private:
-            VersionLabel m_label;
+            Helper::Concurrent::ConcurrentMap<SizeType, uint8_t> m_label;
+            std::shared_timed_mutex m_updateMutex;
         public:
             LocalVersionMap() = default;
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr) override
-            {
-                m_label.Initialize(size, blockSize, capacity, globalIDs);
+            void DeleteAll() override { 
+                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                m_label.clear(); 
             }
 
-            void DeleteAll() override { m_label.DeleteAll(); }
+            SizeType Count() override { 
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                return (SizeType)(m_label.size()); 
+            }
+            SizeType GetDeleteCount() override { return 0; }
+            std::uint64_t BufferSize() override { 
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                return m_label.size() * (sizeof(uint8_t) + sizeof(SizeType)); 
+            }
 
-            SizeType Count() const override { return m_label.Count(); }
-            SizeType GetDeleteCount() const override { return m_label.GetDeleteCount(); }
-            SizeType GetVectorNum() override { return m_label.GetVectorNum(); }
-            std::uint64_t BufferSize() const override { return m_label.BufferSize(); }
+            bool Deleted(const SizeType& key) override {
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                if (m_label.find(key) != m_label.end()) return false;
+                return true;
+            }
+            bool Delete(const SizeType& key) override { 
+                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                return m_label.unsafe_erase(key); 
+            }
 
-            bool Deleted(const SizeType& key) const override { return m_label.Deleted(key); }
-            bool Delete(const SizeType& key) override { return m_label.Delete(key); }
+            ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override {
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                globalIDs.clear();
+                for (const auto& it : m_label) {
+                    globalIDs.push_back(it.first);
+                }
+                return ErrorCode::Success;
+            }
 
-            uint8_t GetVersion(const SizeType& key) override { return m_label.GetVersion(key); }
-            void SetVersion(const SizeType& key, const uint8_t& version) override { m_label.SetVersion(key, version); }
-            bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override { return m_label.IncVersion(key, newVersion); }
+            uint8_t GetVersion(const SizeType& key) override {
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                auto iter = m_label.find(key);
+                if (iter == m_label.end()) return 0xfe;
+                return iter->second; 
+            }
+            void SetVersion(const SizeType& key, const uint8_t& version) override { 
+                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                m_label[key] = version;
+            }
+            bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override {
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                auto iter = m_label.find(key);
+                if (iter == m_label.end()) return false;
+                uint8_t oldVersion = iter->second;
+                *newVersion = (oldVersion+1) & 0x7f;
+                m_label[key] = *newVersion;
+                return true; 
+            }
 
-            ErrorCode AddBatch(SizeType num) override { return m_label.AddBatch(num); }
-            void SetR(SizeType num) override { m_label.SetR(num); }
-
-            ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) override { return m_label.Save(output); }
-            ErrorCode Save(const std::string& filename) override { return m_label.Save(filename); }
-            ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity) override { return m_label.Load(input, blockSize, capacity); }
-            ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) override { return m_label.Load(filename, blockSize, capacity); }
-            ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity) override { return m_label.Load(pmemoryFile, blockSize, capacity); }
+            ErrorCode Save(std::shared_ptr<Helper::DiskIO> ptr) override { 
+                std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                SizeType CR = m_label.size();
+                IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&CR);
+                for (auto& it : m_label) {
+                    IOBINARY(ptr, WriteBinary, sizeof(SizeType), (char*)&(it.first));
+                    IOBINARY(ptr, WriteBinary, sizeof(uint8_t), (char*)&(it.second));
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Save mapping (%lld, 1) Finish!\n", (std::int64_t)CR);
+                return ErrorCode::Success;
+            }
+            ErrorCode Save(const std::string& filename) override { 
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::out)) return ErrorCode::FailedCreateFile;
+                return Save(ptr);
+            }
+            ErrorCode Load(std::shared_ptr<Helper::DiskIO> ptr, SizeType blockSize, SizeType capacity) override { 
+                SizeType CR;
+                IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&CR);
+                for (int i = 0; i < CR; i++) {
+                    SizeType key;
+                    uint8_t value;
+                    IOBINARY(ptr, ReadBinary, sizeof(SizeType), (char*)&key);
+                    IOBINARY(ptr, ReadBinary, sizeof(uint8_t), (char*)&value);
+                    m_label[key] = value;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping (%lld, 1) Finish!\n", (std::int64_t)CR);
+                return ErrorCode::Success;
+            }
+            ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) override { 
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load mapping From %s\n", filename.c_str());
+                auto ptr = f_createIO();
+                if (ptr == nullptr || !ptr->Initialize(filename.c_str(), std::ios::binary | std::ios::in)) return ErrorCode::FailedOpenFile;
+                return Load(ptr, blockSize, capacity);
+            }
         };
     }
 }

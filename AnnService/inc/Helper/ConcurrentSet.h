@@ -87,13 +87,19 @@ namespace SPTAG
 
                 ~ConcurrentMap() {}
 
-                iterator find(const K& k)
+                iterator find(const K& k) const
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.find(k);
                 }
 
-                iterator end() noexcept
+                iterator begin() const noexcept
+                {
+                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    return m_data.begin();
+                }
+
+                iterator end() const noexcept
                 {
                     std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.end();
@@ -116,6 +122,18 @@ namespace SPTAG
                 {
                     std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
                     return m_data.insert(v);
+                }
+
+                void clear()
+                {
+                    std::unique_lock<std::shared_timed_mutex> lock(*m_lock);
+                    m_data.clear();
+                }
+                
+                size_t size() const
+                {
+                    std::shared_lock<std::shared_timed_mutex> lock(*m_lock);
+                    return m_data.size();
                 }
 
             private:

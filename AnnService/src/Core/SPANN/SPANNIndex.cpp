@@ -1753,20 +1753,6 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
             return ErrorCode::EmptyIndex;
         }
 
-        for (int layer = 0; layer < m_extraSearchers.size(); layer++)
-        {
-            auto addCapacityBegin = std::chrono::high_resolution_clock::now();
-            if (m_extraSearchers[layer]->AddIDCapacity(p_vectorNum, layer == 0? false : true) != ErrorCode::Success)
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow for layer %d: add VID: %d\n", layer, begin);
-                return ErrorCode::MemoryOverFlow;
-            }
-            auto addCapacityEnd = std::chrono::high_resolution_clock::now();
-            auto addCapacityUs = std::chrono::duration_cast<std::chrono::microseconds>(addCapacityEnd - addCapacityBegin).count();
-            if (layer == 0) addIndexAddCapacityLayer0Us += addCapacityUs;
-            else addIndexAddCapacityUpperUs += addCapacityUs;
-        }
-
         auto metadataBegin = std::chrono::high_resolution_clock::now();
         if (m_pMetadata != nullptr)
         {

@@ -399,12 +399,7 @@ namespace SPTAG::SPANN {
 
         virtual ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
         {
-            for (SizeType i = 0; i < m_versionMap->Count(); i++) 
-            {
-                if (!m_versionMap->Deleted(i))
-                    globalIDs.push_back(i);
-            }
-            return ErrorCode::Success;
+            return m_versionMap->GetContainedIDs(globalIDs);
         }
 
         bool ShouldCheckVersionMapInSearch(bool p_checkVersionMap) const
@@ -415,11 +410,6 @@ namespace SPTAG::SPANN {
                 return true;
             }
             return p_checkVersionMap;
-        }
-        
-        virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) override
-        {
-            return m_versionMap->AddBatch(capa, deleted);
         }
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
@@ -1826,7 +1816,6 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
-                	m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                     m_versionMap->DeleteAll();
 			        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
 			        std::shared_ptr<IExtraSearcher> storeExtraSearcher;
@@ -1940,12 +1929,6 @@ namespace SPTAG::SPANN {
                     char* ptr = (char*)(assignment.c_str());
                     SizeType VID = *(reinterpret_cast<SizeType*>(ptr));
                     if (assignment.size() == m_vectorInfoSize) {
-                        if (VID >= m_versionMap->Count()) {
-                            if (m_versionMap->AddBatch(VID - m_versionMap->GetVectorNum() + 1) != ErrorCode::Success) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow: VID: %lld, Map Size:%d\n", (std::int64_t)VID, m_versionMap->BufferSize());
-                                return false;
-                            }
-                        }
                         std::shared_ptr<VectorSet> vectorSet;
                         vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)ptr + m_metaDataSize, m_vectorDataSize, false),
                             GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
@@ -2540,8 +2523,19 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
-            m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
+            //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+
+            if (p_localToGlobal.R() > 0) {
+                for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
+                    SizeType globalID = *(p_localToGlobal[i]);
+                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, -1);
+                }
+            } else {
+                for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
+                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, -1);
+                }
+            }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 
