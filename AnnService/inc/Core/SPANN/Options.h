@@ -123,8 +123,6 @@ namespace SPTAG {
             bool m_distributedVersionMap;
             bool m_searchCheckVersionMapOnlyLayer0;
             int m_versionChunkSize;
-            int m_versionCacheTTLMs;
-            int m_versionCacheMaxChunks;
             int m_asyncRpcMaxInflight;
 
             // GPU building

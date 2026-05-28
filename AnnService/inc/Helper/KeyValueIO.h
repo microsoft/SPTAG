@@ -34,6 +34,14 @@ namespace SPTAG
 
             virtual ErrorCode Put(const SizeType key, const std::string& value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) = 0;
 
+            virtual ErrorCode CompareAndSwap(const std::string& key, const std::string& value,
+                                             bool previousNotExist, const std::string& previousValue,
+                                             const std::chrono::microseconds& timeout,
+                                             std::vector<Helper::AsyncReadRequest>* reqs,
+                                             bool* swapped, bool* actualNotExist, std::string* actualValue) {
+                return ErrorCode::Undefined;
+            }
+
             virtual ErrorCode Merge(const SizeType key, const std::string &value,
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;

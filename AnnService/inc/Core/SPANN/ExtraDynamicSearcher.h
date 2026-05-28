@@ -320,11 +320,9 @@ namespace SPTAG::SPANN {
                 tikvMap->SetDB(db);
                 tikvMap->SetLayer(layer);
                 tikvMap->SetChunkSize(p_opt.m_versionChunkSize);
-                tikvMap->SetCacheTTL(p_opt.m_versionCacheTTLMs);
-                tikvMap->SetCacheMaxChunks(p_opt.m_versionCacheMaxChunks);
                 m_versionMap = std::move(tikvMap);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, chunkSize=%d, cacheTTL=%dms, cacheMax=%d)\n",
-                    layer, p_opt.m_versionChunkSize, p_opt.m_versionCacheTTLMs, p_opt.m_versionCacheMaxChunks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, per-VID keys, no local cache)\n",
+                    layer);
             } else 
 #endif
             {
@@ -2790,12 +2788,17 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                uint8_t version;
+                if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
+                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                    version = m_versionMap->GetVersion(VID);
+                } else if (VID >= m_versionMap->Count()) {
+                    m_versionMap->SetR(VID + 1);
+                }
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
                 RNGSelection(p_exWorkSpace, selections, (ValueType*)(p_vectorSet->GetVector(v)), replicaCount);
 
-                uint8_t version = m_versionMap->GetVersion(VID);
                 std::string appendPosting(m_vectorInfoSize, '\0');
                 Serialize((char*)(appendPosting.c_str()), VID, version, p_vectorSet->GetVector(v));
                 if (m_opt->m_enableWAL && m_wal) {

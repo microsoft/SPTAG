@@ -42,6 +42,8 @@ namespace SPTAG
 
             virtual uint8_t GetVersion(const SizeType& key) = 0;
             virtual uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) { return GetVersion(key); }
+            virtual bool TryGetDefaultVersionForNewVector(uint8_t& version) const { return false; }
+            virtual void SetR(SizeType num) {}
             virtual void SetVersion(const SizeType& key, const uint8_t& version) = 0;
             /// Increment the version of a VID.
             /// @param expectedOld If not 0xff, the caller asserts the current version should be this value.

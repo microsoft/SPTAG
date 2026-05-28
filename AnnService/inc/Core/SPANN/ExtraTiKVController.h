@@ -667,6 +667,18 @@ namespace SPTAG::SPANN
             return Put(k, value, timeout, reqs);
         }
 
+        ErrorCode CompareAndSwap(const std::string& key, const std::string& value,
+                                 bool previousNotExist, const std::string& previousValue,
+                                 const std::chrono::microseconds& timeout,
+                                 std::vector<Helper::AsyncReadRequest>* reqs,
+                                 bool* swapped, bool* actualNotExist, std::string* actualValue) override
+        {
+            (void)reqs;
+            return RawCompareAndSwapWithRetry(MakePrefixedKey(key), value,
+                previousNotExist, previousValue, timeout,
+                swapped, actualNotExist, actualValue);
+        }
+
         // ---- Delete operations ----
 
         ErrorCode Delete(SizeType key) override {
