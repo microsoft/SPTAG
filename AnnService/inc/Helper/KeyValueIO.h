@@ -48,9 +48,23 @@ namespace SPTAG
             virtual ErrorCode MultiDelete(const std::vector<std::string>& keys,
                                           const std::chrono::microseconds& timeout) { return ErrorCode::Undefined; }
 
+            virtual ErrorCode CompareAndSwap(const std::string& key, const std::string& value,
+                                             bool previousNotExist, const std::string& previousValue,
+                                             const std::chrono::microseconds& timeout,
+                                             std::vector<Helper::AsyncReadRequest>* reqs,
+                                             bool* swapped, bool* actualNotExist, std::string* actualValue) {
+                return ErrorCode::Undefined;
+            }
+
             virtual ErrorCode Merge(const SizeType key, const std::string &value,
                                     const std::chrono::microseconds &timeout,
                                     std::vector<Helper::AsyncReadRequest> *reqs, int& size) = 0;
+
+            virtual ErrorCode MergeWithCAS(const SizeType key, const std::string &value,
+                                           const std::chrono::microseconds &timeout,
+                                           std::vector<Helper::AsyncReadRequest> *reqs, int& size) {
+                return ErrorCode::Undefined;
+            }
 
             virtual ErrorCode MultiMerge(const std::vector<SizeType>& keys, const std::vector<std::string>& values, 
                                          const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs, std::vector<int>& sizes) {

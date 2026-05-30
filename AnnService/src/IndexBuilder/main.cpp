@@ -64,7 +64,7 @@ int main(int argc, char *argv[])
     if (!options->m_builderConfigFile.empty() &&
         iniReader.LoadIniFile(options->m_builderConfigFile) != ErrorCode::Success)
     {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!");
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open index configure file!\n");
         return -1;
     }
 
@@ -118,8 +118,11 @@ int main(int argc, char *argv[])
     }
     else
     {
-        indexBuilder->SetQuantizerFileName(
-            options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));
+        if (!options->m_quantizerFile.empty())
+        {
+            indexBuilder->SetQuantizerFileName(
+                options->m_quantizerFile.substr(options->m_quantizerFile.find_last_of("/\\") + 1));
+        }
         code = indexBuilder->BuildIndex(options->m_normalized);
     }
     if (code == ErrorCode::Success)

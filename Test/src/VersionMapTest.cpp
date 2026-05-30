@@ -32,7 +32,7 @@ static std::unique_ptr<LocalVersionMap> MakeLocalVersionMap()
 // Helper: create a TiKVVersionMap connected to the live TiKV cluster.
 // Requires env TIKV_PD_ADDRESSES (e.g. "127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793").
 // Uses a unique key prefix per test to avoid collision.
-static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int cacheMaxChunks = 100, int cacheTTLMs = 0)
+static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& testName, int chunkSize = 64, int layer = 0)
 {
     const char* pdAddr = std::getenv("TIKV_PD_ADDRESSES");
     if (!pdAddr || std::string(pdAddr).empty()) {
@@ -47,10 +47,8 @@ static std::unique_ptr<TiKVVersionMap> MakeTiKVVersionMap(const std::string& tes
     auto db = std::make_shared<SPTAG::SPANN::TiKVIO>(std::string(pdAddr), prefix, false, 100000);
     auto vm = std::make_unique<TiKVVersionMap>();
     vm->SetDB(db);
-    vm->SetLayer(0);
+    vm->SetLayer(layer);
     vm->SetChunkSize(chunkSize);
-    vm->SetCacheTTL(cacheTTLMs);
-    vm->SetCacheMaxChunks(cacheMaxChunks);
     return vm;
 }
 #endif
@@ -64,7 +62,6 @@ BOOST_AUTO_TEST_SUITE(VersionMapTest)
 BOOST_AUTO_TEST_CASE(Local_InitializeAndCount)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
     BOOST_CHECK_EQUAL(vm->Count(), 100);
     BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 }
@@ -72,7 +69,6 @@ BOOST_AUTO_TEST_CASE(Local_InitializeAndCount)
 BOOST_AUTO_TEST_CASE(Local_DeleteAndDeleted)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(50, 1, 50);
 
     BOOST_CHECK(!vm->Deleted(0));
     BOOST_CHECK(vm->Delete(0));
@@ -87,7 +83,6 @@ BOOST_AUTO_TEST_CASE(Local_DeleteAndDeleted)
 BOOST_AUTO_TEST_CASE(Local_GetSetVersion)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     // VersionLabel initializes to 0xff (not 0, not deleted=0xfe)
     BOOST_CHECK_EQUAL(vm->GetVersion(0), 0xff);
@@ -99,7 +94,6 @@ BOOST_AUTO_TEST_CASE(Local_GetSetVersion)
 BOOST_AUTO_TEST_CASE(Local_IncVersion)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     // VersionLabel initial value is 0xff, so first Inc gives (0xff+1)&0x7f = 0
     uint8_t newVer = 0;
@@ -117,7 +111,6 @@ BOOST_AUTO_TEST_CASE(Local_IncVersion)
 BOOST_AUTO_TEST_CASE(Local_IncVersionWraparound)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(10, 1, 10);
 
     // Set version to 0x7e (126), one below max
     vm->SetVersion(0, 0x7e);
@@ -130,20 +123,9 @@ BOOST_AUTO_TEST_CASE(Local_IncVersionWraparound)
     BOOST_CHECK_EQUAL(newVer, 0x00);
 }
 
-BOOST_AUTO_TEST_CASE(Local_AddBatch)
-{
-    auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 200);
-
-    BOOST_CHECK_EQUAL(vm->Count(), 100);
-    vm->AddBatch(50);
-    BOOST_CHECK_EQUAL(vm->Count(), 150);
-}
-
 BOOST_AUTO_TEST_CASE(Local_DeleteAll)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(20, 1, 20);
 
     vm->DeleteAll();
     for (int i = 0; i < 20; i++) {
@@ -154,7 +136,6 @@ BOOST_AUTO_TEST_CASE(Local_DeleteAll)
 BOOST_AUTO_TEST_CASE(Local_BatchGetVersions)
 {
     auto vm = MakeLocalVersionMap();
-    vm->Initialize(100, 1, 100);
 
     vm->SetVersion(5, 10);
     vm->SetVersion(10, 20);
@@ -201,9 +182,8 @@ BOOST_AUTO_TEST_CASE(TiKV_InitializeAlive)
     }
 }
 
-BOOST_AUTO_TEST_CASE(TiKV_ChunkBoundary)
+BOOST_AUTO_TEST_CASE(TiKV_PerVIDBoundary)
 {
-    // chunkSize=64, so VID 63 is the last in chunk 0, VID 64 is first in chunk 1
     auto vm = MakeTiKVVersionMap("ChunkBound", 64);
     if (!vm) return;
 
@@ -235,11 +215,11 @@ BOOST_AUTO_TEST_CASE(TiKV_DeleteAndDeleted)
     BOOST_CHECK(!vm->Deleted(0));
     BOOST_CHECK(vm->Delete(0));
     BOOST_CHECK(vm->Deleted(0));
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 1);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 
     // Double delete returns false
     BOOST_CHECK(!vm->Delete(0));
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 1);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_DeleteMultiple)
@@ -252,7 +232,7 @@ BOOST_AUTO_TEST_CASE(TiKV_DeleteMultiple)
     for (int i = 0; i < 100; i += 2) {
         BOOST_CHECK(vm->Delete(i));
     }
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 50);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 
     for (int i = 0; i < 100; i++) {
         if (i % 2 == 0) {
@@ -274,13 +254,13 @@ BOOST_AUTO_TEST_CASE(TiKV_GetSetVersion)
     vm->SetVersion(5, 42);
     BOOST_CHECK_EQUAL(vm->GetVersion(5), 42);
 
-    // Setting to 0xfe should count as delete
+    // Setting to 0xfe should mark the vector as deleted.
     SizeType delBefore = vm->GetDeleteCount();
     vm->SetVersion(10, 0xfe);
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), delBefore + 1);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), delBefore);
     BOOST_CHECK(vm->Deleted(10));
 
-    // SetVersion from deleted → alive should decrement delete count
+    // SetVersion from deleted to alive should make the vector visible again.
     vm->SetVersion(10, 0x00);
     BOOST_CHECK_EQUAL(vm->GetDeleteCount(), delBefore);
     BOOST_CHECK(!vm->Deleted(10));
@@ -380,16 +360,11 @@ BOOST_AUTO_TEST_CASE(TiKV_AddBatch)
     BOOST_CHECK(!vm->Deleted(0));
     BOOST_CHECK(!vm->Deleted(99));
 
-    // VIDs in newly created chunks (beyond old last chunk) should be deleted
-    // With chunkSize=64: old chunks are 0,1. NewLastChunk = ChunkId(149)=2.
-    // VIDs 128-149 are in chunk 2, which is newly created as 0xfe.
-    BOOST_CHECK(vm->Deleted(128));
-    BOOST_CHECK(vm->Deleted(149));
-
-    // VIDs 100-127 are in chunk 1 (existing), initialized as 0x00 by Initialize
-    // They remain 0x00 after AddBatch (not overwritten)
+    // New layer-0 VIDs inherit the alive default version.
     BOOST_CHECK(!vm->Deleted(100));
     BOOST_CHECK(!vm->Deleted(127));
+    BOOST_CHECK(!vm->Deleted(128));
+    BOOST_CHECK(!vm->Deleted(149));
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_DeleteAll)
@@ -403,7 +378,7 @@ BOOST_AUTO_TEST_CASE(TiKV_DeleteAll)
     for (int i = 0; i < 50; i++) {
         BOOST_CHECK(vm->Deleted(i));
     }
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 50);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_BatchGetVersions)
@@ -414,8 +389,8 @@ BOOST_AUTO_TEST_CASE(TiKV_BatchGetVersions)
     vm->Initialize(200, 1, 200);
     vm->SetVersion(5, 10);
     vm->SetVersion(10, 20);
-    vm->SetVersion(63, 30);  // chunk boundary
-    vm->SetVersion(64, 40);  // next chunk
+    vm->SetVersion(63, 30);
+    vm->SetVersion(64, 40);
     vm->Delete(100);
 
     std::vector<SizeType> vids = {5, 10, 63, 64, 100, 0, 199};
@@ -462,130 +437,15 @@ BOOST_AUTO_TEST_CASE(TiKV_BatchGetVersionsEmpty)
 }
 
 // ==============================================================
-// Cache Tests
-// ==============================================================
-
-BOOST_AUTO_TEST_CASE(TiKV_CacheHitMiss)
-{
-    auto vm = MakeTiKVVersionMap("CacheHit", 64, 100);
-    if (!vm) return;
-
-    vm->Initialize(200, 1, 200);
-    vm->SetVersion(5, 42);
-
-    // First read populates cache
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 42);
-
-    // Second read should come from cache
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 42);
-
-    // Read another VID in the same chunk (0..63) — should also be cached now
-    BOOST_CHECK_EQUAL(vm->GetVersion(0), 0);
-}
-
-BOOST_AUTO_TEST_CASE(TiKV_CacheNoTTLExpiry)
-{
-    auto vm = MakeTiKVVersionMap("CacheNoTTL", 64, 100);
-    if (!vm) return;
-
-    vm->Initialize(100, 1, 100);
-    vm->SetVersion(5, 10);
-
-    // Read to populate cache
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-
-    // Cache is capacity-bound only; elapsed time should not expire entries.
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
-}
-
-BOOST_AUTO_TEST_CASE(TiKV_CacheTTLExpiry)
-{
-    auto vm = MakeTiKVVersionMap("CacheTTL", 64, 100, 50);
-    if (!vm) return;
-
-    vm->Initialize(100, 1, 100);
-    vm->SetVersion(5, 10);
-
-    // Populate vm's local cache with version 10.
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 10);
-
-    // A separate version-map instance writes the same TiKV key without updating vm's cache.
-    auto writer = std::make_unique<TiKVVersionMap>();
-    writer->SetDB(vm->GetDB());
-    writer->SetLayer(0);
-    writer->SetChunkSize(64);
-    writer->SetCacheMaxChunks(0);
-    BOOST_CHECK(writer->Load(std::string(), 1, 100) == ErrorCode::Success);
-    writer->SetVersion(5, 20);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
-
-    // After TTL expiry, vm should refresh from TiKV and observe the external update.
-    BOOST_CHECK_EQUAL(vm->GetVersion(5), 20);
-}
-
-BOOST_AUTO_TEST_CASE(TiKV_CacheEviction)
-{
-    // Small cache: max 3 chunks, chunkSize=64
-    auto vm = MakeTiKVVersionMap("CacheEvict", 64, 3);
-    if (!vm) return;
-
-    vm->Initialize(500, 1, 500);
-
-    // Set version in 4 different chunks
-    vm->SetVersion(0, 10);    // chunk 0
-    vm->SetVersion(64, 20);   // chunk 1
-    vm->SetVersion(128, 30);  // chunk 2
-    vm->SetVersion(192, 40);  // chunk 3
-
-    // Read all 4 — cache should evict chunk 0 (LRU)
-    BOOST_CHECK_EQUAL(vm->GetVersion(0), 10);
-    BOOST_CHECK_EQUAL(vm->GetVersion(64), 20);
-    BOOST_CHECK_EQUAL(vm->GetVersion(128), 30);
-    BOOST_CHECK_EQUAL(vm->GetVersion(192), 40);
-
-    // All data should still be correct (even if evicted, re-fetched from TiKV)
-    BOOST_CHECK_EQUAL(vm->GetVersion(0), 10);
-}
-
-BOOST_AUTO_TEST_CASE(TiKV_BatchGetWithCache)
-{
-    auto vm = MakeTiKVVersionMap("BatchCache", 64, 100);
-    if (!vm) return;
-
-    vm->Initialize(200, 1, 200);
-    vm->SetVersion(5, 10);
-    vm->SetVersion(100, 20);
-
-    // First BatchGet populates cache for chunks containing VID 5 and 100
-    std::vector<SizeType> vids1 = {5, 100};
-    std::vector<uint8_t> vers1;
-    vm->BatchGetVersions(vids1, vers1);
-    BOOST_CHECK_EQUAL(vers1[0], 10);
-    BOOST_CHECK_EQUAL(vers1[1], 20);
-
-    // Second BatchGet should hit cache
-    std::vector<SizeType> vids2 = {5, 6, 100, 101};
-    std::vector<uint8_t> vers2;
-    vm->BatchGetVersions(vids2, vers2);
-    BOOST_CHECK_EQUAL(vers2[0], 10);
-    BOOST_CHECK_EQUAL(vers2[1], 0);  // VID 6, same chunk as 5
-    BOOST_CHECK_EQUAL(vers2[2], 20);
-    BOOST_CHECK_EQUAL(vers2[3], 0);  // VID 101, same chunk as 100
-}
-
-// ==============================================================
 // Concurrent Access Tests
 // ==============================================================
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentDelete)
 {
-    auto vm = MakeTiKVVersionMap("ConcDel", 64, 0);  // no cache, to avoid stale reads
+    auto vm = MakeTiKVVersionMap("ConcDel", 64);
     if (!vm) return;
 
-    const int N = 256;  // exactly 4 chunks of 64
+    const int N = 256;
     vm->Initialize(N, 1, N);
 
     const int numThreads = 4;
@@ -609,7 +469,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentDelete)
 
     // With non-overlapping ranges over distinct chunks, all deletes should succeed.
     BOOST_CHECK_EQUAL(successCount.load(), N);
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), N);
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 
     for (int i = 0; i < N; i++) {
         BOOST_CHECK(vm->Deleted(i));
@@ -618,7 +478,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentDelete)
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentIncVersion)
 {
-    auto vm = MakeTiKVVersionMap("ConcInc", 64, 0);
+    auto vm = MakeTiKVVersionMap("ConcInc", 64);
     if (!vm) return;
 
     const int N = 100;
@@ -628,8 +488,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentIncVersion)
     const int incsPerThread = 10;
     std::vector<std::thread> threads;
 
-    // Each thread increments all VIDs. With chunk write mutex, increments are
-    // serialized per chunk — total should be numThreads * incsPerThread per VID
+    // Each thread increments all VIDs. Per-VID CAS should preserve every increment.
     for (int t = 0; t < numThreads; t++) {
         threads.emplace_back([&]() {
             for (int round = 0; round < incsPerThread; round++) {
@@ -653,7 +512,7 @@ BOOST_AUTO_TEST_CASE(TiKV_ConcurrentIncVersion)
 
 BOOST_AUTO_TEST_CASE(TiKV_ConcurrentReadWrite)
 {
-    auto vm = MakeTiKVVersionMap("ConcRW", 64, 100);
+    auto vm = MakeTiKVVersionMap("ConcRW", 64);
     if (!vm) return;
 
     const int N = 200;
@@ -725,38 +584,31 @@ BOOST_AUTO_TEST_CASE(TiKV_SingleElement)
     BOOST_CHECK(vm->Deleted(0));
 }
 
-BOOST_AUTO_TEST_CASE(TiKV_ExactChunkSize)
+BOOST_AUTO_TEST_CASE(TiKV_ExactBoundary)
 {
-    // Size is exact multiple of chunkSize
     auto vm = MakeTiKVVersionMap("ExactChunk", 64);
     if (!vm) return;
 
-    vm->Initialize(128, 1, 128); // exactly 2 chunks
+    vm->Initialize(128, 1, 128);
 
-    // Last VID in chunk 0
     BOOST_CHECK(!vm->Deleted(63));
     vm->SetVersion(63, 50);
     BOOST_CHECK_EQUAL(vm->GetVersion(63), 50);
 
-    // First VID in chunk 1
     vm->SetVersion(64, 60);
     BOOST_CHECK_EQUAL(vm->GetVersion(64), 60);
 
-    // Last VID overall
     vm->SetVersion(127, 70);
     BOOST_CHECK_EQUAL(vm->GetVersion(127), 70);
 }
 
-BOOST_AUTO_TEST_CASE(TiKV_PartialLastChunk)
+BOOST_AUTO_TEST_CASE(TiKV_PartialBoundary)
 {
-    // Size not a multiple of chunkSize (100 VIDs, chunkSize=64)
-    // chunk 0: VIDs 0-63, chunk 1: VIDs 64-99 (only 36 used)
     auto vm = MakeTiKVVersionMap("PartialChunk", 64);
     if (!vm) return;
 
     vm->Initialize(100, 1, 100);
 
-    // Verify VIDs near the end of partial chunk
     BOOST_CHECK(!vm->Deleted(99));
     vm->SetVersion(99, 33);
     BOOST_CHECK_EQUAL(vm->GetVersion(99), 33);
@@ -764,7 +616,7 @@ BOOST_AUTO_TEST_CASE(TiKV_PartialLastChunk)
 
 BOOST_AUTO_TEST_CASE(TiKV_InitializeWithGlobalIDs)
 {
-    auto vm = MakeTiKVVersionMap("InitGlobal", 64);
+    auto vm = MakeTiKVVersionMap("InitGlobal", 64, 1);
     if (!vm) return;
 
     // Simulate non-leaf layer: only certain globalIDs are alive
@@ -788,7 +640,21 @@ BOOST_AUTO_TEST_CASE(TiKV_InitializeWithGlobalIDs)
         }
     }
 
-    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), size - (int)globalIDValues.size());
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(TiKV_InitializeLayer1DefaultsDeletedWithoutGlobalIDs)
+{
+    auto vm = MakeTiKVVersionMap("InitLayer1DefaultDeleted", 64, 1);
+    if (!vm) return;
+
+    const int size = 32;
+    vm->Initialize(size, 1, size);
+
+    for (int i = 0; i < size; i++) {
+        BOOST_CHECK_MESSAGE(vm->Deleted(i), "VID " << i << " should default to deleted on layer 1");
+    }
+    BOOST_CHECK_EQUAL(vm->GetDeleteCount(), 0);
 }
 
 BOOST_AUTO_TEST_CASE(TiKV_SaveLoadCount)

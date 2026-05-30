@@ -628,11 +628,6 @@ namespace SPTAG {
             {
                 return ErrorCode::Undefined;
             }
-            
-            virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) 
-            {
-                return ErrorCode::Undefined;
-            }
 
             // Bind a routing worker (no-op by default). ExtraDynamicSearcher
             // overrides this to install the cross-node append + put +

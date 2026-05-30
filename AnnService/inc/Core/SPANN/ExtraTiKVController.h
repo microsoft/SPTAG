@@ -668,6 +668,18 @@ namespace SPTAG::SPANN
             return Put(k, value, timeout, reqs);
         }
 
+        ErrorCode CompareAndSwap(const std::string& key, const std::string& value,
+                                 bool previousNotExist, const std::string& previousValue,
+                                 const std::chrono::microseconds& timeout,
+                                 std::vector<Helper::AsyncReadRequest>* reqs,
+                                 bool* swapped, bool* actualNotExist, std::string* actualValue) override
+        {
+            (void)reqs;
+            return RawCompareAndSwapWithRetry(MakePrefixedKey(key), value,
+                previousNotExist, previousValue, timeout,
+                swapped, actualNotExist, actualValue);
+        }
+
         // ---- Delete operations ----
 
         ErrorCode Delete(SizeType key) override {
@@ -821,6 +833,63 @@ namespace SPTAG::SPANN
                 }
             }
             return ErrorCode::Success;
+        }
+
+        ErrorCode MergeWithCAS(const SizeType key, const std::string& value,
+                               const std::chrono::microseconds& timeout,
+                               std::vector<Helper::AsyncReadRequest>* reqs,
+                               int& size) override
+        {
+            if (value.empty()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO::MergeWithCAS: empty append posting!\n");
+                return ErrorCode::Fail;
+            }
+            if (m_useMultiChunkPosting) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "TiKVIO::MergeWithCAS only supports single-key posting; use Merge for multi-chunk posting.\n");
+                return ErrorCode::Undefined;
+            }
+
+            std::string rawKey(reinterpret_cast<const char*>(&key), sizeof(SizeType));
+            std::string prefixedKey = MakePrefixedKey(rawKey);
+            std::string expectedValue;
+            bool expectedNotExist = false;
+
+            auto ret = Get(rawKey, &expectedValue, timeout, reqs);
+            if (ret == ErrorCode::Key_NotFound) {
+                expectedValue.clear();
+                expectedNotExist = true;
+            } else if (ret != ErrorCode::Success) {
+                return ret;
+            }
+
+            constexpr int kMaxCasConflicts = 16;
+            for (int conflictAttempt = 0; conflictAttempt < kMaxCasConflicts; conflictAttempt++) {
+                std::string mergedValue = expectedValue;
+                mergedValue.append(value);
+                size = static_cast<int>(mergedValue.size());
+
+                bool swapped = false;
+                bool actualNotExist = false;
+                std::string actualValue;
+                ret = RawCompareAndSwapWithRetry(prefixedKey, mergedValue,
+                    expectedNotExist, expectedValue, timeout,
+                    &swapped, &actualNotExist, &actualValue);
+                if (ret != ErrorCode::Success) return ret;
+                if (swapped) return ErrorCode::Success;
+
+                if (!actualNotExist && actualValue == mergedValue) {
+                    return ErrorCode::Success;
+                }
+
+                expectedNotExist = actualNotExist;
+                expectedValue = actualNotExist ? std::string() : std::move(actualValue);
+            }
+
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                "TiKVIO::MergeWithCAS conflict after %d attempts for key %lld\n",
+                kMaxCasConflicts, (std::int64_t)key);
+            return ErrorCode::Key_Conflict;
         }
 
         // ---- MultiGet operations ----
@@ -3172,6 +3241,66 @@ namespace SPTAG::SPANN
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVIO::RawPutWithRetry error: %s\n", response.error().c_str());
                     return ErrorCode::Fail;
                 }
+                return ErrorCode::Success;
+            }
+        }
+
+        ErrorCode RawCompareAndSwapWithRetry(const std::string& prefixedKey,
+                                             const std::string& value,
+                                             bool previousNotExist,
+                                             const std::string& previousValue,
+                                             const std::chrono::microseconds& timeout,
+                                             bool* swapped,
+                                             bool* actualNotExist,
+                                             std::string* actualValue) {
+            for (int attempt = 0; ; attempt++) {
+                auto stub = GetStubForKey(prefixedKey);
+                if (!stub) { RetryBackoff(attempt); continue; }
+
+                kvrpcpb::RawCASRequest request;
+                request.set_key(prefixedKey);
+                request.set_value(value);
+                request.set_previous_not_exist(previousNotExist);
+                if (!previousNotExist) request.set_previous_value(previousValue);
+                SetContext(request.mutable_context(), prefixedKey);
+
+                kvrpcpb::RawCASResponse response;
+                grpc::ClientContext ctx;
+                SetDeadline(ctx, timeout);
+
+                auto status = stub->RawCompareAndSwap(&ctx, request, &response);
+                if (!status.ok()) {
+                    if (ShouldLogRetry(attempt)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "TiKVIO::RawCompareAndSwapWithRetry gRPC error (attempt %d): %s\n",
+                            attempt + 1, status.error_message().c_str());
+                    }
+                    InvalidateRegionCache(prefixedKey);
+                    RetryBackoff(attempt);
+                    continue;
+                }
+                if (response.has_region_error()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "TiKVIO::RawCompareAndSwapWithRetry region_error (attempt %d)\n", attempt + 1);
+                    InvalidateRegionCache(prefixedKey);
+                    if (attempt >= 10) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVIO::RawCompareAndSwapWithRetry region_error failed after %d attempts, giving up\n",
+                            attempt + 1);
+                        return ErrorCode::Fail;
+                    }
+                    RetryBackoff(attempt);
+                    continue;
+                }
+                if (!response.error().empty()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "TiKVIO::RawCompareAndSwapWithRetry error: %s\n", response.error().c_str());
+                    return ErrorCode::Fail;
+                }
+
+                if (swapped) *swapped = response.succeed();
+                if (actualNotExist) *actualNotExist = response.previous_not_exist();
+                if (actualValue) *actualValue = response.previous_value();
                 return ErrorCode::Success;
             }
         }

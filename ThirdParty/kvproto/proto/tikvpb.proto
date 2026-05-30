@@ -18,6 +18,7 @@ service Tikv {
     rpc RawDelete(kvrpcpb.RawDeleteRequest) returns (kvrpcpb.RawDeleteResponse) {}
     rpc RawBatchDelete(kvrpcpb.RawBatchDeleteRequest) returns (kvrpcpb.RawBatchDeleteResponse) {}
     rpc RawDeleteRange(kvrpcpb.RawDeleteRangeRequest) returns (kvrpcpb.RawDeleteRangeResponse) {}
+    rpc RawCompareAndSwap(kvrpcpb.RawCASRequest) returns (kvrpcpb.RawCASResponse) {}
     rpc RawScan(kvrpcpb.RawScanRequest) returns (kvrpcpb.RawScanResponse) {}
     rpc RawCoprocessor(kvrpcpb.RawCoprocessorRequest) returns (kvrpcpb.RawCoprocessorResponse) {}
 }

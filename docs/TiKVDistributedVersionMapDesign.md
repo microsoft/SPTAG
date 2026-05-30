@@ -17,9 +17,7 @@ The relevant options are defined under the SSD/SPANN parameter set:
 | --- | ---: | --- |
 | `DistributedVersionMap` | `true` | Use `TiKVVersionMap` when `Storage=TIKVIO`; otherwise use local in-memory `LocalVersionMap`. |
 | `SearchCheckVersionMapOnlyLayer0` | `false` | When enabled with TiKV distributed VM, search checks the version map only on the current search target layer. For normal user search (`p_tolayer=0`), this means layer 0 only. |
-| `VersionChunkSize` | `4096` | Number of VIDs stored in one TiKV version chunk. |
-| `VersionCacheTTLMs` | `0` | Cache-entry freshness TTL in milliseconds. `0` means cached chunks do not expire. |
-| `VersionCacheMaxChunks` | `10000` | Max chunks in the local LRU cache. `<= 0` disables cache. |
+| `VersionChunkSize` | `4096` | Legacy no-op for TiKV distributed VM; versions are stored per VID. |
 | `AsyncRpcMaxInflight` | `0` | TiKV async RPC in-flight limit. This is owned by TiKV IO, not the version map itself. |
 
 Current benchmark config enables:
@@ -28,8 +26,6 @@ Current benchmark config enables:
 Storage=TIKVIO
 DistributedVersionMap=true
 SearchCheckVersionMapOnlyLayer0=true
-VersionCacheMaxChunks=100000
-VersionCacheTTLMs=0
 AsyncRpcMaxInflight=512
 ```
 
@@ -40,14 +36,7 @@ AsyncRpcMaxInflight=512
 | Logical key | Value | Description |
 | --- | --- | --- |
 | `vc:{layer}` | `SizeType` bytes | Current vector count for this layer. |
-| `v:{layer}:{chunkId}` | `uint8_t[VersionChunkSize]` | Version bytes for VIDs in this chunk. |
-
-Chunk mapping:
-
-```text
-chunkId = VID / VersionChunkSize
-offset  = VID % VersionChunkSize
-```
+| `v:{layer}:{vid}` | `uint8_t` | Version byte for one VID. `vid` is zero-padded to 10 digits so TiKV regions can be pre-split by VID range. |
 
 Version byte meanings:
 
@@ -57,7 +46,7 @@ Version byte meanings:
 | `0xff` | Uninitialized live slot, matching local `VersionLabel` behavior. |
 | `0x00..0x7f` | Active version values used by reassign/update logic. |
 
-Missing chunks, short chunks, invalid VIDs, or failed reads are treated as `0xfe` during read paths. This is conservative: unknown version state is filtered as deleted.
+Missing per-VID keys use a code-defined layer default: layer 0 defaults to alive version `0x00`, while non-leaf layers default to deleted `0xfe`. Invalid VIDs or failed reads are treated as `0xfe` during read paths. This is conservative: unknown version state is filtered as deleted.
 
 ## Object Wiring
 
@@ -65,7 +54,7 @@ Each `ExtraDynamicSearcher` owns an `IVersionMap`:
 
 ```text
 if Storage == TIKVIO and DistributedVersionMap:
-    m_versionMap = TiKVVersionMap(db, layer, VersionChunkSize, VersionCacheMaxChunks)
+    m_versionMap = TiKVVersionMap(db, layer)
 else:
     m_versionMap = LocalVersionMap()
 ```
@@ -82,25 +71,25 @@ m_versionMap->Initialize(vectorSize, blockSize, capacity, &localToGlobal)
 
 Layer initialization behavior:
 
-- Layer 0 or no `globalIDs`: initialize all chunks as alive (`0x00`).
-- Non-leaf layers with `globalIDs`: initialize all chunks as deleted (`0xfe`), then mark VIDs present in `globalIDs` as alive (`0x00`).
+- Layer 0 or no `globalIDs`: set the default missing-key version to alive (`0x00`).
+- Non-leaf layers with `globalIDs`: set the default missing-key version to deleted (`0xfe`), then write one alive (`0x00`) key for each VID present in `globalIDs`.
 
-The count key `vc:{layer}` is saved after initialization. TiKV-backed `Save()` and `Load()` do not write/read local version-map files; the authoritative state is already in TiKV. `Load()` reads `vc:{layer}` and scans chunks to recompute the delete count.
+The count metadata key is saved after initialization. TiKV-backed `Save()` and `Load()` do not write/read local version-map files; the authoritative state is already in TiKV. Different runs should use distinct `TiKVKeyPrefix` values or wipe TiKV before reuse. `GetDeleteCount()` returns 0 for the TiKV-backed version map to avoid expensive distributed scans.
 
 ## Write Paths
 
 ### Add Capacity
 
-`AddBatch(num, deleted)` extends the logical vector count and creates any new chunks needed.
+`AddBatch(num, deleted)` extends the logical vector count.
 
-- `deleted=false`: new chunks are initialized with `0xff`.
-- `deleted=true`: the new VID range is filled with `0xfe`, and `m_deleted` is incremented.
+- `deleted=false`: new VIDs use the map default unless the default is deleted, in which case per-VID alive entries are written for the new range.
+- `deleted=true`: new VIDs use the map default if it is deleted, otherwise per-VID deleted entries are written for the new range. `m_deleted` is incremented.
 
 The count key is saved after the extension.
 
 ### Delete
 
-`Delete(VID)` writes `0xfe` at the VID's chunk offset. It uses a striped per-chunk mutex to serialize read-modify-write operations in this process.
+`Delete(VID)` writes `0xfe` to that VID's key. It uses a striped per-VID mutex to serialize read-modify-write operations in this process.
 
 ### Set Version
 
@@ -108,7 +97,7 @@ The count key is saved after the extension.
 
 ### Increment Version
 
-`IncVersion(VID, newVersion, expectedOld)` reads the chunk, validates the current byte, increments modulo `0x80`, and writes the chunk back.
+`IncVersion(VID, newVersion, expectedOld)` reads that VID's key/default version, validates the current byte, increments modulo `0x80`, and writes the VID key back.
 
 When `expectedOld != 0xff`, the operation uses compare-style semantics:
 
@@ -119,32 +108,27 @@ When `expectedOld != 0xff`, the operation uses compare-style semantics:
 
 When `expectedOld == 0xff`, the operation increments the current non-deleted value without a compare expectation. Current SPANN reassign paths pass the observed old version as `expectedOld`, so they use the compare-style path above.
 
-Current limitation: this is a best-effort read-modify-write. It is protected by local process locks, but it is not a distributed CAS across multiple processes. The code notes this should use TiKV RawCAS if/when available through the dependency stack.
+`IncVersion()` uses TiKV `RawCompareAndSwap` through `KeyValueIO::CompareAndSwap`, so the compare-and-update is atomic at the TiKV server for one VID key. On CAS conflict it evaluates the value returned by TiKV and preserves the idempotent `current == target` success case described above.
+
+The per-VID key uses a zero-padded VID so deployment scripts can pre-split version-map regions with keys such as `spfresh_sift1b_v:0:0100000000` and `spfresh_sift1b_v:1:0100000000`.
 
 ## Read Paths
 
 ### Single VID
 
-`Deleted(VID)` and `GetVersion(VID)` read the owning chunk and return one byte. They support two read policies:
-
-- `UseCache`: check/fill the local chunk LRU cache.
-- `BypassCacheNoFill`: read TiKV directly and do not populate the cache.
-
-Search-created workspaces currently use `BypassCacheNoFill` so query traffic does not pollute the cache with one-off chunks.
+`Deleted(VID)` and `GetVersion(VID)` read that VID's key and return one byte. Version read policies are accepted for interface compatibility, but TiKV distributed VM no longer has a local version cache, so both policies read TiKV/default metadata directly.
 
 ### Batch VID Lookup
 
-`BatchGetVersions(vids, versions, policy)` groups VIDs by chunk, resolves cached chunks first, and issues one TiKV `MultiGet` for missing chunks.
+`BatchGetVersions(vids, versions, policy)` builds one key per valid VID and issues one TiKV `MultiGet`.
 
 Resolution phases:
 
-1. Group VIDs by `chunkId`.
-2. Read cache hits under a shared lock.
-3. Batch fetch missing chunks from TiKV.
-4. Optionally insert fetched chunks into the LRU cache.
-5. Fill one output byte per input VID.
+1. Filter invalid VIDs to `0xfe`.
+2. Batch fetch per-VID keys from TiKV.
+3. Fill one output byte per input VID, using the map default for missing keys.
 
-If a chunk is missing or too short, affected VIDs are returned as `0xfe`.
+If the batch read fails, unresolved valid VIDs use the map default; invalid VIDs remain `0xfe`.
 
 ## Search Semantics
 
@@ -214,43 +198,28 @@ if p_checkVersionMap:
 
 ## Cache Design
 
-The version map has a per-process LRU chunk cache:
+TiKV distributed VM no longer keeps a local version cache. Each single or batch read goes to TiKV and falls back to the code-defined layer default for missing per-VID keys.
 
-- Front of the list is most recently inserted/updated.
-- `VersionCacheMaxChunks <= 0` disables the cache.
-- `VersionCacheTTLMs <= 0` keeps the current pure-LRU behavior: cached chunks do not expire by age.
-- `VersionCacheTTLMs > 0` makes cache hits valid only while `now - refreshTime < VersionCacheTTLMs`.
-- Fresh cache hits use shared locking and do not reorder entries.
-- Cache misses and expired entries fetch from TiKV and insert under an exclusive lock.
-- Writes update the cache after a successful TiKV `Put`.
-- `BypassCacheNoFill` disables both lookup and fill for that read.
-
-Single-chunk reads use a striped refresh mutex so multiple threads do not all refresh the same expired/missing chunk at once. Batched reads group miss/expired chunks and refresh them with one TiKV `MultiGet`.
-
-This cache reduces repeated chunk reads but is not a distributed coherence mechanism. Other processes can update TiKV without invalidating this process's cached chunks before TTL expiry. Search paths can bypass cache when freshness is preferred.
+During `AddIndex`, newly allocated VIDs can use the TiKV version map's default alive version directly, avoiding a point `Get` for keys that are known not to be materialized yet.
 
 ## Failure And Missing-Key Behavior
 
 Read-side behavior is fail-closed:
 
 - Missing count key on load sets count to `0` and logs a warning.
-- Missing chunk data returns `0xfe` for affected VIDs.
-- Failed `MultiGet` logs a warning and unresolved chunks return `0xfe`.
-- Short chunk values return `0xfe` for out-of-range offsets.
+- Missing per-VID keys use the code-defined layer default.
+- Failed `MultiGet` logs a warning and unresolved valid VIDs use the code-defined layer default.
 
 Write-side behavior:
 
-- Failed chunk writes are logged and return failure to the caller.
+- Failed per-VID writes are logged and return failure to the caller.
 - Delete/set/inc operations do not silently mark a write successful if TiKV write failed.
 
 ## Current Limitations
 
-- `IncVersion()` is not a distributed atomic CAS. Concurrent writers from different processes can still race at chunk granularity.
-- Delete count is maintained locally during writes and recomputed by scanning chunks on load; it is not stored as a separate authoritative TiKV counter.
-- The LRU cache is local to one process and has no cross-process invalidation.
-- `VersionCacheTTLMs` bounds cache staleness only for code paths that use `UseCache`; `BypassCacheNoFill` still reads TiKV directly.
+- Count is stored as a metadata key and flushed periodically or on `Save()`; it is not transactionally coupled with each per-VID write.
 - `SearchCheckVersionMapOnlyLayer0` is historically named; with the current implementation it means target-layer-only checking for TiKV distributed VM.
-- Missing version chunks are treated as deleted. This favors correctness over recall when TiKV data is incomplete.
+- Missing per-VID keys use the layer's default version. Failed reads are treated as deleted. This favors correctness over recall when TiKV data is unavailable.
 
 ## Relevant Code
 

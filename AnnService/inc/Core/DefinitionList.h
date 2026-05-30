@@ -89,6 +89,7 @@ DefineErrorCode(Posting_OverFlow, 0x5002)
 DefineErrorCode(Posting_SizeError, 0x5003)
 DefineErrorCode(Block_IDError, 0x5004)
 DefineErrorCode(Posting_ChecksumError, 0x5005)
+DefineErrorCode(Key_Conflict, 0x5006)
 
 #endif // DefineErrorCode
 

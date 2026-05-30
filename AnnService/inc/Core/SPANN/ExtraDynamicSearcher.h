@@ -330,12 +330,12 @@ namespace SPTAG::SPANN {
         bool m_allDonePrinted = false;
 
         std::mutex m_progressLogMutex;
-        std::chrono::steady_clock::time_point m_lastProgressLogTime = std::chrono::steady_clock::time_point::min();
-        size_t m_lastProgressLogQueueSize = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogSplit = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogMerge = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogAppend = std::numeric_limits<size_t>::max();
-        size_t m_lastProgressLogReassign = std::numeric_limits<size_t>::max();
+        std::chrono::steady_clock::time_point m_lastProgressLogTime = (std::chrono::steady_clock::time_point::min)();
+        size_t m_lastProgressLogQueueSize = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogSplit = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogMerge = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogAppend = (std::numeric_limits<size_t>::max)();
+        size_t m_lastProgressLogReassign = (std::numeric_limits<size_t>::max)();
 
         bool ShouldLogProgress(size_t totalJobs, bool force = false) {
             auto now = std::chrono::steady_clock::now();
@@ -362,7 +362,7 @@ namespace SPTAG::SPANN {
             }
 
             bool enoughTimeElapsed =
-                (m_lastProgressLogTime == std::chrono::steady_clock::time_point::min()) ||
+                (m_lastProgressLogTime == (std::chrono::steady_clock::time_point::min)()) ||
                 (std::chrono::duration_cast<std::chrono::seconds>(now - m_lastProgressLogTime).count() >= 5);
 
             bool shouldLog = queueChanged && enoughTimeElapsed;
@@ -404,11 +404,9 @@ namespace SPTAG::SPANN {
                 tikvMap->SetDB(db);
                 tikvMap->SetLayer(layer);
                 tikvMap->SetChunkSize(p_opt.m_versionChunkSize);
-                tikvMap->SetCacheTTL(p_opt.m_versionCacheTTLMs);
-                tikvMap->SetCacheMaxChunks(p_opt.m_versionCacheMaxChunks);
                 m_versionMap = std::move(tikvMap);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, chunkSize=%d, cacheTTL=%dms, cacheMax=%d)\n",
-                    layer, p_opt.m_versionChunkSize, p_opt.m_versionCacheTTLMs, p_opt.m_versionCacheMaxChunks);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Using distributed TiKV VersionMap (layer=%d, per-VID keys, no local cache)\n",
+                    layer);
             } else 
 #endif
             {
@@ -596,9 +594,7 @@ namespace SPTAG::SPANN {
                     {
                         const uint8_t* basePtr = reinterpret_cast<const uint8_t*>(appendPosting.data());
                         size_t totalRec = appendPosting.size() / m_vectorInfoSize;
-                        EnsureVersionMapCoversPosting(basePtr, totalRec, "AppendCallback", headID);
 
-                        const SizeType localCount = m_versionMap->Count();
                         std::vector<SizeType> batchVids;
                         std::vector<uint8_t> batchVers;
                         batchVids.reserve(totalRec);
@@ -607,7 +603,7 @@ namespace SPTAG::SPANN {
                             const uint8_t* p = basePtr + i * m_vectorInfoSize;
                             SizeType vid = *reinterpret_cast<const SizeType*>(p);
                             uint8_t recVer = *(p + sizeof(SizeType));
-                            if (vid < 0 || vid >= localCount) continue;
+                            if (vid < 0) continue;
                             if (recVer == 0xfe) continue;
                             uint8_t curVer = m_versionMap->GetVersion(vid);
                             if (curVer == 0xfe) continue;
@@ -674,9 +670,6 @@ namespace SPTAG::SPANN {
                         const uint8_t* basePtr =
                             reinterpret_cast<const uint8_t*>(req->m_appendPosting.data());
                         size_t totalRec = req->m_appendPosting.size() / m_vectorInfoSize;
-                        EnsureVersionMapCoversPosting(basePtr, totalRec,
-                            "BatchAppendCallback", req->m_headID);
-                        const SizeType localCount = m_versionMap->Count();
                         std::vector<SizeType> batchVids;
                         std::vector<uint8_t> batchVers;
                         batchVids.reserve(totalRec);
@@ -685,7 +678,7 @@ namespace SPTAG::SPANN {
                             const uint8_t* p = basePtr + k * m_vectorInfoSize;
                             SizeType vid = *reinterpret_cast<const SizeType*>(p);
                             uint8_t recVer = *(p + sizeof(SizeType));
-                            if (vid < 0 || vid >= localCount) continue;
+                            if (vid < 0) continue;
                             if (recVer == 0xfe) continue;
                             uint8_t curVer = m_versionMap->GetVersion(vid);
                             if (curVer == 0xfe) continue;
@@ -980,45 +973,6 @@ namespace SPTAG::SPANN {
             return ec;
         }
 
-        // Validate (and lazily extend) the local version map so that
-        // every (vid, ver) tuple in a posting we are about to write is
-        // representable. Without this, remote-originated postings carrying
-        // VIDs above our current Count() get dropped silently.
-        void EnsureVersionMapCoversPosting(const uint8_t* p_basePtr, size_t p_totalRec,
-                                           const char* p_caller, SizeType p_headID) {
-            const SizeType localCount = m_versionMap->Count();
-            SizeType maxVid = -1;
-            for (size_t i = 0; i < p_totalRec; ++i) {
-                const uint8_t* p = p_basePtr + i * m_vectorInfoSize;
-                SizeType vid = *reinterpret_cast<const SizeType*>(p);
-                if (vid > maxVid) maxVid = vid;
-            }
-            if (maxVid >= localCount) {
-                SizeType need = maxVid + 1 - localCount;
-                // Design contract: on the interleaved stride scheme each
-                // node owns globalVIDs satisfying VID % numWorkers ==
-                // nodeID. The max VID a remote peer can have produced by
-                // now is approximately localCount * numWorkers, so when
-                // we lag behind we extend by capacity*numWorkers in one
-                // shot.  This keeps capacity growth conflict-free (we
-                // amortize many remote inserts into one extension) and
-                // avoids the per-VID AddBatch(1) thrashing of the old
-                // exact-gap formula.
-                int numWorkers = GetNumWorkerNodes();
-                SizeType extendBy = need;
-                if (numWorkers > 1) {
-                    SizeType strideGrow = localCount * (SizeType)numWorkers;
-                    if (strideGrow > extendBy) extendBy = strideGrow;
-                }
-                m_versionMap->AddBatch(extendBy);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Debug,
-                    "%s: extended local versionMap by %lld (head=%lld maxVid=%lld localCount=%lld need=%lld numWorkers=%d)\n",
-                    p_caller, (std::int64_t)extendBy, (std::int64_t)p_headID,
-                    (std::int64_t)maxVid, (std::int64_t)localCount,
-                    (std::int64_t)need, numWorkers);
-            }
-        }
-
         virtual bool Available() override
         {
             return db->Available();
@@ -1075,12 +1029,7 @@ namespace SPTAG::SPANN {
 
         virtual ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
         {
-            for (SizeType i = 0; i < m_versionMap->Count(); i++) 
-            {
-                if (!m_versionMap->Deleted(i))
-                    globalIDs.push_back(i);
-            }
-            return ErrorCode::Success;
+            return m_versionMap->GetContainedIDs(globalIDs);
         }
 
         bool ShouldCheckVersionMapInSearch(bool p_checkVersionMap) const
@@ -1091,16 +1040,6 @@ namespace SPTAG::SPANN {
                 return true;
             }
             return p_checkVersionMap;
-        }
-        
-        virtual ErrorCode AddIDCapacity(SizeType capa, bool deleted) override
-        {
-            // Distributed: grow the version map by the FULL batch size
-            // (capa * numWorkers), not just this node's slice. Stripe formula
-            // in AllocateGlobalVID produces globalVIDs up to
-            // m_initialVectorSize + insertCount * numWorkers.
-            int numWorkers = GetNumWorkerNodes();
-            return m_versionMap->AddBatch(capa * numWorkers, deleted);
         }
 
         SPANN::Index<ValueType>* GetHeadIndex() const { return m_headIndex; }
@@ -3000,7 +2939,6 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
-                	m_versionMap->Initialize(m_opt->m_vectorSize, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
                     m_versionMap->DeleteAll();
 			        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
 			        std::shared_ptr<IExtraSearcher> storeExtraSearcher;
@@ -3117,12 +3055,6 @@ namespace SPTAG::SPANN {
                     char* ptr = (char*)(assignment.c_str());
                     SizeType VID = *(reinterpret_cast<SizeType*>(ptr));
                     if (assignment.size() == m_vectorInfoSize) {
-                        if (VID >= m_versionMap->Count()) {
-                            if (m_versionMap->AddBatch(VID - m_versionMap->GetVectorNum() + 1) != ErrorCode::Success) {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MemoryOverFlow: VID: %lld, Map Size:%d\n", (std::int64_t)VID, m_versionMap->BufferSize());
-                                return false;
-                            }
-                        }
                         std::shared_ptr<VectorSet> vectorSet;
                         vectorSet.reset(new BasicVectorSet(ByteArray((std::uint8_t*)ptr + m_metaDataSize, m_vectorDataSize, false),
                             GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
@@ -3718,8 +3650,19 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
-            m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
+            //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
+
+            if (p_localToGlobal.R() > 0) {
+                for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
+                    SizeType globalID = *(p_localToGlobal[i]);
+                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, -1);
+                }
+            } else {
+                for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
+                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, -1);
+                }
+            }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 
@@ -3743,9 +3686,9 @@ namespace SPTAG::SPANN {
                 uint32_t reassignNumBeforeZeroReplica = m_stat.m_reAssignNum;
                 uint32_t headMissBeforeZeroReplica = m_stat.m_headMiss.load();
 
-                int zeroReplicaWorkerNum = std::max(1, std::min(static_cast<int>(zeroReplicaCount), m_opt->m_appendThreadNum));
+                int zeroReplicaWorkerNum = (std::max)(1, (std::min)(static_cast<int>(zeroReplicaCount), m_opt->m_appendThreadNum));
                 size_t zeroReplicaBatchSize = 4096;
-                size_t zeroReplicaQueueLimit = std::max(static_cast<size_t>(4), static_cast<size_t>(zeroReplicaWorkerNum) * 2);
+                size_t zeroReplicaQueueLimit = (std::max)(static_cast<size_t>(4), static_cast<size_t>(zeroReplicaWorkerNum) * 2);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "SPFresh: zero-replica refill workers:%d batchSize:%zu queueLimit:%zu\n",
                              zeroReplicaWorkerNum, zeroReplicaBatchSize, zeroReplicaQueueLimit);
@@ -3945,7 +3888,8 @@ namespace SPTAG::SPANN {
                         }
 
                         ErrorCode tmp;
-                        if ((tmp = db->Put(DBKey(postingID), postinglist, MaxTimeout, &(workSpace.m_diskRequests))) !=
+                        int vsize;
+                        if ((tmp = db->MergeWithCAS(DBKey(postingID), postinglist, MaxTimeout, &(workSpace.m_diskRequests), vsize)) !=
                             ErrorCode::Success)
                         {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[WriteDB] Put %lld fail!\n", (std::int64_t)index);
@@ -3973,12 +3917,17 @@ namespace SPTAG::SPANN {
             std::unordered_map<SizeType, std::string> headAppends;
             for (int v = 0; v < p_vectorSet->Count(); v++) {
                 SizeType VID = begin + v;
-                if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                uint8_t version;
+                if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
+                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                    version = m_versionMap->GetVersion(VID);
+                } else if (VID >= m_versionMap->Count()) {
+                    m_versionMap->SetR(VID + 1);
+                }
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
                 RNGSelection(p_exWorkSpace, selections, (ValueType*)(p_vectorSet->GetVector(v)), replicaCount);
 
-                uint8_t version = m_versionMap->GetVersion(VID);
                 std::string appendPosting(m_vectorInfoSize, '\0');
                 Serialize((char*)(appendPosting.c_str()), VID, version, p_vectorSet->GetVector(v));
                 if (m_opt->m_enableWAL && m_wal) {

@@ -123,8 +123,6 @@ namespace SPTAG {
             bool m_distributedVersionMap;
             bool m_searchCheckVersionMapOnlyLayer0;
             int m_versionChunkSize;
-            int m_versionCacheTTLMs;
-            int m_versionCacheMaxChunks;
             int m_asyncRpcMaxInflight;
 
             // Distributed RemotePostingOps RPC tuning
@@ -331,7 +329,7 @@ namespace SPTAG {
         { \
             VarName = tmp; \
         } \
-    } else \
+    }
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
@@ -386,7 +384,7 @@ namespace SPTAG {
         if (Helper::StrUtils::StrEqualIgnoreCase(p_param, RepresentStr)) \
         { \
             return SPTAG::Helper::Convert::ConvertToString(VarName); \
-        } else \
+        }
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
