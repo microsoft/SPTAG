@@ -87,7 +87,25 @@ namespace SPTAG
             int m_iHashTableExp;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::WorkSpace>> m_workSpaceFactory;
 
+            // Dual-pool metadata-only head store. When enabled, this KDT physically holds
+            // ONLY the U_extra head vectors (local indices 0..count-h1split-1), while the
+            // logical sample space spans all heads [0, m_metaOnlyCount). H1 head ids
+            // [0, m_metaOnlyHeadSplit) are resolved lazily through m_externalSampleResolver
+            // (into the per-bundle subgraph stores). Default OFF: zero behavior change.
+            bool m_bMetadataOnly = false;
+            SizeType m_metaOnlyCount = 0;
+            SizeType m_metaOnlyHeadSplit = 0;
+            std::function<const void*(SizeType)> m_externalSampleResolver;
+
         public:
+            inline void SetMetadataOnly(SizeType p_totalHeads, SizeType p_h1Split) {
+                m_bMetadataOnly = true; m_metaOnlyCount = p_totalHeads; m_metaOnlyHeadSplit = p_h1Split;
+            }
+            inline bool IsMetadataOnly() const { return m_bMetadataOnly; }
+            inline void SetExternalSampleResolver(std::function<const void*(SizeType)> p_fn) {
+                m_externalSampleResolver = std::move(p_fn);
+            }
+
             Index()
             {
 #define DefineKDTParameter(VarName, VarType, DefaultValue, RepresentStr) \
@@ -104,7 +122,7 @@ namespace SPTAG
 
             ~Index() {}
 
-            inline SizeType GetNumSamples() const { return m_pSamples.R(); }
+            inline SizeType GetNumSamples() const { return m_bMetadataOnly ? m_metaOnlyCount : m_pSamples.R(); }
             inline SizeType GetNumDeleted() const { return (SizeType)m_deletedID.Count(); }
             inline DimensionType GetFeatureDim() const { return m_pSamples.C(); }
             
@@ -125,12 +143,21 @@ namespace SPTAG
             }
             inline float ComputeDistance(const void* pX, const void* pY) const { return m_fComputeDistance((const T*)pX, (const T*)pY, m_pSamples.C()); }
             inline float GetDistance(const void* target, const SizeType idx) const {
+                if (m_bMetadataOnly) return ComputeDistance(target, GetSample(idx));
                 return ComputeDistance(target, m_pSamples.At(idx));
             }
-            inline const void* GetSample(const SizeType idx) const { return (void*)m_pSamples[idx]; }
+            inline const void* GetSample(const SizeType idx) const {
+                if (!m_bMetadataOnly) return (void*)m_pSamples[idx];
+                if (idx >= m_metaOnlyHeadSplit) return (void*)m_pSamples[idx - m_metaOnlyHeadSplit];
+                if (m_externalSampleResolver) return m_externalSampleResolver(idx);
+                return nullptr;
+            }
             inline const COMMON::RelativeNeighborhoodGraph& GetGraph() const { return m_pGraph; }
             inline DimensionType GetNeighborhoodSize() const { return m_pGraph.m_iNeighborhoodSize; }
-            inline bool ContainSample(const SizeType idx) const { return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx); }
+            inline bool ContainSample(const SizeType idx) const {
+                if (m_bMetadataOnly) return idx >= 0 && idx < m_metaOnlyCount;
+                return idx >= 0 && idx < m_deletedID.R() && !m_deletedID.Contains(idx);
+            }
             inline bool NeedRefine() const { return m_deletedID.Count() > (size_t)(GetNumSamples() * m_fDeletePercentageForRefine); }
             std::shared_ptr<std::vector<std::uint64_t>> BufferSize() const
             {
@@ -173,6 +200,7 @@ namespace SPTAG
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
             ErrorCode AddIndexIdx(SizeType begin, SizeType end);
+            ErrorCode AddIndexIdxNoBackEdge(SizeType begin, SizeType end);
             ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, int& beginHead, int& endHead);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);

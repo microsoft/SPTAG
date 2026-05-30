@@ -39,6 +39,12 @@ public:
     virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false) = 0;
     virtual ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, int& beginHead, int& endHead) { return ErrorCode::Undefined; }
     virtual ErrorCode AddIndexIdx(SizeType begin, SizeType end) { return ErrorCode::Undefined; }
+    // Like AddIndexIdx, but builds only the OUT-edges of the newly appended
+    // nodes (updateNeighbors=false): existing nodes never get a back-edge to
+    // the new ones. Used to inject dual-pool U_extra heads into a bundle
+    // subgraph so they can route outward to H1 without polluting H1's RNG
+    // neighbor lists (H1 -> U_extra is reachable only via cross-edges).
+    virtual ErrorCode AddIndexIdxNoBackEdge(SizeType begin, SizeType end) { return ErrorCode::Undefined; }
     virtual void SetAddCountForRebuild(int val) {}
 
 

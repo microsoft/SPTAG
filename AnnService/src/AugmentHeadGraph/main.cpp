@@ -34,6 +34,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -390,6 +392,63 @@ int main(int argc, char** argv)
                  "Augmentation complete: %zu heads, %zu with edges, %zu fully filled.\n",
                  work.size(), nonEmpty.load(), fullCount.load());
 
+    // Dual-pool approach-1: add reverse H1->U_extra cross-edges. U_extra heads
+    // are appended graph-only in each bundle (localHid >= manifest headCount)
+    // with out-edges toward H1 but NO back-edges into H1's RNG lists, so during
+    // unfilter traversal H1 nodes cannot reach U_extra unless we explicitly wire
+    // cross-edges H1->U_extra. For every U_extra source, take its forward edges
+    // to H1 heads in other bundles and register the reverse edge on those H1
+    // records. This is the only path by which an H1 (in another bundle) reaches
+    // a U_extra head; filter-mode never follows cross-edges, keeping U_extra
+    // unfilter-only.
+    {
+        auto isUExtra = [&](int subIdx, SizeType localHid) -> bool {
+            return localHid >= static_cast<SizeType>(nodes[subIdx].headCount);
+        };
+        std::unordered_map<SizeType, size_t> vidToRec;
+        vidToRec.reserve(records.size() * 2);
+        for (size_t i = 0; i < records.size(); ++i) {
+            if (records[i].globalVID >= 0) vidToRec[records[i].globalVID] = i;
+        }
+        std::unordered_set<SizeType> uExtraVIDs;
+        for (size_t i = 0; i < work.size(); ++i) {
+            if (isUExtra(work[i].subIdx, work[i].localHid) && records[i].globalVID >= 0)
+                uExtraVIDs.insert(records[i].globalVID);
+        }
+        size_t reverseAdded = 0;
+        for (size_t i = 0; i < work.size(); ++i) {
+            if (!isUExtra(work[i].subIdx, work[i].localHid)) continue;
+            const SizeType uVID = records[i].globalVID;
+            if (uVID < 0) continue;
+            for (const auto& e : records[i].edges) {
+                const SizeType nbrVID = static_cast<SizeType>(e.neighborGlobalVID);
+                if (uExtraVIDs.count(nbrVID)) continue; // only H1 targets get reverse edge
+                auto it = vidToRec.find(nbrVID);
+                if (it == vidToRec.end()) continue;
+                Record& hrec = records[it->second];
+                bool exists = false;
+                for (const auto& he : hrec.edges) {
+                    if (he.neighborGlobalVID == static_cast<std::int32_t>(uVID)) { exists = true; break; }
+                }
+                if (exists) continue;
+                Helper::HeadCrossEdgeEntry re;
+                re.neighborGlobalVID = static_cast<std::int32_t>(uVID);
+                re.dist = e.dist;
+                hrec.edges.push_back(re);
+                ++reverseAdded;
+            }
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                     "DualPool approach-1: added %zu reverse H1->U_extra cross-edges.\n", reverseAdded);
+    }
+
+    // Cross-edge loader rejects records whose edge count exceeds the header's
+    // maxEdgesPerHead, so record the true maximum after reverse-edge merging.
+    int actualMaxEdges = opts->m_extraEdges;
+    for (const auto& r : records) {
+        actualMaxEdges = std::max<int>(actualMaxEdges, static_cast<int>(r.edges.size()));
+    }
+
     FILE* fp = fopen(outPath.c_str(), "wb");
     if (fp == nullptr) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot open %s for write.\n", outPath.c_str());
@@ -399,7 +458,7 @@ int main(int argc, char** argv)
     header.magic = Helper::kHeadCrossEdgesMagic;
     header.version = Helper::kHeadCrossEdgesVersion;
     header.totalHeads = static_cast<std::int32_t>(records.size());
-    header.maxEdgesPerHead = opts->m_extraEdges;
+    header.maxEdgesPerHead = actualMaxEdges;
     header.searchTopK = opts->m_searchTopK;
     if (fwrite(&header, sizeof(header), 1, fp) != 1) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Write header failed.\n");

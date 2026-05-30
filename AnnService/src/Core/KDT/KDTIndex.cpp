@@ -873,6 +873,15 @@ template <typename T> ErrorCode Index<T>::AddIndexIdx(SizeType begin, SizeType e
     return ErrorCode::Success;
 }
 
+template <typename T> ErrorCode Index<T>::AddIndexIdxNoBackEdge(SizeType begin, SizeType end)
+{
+    for (SizeType node = begin; node < end; node++)
+    {
+        m_pGraph.RefineNode<T>(this, node, false, true, m_pGraph.m_iAddCEF);
+    }
+    return ErrorCode::Success;
+}
+
 template <typename T> ErrorCode Index<T>::UpdateIndex()
 {
     m_pGraph.m_iThreadNum = m_iNumberOfThreads;

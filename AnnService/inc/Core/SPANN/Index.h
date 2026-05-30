@@ -76,6 +76,10 @@ namespace SPTAG
             mutable std::mutex m_globalVIDToBundleLocMutex;
             std::string m_headBundleBaseDir;
 	        COMMON::Dataset<std::uint64_t> m_vectorTranslateMap;
+            // Dual-pool slim head store: when true, the root head index physically holds
+            // only the U_extra head vectors; H1 head GetSample lookups are resolved into
+            // the per-bundle subgraph stores. Detected at load via HeadIndex/head_metaonly.bin.
+            mutable bool m_metadataOnlyHeadStore = false;
             std::unordered_map<std::string, std::string> m_headParameters;
 
             COMMON::VersionLabel m_versionMap;
@@ -244,6 +248,7 @@ namespace SPTAG
             ErrorCode SaveHeadBundleManifest(const std::string& p_baseDir) const;
             ErrorCode LoadHeadBundleManifest(const std::string& p_baseDir);
             ErrorCode InitializeHeadBundleRuntime(const std::string& p_baseDir);
+            ErrorCode SetupMetadataOnlyHeadStore(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;
             ErrorCode LoadHeadCrossEdges() const;
 

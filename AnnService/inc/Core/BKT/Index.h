@@ -197,6 +197,7 @@ namespace SPTAG
             ErrorCode SearchTree(QueryResult &p_query) const;
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
             ErrorCode AddIndexIdx(SizeType begin, SizeType end);
+            ErrorCode AddIndexIdxNoBackEdge(SizeType begin, SizeType end);
             ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, int& beginHead, int& endHead);
             inline void SetAddCountForRebuild(int val) { m_addCountForRebuild = val; }
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
