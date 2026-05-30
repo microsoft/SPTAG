@@ -259,6 +259,26 @@ mgr.SetHeadIndexCacheLimit(64 * 1024 * 1024)  # 64MB HeadIndex budget
 | Cold load (page cache warm) | 16-60 ms |
 | Filtered search (1.56% sel.) | 10-22 ms (60-120× vs unfiltered) |
 
+### Dual-Pool Head Index — Usage Modes
+
+The per-tag **dual-pool** head index (bundle subgraphs + cross-edges + optional
+U_extra augmentation) shares a **single binary** with the vanilla build; all modes
+are selected via env vars and build-script arguments:
+
+| Mode | Head selection | Subgraphs | U_extra | Build command |
+| ---- | -------------- | --------- | ------- | ------------- |
+| **A. Vanilla** | `BKT` (global ratio) | 1 global | — | `build_tenant0_baseline.py --ratio R` |
+| **B. Dual-pool** | `PerTagBKTMerge` | `--group-target N` + cross-edges | — | `build_tenant0_pertag.py --final-ratio R --group-target N` |
+| **C. Dual-pool + U_extra** | `PerTagBKTMerge` | `N` + reverse H1→U_extra edges | `SPTAG_DUAL_POOL_AUGMENT=1` | Mode B + `SPTAG_DUAL_POOL_EXTRA_RATIO=0.10` |
+
+> Note: `--group-target 1` + no U_extra is **not** vanilla — head selection is still
+> per-tag. True vanilla also requires `selectType = BKT`.
+
+Modes B/C also run `augmentheadgraph` to build cross-subgraph edges. See
+**[docs/MultiTenant_DualPool_Usage.md](docs/MultiTenant_DualPool_Usage.md)** for
+full commands, the asymmetric-edge U_extra design, the slim head store, and the
+complete environment-variable reference.
+
 ### Build
 ```bash
 mkdir build && cd build && cmake ..
