@@ -212,7 +212,7 @@ namespace SPTAG
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr)
+            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr) override
             {
                 (void)blockSize;
                 (void)capacity;

@@ -27,6 +27,29 @@ namespace SPTAG
                 m_label.clear(); 
             }
 
+            void Initialize(SizeType size, SizeType blockSize, SizeType capacity,
+                            COMMON::Dataset<SizeType>* globalIDs = nullptr) override
+            {
+                (void)size;
+                (void)blockSize;
+                (void)capacity;
+                if (globalIDs == nullptr || globalIDs->R() <= 0) return;
+
+                // Hashmap LocalVersionMap treats missing keys as deleted
+                // (Deleted() returns true, GetVersion() returns 0xfe).
+                // Layer-1 build calls Initialize with the alive-head global
+                // IDs; we must explicitly mark them alive (0x00) so that
+                // MergePostings' Deleted()/version-mismatch filter does not
+                // strip every base head entry on the first async merge.
+                std::unique_lock<std::shared_timed_mutex> lock(m_updateMutex);
+                for (SizeType i = 0; i < globalIDs->R(); i++) {
+                    SizeType globalID = *(globalIDs->At(i));
+                    if (globalID >= 0) {
+                        m_label[globalID] = 0x00;
+                    }
+                }
+            }
+
             SizeType Count() override { 
                 std::shared_lock<std::shared_timed_mutex> lock(m_updateMutex);
                 return (SizeType)(m_label.size()); 

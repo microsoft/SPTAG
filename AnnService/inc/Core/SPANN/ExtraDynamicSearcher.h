@@ -3650,19 +3650,25 @@ namespace SPTAG::SPANN {
             auto fullVectors = p_reader->GetVectorSet();
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
-            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: initialize versionMap\n");
-            //m_versionMap->Initialize(m_opt->m_vectorSize, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity, &p_localToGlobal);
-
-            if (p_localToGlobal.R() > 0) {
-                for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
-                    SizeType globalID = *(p_localToGlobal[i]);
-                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, -1);
-                }
-            } else {
-                for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
-                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, -1);
-                }
-            }
+            // Initialize the per-layer version map. For TiKVVersionMap this:
+            //   - layer 0 (default=0x00 alive): bumps m_count only; no per-VID
+            //     writes. Inserts later rely on the default 0x00 == alive.
+            //   - layer >0 (default=0xfe deleted): writes 0x00 explicitly for
+            //     each alive head in p_localToGlobal so MergePostings'
+            //     Deleted()/GetVersion filter (L2021) doesn't silently drop
+            //     legitimate base heads during async merges. Without this,
+            //     layer-1 MergePostings reads stored version=0xfe, sees
+            //     Deleted()=true (because per-VID byte is missing → reads
+            //     default 0xfe), filters every entry, and writes back a
+            //     corrupted near-empty posting -- destroying recall after
+            //     even a single async merge.
+            // LocalVersionMap (hashmap) treats missing keys as deleted
+            // (returns 0xfe) and so has the same problem; its Initialize
+            // override also persists 0x00 for each globalID.
+            m_versionMap->Initialize(m_opt->m_vectorSize,
+                                     p_headIndex->m_iDataBlockSize,
+                                     p_headIndex->m_iDataCapacity,
+                                     &p_localToGlobal);
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing values to DB\n");
 

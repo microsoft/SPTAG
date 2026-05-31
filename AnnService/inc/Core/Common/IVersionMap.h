@@ -30,6 +30,30 @@ namespace SPTAG
 
             virtual void DeleteAll() = 0;
 
+            /// One-time per-layer setup performed at the end of BuildIndex.
+            ///   size      total VID count for this layer (== m_opt->m_vectorSize)
+            ///   blockSize/capacity  hints for array-backed legacy maps; ignored
+            ///                       by hashmap / TiKV implementations
+            ///   globalIDs (optional) set of GLOBAL VIDs that are alive on
+            ///                       this layer. Layers whose "default
+            ///                       version" semantics treat unknown VIDs as
+            ///                       DELETED (e.g. TiKV layer >0, hashmap
+            ///                       LocalVersionMap) MUST persist an
+            ///                       explicit alive byte for each globalID;
+            ///                       otherwise MergePostings'
+            ///                       Deleted()/version-mismatch filter
+            ///                       eats every base entry on the first
+            ///                       async merge and corrupts the head index.
+            /// Default impl: just bump the internal count via SetR.
+            virtual void Initialize(SizeType size, SizeType blockSize, SizeType capacity,
+                                    COMMON::Dataset<SizeType>* globalIDs = nullptr)
+            {
+                (void)blockSize;
+                (void)capacity;
+                (void)globalIDs;
+                SetR(size);
+            }
+
             virtual SizeType Count() = 0;
             virtual SizeType GetDeleteCount() = 0;
             virtual std::uint64_t BufferSize() = 0;
