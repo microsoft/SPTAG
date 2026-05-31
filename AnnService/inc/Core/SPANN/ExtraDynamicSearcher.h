@@ -595,21 +595,37 @@ namespace SPTAG::SPANN {
                         const uint8_t* basePtr = reinterpret_cast<const uint8_t*>(appendPosting.data());
                         size_t totalRec = appendPosting.size() / m_vectorInfoSize;
 
-                        std::vector<SizeType> batchVids;
-                        std::vector<uint8_t> batchVers;
-                        batchVids.reserve(totalRec);
-                        batchVers.reserve(totalRec);
+                        // Pre-build the candidate set and batch-read current
+                        // versions to avoid one TiKV Get per record.
+                        std::vector<size_t> candIdx;
+                        std::vector<SizeType> candVids;
+                        std::vector<uint8_t> candRecVers;
+                        candIdx.reserve(totalRec);
+                        candVids.reserve(totalRec);
+                        candRecVers.reserve(totalRec);
                         for (size_t i = 0; i < totalRec; ++i) {
                             const uint8_t* p = basePtr + i * m_vectorInfoSize;
                             SizeType vid = *reinterpret_cast<const SizeType*>(p);
                             uint8_t recVer = *(p + sizeof(SizeType));
                             if (vid < 0) continue;
                             if (recVer == 0xfe) continue;
-                            uint8_t curVer = m_versionMap->GetVersion(vid);
+                            candIdx.push_back(i);
+                            candVids.push_back(vid);
+                            candRecVers.push_back(recVer);
+                        }
+                        std::vector<uint8_t> curVers;
+                        m_versionMap->BatchGetVersions(candVids, curVers);
+
+                        std::vector<SizeType> batchVids;
+                        std::vector<uint8_t> batchVers;
+                        batchVids.reserve(candVids.size());
+                        batchVers.reserve(candVids.size());
+                        for (size_t k = 0; k < candVids.size(); ++k) {
+                            uint8_t curVer = curVers[k];
                             if (curVer == 0xfe) continue;
-                            if (curVer == recVer) continue;
-                            batchVids.push_back(vid);
-                            batchVers.push_back(recVer);
+                            if (curVer == candRecVers[k]) continue;
+                            batchVids.push_back(candVids[k]);
+                            batchVers.push_back(candRecVers[k]);
                         }
                         if (!batchVids.empty()) {
                             m_versionMap->SetVersionBatch(batchVids, batchVers);
@@ -670,21 +686,35 @@ namespace SPTAG::SPANN {
                         const uint8_t* basePtr =
                             reinterpret_cast<const uint8_t*>(req->m_appendPosting.data());
                         size_t totalRec = req->m_appendPosting.size() / m_vectorInfoSize;
-                        std::vector<SizeType> batchVids;
-                        std::vector<uint8_t> batchVers;
-                        batchVids.reserve(totalRec);
-                        batchVers.reserve(totalRec);
+                        std::vector<size_t> candIdx;
+                        std::vector<SizeType> candVids;
+                        std::vector<uint8_t> candRecVers;
+                        candIdx.reserve(totalRec);
+                        candVids.reserve(totalRec);
+                        candRecVers.reserve(totalRec);
                         for (size_t k = 0; k < totalRec; ++k) {
                             const uint8_t* p = basePtr + k * m_vectorInfoSize;
                             SizeType vid = *reinterpret_cast<const SizeType*>(p);
                             uint8_t recVer = *(p + sizeof(SizeType));
                             if (vid < 0) continue;
                             if (recVer == 0xfe) continue;
-                            uint8_t curVer = m_versionMap->GetVersion(vid);
+                            candIdx.push_back(k);
+                            candVids.push_back(vid);
+                            candRecVers.push_back(recVer);
+                        }
+                        std::vector<uint8_t> curVers;
+                        m_versionMap->BatchGetVersions(candVids, curVers);
+
+                        std::vector<SizeType> batchVids;
+                        std::vector<uint8_t> batchVers;
+                        batchVids.reserve(candVids.size());
+                        batchVers.reserve(candVids.size());
+                        for (size_t k = 0; k < candVids.size(); ++k) {
+                            uint8_t curVer = curVers[k];
                             if (curVer == 0xfe) continue;
-                            if (curVer == recVer) continue;
-                            batchVids.push_back(vid);
-                            batchVers.push_back(recVer);
+                            if (curVer == candRecVers[k]) continue;
+                            batchVids.push_back(candVids[k]);
+                            batchVers.push_back(candRecVers[k]);
                         }
                         if (!batchVids.empty()) {
                             m_versionMap->SetVersionBatch(batchVids, batchVers);
@@ -1135,15 +1165,25 @@ namespace SPTAG::SPANN {
                             int vectorCount = 0;
                             std::shared_ptr<std::string> vecStr;
                             bool hasHead = false;
+                            // Batched version-byte read for this posting + globalID head.
+                            std::vector<SizeType> rf_vids;
+                            rf_vids.reserve(postVectorNum + 1);
+                            for (SizeType j = 0; j < postVectorNum; j++) {
+                                rf_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                            }
+                            rf_vids.push_back(globalID);
+                            std::vector<uint8_t> rf_mapVers;
+                            m_versionMap->BatchGetVersions(rf_vids, rf_mapVers);
                             for (int j = 0; j < postVectorNum;
                                     j++, vectorId += m_vectorInfoSize)
                             {
                                 uint8_t version = *(vectorId + sizeof(SizeType));
-                                SizeType VID = *((SizeType *)(vectorId));
+                                SizeType VID = rf_vids[j];
 
                                 if (VID == globalID) vecStr = std::make_shared<std::string>((char*)vectorId + m_metaDataSize, m_vectorDataSize);
                                 
-                                if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version)
+                                uint8_t mapVer = rf_mapVers[j];
+                                if (mapVer == 0xfe || mapVer != version)
                                     continue;
 
                                 if (VID == globalID) hasHead = true;
@@ -1159,7 +1199,7 @@ namespace SPTAG::SPANN {
                             }
                             if (!hasHead && vecStr != nullptr)
                             {
-                                Serialize((char*)postingP + vectorCount * m_vectorInfoSize, globalID, m_versionMap->GetVersion(globalID), vecStr->data());
+                                Serialize((char*)postingP + vectorCount * m_vectorInfoSize, globalID, rf_mapVers.back(), vecStr->data());
                                 vectorCount++;
                             }
                             if (vectorCount <= m_mergeThreshold) mergelist.insert(globalID);
@@ -1280,30 +1320,50 @@ namespace SPTAG::SPANN {
                 localIndices.reserve(postVectorNum);
                 uint8_t* vectorId = postingP;
                 bool hasHead = false;
+
+                // Pre-scan for invalid VIDs (treat as corruption marker
+                // that triggers retry of the GET, matching the original
+                // serial-loop behaviour) before issuing the batched
+                // version-byte read.
+                {
+                    bool sawInvalid = false;
+                    SizeType maxVid = m_versionMap->Count();
+                    for (SizeType j = 0; j < postVectorNum; j++) {
+                        SizeType VID = *((SizeType*)(postingP + j * m_vectorInfoSize));
+                        if (VID < 0 || VID >= maxVid) { sawInvalid = true; break; }
+                    }
+                    if (sawInvalid) {
+                        if (retry < 3) {
+                            retry++;
+                            goto Retry;
+                        } else {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                "Split fail: Get posting %lld fail after 3 times retries.\n", (std::int64_t)headID);
+                            return ErrorCode::DiskIOFail;
+                        }
+                    }
+                }
+
+                // Batched MultiGet for every entry's version byte plus headID's.
+                std::vector<SizeType> sp_vids;
+                sp_vids.reserve(postVectorNum + 1);
+                for (SizeType j = 0; j < postVectorNum; j++) {
+                    sp_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                }
+                sp_vids.push_back(headID);
+                std::vector<uint8_t> sp_mapVers;
+                m_versionMap->BatchGetVersions(sp_vids, sp_mapVers);
+
                 for (SizeType j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                 {
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(SizeType));
-                    SizeType VID = *((SizeType*)(vectorId));
-                    if (VID < 0 || VID >= m_versionMap->Count())
-                    {
-                        if (retry < 3)
-                        {
-                            retry++;
-                            goto Retry;
-                        }
-                        else
-                        {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                         "Split fail: Get posting %lld fail after 3 times retries.\n", (std::int64_t)(headID));
-                            return ErrorCode::DiskIOFail;
-                        }
-                    }
-                    
+                    SizeType VID = sp_vids[j];
+
                     if (VID == headID) headVec = std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize);
 
-		            //if (VID >= m_versionMap.Count()) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "DEBUG: vector ID:%d total size:%d\n", VID, m_versionMap.Count());
-                    if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                    uint8_t mapVer = sp_mapVers[j];
+                    if (mapVer == 0xfe || mapVer != version) continue;
 
                     if (VID == headID) hasHead = true;
                     localIndices.push_back(j);
@@ -1312,7 +1372,7 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split fail: cannot find head in posting! headID:%lld\n", (std::int64_t)headID);
                     return ErrorCode::Fail;
                 } else {
-                    *((uint8_t*)(headVec->data() + sizeof(SizeType))) = m_versionMap->GetVersion(headID);
+                    *((uint8_t*)(headVec->data() + sizeof(SizeType))) = sp_mapVers.back();
                 }
                 // double gcEndTime = sw.getElapsedMs();
                 // m_splitGcCost += gcEndTime;
@@ -1676,10 +1736,19 @@ namespace SPTAG::SPANN {
 
                                 auto *postingK = reinterpret_cast<uint8_t *>(currentPostingList.data());
                                 size_t newPostVectorNum = currentPostingList.size() / m_vectorInfoSize;
+                                // Batched version-byte read for this posting we're merging into.
+                                std::vector<SizeType> sm_vids;
+                                sm_vids.reserve(newPostVectorNum);
+                                for (size_t j = 0; j < newPostVectorNum; j++) {
+                                    sm_vids.push_back(*((SizeType*)(postingK + j * m_vectorInfoSize)));
+                                }
+                                std::vector<uint8_t> sm_mapVers;
+                                m_versionMap->BatchGetVersions(sm_vids, sm_mapVers);
                                 for (int j = 0; j < (int)newPostVectorNum; j++, postingK += m_vectorInfoSize) {
-                                    SizeType VID = *((SizeType *)(postingK));
+                                    SizeType VID = sm_vids[j];
                                     uint8_t verK = *(postingK + sizeof(SizeType));
-                                    if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != verK) continue;
+                                    uint8_t mapVer = sm_mapVers[j];
+                                    if (mapVer == 0xfe || mapVer != verK) continue;
                                     if (vectorIdSet.find(VID) != vectorIdSet.end()) continue;
                                     vectorIdSet.insert(VID);
                                     mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
@@ -2011,14 +2080,26 @@ namespace SPTAG::SPANN {
             int currentLength = 0;
             uint8_t* vectorId = postingP;
             std::shared_ptr<std::string> headVec;
-            for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+            // Batch one TiKV MultiGet for the entire posting's version
+            // bytes (plus the head's own version) instead of two serial
+            // TiKV roundtrips per entry. Last slot is headID's version.
+            std::vector<SizeType> mp_vids;
+            mp_vids.reserve(postVectorNum + 1);
+            for (size_t j = 0; j < postVectorNum; j++) {
+                mp_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+            }
+            mp_vids.push_back(headID);
+            std::vector<uint8_t> mp_mapVers;
+            m_versionMap->BatchGetVersions(mp_vids, mp_mapVers);
+            for (int j = 0; j < (int)postVectorNum; j++, vectorId += m_vectorInfoSize)
             {
-                SizeType VID = *((SizeType*)(vectorId));
+                SizeType VID = mp_vids[j];
                 uint8_t version = *(vectorId + sizeof(SizeType));
                 if (VID == headID) {
                     headVec = std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize);
                 }
-                if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                uint8_t mapVer = mp_mapVers[j];
+                if (mapVer == 0xfe || mapVer != version) continue;
                 vectorIdSet.insert(VID);
                 mergedPostingList += currentPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
                 currentLength++;
@@ -2028,7 +2109,7 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail: cannot find head vector in posting! headID:%lld\n", (std::int64_t)headID);
                 return ErrorCode::Fail;
             } else {
-                *((uint8_t*)(headVec->data() + sizeof(SizeType))) = m_versionMap->GetVersion(headID);
+                *((uint8_t*)(headVec->data() + sizeof(SizeType))) = mp_mapVers.back();
             }
 
             if (currentLength > m_mergeThreshold)
@@ -2128,12 +2209,21 @@ namespace SPTAG::SPANN {
                     postVectorNum = nextPostingList.size() / m_vectorInfoSize;
                     vectorId = postingP;
                     int nextLength = 0;
-                    for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
+                    // Batched version-byte read for this next posting.
+                    std::vector<SizeType> mp_next_vids;
+                    mp_next_vids.reserve(postVectorNum);
+                    for (size_t j = 0; j < postVectorNum; j++) {
+                        mp_next_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                    }
+                    std::vector<uint8_t> mp_next_mapVers;
+                    m_versionMap->BatchGetVersions(mp_next_vids, mp_next_mapVers);
+                    for (int j = 0; j < (int)postVectorNum; j++, vectorId += m_vectorInfoSize)
                     {
-                        SizeType VID = *((SizeType*)(vectorId));
+                        SizeType VID = mp_next_vids[j];
                         uint8_t version = *(vectorId + sizeof(SizeType));
                         if (VID == queryResult->VID) resultVec = std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize);
-                        if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                        uint8_t mapVer = mp_next_mapVers[j];
+                        if (mapVer == 0xfe || mapVer != version) continue;
                         if (vectorIdSet.find(VID) == vectorIdSet.end()) {
                             nextVectorIdSet.insert(VID);
                             mergedPostingList += nextPostingList.substr(j * m_vectorInfoSize, m_vectorInfoSize);
@@ -2212,12 +2302,20 @@ namespace SPTAG::SPANN {
                 if (!m_opt->m_disableReassign) 
                 {
                     postingP = reinterpret_cast<uint8_t*>(deletedPostingList->data());
+                    // Batched version-byte read for the about-to-be-removed posting.
+                    std::vector<SizeType> mp_del_vids;
+                    mp_del_vids.reserve(deletedLength);
+                    for (int j = 0; j < deletedLength; j++) {
+                        mp_del_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                    }
+                    std::vector<uint8_t> mp_del_mapVers;
+                    m_versionMap->BatchGetVersions(mp_del_vids, mp_del_mapVers);
                     for (int j = 0; j < deletedLength; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                        SizeType VID = *(reinterpret_cast<SizeType*>(vectorId));
                         uint8_t version = *(vectorId + sizeof(SizeType));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
+                        uint8_t mapVer = mp_del_mapVers[j];
+                        if (mapVer == 0xfe || mapVer != version) continue;
                         float origin_dist = m_headIndex->ComputeDistance(deletedHeadVec->data() + m_metaDataSize, vector);
                         float current_dist = m_headIndex->ComputeDistance(nextHeadVec->data() + m_metaDataSize, vector);
                         if (current_dist > origin_dist) {
@@ -2408,19 +2506,28 @@ namespace SPTAG::SPANN {
                 auto& postingList = postingLists[i];
                 size_t postVectorNum = postingList.size() / m_vectorInfoSize;
                 auto* postingP = reinterpret_cast<uint8_t*>(postingList.data());
-                for (int j = 0; j < postVectorNum; j++) {
+                // Batched version-byte read for the entire posting.
+                std::vector<SizeType> cr_vids;
+                cr_vids.reserve(postVectorNum);
+                for (size_t j = 0; j < postVectorNum; j++) {
+                    cr_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                }
+                std::vector<uint8_t> cr_mapVers;
+                m_versionMap->BatchGetVersions(cr_vids, cr_mapVers);
+                const SizeType maxVid = m_versionMap->Count();
+                for (size_t j = 0; j < postVectorNum; j++) {
                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                    SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                    SizeType vid = cr_vids[j];
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    const SizeType maxVid = m_versionMap->Count();
                     if (vid < 0 || vid >= maxVid) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "CollectReAssign: skip invalid VID %d (max %d) in posting headID=%d\n",
                                      vid, maxVid, newHeadsID[i]);
                         continue;
                     }
-                    if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
+                    uint8_t mapVer = cr_mapVers[j];
+                    if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && mapVer != 0xfe && mapVer == version) {
                         m_stat.m_reAssignScanNum++;
                         float dist = m_headIndex->ComputeDistance(newHeadsVec[i]->data(), vector);
                         if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, true)) {
@@ -2485,19 +2592,28 @@ namespace SPTAG::SPANN {
                     auto& postingList = nearbyPostings[i];
                     size_t postVectorNum = postingList.size() / m_vectorInfoSize;
                     auto* postingP = reinterpret_cast<uint8_t*>(postingList.data());
-                    for (int j = 0; j < postVectorNum; j++) {
+                    // Batched version-byte read for the nearby posting.
+                    std::vector<SizeType> nb_vids;
+                    nb_vids.reserve(postVectorNum);
+                    for (size_t j = 0; j < postVectorNum; j++) {
+                        nb_vids.push_back(*((SizeType*)(postingP + j * m_vectorInfoSize)));
+                    }
+                    std::vector<uint8_t> nb_mapVers;
+                    m_versionMap->BatchGetVersions(nb_vids, nb_mapVers);
+                    const SizeType maxVid = m_versionMap->Count();
+                    for (size_t j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
-                        SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
+                        SizeType vid = nb_vids[j];
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        const SizeType maxVid = m_versionMap->Count();
                         if (vid < 0 || vid >= maxVid) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                 "CollectReAssign(nearby): skip invalid VID %d (max %d) in posting headID=%d\n",
                                 vid, maxVid, HeadPrevTopK[i]);
                             continue;
                         }
-                        if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
+                        uint8_t mapVer = nb_mapVers[j];
+                        if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && mapVer != 0xfe && mapVer == version) {
                             m_stat.m_reAssignScanNum++;
                             float dist = m_headIndex->ComputeDistance(HeadPrevTopKVec[i]->data(), vector);
                             if (CheckIsNeedReassign(newHeadsVec, vector, headVector, newHeadsDist[i], dist, false)) {

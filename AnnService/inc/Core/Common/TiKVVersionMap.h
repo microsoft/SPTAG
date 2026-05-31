@@ -6,6 +6,7 @@
 
 #include "IVersionMap.h"
 #include "inc/Helper/KeyValueIO.h"
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <vector>
@@ -233,10 +234,44 @@ namespace SPTAG
                     m_deleted = size;
                     SaveMetadata();
 
+                    // Batch the alive-marker writes via MultiPut so they
+                    // can be grouped per TiKV region and issued in parallel.
+                    // Serial PutByte was the build-time hotspot (~1-2ms
+                    // per write × ~200K alive heads at 1M-vector scale).
+                    std::vector<SizeType> aliveSorted;
+                    aliveSorted.reserve(aliveIDs.size());
+                    for (SizeType id : aliveIDs) aliveSorted.push_back(id);
+                    std::sort(aliveSorted.begin(), aliveSorted.end());
+
                     SizeType written = 0;
-                    for (SizeType globalID : aliveIDs) {
-                        if (PutByte(VersionKey(globalID), 0x00) == ErrorCode::Success) {
-                            written++;
+                    constexpr size_t kBatchSize = 4096;
+                    std::vector<std::string> keys;
+                    std::vector<std::string> values;
+                    keys.reserve(kBatchSize);
+                    values.reserve(kBatchSize);
+                    const std::string aliveByte(1, static_cast<char>(0x00));
+                    for (size_t i = 0; i < aliveSorted.size(); i++) {
+                        keys.push_back(VersionKey(aliveSorted[i]));
+                        values.push_back(aliveByte);
+                        if (keys.size() >= kBatchSize || i + 1 == aliveSorted.size()) {
+                            auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
+                            if (ret == ErrorCode::Success) {
+                                written += static_cast<SizeType>(keys.size());
+                            } else if (ret == ErrorCode::Undefined) {
+                                // Backend lacks MultiPut: fall back to serial PutByte.
+                                for (const auto& k : keys) {
+                                    if (PutByte(k, 0x00) == ErrorCode::Success) written++;
+                                }
+                            } else {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                    "TiKVVersionMap::Initialize: MultiPut batch failed layer=%d ret=%d size=%zu; falling back to serial PutByte for this batch.\n",
+                                    m_layer, static_cast<int>(ret), keys.size());
+                                for (const auto& k : keys) {
+                                    if (PutByte(k, 0x00) == ErrorCode::Success) written++;
+                                }
+                            }
+                            keys.clear();
+                            values.clear();
                         }
                     }
                     m_deleted = size - written;
@@ -336,15 +371,52 @@ namespace SPTAG
             }
 
             // Per-VID batch write: mirrors SetVersion() for each (vid, ver) pair.
-            // The new per-VID-key TiKVVersionMap has no chunked batching path, so
-            // this is a thin convenience loop.  Performance-sensitive callers
-            // can switch to m_db->MultiPut() directly if profiling requires it.
+            // Uses TiKVIO MultiPut so the writes are grouped per TiKV region
+            // and issued in parallel. m_deleted accounting is approximate
+            // here (we do not read the old byte to compute the exact delta);
+            // GetDeleteCount() returns 0 for the TiKV-backed version map so
+            // this approximation is acceptable. Callers that need precise
+            // accounting can call SetVersion() per-VID instead.
             void SetVersionBatch(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
             {
                 size_t n = std::min(vids.size(), versions.size());
                 if (n == 0) return;
+
+                SizeType count = m_count.load();
+                std::vector<std::string> keys;
+                std::vector<std::string> values;
+                keys.reserve(n);
+                values.reserve(n);
                 for (size_t i = 0; i < n; ++i) {
-                    SetVersion(vids[i], versions[i]);
+                    if (vids[i] < 0 || vids[i] >= count) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "TiKVVersionMap::SetVersionBatch: invalid key %d (max %d)\n",
+                            vids[i], count);
+                        continue;
+                    }
+                    keys.push_back(VersionKey(vids[i]));
+                    values.push_back(std::string(1, static_cast<char>(versions[i])));
+                }
+                if (keys.empty()) return;
+
+                auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
+                if (ret == ErrorCode::Undefined) {
+                    // Backend lacks MultiPut: fall back to serial SetVersion
+                    // which preserves m_deleted accounting.
+                    for (size_t i = 0; i < n; ++i) {
+                        if (vids[i] >= 0 && vids[i] < count) {
+                            SetVersion(vids[i], versions[i]);
+                        }
+                    }
+                } else if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "TiKVVersionMap::SetVersionBatch: MultiPut failed layer=%d ret=%d keys=%zu; falling back to per-VID SetVersion.\n",
+                        m_layer, static_cast<int>(ret), keys.size());
+                    for (size_t i = 0; i < n; ++i) {
+                        if (vids[i] >= 0 && vids[i] < count) {
+                            SetVersion(vids[i], versions[i]);
+                        }
+                    }
                 }
             }
 
