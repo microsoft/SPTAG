@@ -362,7 +362,7 @@ namespace SPTAG::SPANN {
             // result lists (unfilled slots). Treat them as "not contained"
             // and avoid calling Deleted(), which would otherwise emit a
             // spurious LL_Error log inside TiKVVersionMap.
-            if (idx < 0 || idx >= m_versionMap->Count()) return false;
+            if (idx < 0) return false;
             return !m_versionMap->Deleted(idx, policy);
         }
 
@@ -371,13 +371,12 @@ namespace SPTAG::SPANN {
             contains.assign(ids.size(), 0);
             if (ids.empty()) return;
 
-            const SizeType count = m_versionMap->Count();
             std::vector<SizeType> validIDs;
             std::vector<size_t> validIndices;
             validIDs.reserve(ids.size());
             validIndices.reserve(ids.size());
             for (size_t i = 0; i < ids.size(); ++i) {
-                if (ids[i] < 0 || ids[i] >= count) continue;
+                if (ids[i] < 0) continue;
                 validIDs.push_back(ids[i]);
                 validIndices.push_back(i);
             }
@@ -441,11 +440,11 @@ namespace SPTAG::SPANN {
             for (int j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
             {
                 SizeType VID = *((SizeType *)(vectorId));
-                if (VID < 0 || VID >= m_versionMap->Count())
+                if (VID < 0)
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                 "PrintErrorInPosting found wrong VID:%d in headID:%d (should be less than %d)\n", VID,
-                                 headID, m_versionMap->Count());
+                                 "PrintErrorInPosting found wrong VID:%d in headID:%d\n", VID,
+                                 headID);
                 }
             }
         }
@@ -653,7 +652,7 @@ namespace SPTAG::SPANN {
                     //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(SizeType));
                     SizeType VID = *((SizeType*)(vectorId));
-                    if (VID < 0 || VID >= m_versionMap->Count())
+                    if (VID < 0)
                     {
                         if (retry < 3)
                         {
@@ -1321,11 +1320,10 @@ namespace SPTAG::SPANN {
                 uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                 ValueType* vectorData = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
 
-                const SizeType maxVid = m_versionMap->Count();
-                if (vid < 0 || vid >= maxVid) {
+                if (vid < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                 "CollectReAssign: skip invalid VID %d (max %d)\n",
-                                 vid, maxVid);
+                                 "CollectReAssign: skip invalid VID %d\n",
+                                 vid);
                     return;
                 }
 
@@ -1361,11 +1359,10 @@ namespace SPTAG::SPANN {
                     SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    const SizeType maxVid = m_versionMap->Count();
-                    if (vid < 0 || vid >= maxVid) {
+                    if (vid < 0) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                     "CollectReAssign: skip invalid VID %d (max %d) in posting headID=%d\n",
-                                     vid, maxVid, newHeadsID[i]);
+                                     "CollectReAssign: skip invalid VID %d in posting headID=%d\n",
+                                     vid, newHeadsID[i]);
                         continue;
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
@@ -1438,11 +1435,10 @@ namespace SPTAG::SPANN {
                         SizeType vid = *(reinterpret_cast<SizeType*>(vectorId));
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        const SizeType maxVid = m_versionMap->Count();
-                        if (vid < 0 || vid >= maxVid) {
+                        if (vid < 0) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                "CollectReAssign(nearby): skip invalid VID %d (max %d) in posting headID=%d\n",
-                                vid, maxVid, HeadPrevTopK[i]);
+                                "CollectReAssign(nearby): skip invalid VID %d in posting headID=%d\n",
+                                vid, HeadPrevTopK[i]);
                             continue;
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
@@ -1742,11 +1738,10 @@ namespace SPTAG::SPANN {
         {
             SizeType VID = *((SizeType*)vectorInfo->c_str());
             uint8_t version = *((uint8_t*)(vectorInfo->c_str() + sizeof(VID)));
-            const SizeType maxVid = m_versionMap->Count();
-            if (VID < 0 || VID >= maxVid) {
+            if (VID < 0) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                             "Reassign: skip invalid VID %d (max %d)\n",
-                             VID, maxVid);
+                             "Reassign: skip invalid VID %d\n",
+                             VID);
                 return ErrorCode::Success;
             }
             // return;
@@ -2260,7 +2255,7 @@ namespace SPTAG::SPANN {
                     p_exWorkSpace->m_offset++;
 
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
-                    if (vectorID >= m_versionMap->Count()) return ErrorCode::Key_OverFlow;
+                    if (vectorID < 0) return ErrorCode::Key_OverFlow;
                     if (m_versionMap->Deleted(vectorID)) continue;
                     if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue;
                     if (p_exWorkSpace->m_filterFunc != nullptr && !p_exWorkSpace->m_filterFunc(p_spann->GetMetadata(vectorID))) continue;
@@ -2792,8 +2787,6 @@ namespace SPTAG::SPANN {
                 if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
                     if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
                     version = m_versionMap->GetVersion(VID);
-                } else if (VID >= m_versionMap->Count()) {
-                    m_versionMap->SetR(VID + 1);
                 }
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
                 int replicaCount = 1;
