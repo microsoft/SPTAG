@@ -1650,7 +1650,7 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
         
-        ErrorCode BatchAppend(ExtraWorkSpace* p_exWorkSpace, std::unordered_map<SizeType, std::string>& headAppends, const char* caller)
+        ErrorCode BatchAppend(ExtraWorkSpace* p_exWorkSpace, std::unordered_map<SizeType, std::string>& headAppends, const char* caller, bool disableSplit = false)
         {
             if (headAppends.empty()) return ErrorCode::Success;
 
@@ -1724,7 +1724,7 @@ namespace SPTAG::SPANN {
                 m_stat.m_appendPostingBytesTotal.fetch_add((uint64_t)postingSize, std::memory_order_relaxed);
                 m_stat.m_appendRmwSampleCount.fetch_add(1, std::memory_order_relaxed);
                 postingSize /= m_vectorInfoSize;
-                if (postingSize > m_postingSizeLimit) {
+                if (postingSize > m_postingSizeLimit && !disableSplit) {
                     m_stat.m_appendTriggeredSplit.fetch_add(1, std::memory_order_relaxed);
                     SplitAsync(keys[i], postingSize);
                 }
@@ -2625,7 +2625,7 @@ namespace SPTAG::SPANN {
                             {
                                 std::shared_ptr<VectorSet> vectorSet(new BasicVectorSet(ByteArray((std::uint8_t*)fullVectors->GetVector(it), m_vectorDataSize, false),
                                     GetEnumValueType<ValueType>(), m_opt->m_dim, 1));
-                                ErrorCode addRet = AddIndex(&workSpace, vectorSet, it);
+                                ErrorCode addRet = AddIndex(&workSpace, vectorSet, it, m_opt->m_storage == Storage::TIKVIO && !m_opt->m_globalIDPath.empty());
                                 if (addRet != ErrorCode::Success) {
                                     zeroReplicaFail(addRet, it);
                                     return;
@@ -2782,7 +2782,7 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
-            SizeType begin) override {
+            SizeType begin, bool disableSplit = false) override {
 
             // Phase 1: RNGSelection + serialize + WAL for each vector, group by headID
             std::unordered_map<SizeType, std::string> headAppends;
@@ -2811,7 +2811,7 @@ namespace SPTAG::SPANN {
             }
 
             // Phase 2: Batch append to each headID (one Merge per head instead of per vector)
-            if (m_opt->m_storage == Storage::TIKVIO) return BatchAppend(p_exWorkSpace, headAppends, "AddIndex");
+            if (m_opt->m_storage == Storage::TIKVIO) return BatchAppend(p_exWorkSpace, headAppends, "AddIndex", disableSplit);
 
             for (auto& [headID, posting] : headAppends) {
                 int appendNum = static_cast<int>(posting.size() / m_vectorInfoSize);
