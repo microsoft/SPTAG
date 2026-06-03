@@ -2685,9 +2685,24 @@ namespace SPTAG::SPANN {
                              m_stat.m_headMiss.load() - headMissBeforeZeroReplica,
                              m_stat.m_reAssignNum - reassignNumBeforeZeroReplica);
 
-                if (p_headIndex->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder) != ErrorCode::Success) {
+                std::vector<SizeType> headOldtoNew;
+                if (p_headIndex->SaveIndex(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder, &headOldtoNew) != ErrorCode::Success) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to save head index!\n");
                     return false;
+                }
+                if (!headOldtoNew.empty()) {
+                    COMMON::Dataset<SizeType> new_topLocalToGlobalID(p_headIndex->GetNumSamples() - p_headIndex->GetNumDeleted(), 1,
+                                                                     p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
+                    for (int i = 0; i < p_headToLocal.R(); i++)
+                    {
+                        if (p_headIndex->ContainSample(i))
+                        {
+                            *(new_topLocalToGlobalID[headOldtoNew[i]]) = *(p_headToLocal[i]);
+                        }
+                    }
+                    new_topLocalToGlobalID.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile);
+                } else {
+                    p_headToLocal.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile);
                 } 
                 std::error_code ec;
                 std::string prevHeadVectorFile = m_opt->m_indexDirectory + FolderSep + m_opt->m_headIndexFolder + FolderSep + p_headIndex->GetParameter("VectorFilePath");
@@ -2700,9 +2715,10 @@ namespace SPTAG::SPANN {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Update headVectorFile from %s to %s for layer %d\n",
                                 prevHeadVectorFile.c_str(), curHeadVectorFile.c_str(), m_layer);
                 }
+            } else {
+                p_headToLocal.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile);
             }
 
-            p_headToLocal.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_headIDFile);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: save versionMap\n");
             m_versionMap->Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer));
 

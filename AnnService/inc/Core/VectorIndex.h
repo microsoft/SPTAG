@@ -86,11 +86,11 @@ public:
 
     virtual std::shared_ptr<std::vector<std::uint64_t>> CalculateBufferSize() const;
 
-    virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs);
+    virtual ErrorCode SaveIndex(std::string& p_config, const std::vector<ByteArray>& p_indexBlobs,  std::vector<SizeType>* p_mapping = nullptr);
 
-    virtual ErrorCode SaveIndex(const std::string& p_folderPath);
+    virtual ErrorCode SaveIndex(const std::string& p_folderPath,  std::vector<SizeType>* p_mapping = nullptr);
 
-    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
+    virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr,  std::vector<SizeType>* p_mapping = nullptr);
 
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
     
