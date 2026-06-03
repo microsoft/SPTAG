@@ -1594,6 +1594,15 @@ namespace SPTAG::SPANN {
                 {
                     if (ret == ErrorCode::Posting_OverFlow) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Merge failed:Posting overflow when appending to %lld! Do split and then retry...\n", (std::int64_t)headID);
+                        int tofill = m_postingSizeLimit + m_bufferSizeLimit - (postingSize / m_vectorInfoSize);
+                        std::string subPosting = appendPosting.substr(0, tofill * m_vectorInfoSize);
+                        ret = db->Merge(DBKey(headID), subPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSize);
+                        if (ret != ErrorCode::Success) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge %lld failed!\n", (std::int64_t)headID);
+                            return ret;
+                        }
+                        appendPosting = appendPosting.substr(tofill * m_vectorInfoSize);
+                        appendNum -= tofill;
                         ret = Split(p_exWorkSpace, headID, false);
                         if (ret != ErrorCode::Success) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split %lld failed!\n", (std::int64_t)headID);
