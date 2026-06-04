@@ -347,6 +347,13 @@ private:
     // Exact per-tag routing stats computed by BuildSignatures.
     std::map<int, std::unordered_map<uint32_t, TagRoutingStats>> m_tenantTagRoutingStats;
 
+    // Per-level tag value offsets (minimum tag value at each hierarchical
+    // level/column), computed by BuildSignatures and persisted to
+    // tag_level_offsets.bin. Used at query time to map a raw tag value back to
+    // its hierarchical level (0=org,1=dept,2=team,...). Without this, the query
+    // path cannot know which level a single ACL tag belongs to.
+    std::map<int, std::vector<uint32_t>> m_tenantTagLevelOffsets;
+
     // Build-time pivot plan selected by the estimator.
     std::map<int, int> m_tenantPivotLevels;
     std::map<int, int> m_tenantPivotNodeCounts;

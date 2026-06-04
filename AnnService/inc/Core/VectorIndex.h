@@ -300,6 +300,11 @@ public:
             float m_filterSelectivity = 1.0f;
             std::vector<SizeType> m_directPostingIDs;
             std::vector<int> m_searchHeadBundleNodes;
+            // Per-level minimum tag value (ascending, disjoint ranges) persisted at
+            // build time as tag_level_offsets.bin. Used to map a raw tag value to its
+            // hierarchical level (org/dept/team/project) for HierarchicalPostingMask
+            // construction. Empty -> fall back to legacy fixed thresholds.
+            std::vector<uint32_t> m_tagLevelOffsets;
 
             void Reset()
             {
@@ -309,6 +314,7 @@ public:
                 m_filterSelectivity = 1.0f;
                 m_directPostingIDs.clear();
                 m_searchHeadBundleNodes.clear();
+                m_tagLevelOffsets.clear();
             }
 
             const uint32_t* QueryTags() const

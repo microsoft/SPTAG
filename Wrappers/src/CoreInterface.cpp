@@ -2844,6 +2844,27 @@ void TenantIndexManager::LoadTenantSparseIndices()
     {
         fprintf(stderr, "[INFO] Loaded sparse tag indices for %d tenants\n", loadedCount);
     }
+
+    // Load per-level tag offsets (used to map a raw query tag value to its
+    // hierarchical level). Independent of sparse_tags availability.
+    for (const auto& kv : m_tenantSpannWorkDirs)
+    {
+        int tenantId = kv.first;
+        if (m_tenantTagLevelOffsets.count(tenantId)) continue;
+        const std::string offPath = kv.second + "/tag_level_offsets.bin";
+        FILE* of = fopen(offPath.c_str(), "rb");
+        if (!of) continue;
+        int32_t nLevels = 0;
+        if (fread(&nLevels, sizeof(int32_t), 1, of) == 1 && nLevels > 0 && nLevels < 64) {
+            std::vector<uint32_t> offs(static_cast<size_t>(nLevels));
+            if (fread(offs.data(), sizeof(uint32_t), offs.size(), of) == offs.size()) {
+                m_tenantTagLevelOffsets[tenantId] = std::move(offs);
+                fprintf(stderr, "[INFO] Tenant %d: loaded tag_level_offsets.bin (%d levels)\n",
+                        tenantId, nLevels);
+            }
+        }
+        fclose(of);
+    }
 }
 
 void TenantIndexManager::LoadTenantTagPureIndices()
@@ -3535,6 +3556,41 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     }
     fclose(infoF);
 
+    // 1b. Load posting_pure_counts.bin (if present). Each posting is laid out as
+    //     [pure prefix | unfilter-tail suffix]. The unfilter-tail vectors exist
+    //     ONLY to boost unfiltered recall and are never scanned by filtered
+    //     queries (runtime caps the read to pure_count * vectorInfoSize). They
+    //     must therefore NOT contribute their tags to the per-head tag filter
+    //     sidecars (signatures_bitmask / posting_hier_masks / sparse_tags),
+    //     otherwise filtered queries lose their pruning and diverge from a
+    //     build without U_extra. Same file format as ssdinfo (header + int32s).
+    std::vector<int32_t> postingPureCounts;
+    bool hasPureCounts = false;
+    {
+        std::string pcPath = workDir + "/posting_pure_counts.bin";
+        FILE* pcF = fopen(pcPath.c_str(), "rb");
+        if (pcF) {
+            int32_t pcHeader[2];
+            if (fread(pcHeader, sizeof(int32_t), 2, pcF) == 2 && pcHeader[0] == numPostings) {
+                postingPureCounts.resize(numPostings);
+                if ((int)fread(postingPureCounts.data(), sizeof(int32_t), numPostings, pcF)
+                    == numPostings) {
+                    hasPureCounts = true;
+                }
+            }
+            fclose(pcF);
+        }
+        if (hasPureCounts) {
+            fprintf(stderr, "[INFO] Tenant %d: pure-count sidecar present; building tag filter "
+                    "masks over pure prefix only (excluding unfilter-tail).\n", p_tenantId);
+        }
+    }
+    auto pureLimit = [&](int pid, int nVecs) -> int {
+        if (!hasPureCounts || pid < 0 || pid >= (int)postingPureCounts.size()) return nVecs;
+        int pc = postingPureCounts[pid];
+        return (pc < 0 || pc > nVecs) ? nVecs : pc;
+    };
+
     // 2. Read ssdmapping: header (rows, cols) then rows × cols × int64 block addresses
     //    addrs[pid][0] = data size in bytes, addrs[pid][1..] = block addresses
     std::string mappingPath = workDir + "/ssdmapping";
@@ -3603,21 +3659,28 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         if ((int)raw.size() < dataSize) continue;
 
         // Extract VIDs and map to tags
+        const int nPure = pureLimit(pid, nVecs);
         for (int j = 0; j < nVecs; j++) {
             int offset = j * VEC_INFO_SIZE;
             int32_t vid;
             memcpy(&vid, raw.data() + offset, sizeof(int32_t));
             if (vid < 0 || vid >= p_numVectors) continue;
-            // Insert ALL tags for this vector into this posting's Bloom AND hierarchical mask
-            for (int t = 0; t < p_numTagsPerVec; t++) {
-                uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
-                posting_tags[pid].push_back(tag);
-                // Also insert into hierarchical mask at level t
-                posting_hier_masks[pid].Insert(t, tag);
+            // Only the pure prefix drives the filter sidecars. Unfilter-tail
+            // vectors (j >= nPure) must not pollute the per-head tag masks.
+            if (j < nPure) {
+                // Insert ALL tags for this vector into this posting's Bloom AND hierarchical mask
+                for (int t = 0; t < p_numTagsPerVec; t++) {
+                    uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
+                    posting_tags[pid].push_back(tag);
+                    // Also insert into hierarchical mask at level t
+                    posting_hier_masks[pid].Insert(t, tag);
+                }
+                totalAssignments++;
             }
-            totalAssignments++;
 
             // First-occurrence capture of vector payload for tag-pure path.
+            // (Captured for any occurrence; tail copies are byte-identical to the
+            // pure home copy, so coverage is unaffected by the pure gate above.)
             if (kTagPureEligible && !vidSeen[vid]) {
                 const uint8_t* src = raw.data() + offset + META_SIZE;
                 std::memcpy(vidVecData.data() + (size_t)vid * (size_t)m_dimension,
@@ -3633,6 +3696,31 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
 
     std::string sigPath = workDir + "/signatures_bitmask.bin";
     sigs->Save(sigPath);
+
+    // Compute per-level tag value offsets (minimum tag value in each column).
+    // The hierarchical posting mask stores each tag at level == its column
+    // index, so the query side must map a raw tag value back to its level.
+    // Tag value ranges are disjoint per level, so the per-column minimum is a
+    // valid level boundary. Persist these so query processes can load them.
+    {
+        std::vector<uint32_t> levelMin(p_numTagsPerVec, std::numeric_limits<uint32_t>::max());
+        for (int vid = 0; vid < p_numVectors; ++vid) {
+            for (int t = 0; t < p_numTagsPerVec; ++t) {
+                uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
+                if (tag < levelMin[t]) levelMin[t] = tag;
+            }
+        }
+        m_tenantTagLevelOffsets[p_tenantId] = levelMin;
+        const std::string offPath = workDir + "/tag_level_offsets.bin";
+        if (FILE* of = fopen(offPath.c_str(), "wb")) {
+            int32_t nLevels = p_numTagsPerVec;
+            fwrite(&nLevels, sizeof(int32_t), 1, of);
+            fwrite(levelMin.data(), sizeof(uint32_t), levelMin.size(), of);
+            fclose(of);
+            fprintf(stderr, "[INFO] Tenant %d: wrote tag_level_offsets.bin (%d levels)\n",
+                    p_tenantId, nLevels);
+        }
+    }
 
     std::unordered_map<uint32_t, int> tagVectorCounts;
     tagVectorCounts.reserve(static_cast<size_t>(p_numVectors) * p_numTagsPerVec);
@@ -4315,13 +4403,33 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     queryMask.Clear();
     SPTAG::Cache::HierarchicalPostingMask queryHierMask;
     queryHierMask.Clear();
+    // Map a raw tag value to its hierarchical level using the per-level offsets
+    // persisted at build time (tag_level_offsets.bin). Tag value ranges are
+    // disjoint and ascending per level, so the level is the largest index i
+    // with qtag >= offsets[i]. Falls back to the legacy fixed thresholds only
+    // when offsets are unavailable (pre-fix indexes).
+    const std::vector<uint32_t>* levelOffsets = nullptr;
+    {
+        auto offIt = m_tenantTagLevelOffsets.find(p_tenantId);
+        if (offIt != m_tenantTagLevelOffsets.end() && !offIt->second.empty())
+            levelOffsets = &offIt->second;
+    }
     for (int i = 0; i < p_numTags; i++) {
         queryMask.Insert(queryTagsPtr[i]);
         // Hierarchical mask uses 0-indexed levels (0=org,1=dept,2=team,3=project)
         // matching the convention used at build time in
         // LoadPostingSignaturesIntoHeadIndex (Insert(t, tag) for t = 0..numTagsPerVec-1).
         uint32_t qtag = queryTagsPtr[i];
-        int level = (qtag < 2000) ? 0 : (qtag < 3000) ? 1 : (qtag < 4000) ? 2 : 3;
+        int level;
+        if (levelOffsets != nullptr) {
+            level = 0;
+            for (int l = 0; l < (int)levelOffsets->size(); ++l) {
+                if (qtag >= (*levelOffsets)[l]) level = l;
+                else break;
+            }
+        } else {
+            level = (qtag < 2000) ? 0 : (qtag < 3000) ? 1 : (qtag < 4000) ? 2 : 3;
+        }
         queryHierMask.Insert(level, qtag);
     }
     auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
@@ -4331,6 +4439,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
     if (p_numTags > 0 && queryTagsPtr != nullptr) {
         searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
+    }
+    // Plumb the data-driven tag-level offsets so the SPANN search path maps tag
+    // values to hierarchical levels identically to build (column index = level),
+    // instead of the stale legacy thresholds in TagLevelFromId.
+    if (levelOffsets != nullptr) {
+        searchContext.m_tagLevelOffsets = *levelOffsets;
     }
     if (internalIdx) {
             // Dense path posting pre-filter.
@@ -4348,6 +4462,9 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             // at every level. MayIntersect is a no-false-negative test, so it is
             // safe as a pre-filter (false positives only let extra postings through).
             if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && p_numTags > 0) {
+                static const bool s_disableHierFilter =
+                    (std::getenv("SPTAG_DISABLE_HIER_POSTING_FILTER") != nullptr);
+                if (!s_disableHierFilter) {
                 searchContext.m_postingFilter =
                     [memIdx = memoryIndex.get(), queryHierMask](int localHid) {
                         // Use the per-posting multi-membership mask (union of all
@@ -4358,6 +4475,7 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                         if (hierMask == nullptr) return true;  // fail open
                         return hierMask->MayIntersect(queryHierMask);
                     };
+                }
             }
             // Bundle-node routing (multi-bundle graph search) is separate from the
             // posting pre-filter above and still useful when manifest has >1 node.

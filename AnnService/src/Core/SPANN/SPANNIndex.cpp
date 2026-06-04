@@ -47,9 +47,26 @@ constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
 
 // Helper to determine tag level from tag ID based on range
+// NOTE: Legacy thresholds below are a fallback ONLY. The real tag→level mapping
+// is data-driven: the per-tenant tag_level_offsets.bin (ascending per-level minimum
+// tag values, e.g. [0,4,20,84]) is plumbed through ThreadLocalSearchContext and
+// consulted first. The legacy fixed scheme (1000/2000/3000/4000) does NOT match
+// the offset-based tag encoding and silently collapsed every dept/team tag to
+// level 0, breaking HierarchicalPostingMask intersection for mid-selectivity
+// filtered queries.
 // Level 0 (org): 1000-1999, Level 1 (dept): 2000-2999,
 // Level 2 (team): 3000-3999, Level 3 (project): 4000-4999
 static inline int TagLevelFromId(uint32_t tag) {
+    const auto* ctx = SPTAG::VectorIndex::GetThreadLocalSearchContext();
+    if (ctx != nullptr && !ctx->m_tagLevelOffsets.empty()) {
+        const auto& off = ctx->m_tagLevelOffsets;
+        int level = 0;
+        for (int l = 0; l < static_cast<int>(off.size()); ++l) {
+            if (tag >= off[l]) level = l;
+            else break;
+        }
+        return level;
+    }
     if (tag < 2000) return 0;
     if (tag < 3000) return 1;
     if (tag < 4000) return 2;
@@ -572,24 +589,28 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
     }
 
     kdt->SetMetadataOnly(total, h1Split_);
-    kdt->SetExternalSampleResolver([this](SizeType hid) -> const void* {
-        // hid in [0, h1Split): resolve the H1 head vector from its owning bundle store.
-        if (hid < 0 || hid >= m_vectorTranslateMap.R()) return nullptr;
+
+    // Precompute every H1 head's resolved bundle vector pointer ONCE. All bundle nodes
+    // are eager-loaded above and never evicted, so these pointers are stable for the
+    // lifetime of the index and the search-time resolver becomes a lock-free O(1) lookup.
+    m_metaOnlyHeadVectorPtrs.assign(static_cast<size_t>(h1Split_), nullptr);
+    for (SizeType hid = 0; hid < h1Split_ && hid < m_vectorTranslateMap.R(); ++hid) {
         SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[hid]));
         if (globalVID == MaxSize && m_index->HasHeadNodeMeta()) {
             globalVID = m_index->GetHeadNodeGlobalVID(hid);
         }
-        if (globalVID == MaxSize) return nullptr;
-        std::pair<int, SizeType> loc;
-        {
-            std::lock_guard<std::mutex> lk(m_globalVIDToBundleLocMutex);
-            auto it = m_globalVIDToBundleLoc.find(globalVID);
-            if (it == m_globalVIDToBundleLoc.end()) return nullptr;
-            loc = it->second;
-        }
-        if (EnsureHeadBundleNodeLoaded(loc.first) != ErrorCode::Success) return nullptr;
+        if (globalVID == MaxSize) continue;
+        auto it = m_globalVIDToBundleLoc.find(globalVID);
+        if (it == m_globalVIDToBundleLoc.end()) continue;
+        const std::pair<int, SizeType>& loc = it->second;
+        if (EnsureHeadBundleNodeLoaded(loc.first) != ErrorCode::Success) continue;
         auto& bidx = m_loadedHeadBundleIndexes[static_cast<size_t>(loc.first)];
-        return bidx ? bidx->GetSample(loc.second) : nullptr;
+        if (bidx) m_metaOnlyHeadVectorPtrs[static_cast<size_t>(hid)] = bidx->GetSample(loc.second);
+    }
+    kdt->SetExternalSampleResolver([this](SizeType hid) -> const void* {
+        // hid in [0, h1Split): resolve the H1 head vector from the precomputed table.
+        if (hid < 0 || hid >= static_cast<SizeType>(m_metaOnlyHeadVectorPtrs.size())) return nullptr;
+        return m_metaOnlyHeadVectorPtrs[static_cast<size_t>(hid)];
     });
 
     m_metadataOnlyHeadStore = true;
@@ -856,6 +877,13 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     int crossHopCount = 0;
     int crossEdgesSeen = 0;
     int crossDroppedByTag = 0;
+    // Dual-pool U_extra diagnostics (SPTAG_LOG_UEXTRA): count how often the
+    // unfilter traversal actually reaches role==1 (U_extra) heads.
+    static const bool s_logUExtra = (std::getenv("SPTAG_LOG_UEXTRA") != nullptr);
+    const bool s_hasRoles = HasHeadRoles();
+    int uextraCrossTargets = 0;  // cross-edges pointing at a U_extra head
+    int uextraChecked = 0;       // U_extra heads popped/visited in the PQ
+    int uextraKept = 0;          // U_extra heads committed to the result heap
 
     // Early termination floor: ensure result heap is filled and PQ has settled
     // before allowing the worstDist gate to kick in. Without this, we would
@@ -871,6 +899,8 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         if (visitedA.count(cur.globalA)) continue;
         visitedA.insert(cur.globalA);
         ++checks;
+        const bool curIsUExtra = s_logUExtra && s_hasRoles && IsHeadRoleUnfilterOnly(cur.globalA);
+        if (curIsUExtra) ++uextraChecked;
 
         // Early termination: once we've done minChecks and the closest remaining
         // PQ candidate is already worse than the worst kept top-graphResultNum
@@ -893,6 +923,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         }
         if (keepHead) {
             p_queryResults->AddPoint(cur.m_idx_B, cur.dist);
+            if (curIsUExtra) ++uextraKept;
         }
 
         // Expand RNG neighbors within the home node's head index (BKT or KDT).
@@ -946,6 +977,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
             for (SizeType nbrA : crossIt->second) {
                 if (nbrA < 0) continue;
                 ++crossEdgesSeen;
+                if (s_logUExtra && s_hasRoles && IsHeadRoleUnfilterOnly(nbrA)) ++uextraCrossTargets;
                 if (visitedA.count(nbrA)) continue;
 
                 // Hierarchical mask filter: skip neighbors that don't match query
@@ -999,6 +1031,23 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
 
     p_queryResults->SortResult();
     p_scannedOut = scanned + checks;
+
+    if (s_logUExtra) {
+        int uextraInFinal = 0;
+        int finalCount = p_queryResults->GetResultNum();
+        for (int i = 0; i < finalCount; ++i) {
+            auto* r = p_queryResults->GetResult(i);
+            if (r == nullptr || r->VID < 0) continue;
+            SizeType gA = m_index->GetHeadNodeGlobalVID(r->VID);
+            if (gA != MaxSize && s_hasRoles && IsHeadRoleUnfilterOnly(gA)) ++uextraInFinal;
+        }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "UExtraDBG: hasRoles=%d filterMode=%d crossSeen=%d uextraCrossTargets=%d "
+            "checks=%d uextraChecked=%d uextraKept=%d uextraInFinalHeads=%d/%d\n",
+            (int)s_hasRoles, (p_numQueryTags > 0) ? 1 : 0,
+            crossEdgesSeen, uextraCrossTargets,
+            checks, uextraChecked, uextraKept, uextraInFinal, finalCount);
+    }
 
     if (m_options.m_logAdaptiveNprobe) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
@@ -3407,11 +3456,22 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             // pristine — H1 can only reach U_extra via cross-edges (built later
             // by AugmentHeadGraph). U_extra also stay out of the BKT tree, so
             // query seeding never lands on them directly.
+            // SPTAG_UEXTRA_FULL_GRAPH (default OFF): when set =1, build the BKT tree + RNG
+            // graph over the full [H1 + U_extra] head set so U_extra become first-class graph
+            // nodes (seedable via BKT + normal RNG back-edges). DEFAULT (OFF) keeps the
+            // intended dual-pool design: BKT over H1 only, U_extra appended with NoBackEdge
+            // so their only in-edges are the cross-edges added by AugmentHeadGraph (second-
+            // class graph citizens). Posting assignment is governed separately by
+            // SPTAG_UEXTRA_FULL_POSTING. head_role.bin is always written for filter gating.
+            static const bool s_uextraFullGraph = []() {
+                const char* v = std::getenv("SPTAG_UEXTRA_FULL_GRAPH");
+                return (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
+            }();
             SizeType totalCount = localHeadVectorSet->Count();
             SizeType n_h1 = (n_h1_split >= 0 && n_h1_split <= totalCount) ? n_h1_split : totalCount;
             SizeType n_extra = totalCount - n_h1;
             std::shared_ptr<VectorSet> buildSet = localHeadVectorSet;
-            if (n_extra > 0) {
+            if (!s_uextraFullGraph && n_extra > 0) {
                 ByteArray h1Bytes = ByteArray::Alloc(
                     static_cast<size_t>(n_h1) * static_cast<size_t>(dims) * sizeof(T));
                 std::memcpy(h1Bytes.Data(), localHeadVectorSet->GetData(),
@@ -3424,7 +3484,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build node head index for %s.\n", saveDir.c_str());
                 return false;
             }
-            if (n_extra > 0) {
+            if (!s_uextraFullGraph && n_extra > 0) {
                 const T* uBase = static_cast<const T*>(localHeadVectorSet->GetData())
                                  + static_cast<size_t>(n_h1) * static_cast<size_t>(dims);
                 localHeadIndex->SetAddCountForRebuild(std::numeric_limits<int>::max());
@@ -3470,9 +3530,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             // Dual-pool v3: build global m_index BKT from H1-only heads (first n_h1 in file),
             // then extend the RNG graph with U_extra via AddIndexId+AddIndexIdx so unfilter
             // can reach U_extra while filter never sees them in the BKT tree.
+            static const bool s_uextraFullGraph = []() {
+                const char* v = std::getenv("SPTAG_UEXTRA_FULL_GRAPH");
+                return (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
+            }();
             std::shared_ptr<VectorSet> h1VecSet = headvectorset;
             SizeType n_extra_global = 0;
-            if (!m_pendingHeadRoles.empty()) {
+            if (!s_uextraFullGraph && !m_pendingHeadRoles.empty()) {
                 SizeType n_h1 = 0;
                 for (auto r : m_pendingHeadRoles) if (r == 0) ++n_h1;
                 if (n_h1 < headvectorset->Count()) {
@@ -3552,6 +3616,17 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     SizeType n_h1_node = static_cast<SizeType>(m_pendingNodeHeadSelections[nodeId].size());
                     if (!buildHeadIndexFromFile(nodeVectorFile, nodeDir, n_h1_node)) {
                         return ErrorCode::Fail;
+                    }
+                    // The bundle subgraph's SaveIndex has written node vectors.bin,
+                    // which is byte-identical to this SPTAGHeadVectors.bin build input.
+                    // Nothing at load/search/augment time reads the per-node
+                    // SPTAGHeadVectors.bin (EnsureHeadBundleNodeLoaded uses vectors.bin
+                    // via LoadIndex + SPTAGHeadVectorIDs.bin; AugmentHeadGraph likewise).
+                    // Remove the redundant copy to halve per-node head-vector storage.
+                    if (fileexists(nodeVectorFile.c_str()) && remove(nodeVectorFile.c_str()) != 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                     "Failed to remove redundant node head vector file %s\n",
+                                     nodeVectorFile.c_str());
                     }
                 }
 
@@ -3693,12 +3768,116 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs build head time: %.2lfs build ssd time: %.2lfs\n",
                  selectHeadTime, buildHeadTime, buildSSDTime);
 
-    if (m_options.m_deleteHeadVectors)
+    // Remove the top-level head vector file (SPTAGHeadVectors.bin) when explicitly
+    // requested, OR for bundle builds where it is pure redundancy: it is byte-identical
+    // to HeadIndex/vectors.bin and at search-load is only a never-triggered fallback for
+    // head count (SPTAGHeadVectorIDs.bin is always present). Dropping it removes one full
+    // copy of the head vectors from disk.
+    if (m_options.m_deleteHeadVectors || !m_pendingNodeHeadSelections.empty())
     {
         if (fileexists((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) &&
             remove((m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile).c_str()) != 0)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Head vector file can't be removed.\n");
+        }
+    }
+
+    // ---- Dual-pool slim (metadata-only) head root ----
+    // When SPTAG_METAONLY_HEAD_ROOT is set for a bundle build, rewrite
+    // HeadIndex/{vectors,tree,graph,deletes}.bin so the root KDT physically holds ONLY
+    // the U_extra head vectors (logical ids [h1Split,total)); every H1 head vector is
+    // dropped from the root and resolved at search time from the per-bundle subgraph
+    // stores (see SetupMetadataOnlyHeadStore). A head_metaonly.bin sidecar records
+    // totalHeads/h1Split/dim. For a build with no U_extra (e.g. Mode B) the root keeps a
+    // single dummy placeholder sample (never resolved) so the KDT is non-empty, and ALL
+    // heads resolve from bundles. This removes the full H1 copy (~29 MB on SIFT-1M).
+    static const bool s_slimHeadRoot = []() {
+        const char* v = std::getenv("SPTAG_METAONLY_HEAD_ROOT");
+        return (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
+    }();
+    if (s_slimHeadRoot && !m_pendingNodeHeadSelections.empty() && m_index != nullptr)
+    {
+        SizeType total = m_vectorTranslateMap.R();
+        SizeType n_h1 = total;
+        SizeType n_extra = 0;
+        bool rolesOk = true;
+        if (!m_pendingHeadRoles.empty())
+        {
+            if (static_cast<SizeType>(m_pendingHeadRoles.size()) != total)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                    "Slim head root: head_role size %zu != total heads %d; skipping slim root.\n",
+                    m_pendingHeadRoles.size(), (int)total);
+                rolesOk = false;
+            }
+            else
+            {
+                n_h1 = 0;
+                for (auto r : m_pendingHeadRoles) if (r == 0) ++n_h1;
+                n_extra = total - n_h1;
+            }
+        }
+        if (rolesOk)
+        {
+            auto slimValueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
+            auto slimDims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+            SizeType physCount = (n_extra > 0) ? n_extra : 1; // never persist a 0-sample KDT
+            ByteArray slimBytes = ByteArray::Alloc(
+                static_cast<size_t>(physCount) * static_cast<size_t>(slimDims) * sizeof(T));
+            std::memset(slimBytes.Data(), 0, slimBytes.Length());
+            for (SizeType j = 0; j < n_extra; ++j)
+            {
+                const void* src = m_index->GetSample(n_h1 + j);
+                if (src)
+                    std::memcpy(slimBytes.Data() + static_cast<size_t>(j) * slimDims * sizeof(T),
+                                src, static_cast<size_t>(slimDims) * sizeof(T));
+            }
+            auto slimVecSet = std::make_shared<BasicVectorSet>(
+                slimBytes, slimValueType, static_cast<DimensionType>(slimDims), physCount);
+            auto slim = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, slimValueType);
+            slim->SetParameter("DistCalcMethod",
+                SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+            slim->SetQuantizer(m_pQuantizer);
+            for (const auto& iter : m_headParameters)
+                slim->SetParameter(iter.first.c_str(), iter.second.c_str());
+            if (slim->BuildIndex(slimVecSet, nullptr, false, true, true) != ErrorCode::Success)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Slim head root: failed to build slim KDT.\n");
+                return ErrorCode::Fail;
+            }
+            // Swap the in-memory root for the slim KDT so any later serialization
+            // (e.g. SaveAll -> SaveIndexData) writes ONLY the slim physical samples.
+            // KDT::SaveIndexData serializes m_pSamples (physical), so this persists the
+            // metadata-only root. Full H1 resolution is restored on load via the sidecar.
+            m_index = slim;
+            std::string headDir = m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+            std::string sidecar = headDir + FolderSep + "head_metaonly.bin";
+            FILE* sfp = std::fopen(sidecar.c_str(), "wb");
+            if (sfp == nullptr)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Slim head root: cannot write sidecar %s\n", sidecar.c_str());
+                return ErrorCode::Fail;
+            }
+            std::uint32_t magic = 0x484D4F31u; // 'HMO1'
+            std::int32_t version = 1;
+            std::int64_t totalHeads = total, h1Split = n_h1;
+            std::int32_t dim = static_cast<std::int32_t>(slimDims);
+            bool wok = std::fwrite(&magic, sizeof(magic), 1, sfp) == 1
+                    && std::fwrite(&version, sizeof(version), 1, sfp) == 1
+                    && std::fwrite(&totalHeads, sizeof(totalHeads), 1, sfp) == 1
+                    && std::fwrite(&h1Split, sizeof(h1Split), 1, sfp) == 1
+                    && std::fwrite(&dim, sizeof(dim), 1, sfp) == 1;
+            std::fclose(sfp);
+            if (!wok)
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Slim head root: failed writing sidecar %s\n", sidecar.c_str());
+                return ErrorCode::Fail;
+            }
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "Slim head root: wrote metadata-only root total=%d h1Split=%d U_extra=%d phys=%d dim=%d\n",
+                (int)total, (int)n_h1, (int)n_extra, (int)physCount, (int)slimDims);
         }
     }
 

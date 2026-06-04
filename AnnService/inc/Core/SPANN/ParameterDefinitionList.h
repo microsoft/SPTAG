@@ -86,6 +86,11 @@ DefineSSDParameter(m_zstdCompressLevel, int, 0, "ZstdCompressLevel")
 DefineSSDParameter(m_internalResultNum, int, 64, "InternalResultNum")
 DefineSSDParameter(m_postingPageLimit, int, 3, "PostingPageLimit")
 DefineSSDParameter(m_replicaCount, int, 8, "ReplicaCount")
+// Independent tail replica (K_replica) for the unfilter-tail. Each base vector
+// inserts into its top-m_tailReplicaCount nearest heads' tail region (tag-agnostic,
+// scanned only by unfilter queries). Decoupled from m_replicaCount above, which
+// governs the per-tag pure posting region. Default 0 = unfilter-tail disabled.
+DefineSSDParameter(m_tailReplicaCount, int, 0, "TailReplicaCount")
 DefineSSDParameter(m_outputEmptyReplicaID, bool, false, "OutputEmptyReplicaID")
 DefineSSDParameter(m_batches, int, 1, "Batches")
 DefineSSDParameter(m_tmpdir, std::string, std::string("."), "TmpDir")

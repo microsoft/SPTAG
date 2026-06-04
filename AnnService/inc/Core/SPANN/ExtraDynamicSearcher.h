@@ -2068,9 +2068,26 @@ namespace SPTAG::SPANN {
                 p_exWorkSpace->m_queryTags != nullptr &&
                 p_exWorkSpace->m_numQueryTags > 0;
             const bool trackPostingStats = hasInlineTagFilter;
+
+            // U_extra (unfilter-only) heads are infrastructure for unfiltered
+            // recall only. Filtered queries must behave identically to a build
+            // without U_extra, so drop role==1 heads from the candidate posting
+            // list entirely. Disable for A/B via SPTAG_FILTER_KEEP_UEXTRA=1.
+            static const bool s_filterKeepUextra = []() {
+                const char* env = std::getenv("SPTAG_FILTER_KEEP_UEXTRA");
+                return env && env[0] == '1';
+            }();
+            if (hasInlineTagFilter && HasHeadRoles() && !s_filterKeepUextra) {
+                auto& ids = p_exWorkSpace->m_postingIDs;
+                ids.erase(std::remove_if(ids.begin(), ids.end(),
+                    [&](int pid) { return IsUnfilterOnlyHead(pid); }), ids.end());
+            }
+            // Pure/tail split for filtered queries is ON by default whenever the
+            // pure-count sidecar exists: filtered queries must never scan the
+            // unfilter-only tail. Set SPTAG_UNFILTER_TAIL=0 to force-disable.
             static const bool s_unfilterTailEnabled = []() {
                 const char* env = std::getenv("SPTAG_UNFILTER_TAIL");
-                return env && env[0] == '1';
+                return !(env && env[0] == '0');
             }();
             const bool useUnfilterTail =
                 s_unfilterTailEnabled && m_hasPostingPureCounts && hasInlineTagFilter;
@@ -2082,6 +2099,12 @@ namespace SPTAG::SPANN {
                 std::vector<std::uint32_t> maxBytes(p_exWorkSpace->m_postingIDs.size(), 0);
                 for (size_t i = 0; i < maxBytes.size(); ++i) {
                     SizeType hid = p_exWorkSpace->m_postingIDs[i];
+                    if (IsUnfilterOnlyHead((int)hid)) {
+                        // Tail-only (U_extra) head: filtered queries scan nothing
+                        // from it, so cap the read to a single vector (minimal IO).
+                        maxBytes[i] = static_cast<std::uint32_t>(m_vectorInfoSize);
+                        continue;
+                    }
                     int pure = m_postingPureCounts.GetSize(hid);
                     if (pure > 0) {
                         maxBytes[i] = static_cast<std::uint32_t>(pure) *
@@ -2119,8 +2142,13 @@ namespace SPTAG::SPANN {
                 int vectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
                 int scanLimit = vectorNum;
                 if (useUnfilterTail) {
-                    int pure = m_postingPureCounts.GetSize(curPostingID);
-                    if (pure > 0 && pure < scanLimit) scanLimit = pure;
+                    if (IsUnfilterOnlyHead((int)curPostingID)) {
+                        // Tail-only (U_extra) head: never scanned by filtered queries.
+                        scanLimit = 0;
+                    } else {
+                        int pure = m_postingPureCounts.GetSize(curPostingID);
+                        if (pure > 0 && pure < scanLimit) scanLimit = pure;
+                    }
                 }
                 bool postingHasExactMatch = false;
 
@@ -2490,15 +2518,34 @@ namespace SPTAG::SPANN {
 
                     std::vector<std::vector<uint8_t>> allowedHeadMasks(plannedNodeVectors.size(), std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
                     std::vector<size_t> nodeHeadCounts(plannedNodeVectors.size(), 0);
-                    // Dual-pool v3: collect U_extra head ordinals per node (skipped from normal RNGSelection)
+                    // Dual-pool v3: collect U_extra head ordinals per node (legacy: skipped from normal RNGSelection)
                     std::vector<std::vector<SizeType>> uExtraOrdPerNode(plannedNodeVectors.size());
+                    // By default U_extra heads now participate in the normal inverse RNG
+                    // assignment, so they receive full-sized postings (~replicaCount * N / heads)
+                    // that compete with H1 for replicas -- same as ordinary heads. Set
+                    // SPTAG_UEXTRA_FULL_POSTING=0 to restore the legacy behavior (exclude
+                    // U_extra from the mask, then give each only a k=replicaCount kNN posting).
+                    static const bool s_uextraFullPosting = []() {
+                        const char* v = std::getenv("SPTAG_UEXTRA_FULL_POSTING");
+                        return !(v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F'));
+                    }();
+                    // Tail-only U_extra (corrected design, default ON): U_extra heads are
+                    // NOT pinned into any subset's pure clustering. They are excluded from
+                    // the pure mask (so their pure_count stays 0) and receive members ONLY
+                    // through the global tag-agnostic unfilter-tail (K_replica / Phase 4).
+                    // Each subset thus clusters purely over its own H1 heads, while U_extra
+                    // act as global unfilter-only heads filled by the tail mechanism.
+                    // Set SPTAG_UEXTRA_TAIL_ONLY=0 to restore legacy pure-posting behavior.
+                    static const bool s_uextraTailOnly = []() {
+                        const char* v = std::getenv("SPTAG_UEXTRA_TAIL_ONLY");
+                        return !(v && (v[0] == '0' || v[0] == 'f' || v[0] == 'F'));
+                    }();
                     for (SizeType headId = 0; headId < static_cast<SizeType>(headToNode.size()); ++headId)
                     {
                         int nodeId = headToNode[headId];
                         if (nodeId >= 0 && nodeId < static_cast<int>(allowedHeadMasks.size())) {
-                            // Exclude U_extra (role==1) from the RNG selection mask; they get
-                            // postings via separate k-NN below so H1 catchments are preserved.
-                            if (m_hasHeadRole && IsUnfilterOnlyHead(static_cast<int>(headId))) {
+                            if (m_hasHeadRole && (s_uextraTailOnly || !s_uextraFullPosting) && IsUnfilterOnlyHead(static_cast<int>(headId))) {
+                                // U_extra excluded from this subset's pure clustering.
                                 uExtraOrdPerNode[static_cast<size_t>(nodeId)].push_back(headId);
                             } else {
                                 allowedHeadMasks[static_cast<size_t>(nodeId)][static_cast<size_t>(headId)] = 1;
@@ -2627,7 +2674,9 @@ namespace SPTAG::SPANN {
                     // For each U_extra head u in bundle N, find m_opt->m_replicaCount nearest
                     // base vectors from plannedNodeVectors[N] and add them as postings.
                     // This gives U_extra their own coverage without stealing from H1 postings.
-                    if (m_hasHeadRole) {
+                    // NOTE: skipped in tail-only mode (default) -- U_extra must have
+                    // pure_count=0; the unfilter-tail (Phase 4 / K_replica) fills them instead.
+                    if (m_hasHeadRole && !s_uextraFullPosting && !s_uextraTailOnly) {
                         size_t totalUExtra = 0;
                         for (auto& v : uExtraOrdPerNode) totalUExtra += v.size();
                         if (totalUExtra > 0) {
@@ -2932,11 +2981,17 @@ namespace SPTAG::SPANN {
             std::vector<int> pure_count_per_head;
             {
                 const char* env_k = std::getenv("SPTAG_UNFILTER_TAIL_K_REPLICA");
-                int k_replica = env_k ? std::atoi(env_k) : 0;
+                int k_replica = env_k ? std::atoi(env_k) : m_opt->m_tailReplicaCount;
+                if (k_replica <= 0 && m_hasHeadRole) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "Phase 4 (unfilter-tail) DISABLED (K_replica=0) but U_extra heads exist: "
+                                 "in tail-only mode their postings will be EMPTY. Set TailReplicaCount/"
+                                 "SPTAG_UNFILTER_TAIL_K_REPLICA > 0 to populate U_extra tails.\n");
+                }
                 if (k_replica > 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                                 "Phase 4 (unfilter-tail): K_replica=%d, scanning %d base vectors against %d heads\n",
-                                 k_replica, fullCount, p_headIndex->GetNumSamples());
+                                 "Phase 4 (unfilter-tail): K_replica=%d (source=%s), scanning %d base vectors against %d heads\n",
+                                 k_replica, (env_k ? "env" : "TailReplicaCount param"), fullCount, p_headIndex->GetNumSamples());
 
                     // Snapshot pure counts (post-cut, pre-tail)
                     pure_count_per_head.resize(postingListSize.size());

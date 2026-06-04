@@ -80,6 +80,12 @@ namespace SPTAG
             // only the U_extra head vectors; H1 head GetSample lookups are resolved into
             // the per-bundle subgraph stores. Detected at load via HeadIndex/head_metaonly.bin.
             mutable bool m_metadataOnlyHeadStore = false;
+            // Precomputed H1 head-id -> resolved bundle sample pointer table. Built once at
+            // load (SetupMetadataOnlyHeadStore) after every bundle is eager-loaded and
+            // immutable, so the external sample resolver is a lock-free O(1) array lookup
+            // on the search hot path (the unordered_map + mutex path was a 4x unfilter
+            // regression).
+            mutable std::vector<const void*> m_metaOnlyHeadVectorPtrs;
             std::unordered_map<std::string, std::string> m_headParameters;
 
             COMMON::VersionLabel m_versionMap;

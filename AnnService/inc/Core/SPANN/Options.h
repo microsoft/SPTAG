@@ -90,6 +90,7 @@ namespace SPTAG {
 
             // Building
             int m_replicaCount;
+            int m_tailReplicaCount;
             int m_postingPageLimit;
             int m_internalResultNum;
             bool m_outputEmptyReplicaID;
