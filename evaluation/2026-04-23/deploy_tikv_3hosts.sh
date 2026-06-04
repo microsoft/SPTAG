@@ -9,6 +9,7 @@ TIKV_IMAGE=${TIKV_IMAGE:-pingcap/tikv:nightly}
 REMOTE_DIR=${REMOTE_DIR:-/mnt/md0/qiazh/SPTAG/evaluation/2026-04-23}
 REMOTE_HOSTS=${REMOTE_HOSTS:-"azureuser@annservicFX071Y azureuser@annservicKFECPH azureuser@annservicP92MC8"}
 PRIVATE_IPS=${PRIVATE_IPS:-"annservicFX071Y annservicKFECPH annservicP92MC8"}
+DOCKER_CMD=${DOCKER_CMD:-docker}
 
 read -r -a PRIVATE_IP_ARRAY <<< "$PRIVATE_IPS"
 read -r -a REMOTE_HOST_ARRAY <<< "$REMOTE_HOSTS"
@@ -31,9 +32,24 @@ Environment overrides:
   DATA_ROOT=/mnt/md0/qiazh/tikv
   PRIVATE_IPS="annservicFX071Y annservicKFECPH annservicP92MC8"
   REMOTE_HOSTS="azureuser@annservicFX071Y azureuser@annservicKFECPH azureuser@annservicP92MC8"
+  DOCKER_CMD="sudo -n docker" # optional, if azureuser cannot access docker directly
   NODE_IP=annservicFX071Y  # optional, otherwise auto-detected from hostname -I
   NODE_INDEX=1             # optional fallback if NODE_IP cannot be detected
 USAGE
+}
+
+run_docker() {
+  read -r -a docker_cmd <<< "$DOCKER_CMD"
+  "${docker_cmd[@]}" "$@"
+}
+
+wait_all() {
+  local status=0
+  local pid
+  for pid in "$@"; do
+    wait "$pid" || status=1
+  done
+  return "$status"
 }
 
 require_three_nodes() {
@@ -98,12 +114,12 @@ pd_url() {
 prepare() {
   mkdir -p "$DATA_ROOT"/{pd-data,pd-logs,tikv-data,tikv-logs}
   cp "$SCRIPT_DIR/tikv.toml" "$DATA_ROOT/tikv.toml"
-  docker pull "$PD_IMAGE"
-  docker pull "$TIKV_IMAGE"
+  run_docker pull "$PD_IMAGE"
+  run_docker pull "$TIKV_IMAGE"
 }
 
 stop_local() {
-  docker rm -f tikv-pd tikv-server >/dev/null 2>&1 || true
+  run_docker rm -f tikv-pd tikv-server >/dev/null 2>&1 || true
 }
 
 wipe_local() {
@@ -119,8 +135,8 @@ start_pd() {
   local ip idx
   ip=$(node_ip)
   idx=$(node_index "$ip")
-  docker rm -f tikv-pd >/dev/null 2>&1 || true
-  docker run -d --name tikv-pd --restart unless-stopped --network host \
+  run_docker rm -f tikv-pd >/dev/null 2>&1 || true
+  run_docker run -d --name tikv-pd --restart unless-stopped --network host \
     -v "$DATA_ROOT/pd-data:/data" \
     -v "$DATA_ROOT/pd-logs:/logs" \
     "$PD_IMAGE" \
@@ -139,8 +155,8 @@ start_tikv() {
   prepare
   local ip
   ip=$(node_ip)
-  docker rm -f tikv-server >/dev/null 2>&1 || true
-  docker run -d --name tikv-server --restart unless-stopped --network host \
+  run_docker rm -f tikv-server >/dev/null 2>&1 || true
+  run_docker run -d --name tikv-server --restart unless-stopped --network host \
     -v "$DATA_ROOT/tikv-data:/data" \
     -v "$DATA_ROOT/tikv-logs:/logs" \
     -v "$DATA_ROOT/tikv.toml:/opt/tikv.toml:ro" \
@@ -155,14 +171,14 @@ start_tikv() {
 }
 
 configure_cluster() {
-  docker run --rm --network host --entrypoint /pd-ctl "$PD_IMAGE" \
+  run_docker run --rm --network host --entrypoint /pd-ctl "$PD_IMAGE" \
     -u "$(pd_url)" config set max-replicas 1
-  docker run --rm --network host --entrypoint /pd-ctl "$PD_IMAGE" \
+  run_docker run --rm --network host --entrypoint /pd-ctl "$PD_IMAGE" \
     -u "$(pd_url)" config show | grep -E 'max-replicas|location-labels|strictly-match-label'
 }
 
 status_local() {
-  docker ps --filter name='tikv-' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+  run_docker ps --filter name='tikv-' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
   curl -fsS "$(pd_url)/pd/api/v1/stores" | python3 -c "
 import json
 import sys
@@ -187,28 +203,34 @@ remote_deploy() {
     scp "$SCRIPT_DIR/tikv.toml" "$SCRIPT_DIR/$(basename "$0")" "$host:$REMOTE_DIR/"
   done
 
+  local pids=()
   for idx in "${!REMOTE_HOST_ARRAY[@]}"; do
     host=${REMOTE_HOST_ARRAY[$idx]}
-    ssh -o BatchMode=yes "$host" "bash '$REMOTE_DIR/$(basename "$0")' prepare" &
+    ssh -o BatchMode=yes "$host" "DOCKER_CMD='$DOCKER_CMD' bash '$REMOTE_DIR/$(basename "$0")' prepare" &
+    pids+=("$!")
   done
-  wait
+  wait_all "${pids[@]}"
 
-  for idx in "${!REMOTE_HOST_ARRAY[@]}"; do
-    host=${REMOTE_HOST_ARRAY[$idx]}
-    node_addr=${PRIVATE_IP_ARRAY[$idx]}
-    ssh -o BatchMode=yes "$host" "NODE_IP='$node_addr' bash '$REMOTE_DIR/$(basename "$0")' start-pd" &
-  done
-  wait
-
+  pids=()
   for idx in "${!REMOTE_HOST_ARRAY[@]}"; do
     host=${REMOTE_HOST_ARRAY[$idx]}
     node_addr=${PRIVATE_IP_ARRAY[$idx]}
-    ssh -o BatchMode=yes "$host" "NODE_IP='$node_addr' bash '$REMOTE_DIR/$(basename "$0")' start-tikv" &
+    ssh -o BatchMode=yes "$host" "NODE_IP='$node_addr' DOCKER_CMD='$DOCKER_CMD' bash '$REMOTE_DIR/$(basename "$0")' start-pd" &
+    pids+=("$!")
   done
-  wait
+  wait_all "${pids[@]}"
 
-  ssh -o BatchMode=yes "${REMOTE_HOST_ARRAY[0]}" "bash '$REMOTE_DIR/$(basename "$0")' configure"
-  ssh -o BatchMode=yes "${REMOTE_HOST_ARRAY[0]}" "bash '$REMOTE_DIR/$(basename "$0")' status"
+  pids=()
+  for idx in "${!REMOTE_HOST_ARRAY[@]}"; do
+    host=${REMOTE_HOST_ARRAY[$idx]}
+    node_addr=${PRIVATE_IP_ARRAY[$idx]}
+    ssh -o BatchMode=yes "$host" "NODE_IP='$node_addr' DOCKER_CMD='$DOCKER_CMD' bash '$REMOTE_DIR/$(basename "$0")' start-tikv" &
+    pids+=("$!")
+  done
+  wait_all "${pids[@]}"
+
+  ssh -o BatchMode=yes "${REMOTE_HOST_ARRAY[0]}" "DOCKER_CMD='$DOCKER_CMD' bash '$REMOTE_DIR/$(basename "$0")' configure"
+  ssh -o BatchMode=yes "${REMOTE_HOST_ARRAY[0]}" "DOCKER_CMD='$DOCKER_CMD' bash '$REMOTE_DIR/$(basename "$0")' status"
 }
 
 command=${1:-}

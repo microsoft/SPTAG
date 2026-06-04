@@ -224,7 +224,7 @@ main() {
     "$SCRIPT_DIR/wipe_tikv_3hosts.sh" --yes
 
   echo "== restarting cluster =="
-  DATA_ROOT="$DATA_ROOT" REMOTE_HOSTS="$REMOTE_HOSTS" PRIVATE_IPS="$PRIVATE_IPS" REMOTE_DIR="$REMOTE_DIR" PD_IMAGE="$PD_IMAGE" \
+  DATA_ROOT="$DATA_ROOT" REMOTE_HOSTS="$REMOTE_HOSTS" PRIVATE_IPS="$PRIVATE_IPS" REMOTE_DIR="$REMOTE_DIR" PD_IMAGE="$PD_IMAGE" DOCKER_CMD="$DOCKER_CMD" \
     "$SCRIPT_DIR/deploy_tikv_3hosts.sh" remote
 
   wait_for_stores "${PRIVATE_IP_ARRAY[0]}" "${#PRIVATE_IP_ARRAY[@]}"
