@@ -577,6 +577,7 @@ namespace SPTAG::SPANN {
                     {
                         MergeAsync(*it);
                     }
+                    mergelist.clear();
                     doneReassign = false;
                 }
             }
@@ -2693,7 +2694,7 @@ namespace SPTAG::SPANN {
                 }
 
                 if (m_opt->m_storage == Storage::FILEIO && !m_opt->m_globalIDPath.empty()) RefineIndex();
-                
+
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "SPFresh: zero-replica refill done, processed:%zu, newSplits:%u, newHeadMiss:%u, newReassign:%u\n",
                              zeroReplicaCount, m_stat.m_splitNum - splitNumBeforeZeroReplica,
