@@ -1614,11 +1614,13 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
     std::lock_guard<std::mutex> lock(m_dataAddLock);
     std::unique_lock<std::shared_timed_mutex> uniquelock(m_dataDeleteLock);
     ErrorCode ret;
+    /*
     for (int layer = 0; layer < m_extraSearchers.size(); layer++)
     {
         if ((ret = m_extraSearchers[layer]->RefineIndex()) != ErrorCode::Success)
             return ret;
     }
+    */
 
     std::vector<SizeType> headOldtoNew;
 

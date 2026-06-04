@@ -457,6 +457,10 @@ namespace SPTAG::SPANN {
             std::atomic_bool doneReassign = false;
             Helper::Concurrent::ConcurrentSet<SizeType> mergelist;
             while (!doneReassign) {
+                while(!AllFinished())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
                 auto preReassignTimeBegin = std::chrono::high_resolution_clock::now();
                 std::atomic<ErrorCode> finalcode = ErrorCode::Success;
                 doneReassign = true;
@@ -515,6 +519,7 @@ namespace SPTAG::SPANN {
 
                                 if (VID == globalID) hasHead = true;
 
+                                *(vectorId + sizeof(SizeType)) = -1;
                                 if (j != vectorCount)
                                 {
                                     memcpy(postingP + vectorCount * m_vectorInfoSize, vectorId, m_vectorInfoSize);
@@ -552,9 +557,16 @@ namespace SPTAG::SPANN {
                 };
                 for (int j = 0; j < m_opt->m_iSSDNumberOfThreads; j++) { threads.emplace_back(func); }
                 for (auto& thread : threads) { thread.join(); }
+
+                globalIDs.clear();
+                m_versionMap->GetContainedIDs(globalIDs);
+                for (auto id : globalIDs) {
+                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, -1);
+                }
+
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(preReassignTimeEnd - preReassignTimeBegin).count();
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "rebuild cost: %.2lf s\n", elapsedSeconds);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "refine cost: %.2lf s\n", elapsedSeconds);
 
                 if (finalcode != ErrorCode::Success)
                     return finalcode;
@@ -565,10 +577,11 @@ namespace SPTAG::SPANN {
                     {
                         MergeAsync(*it);
                     }
+                    doneReassign = false;
                 }
-                Checkpoint(m_opt->m_indexDirectory);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
             }
+            Checkpoint(m_opt->m_indexDirectory);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
             return ErrorCode::Success;
         }
         
@@ -2679,6 +2692,8 @@ namespace SPTAG::SPANN {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
 
+                if (m_opt->m_storage == Storage::FILEIO && !m_opt->m_globalIDPath.empty()) RefineIndex();
+                
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                              "SPFresh: zero-replica refill done, processed:%zu, newSplits:%u, newHeadMiss:%u, newReassign:%u\n",
                              zeroReplicaCount, m_stat.m_splitNum - splitNumBeforeZeroReplica,
