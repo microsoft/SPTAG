@@ -454,16 +454,15 @@ namespace SPTAG::SPANN {
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin RefineIndex\n");
 
-            std::atomic_bool doneReassign = false;
+            int iterations = 0;
             Helper::Concurrent::ConcurrentSet<SizeType> mergelist;
-            while (!doneReassign) {
+            while (iterations < 2) {
                 while(!AllFinished())
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 }
                 auto preReassignTimeBegin = std::chrono::high_resolution_clock::now();
                 std::atomic<ErrorCode> finalcode = ErrorCode::Success;
-                doneReassign = true;
                 std::vector<std::thread> threads;
                 std::atomic<SizeType> nextPostingID(0);
                 std::vector<SizeType> globalIDs;
@@ -566,20 +565,20 @@ namespace SPTAG::SPANN {
 
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
                 double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(preReassignTimeEnd - preReassignTimeBegin).count();
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "refine cost: %.2lf s\n", elapsedSeconds);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "refine cost: %.2lf s mergelist size:%d\n", elapsedSeconds, (int)(mergelist.size()));
 
                 if (finalcode != ErrorCode::Success)
                     return finalcode;
 
-                if (mergelist.size() > 0)
+                if (mergelist.size() > 0 && iterations == 0)
                 {
                     for (auto it = mergelist.begin(); it != mergelist.end(); ++it)
                     {
                         MergeAsync(*it);
                     }
                     mergelist.clear();
-                    doneReassign = false;
                 }
+                iterations++;
             }
             Checkpoint(m_opt->m_indexDirectory);
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: ReWriting SSD Info\n");
