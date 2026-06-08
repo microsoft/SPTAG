@@ -240,7 +240,8 @@ namespace SPTAG
             inline SizeType GetNumDeleted(int layer) const { if (layer < m_extraSearchers.size()) return m_extraSearchers[layer]->GetNumDeleted(); else return m_topIndex->GetNumDeleted(); }
             inline bool NeedRefine() const
             {
-                return GetNumDeleted(0) > (size_t)(GetNumSamples(0) * m_options.m_fDeletePercentageForRefine);
+                return m_topIndex->NeedRefine();
+                //return GetNumDeleted(0) > (size_t)(GetNumSamples(0) * m_options.m_fDeletePercentageForRefine);
             }
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const { return ErrorCode::Undefined; }
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }

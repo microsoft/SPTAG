@@ -1008,7 +1008,8 @@ namespace SPTAG::SPANN {
                 //return Put(key, value, timeout, reqs);
             }
 
-            auto newSize = static_cast<int>(*postingSize) + value.size();
+            size = static_cast<int>(*postingSize);
+            auto newSize = size + value.size();
             int newblocks = (int)(((newSize + PageSize - 1) >> PageSizeEx));
             if (newblocks >= m_blockLimit) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
@@ -1017,7 +1018,7 @@ namespace SPTAG::SPANN {
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                     "[Merge] Original size: %d bytes, Merge size: %d bytes\n",
-                    static_cast<int>(*postingSize), static_cast<int>(value.size()));
+                    size, static_cast<int>(value.size()));
                 if (lock) lock->unlock();
                 return ErrorCode::Posting_OverFlow;
             }

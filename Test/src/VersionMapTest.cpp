@@ -345,22 +345,24 @@ BOOST_AUTO_TEST_CASE(TiKV_IncVersionWraparound)
     BOOST_CHECK_EQUAL(newVer, 0x00);
 }
 
-BOOST_AUTO_TEST_CASE(TiKV_AddBatch)
+BOOST_AUTO_TEST_CASE(TiKV_GrowViaSetVersion)
 {
-    auto vm = MakeTiKVVersionMap("AddBatch");
+    auto vm = MakeTiKVVersionMap("GrowSetVersion");
     if (!vm) return;
 
     vm->Initialize(100, 1, 100);
     BOOST_CHECK_EQUAL(vm->Count(), 100);
 
-    vm->AddBatch(50);
+    // New design: growth is implicit via SetVersion -> EnsureCountAtLeast,
+    // which bumps the count to cover the highest VID written.
+    vm->SetVersion(149, 0x00);
     BOOST_CHECK_EQUAL(vm->Count(), 150);
 
     // Old VIDs should still be alive
     BOOST_CHECK(!vm->Deleted(0));
     BOOST_CHECK(!vm->Deleted(99));
 
-    // New layer-0 VIDs inherit the alive default version.
+    // New layer-0 VIDs default to the alive version (0x00).
     BOOST_CHECK(!vm->Deleted(100));
     BOOST_CHECK(!vm->Deleted(127));
     BOOST_CHECK(!vm->Deleted(128));

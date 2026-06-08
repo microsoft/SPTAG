@@ -332,7 +332,7 @@ void VectorIndex::BuildMetaMapping(bool p_checkDeleted)
     m_pMetaToVec.reset(ptr, std::default_delete<MetadataMap>());
 }
 
-ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteArray> &p_indexBlobs)
+ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteArray> &p_indexBlobs, std::vector<SizeType>* p_mapping)
 {
     if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
         return ErrorCode::EmptyIndex;
@@ -363,7 +363,7 @@ ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteAr
     size_t metaStart = BufferSize()->size();
     if (NeedRefine())
     {
-        ret = RefineIndex(p_indexStreams, nullptr, nullptr);
+        ret = RefineIndex(p_indexStreams, nullptr, p_mapping);
     }
     else
     {
@@ -385,7 +385,7 @@ ErrorCode VectorIndex::SaveIndex(std::string &p_config, const std::vector<ByteAr
     return ret;
 }
 
-ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath)
+ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<SizeType>* p_mapping)
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SaveIndex(%s) begin...ready:%d GetNumSamples():%d GetNumDeleted():%d\n",
                  p_folderPath.c_str(), m_bReady, GetNumSamples(), GetNumDeleted());
@@ -463,7 +463,7 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath)
     size_t metaStart = GetIndexFiles()->size();
     if (NeedRefine())
     {
-        ret = RefineIndex(handles, nullptr, nullptr);
+        ret = RefineIndex(handles, nullptr, p_mapping);
     }
     else
     {
@@ -475,7 +475,7 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath)
     return ret;
 }
 
-ErrorCode VectorIndex::SaveIndexToFile(const std::string &p_file, IAbortOperation *p_abort)
+ErrorCode VectorIndex::SaveIndexToFile(const std::string &p_file, IAbortOperation *p_abort, std::vector<SizeType>* p_mapping)
 {
     if (!m_bReady || GetNumSamples() - GetNumDeleted() == 0)
         return ErrorCode::EmptyIndex;
@@ -510,7 +510,7 @@ ErrorCode VectorIndex::SaveIndexToFile(const std::string &p_file, IAbortOperatio
 
         if (NeedRefine())
         {
-            ret = RefineIndex(p_indexStreams, p_abort, nullptr);
+            ret = RefineIndex(p_indexStreams, p_abort, p_mapping);
         }
         else
         {
