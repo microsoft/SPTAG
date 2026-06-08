@@ -443,8 +443,8 @@ namespace SPTAG::SPANN {
                 if (VID < 0)
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                 "PrintErrorInPosting found wrong VID:%d in headID:%d\n", VID,
-                                 headID);
+                                 "PrintErrorInPosting found wrong VID:%lld in headID:%lld\n", (std::int64_t)VID,
+                                 (std::int64_t)headID);
                 }
             }
         }
@@ -493,10 +493,11 @@ namespace SPTAG::SPANN {
                                     ErrorCode::Success)
                             {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                                "RefineIndex failed to get posting %lld, read size:%d\n",
-                                                (std::int64_t)globalID, (int)(postingList.size()));
+                                            "RefineIndex failed to get posting %lld, read size:%d\n",
+                                            (std::int64_t)globalID, (int)(postingList.size()));
                                 PrintErrorInPosting(postingList, globalID);
                                 finalcode = ErrorCode::Fail;
+                                continue;
                                 //return;
                             }
                             SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
@@ -599,7 +600,7 @@ namespace SPTAG::SPANN {
                 }
             }
             if (!hasHead) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "CheckCentroid cannot find head in posting! pid:%d, where:%s\n", pid, where.c_str());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "CheckCentroid cannot find head in posting! pid:%lld, where:%s\n", (std::int64_t)pid, where.c_str());
                 exit(-1);
             }
         }
@@ -653,7 +654,7 @@ namespace SPTAG::SPANN {
                 SizeType postVectorNum = (SizeType)(postingList.size() / m_vectorInfoSize);
                 splitPostingVectors = static_cast<uint64_t>(postVectorNum);
                
-                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: db get Posting %d successfully with length %d real length:%d vectorNum:%d\n", headID, (int)(postingList.size()), m_postingSizes.GetSize(headID), postVectorNum);
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: db get Posting %lld successfully with length %d real length:%d vectorNum:%d\n", (std::int64_t)headID, (int)(postingList.size()), m_postingSizes.GetSize(headID), postVectorNum);
                 COMMON::Dataset<ValueType> smallSample(postVectorNum, m_opt->m_dim, m_headIndex->m_iDataBlockSize, m_headIndex->m_iDataCapacity, (ValueType*)postingP, true, nullptr, m_metaDataSize, m_vectorInfoSize);
 
                 std::vector<SizeType> localIndices;
@@ -662,7 +663,6 @@ namespace SPTAG::SPANN {
                 bool hasHead = false;
                 for (SizeType j = 0; j < postVectorNum; j++, vectorId += m_vectorInfoSize)
                 {
-                    //LOG(Helper::LogLevel::LL_Info, "vector index/total:id: %d/%d:%d\n", j, m_postingSizes[headID].load(), *(reinterpret_cast<int*>(vectorId)));
                     uint8_t version = *(vectorId + sizeof(SizeType));
                     SizeType VID = *((SizeType*)(vectorId));
                     if (VID < 0)
@@ -682,7 +682,7 @@ namespace SPTAG::SPANN {
                     
                     if (VID == headID) headVec = std::make_shared<std::string>((char*)vectorId, m_vectorInfoSize);
 
-		            //if (VID >= m_versionMap.Count()) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "DEBUG: vector ID:%d total size:%d\n", VID, m_versionMap.Count());
+		            //if (VID >= m_versionMap.Count()) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "DEBUG: vector ID:%lld total size:%lld\n", (std::int64_t)VID, (std::int64_t)m_versionMap.Count());
                     if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) continue;
 
                     if (VID == headID) hasHead = true;
@@ -723,7 +723,7 @@ namespace SPTAG::SPANN {
                         std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
                         m_splitList.unsafe_erase(headID);
                     }
-                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %d, new length: %d\n", headID, index);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %lld, new length: %d\n", (std::int64_t)headID, index);
                     return ErrorCode::Success;
                 }
 
@@ -750,7 +750,7 @@ namespace SPTAG::SPANN {
                         if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
                     if (!hasHead) memcpy(newpostingList.data(), headVec->data(), m_vectorInfoSize);
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Only Keep %d vectors.\n", cut);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Cluserting Failed (The same vector), Only Keep %d vectors.\n", cut);
                    
                     if ((ret=db->Put(DBKey(headID), newpostingList, MaxTimeout, &(p_exWorkSpace->m_diskRequests))) != ErrorCode::Success) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split fail to override posting cut to limit for posting %lld\n", (std::int64_t)(headID));
@@ -951,20 +951,20 @@ namespace SPTAG::SPANN {
                         }
                         if (m_rwLocks.hash_func(newHeadVID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
                     }
-                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %d split into : %d, length: %d\n", headID, newHeadVID, args.counts[k]);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head id: %lld split into : %lld, length: %d\n", (std::int64_t)headID, (std::int64_t)newHeadVID, args.counts[k]);
                 }
                 if (!theSameHead) {
                     m_headIndex->DeleteIndex(headID, m_layer + 1);
                     if ((ret=db->Delete(DBKey(headID))) != ErrorCode::Success)
                     {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting in Split\n");
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to delete old posting in Split: %lld\n", (std::int64_t)headID);
                         return ret;
                     }
                 }
 
                 {
                     std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %d\n", headID);
+                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %lld\n", (std::int64_t)headID);
                     m_splitList.unsafe_erase(headID);
                 }
                 
@@ -1102,7 +1102,7 @@ namespace SPTAG::SPANN {
                 int deletedLength = 0;
                 {
                     std::unique_lock<std::shared_timed_mutex> anotherLock(m_rwLocks[queryResult->VID], std::defer_lock);
-                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Locked: %d, to be lock: %d\n", headID, queryResult->VID);
+                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Locked: %lld, to be lock: %lld\n", (std::int64_t)headID, (std::int64_t)queryResult->VID);
                     if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) {
                         if (!anotherLock.try_lock()) {
                             auto* curJob = new MergeAsyncJob(this, headID, nullptr);
@@ -1146,8 +1146,10 @@ namespace SPTAG::SPANN {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "MergePostings fail: cannot find another head vector in posting! headID:%lld\n", (std::int64_t)(queryResult->VID));
                         return ErrorCode::Fail;
                     }
-                    if (currentLength + dedupLength >= m_postingSizeLimit) continue;
-
+                    if (currentLength + dedupLength >= m_postingSizeLimit) {
+                        mergedPostingList.resize(currentLength * m_vectorInfoSize);
+                        continue;
+                    }
                     if (currentLength >= nextLength) 
                     {               
                         if (vectorIdSet.find(headID) == vectorIdSet.end() && nextVectorIdSet.find(headID) == nextVectorIdSet.end() && headVec != nullptr) {
@@ -1194,7 +1196,7 @@ namespace SPTAG::SPANN {
                     if (m_rwLocks.hash_func(queryResult->VID) != m_rwLocks.hash_func(headID)) anotherLock.unlock();
                 }
 
-                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Release: %d, Release: %d\n", headID, queryResult->VID);
+                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Release: %lld, Release: %lld\n", (std::int64_t)headID, (std::int64_t)queryResult->VID);
                 lock.unlock();
 
                 if (!m_opt->m_disableReassign) 
@@ -1247,7 +1249,7 @@ namespace SPTAG::SPANN {
 
         inline void SplitAsync(SizeType headID, int postingSize, std::function<void()> p_callback = nullptr)
         {
-            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %d, size: %d\n", headID, m_postingSizes.GetSize(headID));
+            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"Into SplitAsync, current headID: %lld, size: %d\n", (std::int64_t)headID, m_postingSizes.GetSize(headID));
             // tbb::concurrent_hash_map<SizeType, SizeType>::const_accessor headIDAccessor;
             // if (m_splitList.find(headIDAccessor, headID)) {
             //     return;
@@ -1335,8 +1337,8 @@ namespace SPTAG::SPANN {
 
                 if (vid < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                 "CollectReAssign: skip invalid VID %d\n",
-                                 vid);
+                                 "CollectReAssign: skip invalid VID %lld\n",
+                                 (std::int64_t)vid);
                     return;
                 }
 
@@ -1374,8 +1376,8 @@ namespace SPTAG::SPANN {
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                     if (vid < 0) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                     "CollectReAssign: skip invalid VID %d in posting headID=%d\n",
-                                     vid, newHeadsID[i]);
+                                     "CollectReAssign: skip invalid VID %lld in posting headID=%lld\n",
+                                     (std::int64_t)vid, (std::int64_t)newHeadsID[i]);
                         continue;
                     }
                     if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
@@ -1450,8 +1452,8 @@ namespace SPTAG::SPANN {
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
                         if (vid < 0) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                "CollectReAssign(nearby): skip invalid VID %d in posting headID=%d\n",
-                                vid, HeadPrevTopK[i]);
+                                "CollectReAssign(nearby): skip invalid VID %lld in posting headID=%lld\n",
+                                (std::int64_t)vid, (std::int64_t)HeadPrevTopK[i]);
                             continue;
                         }
                         if (reAssignVectorsTopK.find(vid) == reAssignVectorsTopK.end() && !m_versionMap->Deleted(vid) && m_versionMap->GetVersion(vid) == version) {
@@ -1559,11 +1561,11 @@ namespace SPTAG::SPANN {
                     uint8_t version = *(uint8_t*)(&appendPosting[idx + sizeof(SizeType)]);
                     auto vectorInfo = std::make_shared<std::string>(appendPosting.c_str() + idx, m_vectorInfoSize);
                     if (m_versionMap->GetVersion(VID) == version) {
-                        // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss To ReAssign: VID: %d, current version: %d\n", *(int*)(&appendPosting[idx]), version);
+                        // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss To ReAssign: VID: %lld, current version: %d\n", (std::int64_t)VID, (int)version);
                         m_stat.m_headMiss++;
                         ReassignAsync(vectorInfo, headID, true);
                     }
-                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss Do Not To ReAssign: VID: %d, version: %d, current version: %d\n", *(int*)(&appendPosting[idx]), m_versionMap->GetVersion(*(int*)(&appendPosting[idx])), version);
+                    // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Head Miss Do Not To ReAssign: VID: %lld, version: %d, current version: %d\n", (std::int64_t)VID, (int)version, (int)m_versionMap->GetVersion(VID));
                 }
                 return ErrorCode::Success;
             }
@@ -1606,16 +1608,18 @@ namespace SPTAG::SPANN {
                          DBKey(headID), appendPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSize)) != ErrorCode::Success)
                 {
                     if (ret == ErrorCode::Posting_OverFlow) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Merge failed:Posting overflow when appending to %lld! Do split and then retry...\n", (std::int64_t)headID);
                         int tofill = m_postingSizeLimit + m_bufferSizeLimit - (postingSize / m_vectorInfoSize);
-                        std::string subPosting = appendPosting.substr(0, tofill * m_vectorInfoSize);
-                        ret = db->Merge(DBKey(headID), subPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSize);
-                        if (ret != ErrorCode::Success) {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge %lld failed!\n", (std::int64_t)headID);
-                            return ret;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "Merge failed:Posting overflow when appending to %lld! existing size:%d tofill:%d Do split and then retry...\n", (std::int64_t)headID, (int)postingSize, tofill);
+                        if (tofill > 0) {
+                            std::string subPosting = appendPosting.substr(0, tofill * m_vectorInfoSize);
+                            ret = db->Merge(DBKey(headID), subPosting, MaxTimeout, &(p_exWorkSpace->m_diskRequests), postingSize);
+                            if (ret != ErrorCode::Success) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Merge %lld failed!\n", (std::int64_t)headID);
+                                return ret;
+                            }
+                            appendPosting = appendPosting.substr(tofill * m_vectorInfoSize);
+                            appendNum -= tofill;
                         }
-                        appendPosting = appendPosting.substr(tofill * m_vectorInfoSize);
-                        appendNum -= tofill;
                         ret = Split(p_exWorkSpace, headID, false);
                         if (ret != ErrorCode::Success) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split %lld failed!\n", (std::int64_t)headID);
@@ -1645,7 +1649,7 @@ namespace SPTAG::SPANN {
             }
             if (postingSize > (m_postingSizeLimit + reassignThreshold)) {
                 // SizeType VID = *(int*)(&appendPosting[0]);
-                // SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %d, reAssign: %d\n", VID, reassignThreshold);
+                // SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split Triggered by inserting VID: %lld, reAssign: %d\n", (std::int64_t)VID, reassignThreshold);
                 // GetDBStats();
                 // if (m_postingSizes.GetSize(headID) > 120) {
                 //     GetDBStats();
@@ -1663,7 +1667,7 @@ namespace SPTAG::SPANN {
                 m_stat.m_appendCost += elapsedMSeconds;
             }
             // } else {
-            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReAssign Append To: %d\n", headID);
+            //     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReAssign Append To: %lld\n", (std::int64_t)headID);
             // }
             return ErrorCode::Success;
         }
@@ -1762,12 +1766,12 @@ namespace SPTAG::SPANN {
             uint8_t version = *((uint8_t*)(vectorInfo->c_str() + sizeof(VID)));
             if (VID < 0) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                             "Reassign: skip invalid VID %d\n",
-                             VID);
+                             "Reassign: skip invalid VID %lld\n",
+                             (std::int64_t)VID);
                 return ErrorCode::Success;
             }
             // return;
-            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignID: %d, version: %d, current version: %d, headPrev: %d\n", VID, version, m_versionMap->GetVersion(VID), headPrev);
+            // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ReassignID: %lld, version: %d, current version: %d, headPrev: %lld\n", (std::int64_t)VID, (int)version, (int)m_versionMap->GetVersion(VID), (std::int64_t)headPrev);
             if (m_versionMap->Deleted(VID) || m_versionMap->GetVersion(VID) != version) {
                 return ErrorCode::Success;
             }
@@ -1786,13 +1790,13 @@ namespace SPTAG::SPANN {
             auto reassignAppendBegin = std::chrono::high_resolution_clock::now();
             // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Need ReAssign\n");
             if (isNeedReassign && m_versionMap->GetVersion(VID) == version) {
-                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %d, version: %d, current version: %d\n", VID, version, m_versionMap->GetVersion(VID));
+                // SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Update Version: VID: %lld, version: %d, current version: %d\n", (std::int64_t)VID, (int)version, (int)m_versionMap->GetVersion(VID));
                 m_versionMap->IncVersion(VID, &version, version);
                 (*vectorInfo)[sizeof(VID)] = version;
 
-                //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%d, replicaCount:%d, candidateNum:%d, dist0:%f\n", oldVID, replicaCount, i, selections[0].distance);
+                //LOG(Helper::LogLevel::LL_Info, "Reassign: oldVID:%lld, replicaCount:%d, candidateNum:%d, dist0:%f\n", (std::int64_t)oldVID, replicaCount, i, selections[0].distance);
                 for (int i = 0; i < replicaCount && m_versionMap->GetVersion(VID) == version; i++) {
-                    //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%d, oldVID:%d, newVID:%d, posting length: %d, dist: %f, string size: %d\n", headID, oldVID, VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
+                    //LOG(Helper::LogLevel::LL_Info, "Reassign: headID :%lld, oldVID:%lld, newVID:%lld, posting length: %d, dist: %f, string size: %d\n", (std::int64_t)headID, (std::int64_t)oldVID, (std::int64_t)VID, m_postingSizes[headID].load(), selections[i].distance, newPart.size());
                     // [FIX H3] use reassignThreshold=0 so that an oversized
                     // target posting triggers SplitAsync (not a synchronous
                     // Split on this worker thread). This matches the
@@ -1801,7 +1805,7 @@ namespace SPTAG::SPANN {
                     // of a Split (observed up to tens of seconds).
                     ErrorCode tmp = Append(p_exWorkSpace, selections[i].VID, 1, *vectorInfo, 0);
                     if (ErrorCode::Success != tmp) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %d, current version: %d, another re-assign\n", VID, version);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Head Miss: VID: %lld, current version: %d, another re-assign\n", (std::int64_t)VID, (int)version);
                         return tmp;
                     }
                 }
@@ -1818,17 +1822,17 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %d, Capacity: %d\n", m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %lld, Capacity: %lld\n", (std::int64_t)(m_opt->m_datasetRowsInBlock), (std::int64_t)(m_opt->m_datasetCapacity));
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
             if (m_opt->m_recovery) {
                 versionmapPath = m_opt->m_persistentBufferPath + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Loading version map\n");
                 m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %d.\n", m_versionMap->Count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recovery: Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             }
             else if (m_opt->m_storage == Storage::ROCKSDBIO || m_opt->m_storage == Storage::TIKVIO) {
                 m_versionMap->Load(versionmapPath, m_opt->m_datasetRowsInBlock, m_opt->m_datasetCapacity);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", m_versionMap->Count());
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
                     m_versionMap->DeleteAll();
@@ -2014,7 +2018,7 @@ namespace SPTAG::SPANN {
                 diskIO += int((buffer.GetAvailableSize() + PageSize - 1) >> PageSizeEx);
                 diskRead += (int)(buffer.GetAvailableSize());
                 
-                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %d size:%d m_vectorInfoSize:%d vectorNum:%d\n", pi, (int)(postingList.size()), m_vectorInfoSize, vectorNum);
+                //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: postingList %lld size:%d m_vectorInfoSize:%d vectorNum:%d\n", (std::int64_t)pi, (int)(postingList.size()), m_vectorInfoSize, vectorNum);
                 int realNum = vectorNum;
                 listElements += vectorNum;
                 auto compStart = std::chrono::high_resolution_clock::now();
@@ -2022,7 +2026,7 @@ namespace SPTAG::SPANN {
                     char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
                     SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
 
-		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%d\n", vectorID);
+		            //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DEBUG: vectorID:%lld\n", (std::int64_t)vectorID);
                     if (!isTiKV && m_versionMap->Deleted(vectorID)) {
                         realNum--;
                         listElements--;
@@ -2352,7 +2356,7 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build SSD Index.\n");
 
             Selection selections(static_cast<size_t>(fullCount) * m_opt->m_replicaCount, m_opt->m_tmpdir);
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%lld Edge bytes:%llu selection size:%zu, capacity size:%zu\n", (std::int64_t)fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
             std::vector<std::atomic_int> replicaCount(fullCount);
             std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
             for (auto& pls : postingListSize) pls = 0;
@@ -2779,7 +2783,7 @@ namespace SPTAG::SPANN {
                             }
                             SizeType fullID = (p_localToGlobal.R() > 0) ? *(p_localToGlobal[localID]) : localID;
                             if (fullID == postingID) hasHead = true;
-                            // if (id == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ID: %d\n", fullID);
+                            // if (id == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ID: %lld\n", (std::int64_t)fullID);
                             uint8_t version = m_versionMap->GetVersion(fullID);
                             // First Vector ID, then version, then Vector
                             Serialize(ptr, fullID, version, p_fullVectors->GetVector(localID));
