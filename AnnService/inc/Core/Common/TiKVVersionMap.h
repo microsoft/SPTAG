@@ -269,7 +269,6 @@ namespace SPTAG
 
             SizeType Count() override { return m_count.load(); }
             SizeType GetDeleteCount() override { return 0; }
-            SizeType GetVectorNum() { return m_count.load(); }
             std::uint64_t BufferSize() override { return static_cast<std::uint64_t>(m_count.load()) + sizeof(SizeType) * 2 + sizeof(uint8_t); }
 
             bool Deleted(const SizeType& key) override
@@ -280,7 +279,7 @@ namespace SPTAG
             bool Deleted(const SizeType& key, VersionReadPolicy policy) override
             {
                 (void)policy;
-                if (key < 0 || key >= m_count.load()) {
+                if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Deleted: invalid key %d (max %d)\n", key, m_count.load());
                     return true;
                 }
@@ -289,7 +288,7 @@ namespace SPTAG
 
             bool Delete(const SizeType& key) override
             {
-                if (key < 0 || key >= m_count.load()) {
+                if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::Delete: invalid key %d (max %d)\n", key, m_count.load());
                     return false;
                 }
@@ -308,7 +307,7 @@ namespace SPTAG
             uint8_t GetVersion(const SizeType& key, VersionReadPolicy policy) override
             {
                 (void)policy;
-                if (key < 0 || key >= m_count.load()) {
+                if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::GetVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return 0xfe;
                 }
@@ -337,7 +336,7 @@ namespace SPTAG
 
             bool IncVersion(const SizeType& key, uint8_t* newVersion, uint8_t expectedOld = 0xff) override
             {
-                if (key < 0 || key >= m_count.load()) {
+                if (key < 0) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "TiKVVersionMap::IncVersion: invalid key %d (max %d)\n", key, m_count.load());
                     return false;
                 }
@@ -391,46 +390,6 @@ namespace SPTAG
                 return false;
             }
 
-            ErrorCode AddBatch(SizeType num)
-            {
-                return AddBatch(num, false);
-            }
-
-            ErrorCode AddBatch(SizeType num, bool deleted)
-            {
-                if (num <= 0) return ErrorCode::Success;
-
-                SizeType oldCount = m_count.load();
-                SizeType newCount = oldCount + num;
-
-                if (deleted) {
-                    if (m_defaultVersion != 0xfe) {
-                        for (SizeType vid = oldCount; vid < newCount; vid++) {
-                            auto ret = PutByte(VersionKey(vid), 0xfe);
-                            if (ret != ErrorCode::Success) return ret;
-                        }
-                    }
-                    m_deleted.fetch_add(num, std::memory_order_relaxed);
-                } else if (m_defaultVersion == 0xfe) {
-                    for (SizeType vid = oldCount; vid < newCount; vid++) {
-                        auto ret = PutByte(VersionKey(vid), 0x00);
-                        if (ret != ErrorCode::Success) return ret;
-                    }
-                }
-
-                m_count = newCount;
-                MarkMetadataDirty();
-                MaybeFlushMetadata();
-                return ErrorCode::Success;
-            }
-
-            void SetR(SizeType num) override
-            {
-                m_count = num;
-                MarkMetadataDirty();
-                MaybeFlushMetadata();
-            }
-
             ErrorCode Save(std::shared_ptr<Helper::DiskIO> output) override
             {
                 (void)output;
@@ -461,14 +420,6 @@ namespace SPTAG
                 return LoadMetadataFromTiKV();
             }
 
-            ErrorCode Load(char* pmemoryFile, SizeType blockSize, SizeType capacity)
-            {
-                (void)pmemoryFile;
-                (void)blockSize;
-                (void)capacity;
-                return LoadMetadataFromTiKV();
-            }
-
             void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
             {
                 BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
@@ -480,14 +431,13 @@ namespace SPTAG
                 versions.assign(vids.size(), 0xfe);
                 if (vids.empty()) return;
 
-                SizeType count = m_count.load();
                 std::vector<size_t> validIndices;
                 std::vector<std::string> keys;
                 validIndices.reserve(vids.size());
                 keys.reserve(vids.size());
 
                 for (size_t i = 0; i < vids.size(); i++) {
-                    if (vids[i] >= 0 && vids[i] < count) {
+                    if (vids[i] >= 0) {
                         validIndices.push_back(i);
                         keys.push_back(VersionKey(vids[i]));
                     }
