@@ -15,6 +15,7 @@
 #include <chrono>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 namespace SPTAG
 {
@@ -253,8 +254,47 @@ namespace SPTAG
                 }
             }
 
-            ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override {
-                return ErrorCode::Success;
+            ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
+            {
+                globalIDs.clear();
+                const SizeType count = m_count.load();
+                if (count <= 0) return ErrorCode::Success;
+
+                constexpr SizeType kBatchSize = 4096;
+                ErrorCode result = ErrorCode::Success;
+                std::vector<std::string> keys;
+                std::vector<std::string> values;
+                keys.reserve(kBatchSize);
+
+                for (SizeType batchStart = 0; batchStart < count; batchStart += kBatchSize) {
+                    const SizeType batchEnd = std::min(batchStart + kBatchSize, count);
+                    keys.clear();
+                    for (SizeType vid = batchStart; vid < batchEnd; vid++) {
+                        keys.emplace_back(VersionKey(vid));
+                    }
+
+                    values.clear();
+                    auto ret = m_db->MultiGet(keys, &values, MaxTimeout, nullptr);
+                    if (ret != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "TiKVVersionMap::GetContainedIDs: MultiGet failed (layer=%d, ret=%d, range=[%d,%d)); treating this range as deleted.\n",
+                            m_layer, static_cast<int>(ret), batchStart, batchEnd);
+                        result = ErrorCode::Fail;
+                        continue;
+                    }
+
+                    for (SizeType vid = batchStart; vid < batchEnd; vid++) {
+                        size_t index = static_cast<size_t>(vid - batchStart);
+                        uint8_t version = (index < values.size() && !values[index].empty())
+                            ? static_cast<uint8_t>(values[index][0])
+                            : m_defaultVersion;
+                        if (version != 0xfe) {
+                            globalIDs.push_back(vid);
+                        }
+                    }
+                }
+
+                return result;
             }
             
             void DeleteAll() override
