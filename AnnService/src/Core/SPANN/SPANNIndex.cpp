@@ -1246,6 +1246,16 @@ template <typename T> ErrorCode Index<T>::BuildIndex(bool p_normalized)
     std::shared_ptr<Helper::ReaderOptions> vectorOptions(
         new Helper::ReaderOptions(valueType, dim, m_options.m_vectorType, m_options.m_vectorDelimiter,
                                   m_options.m_iSSDNumberOfThreads, p_normalized));
+    // A read-only mapping cannot satisfy the in-place Normalize done in SelectHead, so mmap is
+    // only enabled when no normalization is required (L2, or already-normalized Cosine input).
+    bool needNormalize = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) && !p_normalized;
+    vectorOptions->m_useMmap = m_options.m_mmapVectors && !needNormalize;
+    if (m_options.m_mmapVectors && needNormalize)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "MmapVectors disabled: Cosine with un-normalized input requires in-place "
+                     "Normalize; using in-memory load. Pre-normalize input or use L2 to enable mmap.\n");
+    }
     auto vectorReader = Helper::VectorSetReader::CreateInstance(vectorOptions);
     if (m_options.m_vectorPath.empty())
     {

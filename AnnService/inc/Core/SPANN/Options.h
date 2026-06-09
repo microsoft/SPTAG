@@ -23,6 +23,7 @@ namespace SPTAG {
             VectorFileType m_vectorType;
             SizeType m_vectorSize; //Optional on condition
             std::string m_vectorDelimiter; //Optional on condition
+            bool m_mmapVectors; // memory-map the input vector file instead of loading it fully into RAM
             std::string m_queryPath;
             VectorFileType m_queryType;
             SizeType m_querySize; //Optional on condition
