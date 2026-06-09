@@ -939,6 +939,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         bkt->m_iTreeNumber = m_options.m_iTreeNumber;
         bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
         bkt->m_pQuantizer = m_pQuantizer;
+        bkt->m_parallelBuild = m_options.m_selectHeadParallel;   // node-level parallel BKT build (default off)
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Info,

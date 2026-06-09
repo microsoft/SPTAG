@@ -16,6 +16,7 @@
 #include <string.h>
 #include <vector>
 #include <set>
+#include <random>
 
 #define PREFETCH
 
@@ -33,7 +34,11 @@ namespace SPTAG
         public:
             static SizeType rand(SizeType high = MaxSize, SizeType low = 0)   // Generates a random int value.
             {
-                return low + (SizeType)(float(high - low)*(std::rand() / (RAND_MAX + 1.0)));
+                // thread_local generator: thread-safe (the old std::rand() shares hidden global
+                // state and races under concurrent BKT building). Sequences differ from the legacy
+                // std::rand() version (equivalent quality, not bit-identical to old builds).
+                static thread_local std::mt19937 g(std::random_device{}());
+                return low + (SizeType)(float(high - low) * (g() / (g.max() + 1.0)));
             }
 
             static inline float atomic_float_add(volatile float* ptr, const float operand)
