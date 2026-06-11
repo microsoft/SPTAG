@@ -1934,6 +1934,22 @@ template <typename T> ErrorCode Index<T>::DeleteIndex(const SizeType &p_id, int 
     return m_extraSearchers[tolayer]->DeleteIndex(p_id);
 }
 
+template <typename T> ErrorCode Index<T>::ResetIndex(const SizeType& p_id, int tolayer)
+{
+    std::shared_lock<std::shared_timed_mutex> sharedlock(m_dataDeleteLock);
+    if (tolayer >= m_extraSearchers.size()) {
+        auto it = m_topGlobalToLocalID.find(p_id);
+        if (it != m_topGlobalToLocalID.end())
+        {
+            m_topIndex->ResetIndex(it->second);
+        } else {
+            return ErrorCode::VectorNotFound;
+        }
+        return ErrorCode::Success;
+    }
+    return m_extraSearchers[tolayer]->ResetIndex(p_id);
+}
+
 template <typename T> ErrorCode Index<T>::DeleteIndex(const void *p_vectors, SizeType p_vectorNum)
 {
     // TODO: Support batch delete

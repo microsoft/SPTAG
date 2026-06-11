@@ -588,7 +588,8 @@ namespace SPTAG {
             virtual ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
                 SizeType p_begin, bool disableSplit = false) { return ErrorCode::Undefined; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
-
+            virtual ErrorCode ResetIndex(SizeType p_id) { return ErrorCode::Undefined; }
+            
             virtual SizeType GetNumSamples() const = 0;
 
             virtual bool ContainSample(const SizeType idx) const

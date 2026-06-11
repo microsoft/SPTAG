@@ -186,6 +186,8 @@ public:
 
     virtual ErrorCode DeleteIndex(const SizeType& p_id) = 0;
 
+    virtual ErrorCode ResetIndex(const SizeType& p_id) = 0;
+    
     virtual ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams, IAbortOperation* p_abort, std::vector<SizeType>* p_mapping) = 0;
 
     virtual ErrorCode SetWorkSpaceFactory(std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<SPTAG::COMMON::IWorkSpace>> up_workSpaceFactory) = 0;

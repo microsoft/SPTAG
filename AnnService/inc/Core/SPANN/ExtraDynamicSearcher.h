@@ -2562,7 +2562,12 @@ namespace SPTAG::SPANN {
                 p_headGlobaltoLocal.clear();
                 for (int i = 0; i < p_headToLocal.R(); i++) {
                     *(p_headToLocal[i]) = *(p_localToGlobal[*(p_headToLocal[i])]);
-                    p_headGlobaltoLocal[*(p_headToLocal[i])] = i;
+                    if (p_headGlobaltoLocal.find(*(p_headToLocal[i])) == p_headGlobaltoLocal.end()) {
+                        p_headGlobaltoLocal[*(p_headToLocal[i])] = i;
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Duplicate entry found for global ID: %lld previous i:%lld current i:%lld\n", static_cast<std::int64_t>(*(p_headToLocal[i])), 
+                            static_cast<std::int64_t>(p_headGlobaltoLocal[*(p_headToLocal[i])]), static_cast<std::int64_t>(i));
+                    }
                 } 
             }
             if (ErrorCode::Success != WriteDownAllPostingToDB(p_headIndex, selections, fullVectors, postingListSize, p_headToLocal, p_localToGlobal)) return false;
@@ -2867,6 +2872,11 @@ namespace SPTAG::SPANN {
             }
             if (m_versionMap->Delete(p_id)) return ErrorCode::Success;
             return ErrorCode::VectorNotFound;
+        }
+
+        ErrorCode ResetIndex(SizeType p_id) override {
+            m_versionMap->SetVersion(p_id, -1);
+            return ErrorCode::Success;
         }
 
         bool AllFinished() {

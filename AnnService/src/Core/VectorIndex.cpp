@@ -461,7 +461,7 @@ ErrorCode VectorIndex::SaveIndex(const std::string &p_folderPath, std::vector<Si
     }
 
     size_t metaStart = GetIndexFiles()->size();
-    if (NeedRefine())
+    if (NeedRefine() || p_mapping != nullptr)
     {
         ret = RefineIndex(handles, nullptr, p_mapping);
     }

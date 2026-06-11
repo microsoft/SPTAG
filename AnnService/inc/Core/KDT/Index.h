@@ -174,7 +174,11 @@ namespace SPTAG
             ErrorCode AddIndexId(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, SizeType& beginHead, SizeType& endHead);
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode DeleteIndex(const SizeType& p_id);
-
+            ErrorCode ResetIndex(const SizeType& p_id) {
+                if (m_deletedID.Reset(p_id)) return ErrorCode::Success;
+                return ErrorCode::VectorNotFound;
+            }
+            
             ErrorCode SetParameter(const char* p_param, const char* p_value, const char* p_section = nullptr);
             std::string GetParameter(const char* p_param, const char* p_section = nullptr) const;
             ErrorCode UpdateIndex();
