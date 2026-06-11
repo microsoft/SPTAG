@@ -594,27 +594,10 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         const bool isTargetLayer = (layer == p_tolayer);
 
         auto setupStart = std::chrono::high_resolution_clock::now();
-        double setupVersionMapLatency = 0;
         p_exWorkSpace->m_deduper.clear();
         p_exWorkSpace->m_postingIDs.clear();
 
-        std::vector<SizeType> targetLayerCandidateIDs;
-        std::vector<uint8_t> targetLayerContains;
-        if (isTargetLayer) {
-            targetLayerCandidateIDs.reserve(m_options.m_searchInternalResultNum);
-            for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
-            {
-                auto res = localResults.GetResult(i);
-                if (res->VID == -1) continue;
-                targetLayerCandidateIDs.emplace_back(res->VID);
-            }
-            auto versionMapStart = std::chrono::high_resolution_clock::now();
-            searcher->ContainSamples(targetLayerCandidateIDs, targetLayerContains, p_exWorkSpace->m_versionReadPolicy);
-            auto versionMapEnd = std::chrono::high_resolution_clock::now();
-            setupVersionMapLatency += (double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count();
-        }
-
-        size_t targetLayerCandidateIndex = 0;
+        // Target-layer postings include their posting IDs, so direct candidates are returned through SearchIndex.
         for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
         {
             auto res = localResults.GetResult(i);
@@ -622,16 +605,10 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
 
             p_exWorkSpace->m_postingIDs.emplace_back(res->VID);
 
-            if (!isTargetLayer) continue;
-            bool containsTargetLayer = targetLayerCandidateIndex < targetLayerContains.size() && targetLayerContains[targetLayerCandidateIndex] != 0;
-            targetLayerCandidateIndex++;
-            if (!containsTargetLayer) continue;
-            if (resultDedup.CheckAndSet(res->VID)) continue;
-            p_queryResults->AddPoint(res->VID, res->Dist, res->Vec);
         }
         auto setupEnd = std::chrono::high_resolution_clock::now();
         double setupLatency = (double)std::chrono::duration_cast<std::chrono::microseconds>(setupEnd - setupStart).count() / 1000;
-        double setupVersionMapLatencyMs = setupVersionMapLatency / 1000;
+
         localResults.Reset();
         if ((ret = searcher->SearchIndex(p_exWorkSpace, localResults, p_stats, nullptr, nullptr, isTargetLayer)) !=
             ErrorCode::Success)
@@ -641,10 +618,8 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
         if (p_stats)
         {
             p_stats->m_exSetUpLatency += setupLatency;
-            p_stats->m_versionMapLatency += setupVersionMapLatencyMs;
             if (SearchStats::IsValidBreakdownLayer(layer)) {
                 p_stats->m_layerSetupLatency[layer] += setupLatency;
-                p_stats->m_layerVersionMapLatency[layer] += setupVersionMapLatencyMs;
             }
         }
     }
