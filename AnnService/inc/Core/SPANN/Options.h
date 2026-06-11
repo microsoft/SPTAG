@@ -111,10 +111,6 @@ namespace SPTAG {
             bool m_enableWAL;
             bool m_disableCheckpoint;
 
-            // Coprocessor search (push computation to TiKV)
-            bool m_useCoprocessorSearch;
-            int m_coprocessorTopN;
-
             // Multi-chunk posting (append-only writes for TiKV)
             bool m_useMultiChunkPosting;
             int m_postingCountCacheCapacity;

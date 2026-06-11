@@ -1970,12 +1970,6 @@ namespace SPTAG::SPANN {
             SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
             bool p_checkVersionMap) override
         {
-            // Use coprocessor search if enabled and storage is TiKV
-#ifdef TIKV
-            if (m_opt->m_useCoprocessorSearch && m_opt->m_storage == Storage::TIKVIO) {
-                return SearchIndexWithCoprocessor(p_exWorkSpace, p_queryResults, p_stats, truth, found, p_checkVersionMap);
-            }
-#endif
             if (p_stats) p_stats->m_exSetUpLatency = 0;
 
             auto layerTotalStart = std::chrono::high_resolution_clock::now();
@@ -2069,9 +2063,9 @@ namespace SPTAG::SPANN {
                 }
 
                 // Batch check versions
-                std::vector<uint8_t> versions;
+                std::vector<uint8_t> candidateContains;
                 auto versionMapStart = std::chrono::high_resolution_clock::now();
-                m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
+                ContainSamples(candidateVIDs, candidateContains, p_exWorkSpace->m_versionReadPolicy);
                 auto versionMapEnd = std::chrono::high_resolution_clock::now();
                 versionMapLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count());
                 versionCheckCount += static_cast<int>(candidateVIDs.size());
@@ -2082,7 +2076,7 @@ namespace SPTAG::SPANN {
                 for (int i = 0; i < fetchCount && i < queryResults.GetResultNum(); i++) {
                     auto* result = queryResults.GetResult(i);
                     if (result->VID >= 0) {
-                        if (versions[vidIdx] == 0xfe) {
+                        if (vidIdx >= candidateContains.size() || candidateContains[vidIdx] == 0) {
                             result->VID = -1;
                             result->Dist = (std::numeric_limits<float>::max)();
                         }
@@ -2122,125 +2116,6 @@ namespace SPTAG::SPANN {
             return ErrorCode::Success;
         }
 
-#ifdef TIKV
-        // Coprocessor-based search: push distance computation into TiKV.
-        // Instead of fetching raw posting data, sends the query vector and
-        // posting keys to TiKV, which reads postings locally, computes L2
-        // distances, and returns only top-N candidates.
-        ErrorCode SearchIndexWithCoprocessor(ExtraWorkSpace* p_exWorkSpace,
-            QueryResult& p_queryResults,
-            SearchStats* p_stats, std::set<SizeType>* truth, std::map<SizeType, std::set<SizeType>>* found,
-            bool p_checkVersionMap)
-        {
-            auto layerTotalStart = std::chrono::high_resolution_clock::now();
-
-            COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
-
-            int listElements = 0;
-            double readLatency = 0;
-            double versionMapLatency = 0;
-            int versionCheckCount = 0;
-
-            int valueType = 0; // UInt8
-            if (std::is_same<ValueType, float>::value) valueType = 3;
-            else if (std::is_same<ValueType, int8_t>::value) valueType = 1;
-
-            int topN = m_opt->m_coprocessorTopN;
-            if (topN <= 0) topN = m_opt->m_resultNum * 10;
-
-            // Get the TiKVIO instance from the database
-            auto* tikvDB = dynamic_cast<TiKVIO*>(db.get());
-            if (!tikvDB) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndexWithCoprocessor] db is not TiKVIO!\n");
-                return ErrorCode::Fail;
-            }
-
-            auto readStart = std::chrono::high_resolution_clock::now();
-
-            std::vector<TiKVIO::CoprocessorResult> coprResults;
-            auto ret = tikvDB->CoprocessorSearch(
-                p_exWorkSpace->m_postingIDs,
-                reinterpret_cast<const uint8_t*>(queryResults.GetQuantizedTarget()),
-                m_opt->m_dim,
-                valueType,
-                m_metaDataSize,
-                topN,
-                m_hardLatencyLimit,
-                coprResults);
-
-            auto readEnd = std::chrono::high_resolution_clock::now();
-            readLatency = (double)std::chrono::duration_cast<std::chrono::microseconds>(readEnd - readStart).count();
-
-            if (ret != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndexWithCoprocessor] CoprocessorSearch failed!\n");
-                return ErrorCode::DiskIOFail;
-            }
-
-            // Process results: dedup, skip per-entry version check for TiKV mode
-            for (auto& cr : coprResults) {
-                if (p_exWorkSpace->m_deduper.CheckAndSet(cr.vectorID)) continue;
-                queryResults.AddPoint(cr.vectorID, cr.distance);
-                listElements++;
-            }
-
-            // Post-heap batch version check for TiKV mode
-            if (ShouldCheckVersionMapInSearch(p_checkVersionMap)) {
-                int fetchCount = queryResults.GetResultNum();
-
-                std::vector<SizeType> candidateVIDs;
-                candidateVIDs.reserve(fetchCount);
-                for (int i = 0; i < fetchCount && i < queryResults.GetResultNum(); i++) {
-                    auto* result = queryResults.GetResult(i);
-                    if (result->VID >= 0) candidateVIDs.push_back(result->VID);
-                }
-
-                std::vector<uint8_t> versions;
-                auto versionMapStart = std::chrono::high_resolution_clock::now();
-                m_versionMap->BatchGetVersions(candidateVIDs, versions, p_exWorkSpace->m_versionReadPolicy);
-                auto versionMapEnd = std::chrono::high_resolution_clock::now();
-                versionMapLatency += ((double)std::chrono::duration_cast<std::chrono::microseconds>(versionMapEnd - versionMapStart).count());
-                versionCheckCount += static_cast<int>(candidateVIDs.size());
-
-                int vidIdx = 0;
-                for (int i = 0; i < fetchCount && i < queryResults.GetResultNum(); i++) {
-                    auto* result = queryResults.GetResult(i);
-                    if (result->VID >= 0) {
-                        if (versions[vidIdx] == 0xfe) {
-                            result->VID = -1;
-                            result->Dist = (std::numeric_limits<float>::max)();
-                        }
-                        vidIdx++;
-                    }
-                }
-                queryResults.SortResult();
-            }
-
-            auto layerTotalEnd = std::chrono::high_resolution_clock::now();
-            double layerTotalLatency = ((double)std::chrono::duration_cast<std::chrono::microseconds>(layerTotalEnd - layerTotalStart).count()) / 1000;
-
-            if (p_stats)
-            {
-                double readLatencyMs = readLatency / 1000;
-                double versionMapLatencyMs = versionMapLatency / 1000;
-                p_stats->m_compLatency += 0; // computation done on TiKV side
-                p_stats->m_diskReadLatency += readLatencyMs;
-                p_stats->m_versionMapLatency += versionMapLatencyMs;
-                p_stats->m_totalListElementsCount += listElements;
-                p_stats->m_diskIOCount += 0;
-                p_stats->m_diskAccessCount += 0;
-                if (SearchStats::IsValidBreakdownLayer(m_layer)) {
-                    p_stats->m_layerPostingReadLatency[m_layer] += readLatencyMs;
-                    p_stats->m_layerVersionMapLatency[m_layer] += versionMapLatencyMs;
-                    p_stats->m_layerTotalLatency[m_layer] += layerTotalLatency;
-                    p_stats->m_layerPostingCount[m_layer] += static_cast<int>(p_exWorkSpace->m_postingIDs.size());
-                    p_stats->m_layerListElementsCount[m_layer] += listElements;
-                    p_stats->m_layerVersionCheckCount[m_layer] += versionCheckCount;
-                }
-            }
-            queryResults.SetScanned(listElements);
-            return ErrorCode::Success;
-        }
-#endif
         virtual ErrorCode SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace)
         {
             int retry = 0;

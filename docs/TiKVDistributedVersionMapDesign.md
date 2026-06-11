@@ -184,18 +184,6 @@ if TiKV and p_checkVersionMap:
 
 For non-TiKV storage, the local version map still performs per-vector `Deleted(VID)` filtering during posting scan. The TiKV-only search policy does not affect local version-map correctness.
 
-## Coprocessor Search
-
-When TiKV coprocessor search is enabled, posting distance computation is pushed into TiKV and returns top candidates. The same `p_checkVersionMap` policy is applied afterward:
-
-```text
-CoprocessorSearch(postingIDs, query)
-dedup returned candidates
-if p_checkVersionMap:
-    BatchGetVersions(top candidates)
-    filter deleted candidates
-```
-
 ## Cache Design
 
 TiKV distributed VM no longer keeps a local version cache. Each single or batch read goes to TiKV and falls back to the code-defined layer default for missing per-VID keys.
