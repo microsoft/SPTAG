@@ -1098,7 +1098,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Select Head...\n");
     auto t1 = std::chrono::high_resolution_clock::now();
-    if (m_options.m_selectHead)
+    if (m_options.m_selectHead && m_topIndex == nullptr)
     {
         bool success = false;
         if (m_pQuantizer)
@@ -1120,7 +1120,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternalLayer(std::shared_pt
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "select head time: %.2lfs\n", selectHeadTime);
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
-    if (m_options.m_buildHead)
+    if (m_options.m_buildHead && m_topIndex == nullptr)
     {
         auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
         auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
@@ -1361,6 +1361,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         for (int layer = resumeLayer; layer < m_options.m_layers; layer++) {
             setLayerPaths(layer);
 
+            if (layer != resumeLayer) m_topIndex = nullptr;
             if (layer == 0) {
                 // Layer 0 uses the original base vectors
                 auto ret = BuildIndexInternalLayer(vectorReader);
@@ -1429,6 +1430,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         // Layer 0
         setLayerPaths(0);
+        m_topIndex = nullptr;
         auto ret = BuildIndexInternalLayer(vectorReader);
         if (ret != ErrorCode::Success)
         {
@@ -1469,6 +1471,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_options.m_headIndexFolder = origHeadIndexFolder;
                 return ErrorCode::Fail;
             }
+            m_topIndex = nullptr;
             auto ret = BuildIndexInternalLayer(vectorReader);
             if (ret != ErrorCode::Success)
             {
