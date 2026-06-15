@@ -199,6 +199,40 @@ struct PostingBitmask {
 };
 
 // ═══════════════════════════════════════════════════════════════════
+// Wider page-level signature (collision-free for >256 distinct tags).
+// Used by the page-selective IO directory: the org+dept+team+project tag
+// space spans up to ~340 ids, so a 256-bit mask aliases project ids
+// 256.. onto lower-level bits (false positives -> over-read). 512 bits
+// keeps all of them collision-free while costing only 64B/page. Measured:
+// at 46 vec/posting the over-read is dominated by genuine tag dilution, not
+// bit collisions, so 256 bits (32B/page) is the lean operating point.
+// ═══════════════════════════════════════════════════════════════════
+static constexpr int PS_PAGE_BITS  = 256;
+static constexpr int PS_PAGE_WORDS = PS_PAGE_BITS / 64;  // 4
+
+struct PageBitmask {
+    uint64_t bits[PS_PAGE_WORDS] = {};
+
+    void Clear() { for (int i = 0; i < PS_PAGE_WORDS; i++) bits[i] = 0; }
+
+    void Insert(uint32_t tag) {
+        uint32_t pos = tag % PS_PAGE_BITS;
+        bits[pos >> 6] |= (1ULL << (pos & 63));
+    }
+
+    bool MayContain(uint32_t tag) const {
+        uint32_t pos = tag % PS_PAGE_BITS;
+        return (bits[pos >> 6] & (1ULL << (pos & 63))) != 0;
+    }
+
+    bool MayIntersect(const PageBitmask& query) const {
+        for (int i = 0; i < PS_PAGE_WORDS; i++)
+            if (bits[i] & query.bits[i]) return true;
+        return false;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // Hierarchical Posting Mask: 4-level tag hierarchy filter
 //
 // Each level has its own bit array sized to cover the typical tag range:
@@ -212,59 +246,416 @@ struct PostingBitmask {
 // semantic: pass if ANY of head's tags equals ANY of query's tags).
 // ═══════════════════════════════════════════════════════════════════
 
-static constexpr int HIER_ORG_BITS  = 8;
-static constexpr int HIER_DEPT_BITS = 32;
-static constexpr int HIER_TEAM_BITS = 128;
-static constexpr int HIER_PROJ_BITS = 128;
+// Generalised hierarchical posting mask: HIER_LEVELS independent levels, each a
+// HIER_LEVEL_BITS-wide bit array. A "level" is a categorical tag column
+// (0=org/country, 1=dept/year, ...). Bit position within a level is tag %
+// HIER_LEVEL_BITS. With 256 bits/level any column whose distinct values span a
+// contiguous range <= 256 maps collision-free (e.g. YFCC country 1000..1245).
+//
+// Backwards compatible with the legacy 4-level org/dept/team/project layout:
+// those columns (0..3) still map to levels 0..3, and 256 bits is >= every legacy
+// width (8/32/128/128) so pruning is equal-or-better. The wider/extra levels
+// change the persisted head_node_meta byte size (offsets derive from sizeof), so
+// indexes must be rebuilt -- there is no on-disk back-compat with old indexes.
+//
+// HIER_LEVELS is sized to the widest schema in use: YFCC scope-A = 5 facets
+// (year/month/camera/country/us_state), SIFT ACL = 4 (org/dept/team/project).
+// 5 covers both with no spare; raise it if a schema needs more categorical cols.
+static constexpr int HIER_LEVELS     = 5;
+static constexpr int HIER_LEVEL_BITS = 256;                   // max width / level
+static constexpr int HIER_LEVEL_WORDS = HIER_LEVEL_BITS / 64;  // 4
+// Maximum total 64-bit words across all levels (used as the fixed storage
+// capacity of HierarchicalPostingMask so its compile-time sizeof stays stable).
+static constexpr int HIER_MAX_WORDS  = HIER_LEVELS * HIER_LEVEL_WORDS;  // 20
+
+// Legacy names kept for any external reference / documentation.
+static constexpr int HIER_ORG_BITS  = HIER_LEVEL_BITS;
+static constexpr int HIER_DEPT_BITS = HIER_LEVEL_BITS;
+static constexpr int HIER_TEAM_BITS = HIER_LEVEL_BITS;
+static constexpr int HIER_PROJ_BITS = HIER_LEVEL_BITS;
+
+// ═══════════════════════════════════════════════════════════════════
+// Runtime per-column mask width table.
+//
+// Each categorical column (level) gets its own bit-width, chosen at build time
+// from the column's value cardinality (collision-free iff width >= value span).
+// Low-cardinality columns (year=12, month=13) need only 64 bits, not the full
+// 256, so the per-head posting-content mask packs tighter: e.g. YFCC widths
+// [256,64,64,128,64] -> 576 bits = 9 words = 72 B instead of 5*256 = 160 B.
+//
+// The table is a process-global set once per index:
+//   * at build  -> SetHierWidths() from the SPTAG_HIER_LEVEL_WIDTHS env list.
+//   * at load   -> SetHierWidths() from the widths persisted in the
+//                  head_node_meta.bin V5 header (so the byte layout matches).
+// Default (never set, or legacy V3/V4 indexes) is uniform HIER_LEVEL_BITS,
+// which reproduces the previous fixed 256-bit-per-level layout bit-for-bit.
+// Widths are clamped to [64, HIER_LEVEL_BITS] and rounded up to a multiple of
+// 64, guaranteeing totalWords <= HIER_MAX_WORDS (no storage overflow).
+// ═══════════════════════════════════════════════════════════════════
+struct HierWidthTable {
+    int bits[HIER_LEVELS];
+    int wordOff[HIER_LEVELS];
+    int totalWords;
+
+    void Recompute() {
+        int off = 0;
+        for (int l = 0; l < HIER_LEVELS; ++l) { wordOff[l] = off; off += bits[l] / 64; }
+        totalWords = off;
+    }
+    void SetUniform() { for (int l = 0; l < HIER_LEVELS; ++l) bits[l] = HIER_LEVEL_BITS; Recompute(); }
+};
+
+inline HierWidthTable& MutableHierWidths() {
+    static HierWidthTable t = [] { HierWidthTable x; x.SetUniform(); return x; }();
+    return t;
+}
+inline const HierWidthTable& HierWidths() { return MutableHierWidths(); }
+
+// Set per-level widths (bits). n entries are consumed (n <= HIER_LEVELS);
+// remaining levels default to HIER_LEVEL_BITS. Each width is clamped to
+// [64, HIER_LEVEL_BITS] and rounded up to a multiple of 64.
+inline void SetHierWidths(const int* bitsPerLevel, int n) {
+    auto& t = MutableHierWidths();
+    for (int l = 0; l < HIER_LEVELS; ++l) {
+        int b = (l < n) ? bitsPerLevel[l] : HIER_LEVEL_BITS;
+        if (b < 64) b = 64;
+        if (b > HIER_LEVEL_BITS) b = HIER_LEVEL_BITS;
+        b = ((b + 63) / 64) * 64;
+        t.bits[l] = b;
+    }
+    t.Recompute();
+}
+inline void SetHierWidthsUniform() { MutableHierWidths().SetUniform(); }
+
+// Number of bytes actually occupied by one HierarchicalPostingMask given the
+// current width table. The per-head meta record uses this (NOT sizeof) so the
+// stored mask shrinks for narrow schemas.
+inline size_t HierPostingMaskBytes() { return static_cast<size_t>(HierWidths().totalWords) * sizeof(uint64_t); }
 
 struct HierarchicalPostingMask {
-    uint8_t  orgMask = 0;        // 8 bits for org tags
-    uint32_t deptMask = 0;       // 32 bits for dept tags
-    uint64_t teamMask[2] = {};   // 128 bits for team tags
-    uint64_t projectMask[2] = {}; // 128 bits for project tags
+    // Flat storage of up to HIER_MAX_WORDS words. Only the first
+    // HierWidths().totalWords words are ever used; level L occupies words
+    // [wordOff[L], wordOff[L] + bits[L]/64). The compile-time sizeof is fixed
+    // (160 B) so the type is a stable POD, but per-head persistence copies only
+    // HierPostingMaskBytes() bytes.
+    uint64_t mask[HIER_MAX_WORDS] = {};
 
     void Clear() {
-        orgMask = 0;
-        deptMask = 0;
-        teamMask[0] = teamMask[1] = 0;
-        projectMask[0] = projectMask[1] = 0;
+        for (int w = 0; w < HIER_MAX_WORDS; ++w) mask[w] = 0;
     }
 
-    // level: 0=org, 1=dept, 2=team, 3=project. tag is the raw tag id.
+    // level: categorical tag column index (0=org/country, 1=dept/year, ...).
+    // tag is the raw tag id. Columns >= HIER_LEVELS are ignored (fail-open at
+    // query time via MayContain returning true), preserving correctness.
     void Insert(int level, uint32_t tag) {
-        switch (level) {
-            case 0: {  // org
-                uint32_t pos = tag % HIER_ORG_BITS;
-                orgMask |= (1u << pos);
-                break;
-            }
-            case 1: {  // dept
-                uint32_t pos = tag % HIER_DEPT_BITS;
-                deptMask |= (1u << pos);
-                break;
-            }
-            case 2: {  // team
-                uint32_t pos = tag % HIER_TEAM_BITS;
-                teamMask[pos >> 6] |= (1ULL << (pos & 63));
-                break;
-            }
-            case 3: {  // project
-                uint32_t pos = tag % HIER_PROJ_BITS;
-                projectMask[pos >> 6] |= (1ULL << (pos & 63));
-                break;
-            }
-        }
+        if (level < 0 || level >= HIER_LEVELS) return;
+        const auto& t = HierWidths();
+        uint32_t pos = tag % static_cast<uint32_t>(t.bits[level]);
+        mask[t.wordOff[level] + (pos >> 6)] |= (1ULL << (pos & 63));
     }
 
     // OR-across-levels semantic: returns true if ANY level has a non-zero AND.
-    // This matches the existing HeadNodeMatchesAnyQueryTag behavior.
+    // Because levels partition the used words (wordOff), a flat AND over the
+    // used words [0, totalWords) is identical to the per-level OR-of-ANDs.
     bool MayIntersect(const HierarchicalPostingMask& q) const {
-        if ((orgMask & q.orgMask) != 0) return true;
-        if ((deptMask & q.deptMask) != 0) return true;
-        if ((teamMask[0] & q.teamMask[0]) != 0) return true;
-        if ((teamMask[1] & q.teamMask[1]) != 0) return true;
-        if ((projectMask[0] & q.projectMask[0]) != 0) return true;
-        if ((projectMask[1] & q.projectMask[1]) != 0) return true;
+        const int tw = HierWidths().totalWords;
+        for (int w = 0; w < tw; ++w)
+            if ((mask[w] & q.mask[w]) != 0) return true;
+        return false;
+    }
+
+    // Single (level, tag) membership test. No false negatives. A column beyond
+    // the supported level count fails open (returns true) so such predicates are
+    // never wrongly pruned here -- they are still enforced by the exact post-filter.
+    bool MayContain(int level, uint32_t tag) const {
+        if (level < 0 || level >= HIER_LEVELS) return true;
+        const auto& t = HierWidths();
+        uint32_t pos = tag % static_cast<uint32_t>(t.bits[level]);
+        return (mask[t.wordOff[level] + (pos >> 6)] & (1ULL << (pos & 63))) != 0;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// Compact own-tags signature for a HEAD centroid.
+//
+// A head carries exactly ONE categorical value per column (single-valued
+// facets), so its own-tag mask has at most HIER_LEVELS bits set. Storing it as
+// a full HierarchicalPostingMask bitmap (HIER_LEVELS*HIER_LEVEL_BITS bits)
+// wastes ~97% of the space. Keep the raw value per level instead: 4 B/level vs
+// 32 B/level. Empty levels (column index >= numTagsPerVec) use OWN_TAG_EMPTY and
+// are skipped at match time. Categorical tag ids are small (<< OWN_TAG_EMPTY),
+// so the sentinel never collides with a real value.
+// ═══════════════════════════════════════════════════════════════════
+static constexpr uint32_t OWN_TAG_EMPTY = 0xFFFFFFFFu;
+
+struct HierarchicalOwnTags {
+    uint32_t tag[HIER_LEVELS];
+
+    HierarchicalOwnTags() { Clear(); }
+
+    void Clear() { for (int l = 0; l < HIER_LEVELS; ++l) tag[l] = OWN_TAG_EMPTY; }
+
+    // level: categorical tag column index. Columns >= HIER_LEVELS are ignored
+    // (matching HierarchicalPostingMask::Insert; enforced by the exact
+    // post-filter, never wrongly pruned here).
+    void Insert(int level, uint32_t t) {
+        if (level < 0 || level >= HIER_LEVELS) return;
+        tag[level] = t;
+    }
+
+    // Equivalent to the former (single-bit-per-level own bitmap) MayIntersect:
+    // true iff ANY level's own value is admitted by the query mask at that
+    // level. q.MayContain(l, v) reproduces the exact bit-collision behaviour of
+    // the old bitmap AND (pos = v % HIER_LEVEL_BITS), so pruning is unchanged.
+    bool MayIntersect(const HierarchicalPostingMask& q) const {
+        for (int l = 0; l < HIER_LEVELS; ++l) {
+            if (tag[l] == OWN_TAG_EMPTY) continue;
+            if (q.MayContain(l, tag[l])) return true;
+        }
+        return false;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// Literal comparison operator. EQ is the categorical (tag) semantic and the
+// historical default. LT/LE/GT/GE are numerical range comparisons evaluated on
+// the per-vector value stored in column `col`. Numerical values are stored as
+// uint32 with an order-preserving encoding applied at the wrapper boundary
+// (signed/float -> monotone uint32), so the engine only ever does unsigned
+// uint32 comparisons here.
+enum DNFOp : uint8_t { DNF_EQ = 0, DNF_LT = 1, DNF_LE = 2, DNF_GT = 3, DNF_GE = 4 };
+
+static inline bool DNFEvalOp(uint8_t op, uint32_t a, uint32_t b) {
+    switch (op) {
+        case DNF_EQ: return a == b;
+        case DNF_LT: return a <  b;
+        case DNF_LE: return a <= b;
+        case DNF_GT: return a >  b;
+        case DNF_GE: return a >= b;
+        default:     return false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Quantized Numeric Signature (range pruning via the signature layer).
+//
+// A numeric attribute is range-queryable, which a set-membership bitmap cannot
+// express directly. We bridge that gap by QUANTIZING each numeric column into
+// NUM_QUANT_BITS uniform buckets over its [lo,hi] domain and treating the bucket
+// id as a discrete signature symbol. A posting's NumericQuantMask is the OR of
+// its member vectors' buckets (per column); a range predicate sets every bucket
+// overlapping the query interval, then the usual bitmap intersection prunes
+// postings whose members all fall outside the range. The boundary bucket may
+// admit false positives, which the exact per-vector post-filter removes — so the
+// pre-filter is conservative (no false negatives), exactly like the categorical
+// signatures. Multiple numeric columns each get their own 256-bit lane, so the
+// mask is M*NUM_QUANT_WORDS uint64 (variable M, stored in head_node_meta).
+// ═══════════════════════════════════════════════════════════════════
+static constexpr int NUM_QUANT_BITS  = 256;
+static constexpr int NUM_QUANT_WORDS = NUM_QUANT_BITS / 64;  // 4
+
+// Per-column quantization domain [lo, hi] (order-preserving uint32 values).
+struct NumQuantParam { uint32_t lo = 0; uint32_t hi = 0; };
+
+// Map a value to its bucket id in [0, NUM_QUANT_BITS). Clamped at the ends so an
+// out-of-domain value lands in the first/last bucket (still no false negatives).
+static inline int NumQuantBucket(const NumQuantParam& p, uint32_t v) {
+    if (p.hi <= p.lo) return 0;
+    if (v <= p.lo) return 0;
+    if (v >= p.hi) return NUM_QUANT_BITS - 1;
+    uint64_t b = (uint64_t)(v - p.lo) * (uint64_t)NUM_QUANT_BITS / (uint64_t)(p.hi - p.lo);
+    return (b >= NUM_QUANT_BITS) ? (NUM_QUANT_BITS - 1) : (int)b;
+}
+
+// Set bit `bucket` in column `col` of a flat M*NUM_QUANT_WORDS uint64 mask.
+static inline void NumQuantInsert(uint64_t* mask, int col, int bucket) {
+    uint64_t* lane = mask + (size_t)col * NUM_QUANT_WORDS;
+    lane[bucket >> 6] |= (1ULL << (bucket & 63));
+}
+
+// Bucket range [blo, bhi] that a range predicate (op, val) may touch. Returns
+// false if the predicate selects nothing representable.
+static inline bool NumQuantPredBuckets(const NumQuantParam& p, uint8_t op, uint32_t val,
+                                       int& blo, int& bhi) {
+    int bv = NumQuantBucket(p, val);
+    switch (op) {
+        case DNF_EQ: blo = bv; bhi = bv; return true;
+        case DNF_LT: case DNF_LE: blo = 0;  bhi = bv; return true;
+        case DNF_GT: case DNF_GE: blo = bv; bhi = NUM_QUANT_BITS - 1; return true;
+        default: blo = 0; bhi = NUM_QUANT_BITS - 1; return true;
+    }
+}
+
+// True iff column `col` of `mask` has ANY set bit in bucket range [blo, bhi].
+static inline bool NumQuantAnyInRange(const uint64_t* mask, int col, int blo, int bhi) {
+    if (blo < 0) blo = 0;
+    if (bhi > NUM_QUANT_BITS - 1) bhi = NUM_QUANT_BITS - 1;
+    if (blo > bhi) return false;
+    const uint64_t* lane = mask + (size_t)col * NUM_QUANT_WORDS;
+    for (int w = blo >> 6; w <= (bhi >> 6); ++w) {
+        int lo = (w == (blo >> 6)) ? (blo & 63) : 0;
+        int hi = (w == (bhi >> 6)) ? (bhi & 63) : 63;
+        uint64_t m = (hi - lo == 63) ? ~0ULL : (((1ULL << (hi - lo + 1)) - 1) << lo);
+        if (lane[w] & m) return true;
+    }
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DNF (disjunctive normal form) predicate over per-vector tags.
+//   predicate = OR of clauses;  clause = AND of literals;
+//   literal   = (col, val)  meaning  vector.tag[col] == val.
+// `col` is the hierarchy level / tag column (0=org,1=dept,2=team,3=project).
+// A vector with m_numTagsPerVec tag columns matches the predicate iff it
+// satisfies ANY clause (all that clause's literals).
+//
+// Pre-filter helpers (MayMatch*) are conservative (no false negatives): a
+// posting/page is kept iff SOME clause has all its literal values present in
+// the corresponding signature. If a vector truly satisfies a clause, all of
+// that clause's literal values are tags on the vector, so its signature bits
+// are set — hence the test never drops a matching posting/page.
+// ═══════════════════════════════════════════════════════════════════
+// A literal is either CATEGORICAL (kind=0: a tag-column equality, the historical
+// default) or NUMERIC (kind=1: a range comparison on a numeric attribute).
+//   - kind==0: `col` indexes the categorical tag columns (0=org,1=dept,...); the
+//     tag is one logical ACL attribute physically split across these columns.
+//     These drive the categorical (hier/flat) signatures.
+//   - kind==1: `col` ALSO indexes the per-vector tag columns -- numeric attributes
+//     are stored inline as additional tag columns (col >= numBaseCols) holding the
+//     RAW order-preserving value. The exact post-filter reads vecTags[col] for both
+//     kinds; the only difference is `op` (range vs equality). For signature pruning
+//     a numeric literal is matched against the QUANTIZED numeric signature, not the
+//     categorical bitmaps.
+// op defaults to DNF_EQ so existing aggregate initialisers `{col, val}` keep
+// their categorical meaning unchanged.
+struct DNFLiteral { uint32_t col; uint32_t val; uint8_t op = DNF_EQ; uint8_t kind = 0; };
+
+struct DNFClause { std::vector<DNFLiteral> lits; };
+
+struct DNFPredicate {
+    std::vector<DNFClause> clauses;
+
+    bool Empty() const { return clauses.empty(); }
+
+    void Clear() { clauses.clear(); }
+
+    // True iff some clause is a real conjunction (>1 literal). For pure-OR
+    // predicates (every clause a single literal) the flat union of literal
+    // values is logically EQUIVALENT to the DNF, so the coarse union mask used
+    // to admit head-graph candidates can never admit a non-matching vector --
+    // i.e. there is no "head leak" and the exact-DNF result drop pass is a
+    // pure no-op that would only risk discarding legitimately-matching heads.
+    bool HasAndClause() const {
+        for (const auto& c : clauses)
+            if (c.lits.size() > 1) return true;
+        return false;
+    }
+
+    // True iff any literal references a numeric attribute (kind==1). Such a
+    // predicate cannot be lowered to the legacy flat-OR (categorical equality)
+    // path because its values are ranges, not tag equalities.
+    bool HasNumericLiteral() const {
+        for (const auto& c : clauses)
+            for (const auto& l : c.lits)
+                if (l.kind != 0) return true;
+        return false;
+    }
+
+    // All distinct CATEGORICAL (tag, kind==0) literal values across every clause
+    // (union) -- used to build the coarse union signatures, routing and the
+    // selectivity estimate. Numeric literals are excluded: their values are raw
+    // numeric values, not tag ids, and must never enter a categorical bitmask.
+    std::vector<uint32_t> AllValues() const {
+        std::vector<uint32_t> v;
+        for (const auto& c : clauses)
+            for (const auto& l : c.lits) if (l.kind == 0) v.push_back(l.val);
+        return v;
+    }
+
+    // Exact per-vector evaluation (post-filter). Both categorical and numeric
+    // literals read the per-vector tag columns (numeric attributes are inlined as
+    // extra tag columns holding the raw order-preserving value); the literal's
+    // `op` selects equality vs range. Uniform, sidecar-free.
+    bool Matches(const uint32_t* vecTags, int numTags) const {
+        for (const auto& c : clauses) {
+            if (c.lits.empty()) continue;
+            bool all = true;
+            for (const auto& l : c.lits) {
+                if ((int)l.col >= numTags || !DNFEvalOp(l.op, vecTags[l.col], l.val)) { all = false; break; }
+            }
+            if (all) return true;
+        }
+        return false;
+    }
+
+    // ── Signature pre-filters (categorical only) ──────────────────────────
+    // Conservative (no false negatives): a posting/page/head is kept iff SOME
+    // clause has all its CATEGORICAL (kind==0) literal values present in the
+    // corresponding signature. Numeric (kind==1) literals are never tested here
+    // -- they are unconstrained at the categorical signature level and enforced
+    // by the quantized numeric pre-filter (MayMatchHierQuant) and/or the exact
+    // post-filter, so no posting is ever wrongly dropped.
+    bool MayMatchPage(const PageBitmask& page) const {
+        for (const auto& c : clauses) {
+            if (c.lits.empty()) continue;
+            bool all = true;
+            for (const auto& l : c.lits)
+                if (l.kind == 0 && !page.MayContain(l.val)) { all = false; break; }
+            if (all) return true;
+        }
+        return false;
+    }
+
+    bool MayMatchPostingFlat(const PostingBitmask& ps) const {
+        for (const auto& c : clauses) {
+            if (c.lits.empty()) continue;
+            bool all = true;
+            for (const auto& l : c.lits)
+                if (l.kind == 0 && !ps.MayContain(l.val)) { all = false; break; }
+            if (all) return true;
+        }
+        return false;
+    }
+
+    bool MayMatchHier(const HierarchicalPostingMask& h) const {
+        for (const auto& c : clauses) {
+            if (c.lits.empty()) continue;
+            bool all = true;
+            for (const auto& l : c.lits)
+                if (l.kind == 0 && !h.MayContain((int)l.col, l.val)) { all = false; break; }
+            if (all) return true;
+        }
+        return false;
+    }
+
+    // Combined categorical + quantized-numeric posting pre-filter. A clause
+    // passes iff EVERY one of its literals may match: categorical literals against
+    // the hierarchical mask `h`, numeric literals against the posting's quantized
+    // numeric mask `quant` (M*NUM_QUANT_WORDS uint64). `qp` holds the per-column
+    // [lo,hi] domains; `numBaseCols` is the first numeric tag-column index (so a
+    // numeric literal at absolute column `col` maps to quant lane col-numBaseCols).
+    // Conservative: a numeric literal "may match" iff some bucket overlapping its
+    // range is set. When `quant` is null (no numeric signature present) numeric
+    // literals are treated as always-may-match (fail open).
+    bool MayMatchHierQuant(const HierarchicalPostingMask& h,
+                           const uint64_t* quant, int numQuantCols,
+                           const NumQuantParam* qp, int numBaseCols) const {
+        for (const auto& c : clauses) {
+            if (c.lits.empty()) continue;
+            bool all = true;
+            for (const auto& l : c.lits) {
+                if (l.kind == 0) {
+                    if (!h.MayContain((int)l.col, l.val)) { all = false; break; }
+                } else if (quant != nullptr && qp != nullptr) {
+                    int lane = (int)l.col - numBaseCols;
+                    if (lane < 0 || lane >= numQuantCols) continue;  // unknown col: fail open
+                    int blo, bhi;
+                    NumQuantPredBuckets(qp[lane], l.op, l.val, blo, bhi);
+                    if (!NumQuantAnyInRange(quant, lane, blo, bhi)) { all = false; break; }
+                }
+            }
+            if (all) return true;
+        }
         return false;
     }
 };

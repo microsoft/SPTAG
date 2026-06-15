@@ -18,6 +18,7 @@
 
 #include <map>
 #include <cmath>
+#include <cstdlib>
 #include <climits>
 #include <future>
 
@@ -69,7 +70,7 @@ namespace SPTAG::SPANN
         };
 
     public:
-        RocksDBIO(const char* filePath, bool usdDirectIO, bool wal = false, bool recovery = false) {
+        RocksDBIO(const char* filePath, bool usdDirectIO, bool wal = false, bool recovery = false, bool readOnly = false) {
             dbPath = std::string(filePath);
             //dbOptions.statistics = rocksdb::CreateDBStatistics();
             dbOptions.create_if_missing = true;
@@ -102,6 +103,17 @@ namespace SPTAG::SPANN
                 dbOptions.compaction_pri = rocksdb::CompactionPri::kRoundRobin;
                 dbOptions.blob_garbage_collection_age_cutoff = 0.4;
                 // dbOptions.blob_garbage_collection_force_threshold = 0.5;
+
+                // SPTAG_ROCKSDB_DIRECT_IO=1: bypass the OS page cache for SST/blob
+                // reads (O_DIRECT). Forces every posting/vector fetch to hit the
+                // device regardless of dataset size, simulating a working-set >> RAM
+                // regime for an apples-to-apples comparison vs O_DIRECT baselines.
+                if (const char* dio = std::getenv("SPTAG_ROCKSDB_DIRECT_IO")) {
+                    if (dio[0] == '1') {
+                        dbOptions.use_direct_reads = true;
+                        dbOptions.use_direct_io_for_flush_and_compaction = true;
+                    }
+                }
                 // dbOptions.blob_cache = rocksdb::NewLRUCache(5UL << 30);
                 // dbOptions.prepopulate_blob_cache = rocksdb::PrepopulateBlobCache::kFlushOnly;
 
@@ -116,8 +128,19 @@ namespace SPTAG::SPANN
                 // block cache options
                 rocksdb::BlockBasedTableOptions table_options;
                 // table_options.block_cache = rocksdb::NewSimCache(rocksdb::NewLRUCache(1UL << 30), (8UL << 30), -1);
-                table_options.block_cache = rocksdb::NewLRUCache(3UL << 30);
-                // table_options.no_block_cache = true;
+                // Block cache mainly serves cross-tenant block reuse; within-tenant filtering
+                // runs off the resident (mmap'd) PQ codes and is unaffected by its size.
+                // Default to a modest 64MB to keep the memory floor low; override via env.
+                size_t blockCacheMB = 64;
+                if (const char* bcEnv = std::getenv("SPTAG_ROCKSDB_BLOCK_CACHE_MB")) {
+                    long v = std::atol(bcEnv);
+                    if (v >= 0) blockCacheMB = static_cast<size_t>(v);
+                }
+                if (blockCacheMB == 0) {
+                    table_options.no_block_cache = true;
+                } else {
+                    table_options.block_cache = rocksdb::NewLRUCache(blockCacheMB << 20);
+                }
 
                 // filter options
                 table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, true));
@@ -131,8 +154,9 @@ namespace SPTAG::SPANN
                 dbOptions.use_direct_reads = true;
             }
 
-            auto s = rocksdb::DB::Open(dbOptions, dbPath, &db);
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb: %s\n", filePath);
+            auto s = readOnly ? rocksdb::DB::OpenForReadOnly(dbOptions, dbPath, &db)
+                              : rocksdb::DB::Open(dbOptions, dbPath, &db);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: New Rocksdb%s: %s\n", readOnly ? "(RO)" : "", filePath);
             if (s != rocksdb::Status::OK()) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "\e[0;31mRocksdb Open Error\e[0m: %s\n", s.getState());
                 ShutDown();
@@ -160,6 +184,23 @@ namespace SPTAG::SPANN
         bool Available() override
         {
             return (db != nullptr);
+        }
+
+        // ReadOptions for MultiGet. By default RocksDB's MultiGet (async_io=false)
+        // reads the requested keys/blobs ONE AT A TIME -- so a batched rerank
+        // MultiGet over L scattered survivors is effectively SERIAL inside RocksDB.
+        // async_io=true lets RocksDB issue the underlying file reads in parallel
+        // (ReadAsync / io_uring on the posix FileSystem), giving real queue depth
+        // -- the parallel-rerank behavior the batched MultiGet was supposed to have.
+        // Env SPTAG_ROCKSDB_ASYNC_MULTIGET=0 reverts to the legacy serial path.
+        static rocksdb::ReadOptions MultiGetReadOptions() {
+            rocksdb::ReadOptions ro;
+            static const bool s_async = []() {
+                const char* e = std::getenv("SPTAG_ROCKSDB_ASYNC_MULTIGET");
+                return (e == nullptr) || (std::atoi(e) != 0);
+            }();
+            ro.async_io = s_async;
+            return ro;
         }
 
         ErrorCode Get(const std::string& key, std::string* value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) override {
@@ -199,7 +240,7 @@ namespace SPTAG::SPANN
                 slice_keys[i] = rocksdb::Slice(str_keys[i]);
             }
 
-            db->MultiGet(rocksdb::ReadOptions(), db->DefaultColumnFamily(),
+            db->MultiGet(MultiGetReadOptions(), db->DefaultColumnFamily(),
                 num_keys, slice_keys, slice_values, statuses);
 
             for (int i = 0; i < num_keys; i++) {
@@ -232,7 +273,7 @@ namespace SPTAG::SPANN
                 slice_keys[i] = rocksdb::Slice(keys[i]);
             }
 
-            db->MultiGet(rocksdb::ReadOptions(), db->DefaultColumnFamily(),
+            db->MultiGet(MultiGetReadOptions(), db->DefaultColumnFamily(),
                 num_keys, slice_keys, slice_values, statuses);
 
             for (int i = 0; i < num_keys; i++) {

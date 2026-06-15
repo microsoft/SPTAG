@@ -9,12 +9,12 @@ The three independent switches, from outermost to innermost:
 
 | Layer | Switch | Vanilla | Dual-pool |
 | ----- | ------ | ------- | --------- |
-| ① Head-selection algorithm | `SPTAG_SELECT_TYPE_OVERRIDE` | `BKT` (global, ratio-based) | `PerTagBKTMerge` (per-tag grouped) |
+| ① Head-selection algorithm | `SPTAG_SELECT_TYPE_OVERRIDE` | `BKT` (global, ratio-based) | `PerTagBKT` (per-tag grouped) |
 | ② Subgraph count (bundles) | `--group-target N` | none (single global `m_index`) | `N` bundles + cross-edges |
 | ③ U_extra augmentation | `SPTAG_DUAL_POOL_AUGMENT` | off | on (`SPTAG_DUAL_POOL_EXTRA_RATIO`) |
 
 > **Important:** Setting only `--group-target 1` and disabling U_extra does **not**
-> reproduce vanilla. The head-selection layer (①) is still `PerTagBKTMerge`, which
+> reproduce vanilla. The head-selection layer (①) is still `PerTagBKT`, which
 > picks a different head set than vanilla's global BKT-by-ratio. True vanilla
 > additionally requires `selectType = BKT` (which `build_tenant0_baseline.py` sets
 > by popping `SPTAG_SELECT_TYPE_OVERRIDE`).
@@ -146,11 +146,10 @@ build+augment. It touches nothing else (bundles / cross_edges / meta / manifest)
 
 | Variable | Effect |
 | -------- | ------ |
-| `SPTAG_SELECT_TYPE_OVERRIDE` | `BKT` (vanilla) / `PerTagBKTMerge` / `DualGlobal` |
+| `SPTAG_SELECT_TYPE_OVERRIDE` | `BKT` (vanilla) / `PerTagBKT` / `DualGlobal` |
 | `SPTAG_RATIO_OVERRIDE` | global head ratio (vanilla) |
 | `SPTAG_PERTAG_HEAD_RATIO` | per-tag final head ratio |
 | `SPTAG_DUAL_POOL_AUGMENT` | enable U_extra augmentation pool |
 | `SPTAG_DUAL_POOL_EXTRA_RATIO` | U_extra fraction (e.g. 0.10) |
-| `SPTAG_MERGE_ALPHA`, `SPTAG_MERGE_GROUP_SIZE`, `SPTAG_CROSS_TAG_NEIGHBORS` | per-tag merge tuning |
 | `SPTAG_DISABLE_CROSS_EDGES`, `SPTAG_CROSSEDGE_UNFILTER`, `SPTAG_FILTER_KEEP_CROSS` | cross-edge search toggles |
 | `SPTAG_FIXED_NPROBE`, `SPTAG_UNIFIED_NPROBE_BUDGET`, `SPTAG_MULTI_NODE_BUDGET_KEEP_RATIO` | nprobe control |

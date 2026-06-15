@@ -5,6 +5,7 @@
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/TenantPrefixedKeyValueIO.h"
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/Common/QueryResultSet.h"
 #ifdef ROCKSDB
 #include "inc/Core/SPANN/ExtraRocksDBController.h"
 #endif
@@ -300,7 +301,9 @@ bool TryGetAncestorTag(uint32_t tag,
 
 } // namespace
 
-constexpr int32_t kHeadNodeMetaVersion = 3;
+constexpr int32_t kHeadNodeMetaVersion = 3;       // base: categorical only
+constexpr int32_t kHeadNodeMetaVersionV4 = 4;     // V3 + quantized numeric block
+constexpr int32_t kHeadNodeMetaVersionV5 = 5;     // V4 + per-column hier mask widths
 
 struct HeadNodeMetaFileHeader {
     int32_t version;
@@ -309,6 +312,38 @@ struct HeadNodeMetaFileHeader {
     int32_t stride;
 };
 
+// V5 appends, after the base header, HIER_LEVELS int32 per-column mask widths
+// (bits). These must be applied (SetHierWidths) BEFORE InitializeHeadNodeMeta on
+// load so the computed stride matches the persisted byte layout. V3/V4 files
+// carry no widths and load with the uniform default.
+
+// Parse SPTAG_HIER_LEVEL_WIDTHS (comma-separated per-column bit widths, e.g.
+// "256,64,64,128,64") and apply it to the process-global mask width table. With
+// the env unset, restores the uniform HIER_LEVEL_BITS default (legacy layout).
+void ApplyHierWidthsFromEnv()
+{
+    const char* e = std::getenv("SPTAG_HIER_LEVEL_WIDTHS");
+    if (e == nullptr || e[0] == '\0') {
+        SPTAG::Cache::SetHierWidthsUniform();
+        return;
+    }
+    int widths[SPTAG::Cache::HIER_LEVELS];
+    for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l) widths[l] = SPTAG::Cache::HIER_LEVEL_BITS;
+    int n = 0;
+    const char* p = e;
+    while (*p != '\0' && n < SPTAG::Cache::HIER_LEVELS) {
+        widths[n++] = atoi(p);
+        const char* comma = strchr(p, ',');
+        if (comma == nullptr) break;
+        p = comma + 1;
+    }
+    SPTAG::Cache::SetHierWidths(widths, n);
+    const auto& t = SPTAG::Cache::HierWidths();
+    fprintf(stderr, "[INFO] Hier mask widths: bits=[%d,%d,%d,%d,%d] totalWords=%d (%zu B/head)\n",
+            t.bits[0], t.bits[1], t.bits[2], t.bits[3], t.bits[4], t.totalWords,
+            SPTAG::Cache::HierPostingMaskBytes());
+}
+
 std::string HeadNodeMetaPath(const std::string& workDir)
 {
     return workDir + "/HeadIndex/head_node_meta.bin";
@@ -316,7 +351,7 @@ std::string HeadNodeMetaPath(const std::string& workDir)
 
 std::shared_ptr<SPTAG::VectorIndex> GetMemoryIndexForInternal(const std::shared_ptr<SPTAG::VectorIndex>& internalIndex)
 {
-    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIndex.get());
+    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIndex.get());
     if (spannInternalIdx == nullptr) return nullptr;
     return spannInternalIdx->GetMemoryIndex();
 }
@@ -330,15 +365,30 @@ bool SaveHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
     if (!f) return false;
 
     HeadNodeMetaFileHeader header{};
-    header.version = kHeadNodeMetaVersion;
+    int32_t quantCols = headIndex->GetHeadNodeNumQuantCols();
+
+    // Persist per-column hier mask widths only when they are non-uniform; a
+    // uniform table reproduces the legacy V3/V4 layout exactly, so keep emitting
+    // V3/V4 for those (older readers stay compatible).
+    const auto& widths = SPTAG::Cache::HierWidths();
+    bool nonUniformWidths = false;
+    for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l)
+        if (widths.bits[l] != SPTAG::Cache::HIER_LEVEL_BITS) { nonUniformWidths = true; break; }
+
+    header.version = nonUniformWidths ? kHeadNodeMetaVersionV5
+                                      : (quantCols > 0 ? kHeadNodeMetaVersionV4 : kHeadNodeMetaVersion);
     header.numSamples = headIndex->GetHeadNodeMetaSampleCount();
-    header.numTagsPerSample = 0;  // No longer used in V2, repurposed/reserved
+    header.numTagsPerSample = quantCols;  // V4/V5: quantized numeric column count
     header.stride = static_cast<int32_t>(headIndex->GetHeadNodeMetaStride());
 
     const auto& blob = headIndex->GetHeadNodeMetaBlob();
-    bool ok =
-        fwrite(&header, sizeof(header), 1, f) == 1 &&
-        fwrite(blob.data(), 1, blob.size(), f) == blob.size();
+    bool ok = fwrite(&header, sizeof(header), 1, f) == 1;
+    if (ok && header.version == kHeadNodeMetaVersionV5) {
+        int32_t wbits[SPTAG::Cache::HIER_LEVELS];
+        for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l) wbits[l] = widths.bits[l];
+        ok = fwrite(wbits, sizeof(int32_t), SPTAG::Cache::HIER_LEVELS, f) == (size_t)SPTAG::Cache::HIER_LEVELS;
+    }
+    ok = ok && fwrite(blob.data(), 1, blob.size(), f) == blob.size();
     fclose(f);
     return ok;
 }
@@ -353,22 +403,48 @@ bool LoadHeadNodeMetaFile(const std::string& workDir, const std::shared_ptr<SPTA
 
     HeadNodeMetaFileHeader header{};
     bool ok = fread(&header, sizeof(header), 1, f) == 1;
+    // The file's sample count must cover every head. For metadata-only ("slim")
+    // head roots, GetNumSamples() at load time may still report the small physical
+    // root count (the logical total is set later, during the lazy SSD/bundle load),
+    // so accept a file that has at least as many entries as the current count;
+    // InitializeHeadNodeMeta(header.numSamples) below resizes the blob accordingly.
     if (!ok || header.numSamples < 0 || header.stride <= 0 ||
-        header.numSamples != headIndex->GetNumSamples()) {
+        header.numSamples < headIndex->GetNumSamples()) {
         fclose(f);
         return false;
     }
 
-    // Version check with detailed error message
-    if (header.version != kHeadNodeMetaVersion) {
-        fprintf(stderr, "[ERROR] head_node_meta.bin version mismatch: file has version %d, expected version %d. "
+    // Version check. Accept V3 (categorical only), V4 (with quantized numeric
+    // block) and V5 (V4 + per-column hier mask widths).
+    if (header.version != kHeadNodeMetaVersion &&
+        header.version != kHeadNodeMetaVersionV4 &&
+        header.version != kHeadNodeMetaVersionV5) {
+        fprintf(stderr, "[ERROR] head_node_meta.bin version mismatch: file has version %d, expected version %d, %d or %d. "
                         "Please rebuild the index to use the new hierarchical mask format.\n",
-                header.version, kHeadNodeMetaVersion);
+                header.version, kHeadNodeMetaVersion, kHeadNodeMetaVersionV4, kHeadNodeMetaVersionV5);
         fclose(f);
         return false;
     }
+    int quantCols = (header.version == kHeadNodeMetaVersionV4 || header.version == kHeadNodeMetaVersionV5)
+                    ? header.numTagsPerSample : 0;
 
-    headIndex->InitializeHeadNodeMeta(header.numSamples);
+    // Apply per-column mask widths BEFORE InitializeHeadNodeMeta so the computed
+    // stride matches the persisted byte layout. V5 carries explicit widths; V3/V4
+    // predate variable widths and use the uniform default.
+    if (header.version == kHeadNodeMetaVersionV5) {
+        int32_t wbits[SPTAG::Cache::HIER_LEVELS];
+        if (fread(wbits, sizeof(int32_t), SPTAG::Cache::HIER_LEVELS, f) != (size_t)SPTAG::Cache::HIER_LEVELS) {
+            fclose(f);
+            return false;
+        }
+        int widths[SPTAG::Cache::HIER_LEVELS];
+        for (int l = 0; l < SPTAG::Cache::HIER_LEVELS; ++l) widths[l] = wbits[l];
+        SPTAG::Cache::SetHierWidths(widths, SPTAG::Cache::HIER_LEVELS);
+    } else {
+        SPTAG::Cache::SetHierWidthsUniform();
+    }
+
+    headIndex->InitializeHeadNodeMeta(header.numSamples, quantCols);
     if (static_cast<int32_t>(headIndex->GetHeadNodeMetaStride()) != header.stride) {
         fprintf(stderr, "[ERROR] head_node_meta.bin stride mismatch: file has stride %d, expected %zu. "
                         "Binary layout has changed.\n",
@@ -394,7 +470,7 @@ bool LoadPostingSignaturesIntoHeadIndex(const std::string& workDir,
     if (internalIndex == nullptr) return false;
 
     auto headIndex = GetMemoryIndexForInternal(internalIndex);
-    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIndex.get());
+    auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIndex.get());
     if (headIndex == nullptr || spannInternalIdx == nullptr) return false;
 
     SPTAG::Cache::TenantBitmaskPS sigs;
@@ -979,7 +1055,7 @@ void BuildHeadNodeToNodeIndexForCandidate(const PivotEstimatorCandidate& candida
                                           int numVectors,
                                           int numTagsPerVec,
                                           const std::shared_ptr<SPTAG::VectorIndex>& memoryIndex,
-                                          SPTAG::SPANN::Index<float>* spannInternalIdx,
+                                          SPTAG::SPANN::ISPANNIndex* spannInternalIdx,
                                           std::vector<int>& headNodeToNode)
 {
     headNodeToNode.clear();
@@ -992,9 +1068,11 @@ void BuildHeadNodeToNodeIndexForCandidate(const PivotEstimatorCandidate& candida
 
     const SizeType numHeadSamples = memoryIndex->GetNumSamples();
     headNodeToNode.assign(numHeadSamples, -1);
+    const bool useMeta = memoryIndex->HasHeadNodeMeta();
     for (SizeType hid = 0; hid < numHeadSamples; ++hid)
     {
-        SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
+        SizeType globalVID = useMeta ? memoryIndex->GetHeadNodeGlobalVID(hid)
+                                     : spannInternalIdx->GetGlobalVID(hid);
         if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(numVectors)) {
             continue;
         }
@@ -1026,6 +1104,66 @@ bool TryCollectRoutingNodesForQuery(const std::unordered_map<uint32_t, std::vect
         }
 
         unionNodes.insert(tagIt->second.begin(), tagIt->second.end());
+    }
+
+    outNodes.assign(unionNodes.begin(), unionNodes.end());
+    std::sort(outNodes.begin(), outNodes.end());
+    return !outNodes.empty();
+}
+
+// DNF-aware routing: predicate = OR of clauses, clause = AND of literals.
+//   routedNodes = ⋃_clause ( ⋂_literal tagToNodes[literal.val] )
+// A clause's matching vectors all carry every literal tag, so they live in the
+// intersection of those tags' node-sets (sound because tag→node placement is by
+// a single pivot with no replication: node(pivot) ∈ tagToNodes[t] for every tag
+// t the vector carries, hence in the intersection). The OR across clauses unions
+// the clause node-sets. A literal whose value is absent from tagToNodes makes its
+// clause unsatisfiable, contributing the empty set. Result feeds the same
+// allowedNodeMask / m_searchHeadBundleNodes / routedNodeMask plumbing as the
+// legacy collector, so cross-edge navigation stays inside the routed subgraphs.
+bool TryCollectRoutingNodesForDNF(const std::unordered_map<uint32_t, std::vector<int>>& tagToNodes,
+                                  const SPTAG::Cache::DNFPredicate& dnf,
+                                  std::vector<int>& outNodes)
+{
+    outNodes.clear();
+    if (dnf.clauses.empty()) {
+        return false;
+    }
+
+    std::unordered_set<int> unionNodes;
+    for (const auto& clause : dnf.clauses)
+    {
+        if (clause.lits.empty()) {
+            continue;
+        }
+
+        std::unordered_set<int> clauseNodes;
+        bool first = true;
+        for (const auto& lit : clause.lits)
+        {
+            auto tagIt = tagToNodes.find(lit.val);
+            if (tagIt == tagToNodes.end() || tagIt->second.empty()) {
+                clauseNodes.clear();  // unsatisfiable literal → empty clause
+                break;
+            }
+
+            if (first) {
+                clauseNodes.insert(tagIt->second.begin(), tagIt->second.end());
+                first = false;
+            } else {
+                std::unordered_set<int> intersected;
+                for (int nodeId : tagIt->second) {
+                    if (clauseNodes.count(nodeId)) intersected.insert(nodeId);
+                }
+                clauseNodes.swap(intersected);
+            }
+
+            if (clauseNodes.empty()) {
+                break;
+            }
+        }
+
+        unionNodes.insert(clauseNodes.begin(), clauseNodes.end());
     }
 
     outNodes.assign(unionNodes.begin(), unionNodes.end());
@@ -1469,8 +1607,8 @@ bool AnnIndex::ReadyToServe() const
 void AnnIndex::SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec)
 {
     if (!m_index) return;
-    // Cast to SPANN Index<float> to access SetVectorTags
-    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    // Cast to the non-templated SPANN interface to access SetVectorTags
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(m_index.get());
     if (spannIdx) {
         spannIdx->SetVectorTags(tags, numVecs, numTagsPerVec);
     }
@@ -1479,7 +1617,7 @@ void AnnIndex::SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVe
 void AnnIndex::SetNodeVectorAssignments(const std::vector<std::vector<int>>& nodeVectorAssignments)
 {
     if (!m_index) return;
-    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(m_index.get());
     if (!spannIdx) return;
 
     std::vector<std::vector<SPTAG::SizeType>> convertedAssignments;
@@ -1503,7 +1641,7 @@ void AnnIndex::SetNodeVectorAssignments(const std::vector<std::vector<int>>& nod
 void AnnIndex::SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int>>& primaryNodeVectorAssignments)
 {
     if (!m_index) return;
-    auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(m_index.get());
+    auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(m_index.get());
     if (!spannIdx) return;
 
     std::vector<std::vector<SPTAG::SizeType>> convertedAssignments;
@@ -1535,14 +1673,12 @@ bool AnnIndex::SetSharedDB(std::shared_ptr<SPTAG::Helper::KeyValueIO> p_db)
         if (m_index == nullptr) return false;
     }
     if (m_algoType != SPTAG::IndexAlgoType::SPANN) return false;
-    if (m_inputValueType == SPTAG::VectorValueType::Float)
-    {
-        auto spann = std::dynamic_pointer_cast<SPTAG::SPANN::Index<float>>(m_index);
-        if (spann == nullptr) return false;
-        spann->SetSharedDB(std::move(p_db));
-        return true;
-    }
-    return false;
+    // Any SPANN value type (float/uint8/int8/...) exposes SetSharedDB via the
+    // non-templated interface.
+    auto* spann = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(m_index.get());
+    if (spann == nullptr) return false;
+    spann->SetSharedDB(std::move(p_db));
+    return true;
 }
 
 void AnnIndex::UpdateIndex()
@@ -1842,17 +1978,12 @@ std::shared_ptr<AnnIndex> TenantIndexManager::LoadSpannWithSharedDB(const std::s
         // Disable lazy per-tenant DB creation; the searcher must use m_externalDB.
         vecIndex->SetParameter("ShareDB", "true", "BuildSSDIndex");
         if (!EnsureSharedDB()) return nullptr;
-        if (valueType == VectorValueType::Float)
-        {
-            auto spann = std::dynamic_pointer_cast<SPTAG::SPANN::Index<float>>(vecIndex);
-            if (!spann) return nullptr;
-            auto wrapper = std::make_shared<SPTAG::Helper::TenantPrefixedKeyValueIO>(m_sharedDB, p_internalId);
-            spann->SetSharedDB(wrapper);
-        }
-        else
-        {
-            return nullptr;
-        }
+        // SPANN of any value type exposes SetSharedDB via the non-templated
+        // interface (previously float-only, which returned nullptr for uint8).
+        auto* spann = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(vecIndex.get());
+        if (!spann) return nullptr;
+        auto wrapper = std::make_shared<SPTAG::Helper::TenantPrefixedKeyValueIO>(m_sharedDB, p_internalId);
+        spann->SetSharedDB(wrapper);
     }
 
     auto indexfiles = vecIndex->GetIndexFiles();
@@ -1957,6 +2088,16 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
     std::string algoTypeStr = SPTAG::Helper::Convert::ConvertToString(m_algoType);
     std::string valueTypeStr = SPTAG::Helper::Convert::ConvertToString(m_valueType);
 
+    // Distance metric for tenant index builds. Default "Cosine" preserves the
+    // historical SIFT behavior; SPTAG_DIST_METHOD=L2 selects Euclidean (e.g. for
+    // the YFCC-10M / big-ann datasets, whose ground truth is L2). The query side
+    // uses the metric persisted in the index, so this single knob keeps build and
+    // search consistent. Validated values: "Cosine", "L2".
+    std::string distMethod = "Cosine";
+    if (const char* e = std::getenv("SPTAG_DIST_METHOD")) {
+        if (e[0] != '\0') distMethod = e;
+    }
+
     for (auto& tenantEntry : tenantVectorRanges)
     {
         int tenantId = tenantEntry.first;
@@ -2021,11 +2162,91 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                 fprintf(stderr, "[INFO] Tenant %d: SPTAG_DISABLE_PIVOT_ESTIMATOR set, skipping node-aware planning\n", tenantId);
             }
             if (!skipPivot && !tenantLocalTags.empty()) {
+                // Routing/bundle planning must consider only the CATEGORICAL tag
+                // columns. Numeric attributes are inlined as the last
+                // SPTAG_NUMERIC_COLS columns (raw, high-cardinality values); if
+                // fed to the hierarchy pivot estimator they masquerade as deep
+                // hierarchy levels with ~unique values, collapsing the plan to a
+                // single bundle. Build a categorical-only view (first
+                // numBaseCols columns) for all three planning calls. The actual
+                // SPANN build below still uses the full m_buildNumTagsPerVec tags.
+                int numNumericCols = 0;
+                if (const char* e = std::getenv("SPTAG_NUMERIC_COLS")) numNumericCols = atoi(e);
+                if (numNumericCols < 0) numNumericCols = 0;
+                if (numNumericCols > m_buildNumTagsPerVec) numNumericCols = m_buildNumTagsPerVec;
+                const int numBaseCols = m_buildNumTagsPerVec - numNumericCols;
+
+                // Categorical columns that drive routing/bundle planning. By
+                // default all categorical columns participate (the legacy ACL
+                // containment-chain assumption). When the categorical columns are
+                // INDEPENDENT facets that do not form a containment chain (e.g.
+                // YFCC year/month/camera), feeding >1 of them to the pivot
+                // estimator makes it either collapse the plan or fail the
+                // unique-parent check. Two knobs select the routing columns; the
+                // remaining categorical columns stay filter-only signatures (hier
+                // mask + exact DNF), like numeric columns are kept out of routing:
+                //   * SPTAG_ACL_COLS=c0,c1,..  -> explicit, possibly NON-CONTIGUOUS
+                //     column list, projected in the given order (level i = col[i]).
+                //     Required when the ACL chain is not a leading prefix, e.g.
+                //     YFCC country(col0) -> us_state(col4) => SPTAG_ACL_COLS=0,4.
+                //   * SPTAG_ROUTING_COLS=K     -> leading-K columns (legacy). Used
+                //     only when SPTAG_ACL_COLS is unset.
+                // Column indices are clamped to [0, numBaseCols); out-of-range or
+                // duplicate entries are dropped.
+                std::vector<int> routingCols;
+                if (const char* e = std::getenv("SPTAG_ACL_COLS")) {
+                    const char* p = e;
+                    while (*p != '\0') {
+                        int c = atoi(p);
+                        if (c >= 0 && c < numBaseCols) {
+                            bool dup = false;
+                            for (int existing : routingCols) if (existing == c) { dup = true; break; }
+                            if (!dup) routingCols.push_back(c);
+                        }
+                        const char* comma = strchr(p, ',');
+                        if (comma == nullptr) break;
+                        p = comma + 1;
+                    }
+                }
+                if (routingCols.empty()) {
+                    int numRoutingCols = numBaseCols;
+                    if (const char* e = std::getenv("SPTAG_ROUTING_COLS")) {
+                        int k = atoi(e);
+                        if (k > 0) numRoutingCols = (k < numBaseCols) ? k : numBaseCols;
+                    }
+                    for (int t = 0; t < numRoutingCols; ++t) routingCols.push_back(t);
+                }
+
+                const uint32_t* planTags = tenantLocalTags.data();
+                int planNumTags = m_buildNumTagsPerVec;
+                std::vector<uint32_t> catOnlyTags;
+                const int numRoutingCols = static_cast<int>(routingCols.size());
+                bool identityProjection = (numRoutingCols == m_buildNumTagsPerVec);
+                if (identityProjection)
+                    for (int t = 0; t < numRoutingCols; ++t)
+                        if (routingCols[t] != t) { identityProjection = false; break; }
+                if (numRoutingCols > 0 && !identityProjection) {
+                    catOnlyTags.resize(static_cast<size_t>(tenantVecCount) * static_cast<size_t>(numRoutingCols));
+                    for (int i = 0; i < tenantVecCount; ++i)
+                        for (int t = 0; t < numRoutingCols; ++t)
+                            catOnlyTags[static_cast<size_t>(i) * numRoutingCols + t] =
+                                tenantLocalTags[static_cast<size_t>(i) * m_buildNumTagsPerVec + routingCols[t]];
+                    planTags = catOnlyTags.data();
+                    planNumTags = numRoutingCols;
+                    std::string colList;
+                    for (size_t t = 0; t < routingCols.size(); ++t)
+                        colList += (t ? "," : "") + std::to_string(routingCols[t]);
+                    fprintf(stderr,
+                            "[INFO] Tenant %d: routing-node planning on %d categorical cols [%s] "
+                            "(of %d base, %d numeric)\n",
+                            tenantId, numRoutingCols, colList.c_str(), numBaseCols, numNumericCols);
+                }
+
                 PivotEstimatorComputation pivotComputation;
                 const PivotEstimatorCandidate* pivotCandidate = nullptr;
-                if (BuildPivotEstimatorComputation(tenantLocalTags.data(),
+                if (BuildPivotEstimatorComputation(planTags,
                                                    static_cast<int>(tenantVecCount),
-                                                   m_buildNumTagsPerVec,
+                                                   planNumTags,
                                                    0,
                                                    0.99,
                                                    10.0,
@@ -2043,9 +2264,9 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                                                     pivotComputation.levelData,
                                                     m_tenantTagToNodes[tenantId]);
                     BuildPrimaryNodeVectorAssignmentsForCandidate(*pivotCandidate,
-                                                                  tenantLocalTags.data(),
+                                                                  planTags,
                                                                   static_cast<int>(tenantVecCount),
-                                                                  m_buildNumTagsPerVec,
+                                                                  planNumTags,
                                                                   m_tenantPlannedPrimaryNodeVectors[tenantId]);
 
                     // Keep tree-structured tag-to-node merges for query routing, but
@@ -2081,12 +2302,24 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             RemovePathRecursive(spannWorkDir);
             EnsureDir(spannWorkDir);
             tenantIndex->SetBuildParam("IndexDirectory", spannWorkDir.c_str(), "Base");
-            tenantIndex->SetBuildParam("DistCalcMethod", "Cosine", "Base");
+            tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Base");
             tenantIndex->SetBuildParam("isExecute", "true", "SelectHead");
             tenantIndex->SetBuildParam("isExecute", "true", "BuildHead");
             tenantIndex->SetBuildParam("isExecute", "true", "BuildSSDIndex");
             tenantIndex->SetBuildParam("BuildSsdIndex", "true", "BuildSSDIndex");
             tenantIndex->SetBuildParam("Storage", m_storageBackend.c_str(), "BuildSSDIndex");
+
+            // Replica fan-out: each base vector is inserted into its top-N nearest
+            // heads' postings. Default 8 (SPANN historical). Lowering it shrinks the
+            // posting store and the per-query bytes read (less IO amplification) at
+            // some boundary-recall cost. Env SPTAG_REPLICA_COUNT overrides the default.
+            if (const char* e = std::getenv("SPTAG_REPLICA_COUNT")) {
+                int rc = atoi(e);
+                if (rc > 0) {
+                    tenantIndex->SetBuildParam("ReplicaCount", std::to_string(rc).c_str(), "BuildSSDIndex");
+                    fprintf(stderr, "[INFO] Tenant %d: ReplicaCount override = %d\n", tenantId, rc);
+                }
+            }
 
             // Scale DataCapacity and SSD file size to tenant size
             // Block pool uses 4KB pages; each vector with replication needs multiple blocks
@@ -2138,6 +2371,19 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             }
             tenantIndex->SetBuildParam("TPTNumber", std::to_string(tptNumber).c_str(), "BuildHead");
             tenantIndex->SetBuildParam("RefineIterations", std::to_string(refineIter).c_str(), "BuildHead");
+            // Head index (BKT) NumberOfThreads defaults to 1, which serializes the
+            // KNN-graph build + refine over the head set (very slow for large head
+            // counts, e.g. YFCC's ~1.1M PerTagBKT heads). Parallelize it; override
+            // with SPTAG_BUILD_HEAD_THREADS.
+            {
+                int headThreads = (int)std::thread::hardware_concurrency();
+                if (headThreads <= 0) headThreads = 16;
+                if (const char* e = std::getenv("SPTAG_BUILD_HEAD_THREADS")) {
+                    int v = atoi(e);
+                    if (v > 0) headThreads = v;
+                }
+                tenantIndex->SetBuildParam("NumberOfThreads", std::to_string(headThreads).c_str(), "BuildHead");
+            }
 
             // Set per-vector tags to embed in posting metadata (if available from BuildFromDataWithTags)
             if (!tenantLocalTags.empty()) {
@@ -2169,7 +2415,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         {
             // Medium tenant: build in-memory BKT index
             tenantIndex = std::make_shared<AnnIndex>("BKT", valueTypeStr.c_str(), m_dimension);
-            tenantIndex->SetBuildParam("DistCalcMethod", "Cosine", "Index");
+            tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Index");
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             fprintf(stderr, "[INFO] Tenant %d: BKT build (%d vectors)\n", tenantId, tenantVecCount);
         }
@@ -2177,7 +2423,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         {
             // Small tenant: build trivial BKT index (effectively brute force at this scale)
             tenantIndex = std::make_shared<AnnIndex>("BKT", valueTypeStr.c_str(), m_dimension);
-            tenantIndex->SetBuildParam("DistCalcMethod", "Cosine", "Index");
+            tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Index");
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             fprintf(stderr, "[INFO] Tenant %d: BruteForce build (%d vectors)\n", tenantId, tenantVecCount);
         }
@@ -2865,6 +3111,36 @@ void TenantIndexManager::LoadTenantSparseIndices()
         }
         fclose(of);
     }
+
+    // Load numeric attribute metadata (quantized signature domains). Optional —
+    // absent => tenant has no numeric columns.
+    for (const auto& kv : m_tenantSpannWorkDirs)
+    {
+        int tenantId = kv.first;
+        if (m_tenantNumericMeta.count(tenantId)) continue;
+        const std::string nmPath = kv.second + "/numeric_meta.bin";
+        FILE* nf = fopen(nmPath.c_str(), "rb");
+        if (!nf) continue;
+        int32_t magic = 0, base = 0, ncols = 0;
+        if (fread(&magic, sizeof(int32_t), 1, nf) == 1 && magic == 0x54454d4e &&
+            fread(&base, sizeof(int32_t), 1, nf) == 1 &&
+            fread(&ncols, sizeof(int32_t), 1, nf) == 1 && ncols > 0 && ncols < 4096) {
+            NumericMeta nm;
+            nm.numBaseCols = base;
+            nm.params.resize(static_cast<size_t>(ncols));
+            bool ok = true;
+            for (int c = 0; c < ncols; ++c) {
+                if (fread(&nm.params[c].lo, sizeof(uint32_t), 1, nf) != 1 ||
+                    fread(&nm.params[c].hi, sizeof(uint32_t), 1, nf) != 1) { ok = false; break; }
+            }
+            if (ok) {
+                m_tenantNumericMeta[tenantId] = std::move(nm);
+                fprintf(stderr, "[INFO] Tenant %d: loaded numeric_meta.bin (base=%d numeric=%d)\n",
+                        tenantId, base, ncols);
+            }
+        }
+        fclose(nf);
+    }
 }
 
 void TenantIndexManager::LoadTenantTagPureIndices()
@@ -2874,6 +3150,24 @@ void TenantIndexManager::LoadTenantTagPureIndices()
     // calls extra->Checkpoint() after writing chunks. The sidecar holds the
     // metadata (tag → chunkKeys, chunkCounts, count). Without loading it
     // back, SearchWithACL would fall through the fast path.
+    //
+    // When the OPQ prefilter is enabled, every single-tag query is served by
+    // OPQTagPureSearch (resident codes + the canonical vid->vector store),
+    // so the tag-pure full-vector chunks are a redundant SECOND copy of the
+    // vectors. Skip loading their metadata entirely: this drops the in-memory
+    // tag->chunkKeys map and guarantees the dead chunk path is never taken,
+    // realizing the single-vector-copy goal. (The chunk bytes embedded in the
+    // index KV file remain inert; a clean rebuild without chunks reclaims them.)
+    static const bool s_opqPrefilterSkipChunks = []() {
+        const char* v = std::getenv("SPTAG_OPQ_PREFILTER");
+        return v && v[0] == '1';
+    }();
+    if (s_opqPrefilterSkipChunks) {
+        fprintf(stderr,
+            "[INFO] OPQ prefilter ON: skipping tag-pure full-vector chunk load "
+            "(single canonical vector copy in opq_vecstore)\n");
+        return;
+    }
     int loadedCount = 0;
     for (const auto& kv : m_tenantSpannWorkDirs)
     {
@@ -2909,7 +3203,7 @@ void TenantIndexManager::LoadTenantTagPureIndices()
             auto it = m_tenantIndices.find(tenantId);
             if (it != m_tenantIndices.end()) {
                 auto internalIdx = it->second->GetInternalIndex();
-                auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+                auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
                 if (spannIdx != nullptr) {
                     if (auto* opts = spannIdx->GetOptions()) {
                         postingPageLimit = std::max(1, opts->m_postingPageLimit);
@@ -3201,8 +3495,6 @@ bool TenantIndexManager::EnsureTenantLoaded(int p_tenantId)
         loadPath = pathIt->second;
     }
 
-    AnnIndex loadedIndex = AnnIndex::Load(loadPath.c_str());
-    (void)loadedIndex;
     std::shared_ptr<AnnIndex> indexPtr;
     if (indexType == TenantIndexType::SPANN && m_storageBackend == "ROCKSDBIO" && m_useSharedDB)
     {
@@ -3532,6 +3824,180 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     }
     if (numHeads <= 0) return false;
 
+    // Apply per-column hier mask widths from SPTAG_HIER_LEVEL_WIDTHS before any
+    // mask is built or InitializeHeadNodeMeta is called below; this fixes the
+    // per-head posting-mask byte layout for the whole build (and is persisted in
+    // the V5 head_node_meta header by SaveHeadNodeMetaFile).
+    ApplyHierWidthsFromEnv();
+
+    // ── Non-FILEIO posting store (e.g. Storage=ROCKSDBIO) fast path ─────────
+    // When the posting store is not a FILEIO block file, the ssdinfo / ssdmapping
+    // / ssdmapping_postings artifacts the scan below reads do not exist on disk.
+    // The posting-derived filter sidecars (PS / hierarchical masks / sparse_tags
+    // / tag-pure full-vector chunks) are unused by the OPQ search paths. The one
+    // structure the unfilter cross-subgraph head search requires is head_node_meta
+    // carrying each head's global VID — resolvable in-memory from the loaded head
+    // index (m_vectorTranslateMap via GetGlobalVID). Generate that minimal head
+    // metadata (global VID + own-tag mask + bundle routing) here, then return.
+    {
+        struct stat sst{};
+        const bool hasFileIOPostings = stat((workDir + "/ssdmapping").c_str(), &sst) == 0;
+        if (!hasFileIOPostings) {
+            fprintf(stderr, "[INFO] Tenant %d: BuildSignatures non-FILEIO posting store "
+                    "(no ssdmapping); generating in-memory head_node_meta.\n", p_tenantId);
+
+            // tag_level_offsets.bin (per-column minimum tag value -> TagLevelFromId)
+            {
+                std::vector<uint32_t> levelMin(p_numTagsPerVec, std::numeric_limits<uint32_t>::max());
+                for (int vid = 0; vid < p_numVectors; ++vid)
+                    for (int t = 0; t < p_numTagsPerVec; ++t) {
+                        uint32_t tag = p_tagsPtr[(size_t)vid * p_numTagsPerVec + t];
+                        if (tag < levelMin[t]) levelMin[t] = tag;
+                    }
+                m_tenantTagLevelOffsets[p_tenantId] = levelMin;
+                const std::string offPath = workDir + "/tag_level_offsets.bin";
+                if (FILE* of = fopen(offPath.c_str(), "wb")) {
+                    int32_t nLevels = p_numTagsPerVec;
+                    fwrite(&nLevels, sizeof(int32_t), 1, of);
+                    fwrite(levelMin.data(), sizeof(uint32_t), levelMin.size(), of);
+                    fclose(of);
+                }
+            }
+
+            // Pivot estimator (tags-only) drives per-bundle tag routing.
+            PivotEstimatorComputation pivotComputation;
+            const PivotEstimatorCandidate* pivotCandidate = nullptr;
+            if (BuildPivotEstimatorComputation(p_tagsPtr, p_numVectors, p_numTagsPerVec,
+                                               0, 0.99, 10.0, 1.0, std::string(), pivotComputation)) {
+                pivotCandidate = FindBestPivotEstimatorCandidate(pivotComputation.candidates);
+            }
+            if (pivotCandidate != nullptr) {
+                m_tenantPivotLevels[p_tenantId] = pivotCandidate->pivotLevel;
+                m_tenantPivotNodeCounts[p_tenantId] = pivotCandidate->nodeCount;
+                m_tenantNodePivotTags[p_tenantId] = pivotCandidate->nodePivotTags;
+                BuildTagToNodeIndexForCandidate(*pivotCandidate, pivotComputation.levelData,
+                                                m_tenantTagToNodes[p_tenantId]);
+            }
+
+            EnsureTenantLoaded(p_tenantId);
+            std::shared_ptr<AnnIndex> idxPtr;
+            {
+                std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+                auto it = m_tenantIndices.find(p_tenantId);
+                if (it != m_tenantIndices.end()) idxPtr = it->second;
+            }
+            if (!idxPtr) return false;
+            auto internalIdx = idxPtr->GetInternalIndex();
+            auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
+            auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+            if (memoryIndex == nullptr || spannInternalIdx == nullptr) return false;
+
+            SizeType numHeadSamples = memoryIndex->GetNumSamples();
+            if (numHeadSamples < (SizeType)numHeads) numHeadSamples = (SizeType)numHeads;
+            memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
+            // For metadata-only ("slim") head roots the root translate map is not
+            // full, so resolve head-id -> global-VID from the bundle structures.
+            spannInternalIdx->PopulateHeadNodeGlobalVIDsFromBundles();
+
+            // Per-posting member-OR hierarchical mask: the dense filtered path
+            // (HeadPostingHierMaskMayIntersect) keeps a posting iff at least one
+            // of its member vectors MAY carry a query tag. The FILEIO path builds
+            // this by scanning the posting file; on a non-FILEIO ("slim") store
+            // the same membership lives in opq_slim.bin (per-head records of
+            // [VID(4) | Version(1) | Tags(N*4)]) indexed by opq_slim.idx (per-head
+            // byte offsets, postingNum+1 entries). Decode it here so the posting
+            // pre-filter is populated; without it every posting is rejected and
+            // filtered dense recall is 0.
+            std::vector<SPTAG::Cache::HierarchicalPostingMask> postingHierMasks;
+            {
+                const std::string slimBinPath = workDir + "/opq_slim.bin";
+                const std::string slimIdxPath = workDir + "/opq_slim.idx";
+                std::ifstream idxIn(slimIdxPath, std::ios::binary);
+                std::ifstream binIn(slimBinPath, std::ios::binary);
+                if (idxIn && binIn) {
+                    idxIn.seekg(0, std::ios::end);
+                    std::streamoff idxBytes = idxIn.tellg();
+                    idxIn.seekg(0, std::ios::beg);
+                    size_t idxEntries = (idxBytes > 0) ? (size_t)idxBytes / sizeof(std::uint64_t) : 0;
+                    if (idxEntries >= 2) {
+                        std::vector<std::uint64_t> off(idxEntries);
+                        idxIn.read(reinterpret_cast<char*>(off.data()), (std::streamsize)idxEntries * sizeof(std::uint64_t));
+                        size_t numSlimPostings = idxEntries - 1;
+                        binIn.seekg(0, std::ios::end);
+                        std::streamoff slimBytes = binIn.tellg();
+                        binIn.seekg(0, std::ios::beg);
+                        std::vector<std::uint8_t> slim((size_t)std::max<std::streamoff>(slimBytes, 0));
+                        if (slimBytes > 0)
+                            binIn.read(reinterpret_cast<char*>(slim.data()), slimBytes);
+                        const int recSize = (int)(sizeof(int) + sizeof(std::uint8_t)
+                                                  + (size_t)p_numTagsPerVec * sizeof(uint32_t));
+                        const int tagByteOff = (int)(sizeof(int) + sizeof(std::uint8_t));
+                        postingHierMasks.assign(numSlimPostings, SPTAG::Cache::HierarchicalPostingMask());
+                        for (size_t h = 0; h < numSlimPostings; ++h) {
+                            postingHierMasks[h].Clear();
+                            std::uint64_t o0 = off[h], o1 = off[h + 1];
+                            if (o1 <= o0 || o1 > slim.size()) continue;
+                            size_t span = (size_t)(o1 - o0);
+                            size_t n = span / (size_t)recSize;
+                            const std::uint8_t* base = slim.data() + o0;
+                            for (size_t i = 0; i < n; ++i) {
+                                const std::uint8_t* e = base + i * (size_t)recSize;
+                                const uint32_t* vt = reinterpret_cast<const uint32_t*>(e + tagByteOff);
+                                for (int t = 0; t < p_numTagsPerVec; ++t)
+                                    postingHierMasks[h].Insert(t, vt[t]);
+                            }
+                        }
+                        fprintf(stderr, "[INFO] Tenant %d: built posting hier masks for %zu slim postings.\n",
+                                p_tenantId, numSlimPostings);
+                    }
+                } else {
+                    fprintf(stderr, "[WARN] Tenant %d: opq_slim.bin/.idx missing; dense filtered "
+                            "posting pre-filter will be empty.\n", p_tenantId);
+                }
+            }
+
+            int resolved = 0;
+            for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
+                SizeType globalVID = memoryIndex->GetHeadNodeGlobalVID(hid);
+                memoryIndex->SetHeadNodeHeadOnly(hid, true);
+                // Posting-content mask (member-OR) drives the dense-path posting
+                // pre-filter; set it independently of the head's own resolved VID.
+                if ((size_t)hid < postingHierMasks.size())
+                    memoryIndex->SetHeadNodePostingHierMask(hid, postingHierMasks[hid]);
+                if (globalVID == SPTAG::MaxSize || globalVID >= (SizeType)p_numVectors) continue;
+                ++resolved;
+                SPTAG::Cache::HierarchicalOwnTags ownMask;
+                ownMask.Clear();
+                for (int t = 0; t < p_numTagsPerVec; ++t) {
+                    uint32_t tag = p_tagsPtr[(size_t)globalVID * p_numTagsPerVec + t];
+                    ownMask.Insert(t, tag);
+                }
+                memoryIndex->SetHeadNodeHierMask(hid, ownMask);
+            }
+
+            if (pivotCandidate != nullptr) {
+                std::vector<int> headNodeToNode;
+                BuildHeadNodeToNodeIndexForCandidate(*pivotCandidate, p_tagsPtr, p_numVectors,
+                                                     p_numTagsPerVec, memoryIndex, spannInternalIdx,
+                                                     headNodeToNode);
+                m_tenantHeadNodeToNode[p_tenantId] = headNodeToNode;
+                for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
+                    int16_t nid = (hid < (SizeType)headNodeToNode.size() && headNodeToNode[hid] >= 0)
+                                  ? (int16_t)headNodeToNode[hid] : (int16_t)-1;
+                    memoryIndex->SetHeadNodeBundleNodeId(hid, nid);
+                }
+                SaveHeadNodeRoutingIndexFile(workDir, pivotCandidate->pivotLevel,
+                                             pivotCandidate->nodePivotTags,
+                                             m_tenantTagToNodes[p_tenantId], headNodeToNode);
+            }
+            SaveHeadNodeMetaFile(workDir, memoryIndex);
+            fprintf(stderr, "[INFO] Tenant %d: head_node_meta generated for %d heads "
+                    "(%d resolved) [non-FILEIO].\n",
+                    p_tenantId, (int)numHeadSamples, resolved);
+            return true;
+        }
+    }
+
     // ── Read real posting→vector assignment from SPANN on-disk data ──
     // Files: ssdinfo (posting sizes), ssdmapping (block addresses), ssdmapping_postings (block data)
     // Posting format per vector: [VID(4B) | Version(1B) | Tags(N*4B) | VectorData(dim*sizeof(T))]
@@ -3623,6 +4089,46 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     int totalAssignments = 0;
     std::vector<uint8_t> blockBuf(PAGE_SIZE);
 
+    // ── Numeric attribute setup (quantized signature) ──────────────────────
+    // The last `numNumericCols` tag columns are numeric attributes: the RAW value
+    // is stored inline per vector (read by the exact filter) and a quantized
+    // bucket is OR-ed into the per-posting numeric signature for range pruning.
+    // numNumericCols=0 => pure categorical (layout/behavior unchanged).
+    int numNumericCols = 0;
+    if (const char* e = std::getenv("SPTAG_NUMERIC_COLS")) numNumericCols = atoi(e);
+    if (numNumericCols < 0) numNumericCols = 0;
+    if (numNumericCols > p_numTagsPerVec) numNumericCols = p_numTagsPerVec;
+    const int numBaseCols = p_numTagsPerVec - numNumericCols;
+    std::vector<SPTAG::Cache::NumQuantParam> quantParams(numNumericCols);
+    if (numNumericCols > 0) {
+        for (int c = 0; c < numNumericCols; ++c) { quantParams[c].lo = UINT32_MAX; quantParams[c].hi = 0; }
+        for (int vid = 0; vid < p_numVectors; ++vid)
+            for (int c = 0; c < numNumericCols; ++c) {
+                uint32_t v = p_tagsPtr[(size_t)vid * p_numTagsPerVec + numBaseCols + c];
+                if (v < quantParams[c].lo) quantParams[c].lo = v;
+                if (v > quantParams[c].hi) quantParams[c].hi = v;
+            }
+        // Persist quant metadata so query processes can reconstruct the mapping.
+        const std::string nmPath = workDir + "/numeric_meta.bin";
+        if (FILE* nf = fopen(nmPath.c_str(), "wb")) {
+            int32_t magic = 0x54454d4e;  // 'NMET'
+            int32_t base = numBaseCols, ncols = numNumericCols;
+            fwrite(&magic, sizeof(int32_t), 1, nf);
+            fwrite(&base, sizeof(int32_t), 1, nf);
+            fwrite(&ncols, sizeof(int32_t), 1, nf);
+            for (int c = 0; c < numNumericCols; ++c) {
+                fwrite(&quantParams[c].lo, sizeof(uint32_t), 1, nf);
+                fwrite(&quantParams[c].hi, sizeof(uint32_t), 1, nf);
+            }
+            fclose(nf);
+            fprintf(stderr, "[INFO] Tenant %d: wrote numeric_meta.bin (base=%d numeric=%d)\n",
+                    p_tenantId, numBaseCols, numNumericCols);
+        }
+        m_tenantNumericMeta[p_tenantId] = {numBaseCols, quantParams};
+    }
+    std::vector<uint64_t> posting_num_quant(
+        (size_t)numHeads * (size_t)numNumericCols * SPTAG::Cache::NUM_QUANT_WORDS, 0);
+
     // Tag-pure path: collect first-occurrence vector data per VID so we can
     // materialize per-tag dense lists for very-sparse tags after the loop.
     // Only enabled for Float value type (m_inputVectorSize == dim * 4).
@@ -3668,12 +4174,20 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             // Only the pure prefix drives the filter sidecars. Unfilter-tail
             // vectors (j >= nPure) must not pollute the per-head tag masks.
             if (j < nPure) {
-                // Insert ALL tags for this vector into this posting's Bloom AND hierarchical mask
-                for (int t = 0; t < p_numTagsPerVec; t++) {
+                // Categorical tags (cols 0..numBaseCols-1) -> Bloom + hier mask.
+                for (int t = 0; t < numBaseCols; t++) {
                     uint32_t tag = p_tagsPtr[vid * p_numTagsPerVec + t];
                     posting_tags[pid].push_back(tag);
                     // Also insert into hierarchical mask at level t
                     posting_hier_masks[pid].Insert(t, tag);
+                }
+                // Numeric attributes (cols numBaseCols..) -> quantized signature.
+                for (int c = 0; c < numNumericCols; c++) {
+                    uint32_t v = p_tagsPtr[vid * p_numTagsPerVec + numBaseCols + c];
+                    int b = SPTAG::Cache::NumQuantBucket(quantParams[c], v);
+                    SPTAG::Cache::NumQuantInsert(
+                        posting_num_quant.data() + (size_t)pid * numNumericCols * SPTAG::Cache::NUM_QUANT_WORDS,
+                        c, b);
                 }
                 totalAssignments++;
             }
@@ -3856,10 +4370,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     if (idxPtr) {
         auto internalIdx = idxPtr->GetInternalIndex();
         auto memoryIndex = GetMemoryIndexForInternal(internalIdx);
-        auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+        auto* spannInternalIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
         if (memoryIndex != nullptr && spannInternalIdx != nullptr) {
             const SizeType numHeadSamples = memoryIndex->GetNumSamples();
-            memoryIndex->InitializeHeadNodeMeta(numHeadSamples);
+            memoryIndex->InitializeHeadNodeMeta(numHeadSamples, numNumericCols);
             for (SizeType hid = 0; hid < numHeadSamples; ++hid) {
                 SizeType globalVID = spannInternalIdx->GetGlobalVID(hid);
                 memoryIndex->SetHeadNodeGlobalVID(hid, globalVID);
@@ -3877,6 +4391,17 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                     postingMask = posting_hier_masks[hid];
                 }
                 memoryIndex->SetHeadNodePostingHierMask(hid, postingMask);
+
+                // Quantized numeric posting signature: union of member buckets per
+                // numeric column. Drives the range pre-filter (MayMatchHierQuant).
+                if (numNumericCols > 0 && hid < (SizeType)numHeads) {
+                    std::uint64_t* dst = memoryIndex->GetHeadNodeNumQuantMutable(hid);
+                    if (dst != nullptr) {
+                        std::memcpy(dst,
+                            posting_num_quant.data() + (size_t)hid * numNumericCols * SPTAG::Cache::NUM_QUANT_WORDS,
+                            (size_t)numNumericCols * SPTAG::Cache::NUM_QUANT_WORDS * sizeof(std::uint64_t));
+                    }
+                }
 
                 if (globalVID == SPTAG::MaxSize || globalVID >= static_cast<SizeType>(p_numVectors)) {
                     continue;
@@ -3901,7 +4426,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                 // (head centroids are real dataset vectors but are never stored
                 // as members of any posting, so without this gate they would
                 // either be lost or leaked regardless of their own tag).
-                SPTAG::Cache::HierarchicalPostingMask ownMask;
+                SPTAG::Cache::HierarchicalOwnTags ownMask;
                 ownMask.Clear();
                 for (int t = 0; t < p_numTagsPerVec; ++t) {
                     uint32_t tag = p_tagsPtr[static_cast<size_t>(globalVID) * static_cast<size_t>(p_numTagsPerVec) + static_cast<size_t>(t)];
@@ -3976,7 +4501,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
             auto it = m_tenantIndices.find(p_tenantId);
             if (it != m_tenantIndices.end()) {
                 auto internalIdx2 = it->second->GetInternalIndex();
-                auto* spann2 = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx2.get());
+                auto* spann2 = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx2.get());
                 if (spann2 != nullptr) {
                     if (auto* opts = spann2->GetOptions()) {
                         postingPageLimit = std::max(1, opts->m_postingPageLimit);
@@ -4129,7 +4654,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                     auto it = m_tenantIndices.find(p_tenantId);
                     if (it != m_tenantIndices.end()) {
                         auto internalIdx = it->second->GetInternalIndex();
-                        auto* spannIdx = dynamic_cast<SPTAG::SPANN::Index<float>*>(internalIdx.get());
+                        auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
                         if (spannIdx) extra = spannIdx->GetDiskIndex();
                     }
                 }
@@ -4174,6 +4699,87 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     auto _wrTotal0 = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                    : std::chrono::high_resolution_clock::time_point{};
     const uint32_t* queryTagsPtr = reinterpret_cast<const uint32_t*>(p_queryTags.Data());
+    // ── DNF predicate mode ──────────────────────────────────────────────
+    // Sentinel: p_numTags < 0 means p_queryTags is a self-describing DNF blob
+    // (uint32 words): [numClauses]{ [numLits] [col,val]xN }... encoding
+    // OR-of-AND-clauses. Otherwise p_queryTags is the legacy flat OR/IN list of
+    // p_numTags tag values. DNF mode routes only through the dense path; its
+    // union of literal values drives the coarse masks/selectivity while the
+    // exact per-vector DNF eval runs in the posting scan.
+    bool dnfMode = (p_numTags < 0);
+    SPTAG::Cache::DNFPredicate dnf;
+    std::vector<uint32_t> dnfValues;
+    if (dnfMode && queryTagsPtr != nullptr) {
+        const uint32_t* w = queryTagsPtr;
+        const size_t nWords = p_queryTags.Length() / sizeof(uint32_t);
+        size_t pos = 0;
+        // Versioned blob. Magic word selects the literal encoding:
+        //   0x444E4633 ("DNF3") -> each literal is [kind, col, op, val] (4 words).
+        //       kind 0 = categorical tag, kind 1 = numeric (post-filter only).
+        //   0x444E4632 ("DNF2") -> each literal is [col, op, val] (3 words).
+        //   (no magic)          -> legacy [col, val] (2 words), all equality, tag.
+        // Only categorical (kind==0) equality values feed dnfValues (the coarse
+        // mask/selectivity union); numeric literals are evaluated purely at the
+        // exact per-vector post-filter and never drive retrieval.
+        bool dnf3 = (nWords >= 1 && w[0] == 0x444E4633u);
+        bool extended = (nWords >= 1 && w[0] == 0x444E4632u);
+        if (dnf3 || extended) pos = 1;
+        if (nWords > pos) {
+            uint32_t numClauses = w[pos++];
+            for (uint32_t ci = 0; ci < numClauses && pos < nWords; ++ci) {
+                uint32_t numLits = w[pos++];
+                SPTAG::Cache::DNFClause clause;
+                for (uint32_t li = 0; li < numLits; ++li) {
+                    if (dnf3) {
+                        if (pos + 3 >= nWords) break;
+                        uint32_t kind = w[pos++];
+                        uint32_t col  = w[pos++];
+                        uint8_t  op   = (uint8_t)w[pos++];
+                        uint32_t val  = w[pos++];
+                        clause.lits.push_back({col, val, op, (uint8_t)kind});
+                        if (kind == 0 && op == SPTAG::Cache::DNF_EQ) dnfValues.push_back(val);
+                    } else if (extended) {
+                        if (pos + 2 >= nWords) break;
+                        uint32_t col = w[pos++];
+                        uint8_t  op  = (uint8_t)w[pos++];
+                        uint32_t val = w[pos++];
+                        clause.lits.push_back({col, val, op, (uint8_t)0});
+                        if (op == SPTAG::Cache::DNF_EQ) dnfValues.push_back(val);
+                    } else {
+                        if (pos + 1 >= nWords) break;
+                        uint32_t col = w[pos++];
+                        uint32_t val = w[pos++];
+                        clause.lits.push_back({col, val});
+                        dnfValues.push_back(val);
+                    }
+                }
+                if (!clause.lits.empty()) dnf.clauses.push_back(std::move(clause));
+            }
+        }
+    }
+    // ── Lower pure-OR DNF to the legacy flat-OR path ───────────────────────
+    // A DNF with no real conjunction (every clause a single literal) is
+    // logically identical to a flat OR/IN-list over the union of literal
+    // values. The legacy OR path is the tuned, optimal implementation for that
+    // case; the generic DNF dense path is a parallel reimplementation that
+    // selects a marginally different posting set (measured ~2.4% fewer scanned
+    // vectors at equal nprobe -> ~1 lost neighbour/query -> needs higher nprobe
+    // for the same recall). So when there is no AND clause, dedup the union and
+    // hand off to the legacy path verbatim (dnfMode off, positive p_numTags).
+    // The DNF dense path is then reserved for predicates that genuinely need
+    // conjunctions, where there is no legacy equivalent.
+    if (dnfMode && !dnf.Empty() && !dnf.HasAndClause() && !dnf.HasNumericLiteral()) {
+        std::sort(dnfValues.begin(), dnfValues.end());
+        dnfValues.erase(std::unique(dnfValues.begin(), dnfValues.end()), dnfValues.end());
+        queryTagsPtr = dnfValues.empty() ? nullptr : dnfValues.data();
+        p_numTags = static_cast<int>(dnfValues.size());
+        dnf.Clear();
+        dnfMode = false;
+    }
+    // Effective flat tag view used by the dense-path mask/selectivity builders.
+    // In DNF mode this is the union of all literal values.
+    const uint32_t* effTagsPtr = dnfMode ? (dnfValues.empty() ? nullptr : dnfValues.data()) : queryTagsPtr;
+    const int effNumTags = dnfMode ? (int)dnfValues.size() : p_numTags;
     auto _ck_a = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                : std::chrono::high_resolution_clock::time_point{};
     if (!EnsureTenantLoaded(p_tenantId)) return nullptr;
@@ -4228,6 +4834,65 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             t_a, t_b, t_c, t_d, t_e);
         fflush(stdout);
     }
+
+    // ── Selectivity-based routing gate ──────────────────────────────────
+    // The OPQ tag-pure path exhaustively ADC-scans a tag's entire inverted
+    // vid list. For broad tags (large list AND high selectivity) that scan is
+    // more expensive than the dense BKT-graph ANN path. Route to OPQ tag-pure
+    // only when the tag is narrow by EITHER measure:
+    //     vidCount < SPTAG_OPQPURE_MAX_VIDS   OR   selectivity < SPTAG_OPQPURE_MAX_SEL
+    // Otherwise force the dense graph path. Defaults (MAX_VIDS=50000, MAX_SEL=0.1)
+    // enable selectivity routing out of the box: broad tags (e.g. org) go dense,
+    // narrower tags stay on tag-pure. Override the env vars to retune or disable.
+    // Defaults enable selectivity routing out of the box (Option A): broad tags
+    // (vidCount >= 50000 AND selectivity >= 0.1, e.g. org) route to the dense BKT
+    // graph; narrower tags stay on the exhaustive OPQ tag-pure path. Override via
+    // SPTAG_OPQPURE_MAX_VIDS / SPTAG_OPQPURE_MAX_SEL. Set MAX_VIDS very large and
+    // MAX_SEL=1.0 to force every single-tag query back to tag-pure.
+    static const std::int64_t s_opqPureMaxVids = []() {
+        const char* v = std::getenv("SPTAG_OPQPURE_MAX_VIDS");
+        return v ? std::strtoll(v, nullptr, 10) : (std::int64_t)50000;
+    }();
+    static const double s_opqPureMaxSel = []() {
+        const char* v = std::getenv("SPTAG_OPQPURE_MAX_SEL");
+        return v ? std::atof(v) : 0.1;
+    }();
+    static const bool s_gateDebug = (std::getenv("SPTAG_ROUTE_DEBUG") != nullptr);
+    if (!forceDenseTagSearch && p_numTags == 1 && queryTagsPtr != nullptr
+        && m_valueType == SPTAG::VectorValueType::Float && internalIdx != nullptr) {
+        auto* spannGateIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+        if (spannGateIdx != nullptr) {
+            auto gateDisk = spannGateIdx->GetDiskIndex();
+            if (gateDisk != nullptr) {
+                std::int64_t cnt = gateDisk->GetOPQTagVidCount(queryTagsPtr[0]);
+                std::int64_t tot = gateDisk->GetOPQTotalVectors();
+                // Selectivity routing applies regardless of RaBitQ: broad tags still go to
+                // the dense BKT-graph path (graph navigation narrows the candidate set), and
+                // RaBitQ simply replaces PQ as the in-RAM scorer on that path. (An earlier
+                // experiment bypassed this gate under RaBitQ to force exhaustive tag-pure;
+                // that threw away graph navigation and tanked broad/unfilter QPS. Reverted.)
+                if (cnt >= 0 && tot > 0) {
+                    double sel = static_cast<double>(cnt) / static_cast<double>(tot);
+                    bool tagPureOK = (cnt < s_opqPureMaxVids) || (sel < s_opqPureMaxSel);
+                    if (!tagPureOK) {
+                        forceDenseTagSearch = true;
+                        if (s_gateDebug) {
+                            static std::atomic<int> g_c{0};
+                            if (g_c++ < 8)
+                                fprintf(stderr, "[ROUTE] tag=%u cnt=%lld sel=%.4f -> DENSE graph\n",
+                                        queryTagsPtr[0], (long long)cnt, sel);
+                        }
+                    } else if (s_gateDebug) {
+                        static std::atomic<int> g_c2{0};
+                        if (g_c2++ < 8)
+                            fprintf(stderr, "[ROUTE] tag=%u cnt=%lld sel=%.4f -> OPQ tag-pure\n",
+                                    queryTagsPtr[0], (long long)cnt, sel);
+                    }
+                }
+            }
+        }
+    }
+
     const auto tagStatsIt = m_tenantTagRoutingStats.find(p_tenantId);
     const auto* tagStats = (tagStatsIt != m_tenantTagRoutingStats.end()) ? &tagStatsIt->second : nullptr;
 
@@ -4242,11 +4907,37 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     std::vector<int> routedNodes;
     std::vector<uint8_t> allowedNodeMask;
     bool hasRoutingNodeFilter = false;
-    if (p_numTags > 0 &&
+    // Collect routed subgraph nodes: DNF predicates use the OR-of-clauses /
+    // AND-of-literals collector (⋃ clause ⋂ literal); legacy flat OR/IN lists
+    // (including pure-OR DNF already lowered to a positive p_numTags) use the
+    // union collector. Both feed the identical allowedNodeMask plumbing below.
+    bool routingCollected = false;
+    static const bool s_noRoute = []() { const char* e = std::getenv("SPTAG_DNF_NOROUTE"); return e && e[0] == '1'; }();
+    if (!s_noRoute &&
         tagToNodesIt != m_tenantTagToNodes.end() &&
         headNodeToNode != nullptr &&
-        !headNodeToNode->empty() &&
-        TryCollectRoutingNodesForQuery(tagToNodesIt->second, queryTagsPtr, p_numTags, routedNodes)) {
+        !headNodeToNode->empty()) {
+        if (dnfMode && !dnf.Empty()) {
+            routingCollected = TryCollectRoutingNodesForDNF(tagToNodesIt->second, dnf, routedNodes);
+            static const bool s_routeDbg = (std::getenv("SPTAG_ROUTE_DEBUG") != nullptr);
+            if (s_routeDbg) {
+                static std::atomic<int> g_rc{0};
+                if (g_rc++ < 8)
+                    fprintf(stderr, "[DNF-ROUTE] clauses=%zu routedNodes=%zu collected=%d\n",
+                            dnf.clauses.size(), routedNodes.size(), (int)routingCollected);
+            }
+        } else if (p_numTags > 0) {
+            routingCollected = TryCollectRoutingNodesForQuery(tagToNodesIt->second, queryTagsPtr, p_numTags, routedNodes);
+            static const bool s_routeDbg2 = (std::getenv("SPTAG_ROUTE_DEBUG") != nullptr);
+            if (s_routeDbg2) {
+                static std::atomic<int> g_rc2{0};
+                if (g_rc2++ < 8)
+                    fprintf(stderr, "[OR-ROUTE] numTags=%d routedNodes=%zu collected=%d\n",
+                            (int)p_numTags, routedNodes.size(), (int)routingCollected);
+            }
+        }
+    }
+    if (routingCollected) {
         int nodeCount = 0;
         auto nodeCountIt = m_tenantPivotNodeCounts.find(p_tenantId);
         if (nodeCountIt != m_tenantPivotNodeCounts.end()) {
@@ -4298,6 +4989,26 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     // flat-scan for top-K. Bypasses BKT/SSD and gives R=1.0 by construction.
     if (!s_disableTagPurePath && !forceDenseTagSearch && p_numTags == 1
         && m_valueType == SPTAG::VectorValueType::Float) {
+        // OPQ-prefilter narrow path: load the tag's ids -> ADC screen -> fetch only
+        // L survivors -> exact rerank. Preserves the tag-pure exhaustiveness (screens
+        // ALL the tag's vids) while cutting read volume ~18x vs full-vector chunks.
+        static const bool s_opqPrefilter = []() {
+            const char* v = std::getenv("SPTAG_OPQ_PREFILTER");
+            return v && v[0] == '1';
+        }();
+        if (s_opqPrefilter && internalIdx != nullptr) {
+            auto* spannIdx = dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+            if (spannIdx != nullptr) {
+                auto disk = spannIdx->GetDiskIndex();
+                if (disk != nullptr) {
+                    auto result = std::make_shared<SPTAG::COMMON::QueryResultSet<float>>(
+                        reinterpret_cast<const float*>(p_queryVector.Data()), p_resultNum);
+                    if (disk->OPQTagPureSearch(*result, queryTagsPtr[0])) {
+                        return result;
+                    }
+                }
+            }
+        }
         auto pureIt = m_tenantTagPurePostings.find(p_tenantId);
         auto kvIt = m_tenantTagPureKV.find(p_tenantId);
         if (pureIt != m_tenantTagPurePostings.end() && kvIt != m_tenantTagPureKV.end()
@@ -4414,12 +5125,12 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         if (offIt != m_tenantTagLevelOffsets.end() && !offIt->second.empty())
             levelOffsets = &offIt->second;
     }
-    for (int i = 0; i < p_numTags; i++) {
-        queryMask.Insert(queryTagsPtr[i]);
+    for (int i = 0; i < effNumTags; i++) {
+        queryMask.Insert(effTagsPtr[i]);
         // Hierarchical mask uses 0-indexed levels (0=org,1=dept,2=team,3=project)
         // matching the convention used at build time in
         // LoadPostingSignaturesIntoHeadIndex (Insert(t, tag) for t = 0..numTagsPerVec-1).
-        uint32_t qtag = queryTagsPtr[i];
+        uint32_t qtag = effTagsPtr[i];
         int level;
         if (levelOffsets != nullptr) {
             level = 0;
@@ -4437,8 +5148,14 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
     auto _ck_qmask = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                    : std::chrono::high_resolution_clock::time_point{};
     SPTAG::VectorIndex::ThreadLocalSearchContext searchContext;
-    if (p_numTags > 0 && queryTagsPtr != nullptr) {
-        searchContext.m_queryTags.assign(queryTagsPtr, queryTagsPtr + p_numTags);
+    if (effNumTags > 0 && effTagsPtr != nullptr) {
+        searchContext.m_queryTags.assign(effTagsPtr, effTagsPtr + effNumTags);
+    }
+    // In DNF mode the exact predicate supersedes the flat OR/IN list. The flat
+    // m_queryTags above carries only the union of literal values (for coarse
+    // masks + selectivity); the authoritative per-vector test is the DNF.
+    if (dnfMode && !dnf.Empty()) {
+        searchContext.m_dnf = dnf;
     }
     // Plumb the data-driven tag-level offsets so the SPANN search path maps tag
     // values to hierarchical levels identically to build (column index = level),
@@ -4461,18 +5178,39 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
             // LoadPostingSignaturesIntoHeadIndex by OR-ing ALL member vectors' tags
             // at every level. MayIntersect is a no-false-negative test, so it is
             // safe as a pre-filter (false positives only let extra postings through).
-            if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && p_numTags > 0) {
+            const bool dnfHasNum = !dnf.Empty() && dnf.HasNumericLiteral();
+            const TenantIndexManager::NumericMeta* numMeta = nullptr;
+            {
+                auto nmIt = m_tenantNumericMeta.find(p_tenantId);
+                if (nmIt != m_tenantNumericMeta.end()) numMeta = &nmIt->second;
+            }
+            if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && (effNumTags > 0 || dnfHasNum)) {
                 static const bool s_disableHierFilter =
                     (std::getenv("SPTAG_DISABLE_HIER_POSTING_FILTER") != nullptr);
                 if (!s_disableHierFilter) {
+                const int quantCols = memoryIndex->GetHeadNodeNumQuantCols();
+                const SPTAG::Cache::NumQuantParam* qp =
+                    (numMeta != nullptr && !numMeta->params.empty()) ? numMeta->params.data() : nullptr;
+                const int numBase = (numMeta != nullptr) ? numMeta->numBaseCols : 0;
                 searchContext.m_postingFilter =
-                    [memIdx = memoryIndex.get(), queryHierMask](int localHid) {
+                    [memIdx = memoryIndex.get(), queryHierMask, dnf, dnfHasNum, quantCols, qp, numBase](int localHid) {
                         // Use the per-posting multi-membership mask (union of all
-                        // member-vector tags). MayIntersect is no-false-negative so
-                        // it is safe as a pre-filter; the inline per-vector tag
-                        // check inside the posting scan does the exact filtering.
+                        // member-vector tags). MayIntersect / MayMatchHier are
+                        // no-false-negative so they are safe as a pre-filter; the
+                        // inline per-vector check inside the posting scan does the
+                        // exact filtering (DNF eval when present). Numeric range
+                        // literals additionally prune on the quantized numeric
+                        // signature (MayMatchHierQuant) when present.
                         const auto* hierMask = memIdx->GetHeadNodePostingHierMask(localHid);
                         if (hierMask == nullptr) return true;  // fail open
+                        if (!dnf.Empty()) {
+                            if (dnfHasNum && quantCols > 0 && qp != nullptr) {
+                                const std::uint64_t* quant = memIdx->GetHeadNodeNumQuant(localHid);
+                                if (quant != nullptr)
+                                    return dnf.MayMatchHierQuant(*hierMask, quant, quantCols, qp, numBase);
+                            }
+                            return dnf.MayMatchHier(*hierMask);
+                        }
                         return hierMask->MayIntersect(queryHierMask);
                     };
                 }
@@ -4487,16 +5225,38 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
 
         auto vcIt2 = m_tenantVectorCounts.find(p_tenantId);
         int tenantSize2 = (vcIt2 != m_tenantVectorCounts.end()) ? vcIt2->second : 1;
-        float vectorSel = EstimateQueryVectorSelectivity(tenantSize2, tagStats, queryTagsPtr, p_numTags);
+        float vectorSel = EstimateQueryVectorSelectivity(tenantSize2, tagStats, effTagsPtr, effNumTags);
         vectorSel = std::clamp(vectorSel / std::max(1.0f, filteredSearchNprobeSafety), 1e-6f, 1.0f);
         searchContext.m_filterSelectivity = vectorSel;
 
-        if (memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && searchContext.m_filterSelectivity >= 1.0f) {
-            int passCount = 0;
+        // Per-query selectivity fallback: only reached when the cheap stats-based
+        // estimator could not produce a sub-unity estimate. A full scan over every
+        // head (GetHeadNodeMetaSampleCount can be >1M for partitioned indexes) costs
+        // ~50% of total query time and runs on EVERY query, so cap the work by
+        // striding over at most kSelFallbackMaxSamples heads and extrapolating
+        // passCount. Set SPTAG_DISABLE_SEL_FALLBACK=1 to skip it entirely (A/B), or
+        // SPTAG_SEL_FALLBACK_MAXSAMPLES=N to tune the sample budget.
+        static const bool s_disableSelFallback = []() {
+            const char* e = std::getenv("SPTAG_DISABLE_SEL_FALLBACK");
+            return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T');
+        }();
+        static const SizeType kSelFallbackMaxSamples = []() -> SizeType {
+            const char* e = std::getenv("SPTAG_SEL_FALLBACK_MAXSAMPLES");
+            int v = e ? atoi(e) : 16384;
+            return static_cast<SizeType>(v > 0 ? v : 16384);
+        }();
+        if (!s_disableSelFallback && memoryIndex != nullptr && memoryIndex->HasHeadNodeMeta() && tenantSize2 > 0 && searchContext.m_filterSelectivity >= 1.0f) {
             SizeType totalHeads = memoryIndex->GetHeadNodeMetaSampleCount();
-            for (SizeType pid = 0; pid < totalHeads; ++pid) {
+            SizeType stride = (totalHeads > kSelFallbackMaxSamples)
+                ? (totalHeads + kSelFallbackMaxSamples - 1) / kSelFallbackMaxSamples : 1;
+            int passCount = 0, sampled = 0;
+            for (SizeType pid = 0; pid < totalHeads; pid += stride) {
                 if (memoryIndex->HeadNodePSMayIntersect(pid, queryMask)) passCount++;
+                sampled++;
             }
+            // Extrapolate sampled fraction to the full head population so the
+            // selectivity proxy keeps the same meaning as a full scan.
+            totalHeads = (sampled > 0) ? static_cast<SizeType>(sampled) : totalHeads;
             // FIX: divide by total head count (same units), not tenantSize.
             // passCount/tenantSize mixed head-count and vector-count units, so the
             // fallback always reported pathologically small selectivity (~1/avgPosting).

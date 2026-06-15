@@ -57,8 +57,30 @@ namespace SPTAG
         template<typename T>
 	    class SPANNResultIterator;
 
+        // Non-templated accessor interface for SPANN::Index<T>. The multi-tenant
+        // wrapper (CoreInterface) needs to reach SPANN-specific accessors without
+        // knowing the vector value type T. All methods here return value-type-
+        // agnostic types, so a single dynamic_cast<ISPANNIndex*> works for every
+        // instantiation (float / uint8 / int8 / ...). This replaces the previous
+        // hardcoded dynamic_cast<SPANN::Index<float>*>, which silently failed for
+        // any non-float index.
+        class ISPANNIndex
+        {
+        public:
+            virtual ~ISPANNIndex() = default;
+            virtual std::shared_ptr<VectorIndex> GetMemoryIndex() = 0;
+            virtual std::shared_ptr<IExtraSearcher> GetDiskIndex() = 0;
+            virtual Options* GetOptions() = 0;
+            virtual SizeType GetGlobalVID(SizeType vid) = 0;
+            virtual bool PopulateHeadNodeGlobalVIDsFromBundles() = 0;
+            virtual void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) = 0;
+            virtual void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments) = 0;
+            virtual void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments) = 0;
+            virtual void SetSharedDB(std::shared_ptr<Helper::KeyValueIO> p_db) = 0;
+        };
+
         template<typename T>
-        class Index : public VectorIndex
+        class Index : public VectorIndex, public ISPANNIndex
         {
         private:
             std::shared_ptr<VectorIndex> m_index;
@@ -86,6 +108,12 @@ namespace SPTAG
             // on the search hot path (the unordered_map + mutex path was a 4x unfilter
             // regression).
             mutable std::vector<const void*> m_metaOnlyHeadVectorPtrs;
+            // Single global head graph (KDT/RNG over ALL heads, local id == hid) used for
+            // efficient one-entry unfilter navigation, replacing the per-bundle multi-seed
+            // + cross-edge stitched walk for tag-less queries. Loaded from (or built+saved
+            // to) HeadIndex/global_head/ at load on slim indexes. Default ON;
+            // SPTAG_GLOBAL_HEAD_GRAPH=0 disables. nullptr => fall back to per-bundle walk.
+            mutable std::shared_ptr<VectorIndex> m_globalHeadGraph;
             std::unordered_map<std::string, std::string> m_headParameters;
 
             COMMON::VersionLabel m_versionMap;
@@ -324,6 +352,34 @@ namespace SPTAG
             SizeType GetGlobalVID(SizeType vid)
             {
                 return static_cast<SizeType>(*(m_vectorTranslateMap[vid]));
+            }
+
+            // Populate the head index's head_node_meta global-VID table from the
+            // per-bundle head structures. Needed for metadata-only ("slim") head
+            // roots where the monolithic root no longer carries a full
+            // m_vectorTranslateMap (so GetGlobalVID(hid) is invalid for H1 heads);
+            // the authoritative head-id -> global-vector-id mapping then lives only
+            // in the bundle nodes. Caller must InitializeHeadNodeMeta first.
+            bool PopulateHeadNodeGlobalVIDsFromBundles()
+            {
+                if (m_index == nullptr || !m_index->HasHeadNodeMeta()) return false;
+                std::lock_guard<std::mutex> lock(m_globalVIDToBundleLocMutex);
+                if (m_globalVIDToBundleLoc.empty() || m_headBundleLocalToGlobalHIDs.empty())
+                    return false;
+                const SizeType metaCount = m_index->GetHeadNodeMetaSampleCount();
+                for (const auto& kv : m_globalVIDToBundleLoc)
+                {
+                    SizeType globalVID = kv.first;
+                    int nodeId = kv.second.first;
+                    SizeType local = kv.second.second;
+                    if (nodeId < 0 || nodeId >= (int)m_headBundleLocalToGlobalHIDs.size()) continue;
+                    const auto& l2g = m_headBundleLocalToGlobalHIDs[(size_t)nodeId];
+                    if (local < 0 || (size_t)local >= l2g.size()) continue;
+                    SizeType globalHeadId = l2g[(size_t)local];
+                    if (globalHeadId < 0 || globalHeadId >= metaCount) continue;
+                    m_index->SetHeadNodeGlobalVID(globalHeadId, globalVID);
+                }
+                return true;
             }
 
             ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);

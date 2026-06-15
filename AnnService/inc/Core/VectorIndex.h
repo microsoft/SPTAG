@@ -215,7 +215,7 @@ public:
 
         void ClearHeadNodeMeta();
 
-        void InitializeHeadNodeMeta(SizeType p_numSamples);
+        void InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCols = 0);
 
         bool HasHeadNodeMeta() const { return m_headNodeMetaStride > 0 && !m_headNodeMeta.empty(); }
 
@@ -241,9 +241,9 @@ public:
 
         bool IsHeadNodeHeadOnly(SizeType p_sampleId) const;
 
-        void SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask);
+        void SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalOwnTags& p_mask);
 
-        const Cache::HierarchicalPostingMask* GetHeadNodeHierMask(SizeType p_sampleId) const;
+        const Cache::HierarchicalOwnTags* GetHeadNodeHierMask(SizeType p_sampleId) const;
 
         // Posting-content mask: union of all member-vector tags in the head's
         // posting. Distinct from the head's own-tag HierMask (used by
@@ -254,6 +254,14 @@ public:
         void SetHeadNodePostingHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask);
 
         const Cache::HierarchicalPostingMask* GetHeadNodePostingHierMask(SizeType p_sampleId) const;
+
+        // Quantized numeric posting signature (range pruning). Per head, a flat
+        // M*NUM_QUANT_WORDS uint64 block = union of member-vector numeric buckets
+        // (one 256-bit lane per numeric column). M=0 => no block (V3 layout, byte
+        // identical). Used by the posting pre-filter for numeric range predicates.
+        int GetHeadNodeNumQuantCols() const { return m_headNodeNumQuantCols; }
+        std::uint64_t* GetHeadNodeNumQuantMutable(SizeType p_sampleId);
+        const std::uint64_t* GetHeadNodeNumQuant(SizeType p_sampleId) const;
 
         void SetHeadNodeBundleNodeId(SizeType p_sampleId, int16_t p_bundleNodeId);
 
@@ -306,6 +314,10 @@ public:
             // construction. Empty -> fall back to legacy fixed thresholds.
             std::vector<uint32_t> m_tagLevelOffsets;
 
+            // Optional DNF predicate (OR of AND-clauses). When non-empty it is the
+            // authoritative filter and supersedes the flat OR/IN m_queryTags list.
+            SPTAG::Cache::DNFPredicate m_dnf;
+
             void Reset()
             {
                 m_active = false;
@@ -315,6 +327,12 @@ public:
                 m_directPostingIDs.clear();
                 m_searchHeadBundleNodes.clear();
                 m_tagLevelOffsets.clear();
+                m_dnf.Clear();
+            }
+
+            const SPTAG::Cache::DNFPredicate* DNF() const
+            {
+                return m_dnf.Empty() ? nullptr : &m_dnf;
             }
 
             const uint32_t* QueryTags() const
@@ -375,7 +393,7 @@ protected:
 public:
     // Per-head-node metadata blob, indexed by local head sample id (hid).
     // Layout V3 (each record stores):
-    //   [PostingBitmask][HierarchicalPostingMask own-tags][HierarchicalPostingMask posting-content][globalVID][bundleNodeId][headOnly]
+    //   [PostingBitmask][HierarchicalOwnTags own-tags][HierarchicalPostingMask posting-content][globalVID][bundleNodeId][headOnly]
     // Aligned to alignof(PostingBitmask)=8 for stride.
     size_t m_headNodeMetaStride = 0;
     size_t m_headNodePSOffset = 0;
@@ -384,6 +402,8 @@ public:
     size_t m_headNodeGlobalVIDOffset = 0;
     size_t m_headNodeBundleNodeIdOffset = 0;
     size_t m_headNodeHeadOnlyOffset = 0;
+    size_t m_headNodeNumQuantOffset = 0;   // offset of quantized numeric block (V4)
+    int m_headNodeNumQuantCols = 0;        // numeric columns in quant block (0 = none)
     std::vector<std::uint8_t> m_headNodeMeta;
 
 public:

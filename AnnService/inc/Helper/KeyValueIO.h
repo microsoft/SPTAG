@@ -35,6 +35,17 @@ namespace SPTAG
                 return MultiGet(keys, values, timeout, reqs);
             }
 
+            // Optional page-selective variant: per-key, read only the pages whose
+            // selector byte is non-zero (pageSelectPerKey[i][p] != 0 => read page p).
+            // An empty selector vector for a key means "read all pages" for that key.
+            // Default impl ignores selection and calls the regular MultiGet, so backends
+            // that do not support page selection remain correct (just read everything).
+            virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<SPTAG::Helper::PageBuffer<std::uint8_t>>& values, const std::vector<std::vector<std::uint8_t>>& pageSelectPerKey, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs)
+            {
+                (void)pageSelectPerKey;
+                return MultiGet(keys, values, timeout, reqs);
+            }
+
             virtual ErrorCode MultiGet(const std::vector<SizeType>& keys, std::vector<std::string>* values, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs) = 0;
 
             virtual ErrorCode MultiGet(const std::vector<std::string>& keys, std::vector<std::string>* values, const std::chrono::microseconds &timeout, std::vector<Helper::AsyncReadRequest>* reqs) { return ErrorCode::Undefined; }            

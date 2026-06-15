@@ -119,8 +119,10 @@ namespace SPTAG
                         std::swap(indices[i], indices[swapid]);
                         std::swap(label[i], label[swapid]);
                     }
-                    while (indices[i] != clusterIdx[k]) i++;
-                    std::swap(indices[i], indices[pos[k] + counts[k] - 1]);
+                    SizeType blockEnd = std::min(pos[k] + counts[k], last);
+                    while (i < blockEnd && indices[i] != clusterIdx[k]) i++;
+                    if (i < blockEnd)
+                        std::swap(indices[i], indices[pos[k] + counts[k] - 1]);
                 }
                 delete[] pos;
             }
@@ -621,6 +623,12 @@ break;
                             if (dynamicK) {
                                 args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
                                 args._DK = std::max<int>(args._DK, 2);
+                                // _DK must never exceed _K: all KmeansArgs buffers
+                                // (counts/clusterIdx/centers/...) are sized by _K, so
+                                // the max(_DK,2) above can otherwise force _DK=2 > _K=1
+                                // (tiny groups where headCnt==1 cap m_iBKTKmeansK to 1)
+                                // and overflow those buffers, corrupting the heap.
+                                args._DK = std::min<int>(args._DK, args._K);
                             }
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);

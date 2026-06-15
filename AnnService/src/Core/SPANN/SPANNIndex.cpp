@@ -123,6 +123,25 @@ int GetFixedNprobeOverride()
     return v;
 }
 
+// SPTAG_MAX_NPROBE: a CEILING on postingTarget (unlike SPTAG_FIXED_NPROBE which
+// forces a fixed value). Filtered queries that already pick a small nprobe are
+// unaffected; only large scans (notably unfilter, which otherwise scans nearly
+// all postings) are clamped. This bounds the search workspace page-buffer
+// high-water mark, which scales ~linearly with the number of postings scanned
+// (~12.7KB resident per posting). 0 (default) = no cap.
+int GetMaxNprobeCap()
+{
+    static const int v = []() {
+        const char* value = std::getenv("SPTAG_MAX_NPROBE");
+        if (value == nullptr || *value == '\0') return 0;
+        char* end = nullptr;
+        long parsed = std::strtol(value, &end, 10);
+        if (end == value || parsed <= 0 || parsed > 1000000) return 0;
+        return static_cast<int>(parsed);
+    }();
+    return v;
+}
+
 struct HeadBundleManifestHeader
 {
     std::uint32_t magic;
@@ -614,6 +633,76 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
     });
 
     m_metadataOnlyHeadStore = true;
+
+    // Build (or load) a single global head graph (KDT/RNG over ALL H1 heads,
+    // local id == hid) for efficient one-entry unfilter navigation. The slim store
+    // discards the global head graph (only U_extra persisted; when U_extra==0 the
+    // root is a 1-sample dummy), forcing tag-less queries onto the per-bundle
+    // multi-seed + cross-edge walk which is far slower than a flat scan at matched
+    // recall (measured: per-bundle plateaus ~0.964 @ 2.5qps to reach scan recall;
+    // the global graph reaches 0.966 @ 412qps, and matches old recall at 2x QPS).
+    // We reconstruct it from the per-hid bundle vector pointers (raw bundle distance
+    // space, already resolved above) and persist it next to the head index so the
+    // ~minutes-long graph build happens only once.
+    // Default ON for slim indexes; SPTAG_GLOBAL_HEAD_GRAPH=0 disables (falls back to
+    // the per-bundle cross-edge walk).
+    static const bool s_disableGlobalHeadGraph = []() {
+        const char* v = std::getenv("SPTAG_GLOBAL_HEAD_GRAPH");
+        return (v && v[0] == '0');
+    }();
+    if (!s_disableGlobalHeadGraph && h1Split_ > 0) {
+        const std::string gDir = headDir + FolderSep + "global_head";
+        // Try to load a previously-persisted global head graph first.
+        std::shared_ptr<VectorIndex> g;
+        if (VectorIndex::LoadIndex(gDir, g) == ErrorCode::Success && g != nullptr
+            && g->GetNumSamples() == h1Split_) {
+            g->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+            m_globalHeadGraph = g;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "Global head graph loaded from %s: %d heads.\n", gDir.c_str(), static_cast<int>(h1Split_));
+        } else {
+            const DimensionType gdim = static_cast<DimensionType>(m_options.m_dim);
+            ByteArray gbytes = ByteArray::Alloc(static_cast<size_t>(h1Split_) * gdim * sizeof(T));
+            T* gdst = reinterpret_cast<T*>(gbytes.Data());
+            SizeType missing = 0;
+            for (SizeType hid = 0; hid < h1Split_; ++hid) {
+                const void* sv = (hid < static_cast<SizeType>(m_metaOnlyHeadVectorPtrs.size()))
+                                     ? m_metaOnlyHeadVectorPtrs[static_cast<size_t>(hid)] : nullptr;
+                if (sv == nullptr) {
+                    std::memset(gdst + static_cast<size_t>(hid) * gdim, 0, gdim * sizeof(T));
+                    ++missing;
+                } else {
+                    std::memcpy(gdst + static_cast<size_t>(hid) * gdim, sv, gdim * sizeof(T));
+                }
+            }
+            auto gvset = std::make_shared<BasicVectorSet>(gbytes, GetEnumValueType<T>(), gdim, h1Split_);
+            g = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, GetEnumValueType<T>());
+            if (g != nullptr) {
+                g->SetParameter("DistCalcMethod",
+                    SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+                for (const auto& kv : m_headParameters) g->SetParameter(kv.first.c_str(), kv.second.c_str());
+                // p_normalized=false: bundle-resolved vectors are not guaranteed
+                // normalized; cosine BuildIndex must normalize them (idempotent if
+                // already normalized). Passing true here corrupts cross-vector
+                // cosine distances and tanks recall to ~0.
+                if (g->BuildIndex(gvset, nullptr, false, /*p_normalized*/false, /*p_shareOwnership*/false) == ErrorCode::Success) {
+                    g->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+                    m_globalHeadGraph = g;
+                    if (g->SaveIndex(gDir) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "Global head graph: failed to persist to %s (will rebuild next load).\n", gDir.c_str());
+                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "Global head graph built+saved: %d heads (missing=%d) -> %s\n",
+                        static_cast<int>(h1Split_), static_cast<int>(missing), gDir.c_str());
+                } else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                        "Global head graph build failed; unfilter falls back to per-bundle walk.\n");
+                }
+            }
+        }
+    }
+
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
         "Dual-pool slim head store enabled: total=%d H1Split=%d (U_extra from root, H1 from bundles).\n",
         static_cast<int>(total), static_cast<int>(h1Split_));
@@ -1367,6 +1456,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const int numQueryTags = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->NumQueryTags()
         : 0;
+    const SPTAG::Cache::DNFPredicate* queryDNF = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->DNF()
+        : nullptr;
     const float filterSelectivity = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->m_filterSelectivity
         : 1.0f;
@@ -1390,6 +1482,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
         workSpace->m_queryTags = queryTags;
         workSpace->m_numQueryTags = numQueryTags;
+        workSpace->m_dnf = queryDNF;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
         workSpace->m_postingFilter = nullptr;  // no PS needed, we know exact postings
@@ -1501,10 +1594,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const bool adaptiveFilteredNprobeEnabled = m_options.m_enableAdaptiveFilteredNprobe;
 
     std::vector<int> candidateNodes;
-    if (!searchHeadBundleNodes.empty() &&
-        m_headBundleNodes.size() > 1 &&
-        searchHeadBundleNodes.size() < m_headBundleNodes.size())
+    if (!searchHeadBundleNodes.empty() && !m_headBundleNodes.empty())
     {
+        // Routed (filtered) queries restrict navigation to the bundle nodes
+        // their tags map to. Single-bundle indexes (size==1) route to node 0
+        // and must be handled here too — the previous `size > 1` guard left
+        // them with an empty candidate set (no head search ran). When the
+        // routed set covers all nodes the result is identical to the
+        // unfilter all-nodes branch below.
         candidateNodes.reserve(searchHeadBundleNodes.size());
         for (int nodeId : searchHeadBundleNodes)
         {
@@ -1518,11 +1615,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             candidateNodes.push_back(nodeId);
         }
     }
-    else if (searchHeadBundleNodes.empty() && m_headBundleNodes.size() > 1)
+    else if (searchHeadBundleNodes.empty() && !m_headBundleNodes.empty())
     {
         // v5: unfilter (no tag scope) always routes through cross-edge unified
         // traversal across all per-bundle subgraphs. The global m_index is no
-        // longer used for navigation in any code path.
+        // longer used for navigation in any code path. A single-bundle index
+        // (size==1) is also handled here so its sole node is searched instead
+        // of falling through to the (metadata-only-disabled) global fallback.
         candidateNodes.reserve(m_headBundleNodes.size());
         for (size_t i = 0; i < m_headBundleNodes.size(); ++i) {
             const auto& bn = m_headBundleNodes[i];
@@ -1678,6 +1777,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
     }
 
+    // SPTAG_MAX_NPROBE ceiling: clamp postingTarget to bound the search
+    // workspace memory high-water mark. Applied after all estimation so it
+    // never raises postingTarget, only lowers it.
+    {
+        int maxNprobe = GetMaxNprobeCap();
+        if (maxNprobe > 0 && postingTarget > maxNprobe) {
+            postingTarget = maxNprobe;
+        }
+    }
+
     if (m_options.m_logAdaptiveNprobe && adaptiveFilteredNprobeEnabled) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "AdaptiveNprobe: sel=%.4g topK=%d recallTarget=%.3g coverageExp=%.3g "
@@ -1710,7 +1819,36 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     g_pqGraphMs = 0.0;
     auto _phT0 = s_phaseTime ? std::chrono::high_resolution_clock::now()
                              : std::chrono::high_resolution_clock::time_point{};
-    if (!candidateNodes.empty())
+
+    // Unfilter (tag-less) fast path: navigate the single global head graph from one
+    // entry point (classic greedy SPANN head search) instead of the per-bundle
+    // multi-seed + cross-edge stitched walk. The global graph's local id == head hid,
+    // so results feed the downstream posting scan unchanged. Filtered queries still
+    // use the bundle/cross path (they need per-bundle tag routing).
+    const bool unfilterGlobal = (m_globalHeadGraph != nullptr) && (numQueryTags == 0);
+    if (unfilterGlobal)
+    {
+        p_queryResults->Reset();
+        COMMON::QueryResultSet<T> headResults((const T*)p_query.GetTarget(), graphResultNum);
+        if ((ret = m_globalHeadGraph->SearchIndex(headResults)) == ErrorCode::Success)
+        {
+            for (int i = 0; i < headResults.GetResultNum(); ++i)
+            {
+                auto* r = headResults.GetResult(i);
+                if (r == nullptr || r->VID < 0) continue;
+                p_queryResults->AddPoint(r->VID, r->Dist);
+            }
+            p_queryResults->SortResult();
+            p_queryResults->SetScanned(headResults.GetScanned());
+            usedHeadBundleGraphSearch = true;
+        }
+        else
+        {
+            p_queryResults->Reset();
+        }
+    }
+
+    if (!usedHeadBundleGraphSearch && !candidateNodes.empty())
     {
         bool canUseHeadBundle = true;
         for (int nodeId : candidateNodes)
@@ -1869,6 +2007,8 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     auto _phT1 = s_phaseTime ? std::chrono::high_resolution_clock::now()
                              : std::chrono::high_resolution_clock::time_point{};
 
+    SearchStats _phExtraStats;
+    SearchStats* _phExtraStatsPtr = s_phaseTime ? &_phExtraStats : nullptr;
     if (m_extraSearcher != nullptr)
     {
         auto workSpace = m_workSpaceFactory->GetWorkSpace();
@@ -1882,8 +2022,17 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             m_extraSearcher->InitWorkSpace(workSpace.get(), true);
         }
 
-        // If adaptive nprobe > base, expand workspace buffers
-        if (postingTarget > nprobeBase) {
+        // Grow the pooled workspace's page-buffer / disk-request arrays to hold
+        // postingTarget postings. InitWorkSpace(.,true) above reset them to only
+        // m_searchInternalResultNum entries, so any postingTarget beyond that
+        // must expand here — otherwise the posting scan below indexes past the
+        // end of m_pageBuffers/m_diskRequests, truncating reads and collapsing
+        // recall. The prior guard compared against nprobeBase
+        // (=max(searchInternalResultNum, topk)), which left postingTarget in
+        // (searchInternalResultNum, topk] under-sized — the k=100 dead-band.
+        // Clear() only grows (never shrinks), so this is a no-op when already
+        // large enough.
+        if (postingTarget > m_options.m_searchInternalResultNum) {
             int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
                            + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
             workSpace->Clear(postingTarget, maxPages, true, m_options.m_enableDataCompression);
@@ -1894,6 +2043,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // Propagate inline tag filter (for per-vector exact tag check in posting scan)
         workSpace->m_queryTags = queryTags;
         workSpace->m_numQueryTags = numQueryTags;
+        workSpace->m_dnf = queryDNF;
         workSpace->m_deduper.clear();
         workSpace->m_postingIDs.clear();
         workSpace->m_postingProbeStats.Reset();
@@ -2016,7 +2166,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 fflush(stderr);
             }
         }
-        ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, nullptr);
+        ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, _phExtraStatsPtr);
         SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
             workSpace->m_postingProbeStats.m_readPostings,
             workSpace->m_postingProbeStats.m_matchedPostings,
@@ -2035,9 +2185,12 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         double postMs  = std::chrono::duration<double, std::milli>(_phT2 - _phT1).count();
         uint32_t firstTag = (queryTags != nullptr && numQueryTags > 0) ? queryTags[0] : 0u;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "PhaseTime: tag=%u nprobe=%d bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f total=%.3f\n",
+            "PhaseTime: tag=%u nprobe=%d bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f io=%.3f scan=%.3f postOther=%.3f total=%.3f\n",
             firstTag, postingTarget, g_bktSeedMs, g_pqGraphMs,
-            graphTotalMs - g_bktSeedMs - g_pqGraphMs, postMs, graphTotalMs + postMs);
+            graphTotalMs - g_bktSeedMs - g_pqGraphMs, postMs,
+            _phExtraStats.m_diskReadLatency, _phExtraStats.m_compLatency,
+            postMs - _phExtraStats.m_diskReadLatency - _phExtraStats.m_compLatency,
+            graphTotalMs + postMs);
     }
 
     if (p_queryResults != (COMMON::QueryResultSet<T> *)&p_query)
@@ -2646,7 +2799,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                                            vectorset->Count() + 1, (InternalDataType *)vectorset->GetData());
 
     // Allow runtime override of m_selectType via env var (used by experimental
-    // selectType variants like PerTagBKTMerge that aren't surfaced in config yet).
+    // selectType variants like PerTagBKT that aren't surfaced in config yet).
     if (const char* selOverride = std::getenv("SPTAG_SELECT_TYPE_OVERRIDE"))
     {
         if (selOverride[0] != '\0' &&
@@ -2737,64 +2890,30 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             return false;
         }
     }
-    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "PerTagBKTMerge"))
+    else if (Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), "PerTagBKT"))
     {
-        // Boss-proposed scheme:
-        //   Phase 1 — partition vectors by tag value (e.g. team-level, 64 groups).
-        //             For each group: build a BKTree on that subset and run
-        //             SelectHeadDynamically with the head ratio bumped by an
-        //             oversample factor (default 3x). Concatenate all per-tag
-        //             heads into a single candidate set.
-        //   Phase 2 — greedy 3-way merge: each candidate looks for its k nearest
-        //             unmerged neighbours within (same tag) ∪ (top-K cross-tag
-        //             neighbours by tag centroid). Merge if pairwise distances
-        //             are within alpha * mean(1-NN spacing) and the implied
-        //             posting size cap is respected.
-        //   Phase 3 — for each merged group, elect the candidate closest to the
-        //             group geometric mean as the representative head. Singletons
-        //             survive as-is.
+        // Per-tag head selection (the deprecated cross-tag "merge" variants were
+        // removed 2026-06-11):
+        //   Partition vectors by a per-vector grouping tag (the routing key,
+        //   e.g. SIFT project / YFCC country). For each group build a BKTree on
+        //   that subset and run SelectHeadDynamically at the target head ratio.
+        //   The union of all per-tag heads is the final head set. No merge.
         // Inputs:
-        //   env SPTAG_PER_VECTOR_TAGS_FILE       : text file, one int per line
-        //                                          (length must equal data.R())
-        //   env SPTAG_PARTITION_OVERSAMPLE       : default 3.0
-        //   env SPTAG_MERGE_ALPHA                : default 0.2
-        //   env SPTAG_CROSS_TAG_NEIGHBORS        : default 3
-        //   env SPTAG_MERGE_GROUP_SIZE           : default 3
-        //
+        //   env SPTAG_PER_VECTOR_TAGS_FILE : text file, one int per line
+        //                                    (length must equal data.R())
+        //   env SPTAG_PERTAG_HEAD_RATIO    : target final head ratio (default 0.016)
         const char* tagsFile = std::getenv("SPTAG_PER_VECTOR_TAGS_FILE");
         if (tagsFile == nullptr)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                         "PerTagBKTMerge requires env SPTAG_PER_VECTOR_TAGS_FILE\n");
+                         "PerTagBKT requires env SPTAG_PER_VECTOR_TAGS_FILE\n");
             return false;
         }
-        // [REMOVED 2026-05-29] oversample factor: was used to inflate per-tag
-        // SelectHead target so that the 3-way merge would shrink back to
-        // finalRatio. It complicates fair A/B vs vanilla BKT. perTagTarget is
-        // now finalRatio directly; merge will produce ~finalRatio/group heads.
-        float mergeAlpha = 1.0f;
-        if (const char* e = std::getenv("SPTAG_MERGE_ALPHA"))
-            mergeAlpha = std::max(0.0f, static_cast<float>(std::atof(e)));
-        int crossTagNeighbors = 3;
-        if (const char* e = std::getenv("SPTAG_CROSS_TAG_NEIGHBORS"))
-            crossTagNeighbors = std::max(0, std::atoi(e));
-        int mergeGroupSize = 3;
-        if (const char* e = std::getenv("SPTAG_MERGE_GROUP_SIZE"))
-            mergeGroupSize = std::max(1, std::atoi(e));
-        // Target FINAL head ratio (after merge). Per-tag SelectHead aims at
-        // `oversample × finalRatio`. Defaults to 0.016 ≈ SIFT-1M tenant-0
-        // baseline. Override per dataset.
+        // Target final head ratio. Defaults to 0.016 ≈ SIFT-1M tenant-0
+        // baseline. Override per dataset via SPTAG_PERTAG_HEAD_RATIO.
         double finalRatio = 0.016;
         if (const char* e = std::getenv("SPTAG_PERTAG_HEAD_RATIO"))
             finalRatio = std::max(1e-5, std::atof(e));
-        // Cap on the sum of per-head catchments inside a merge group, expressed
-        // as a multiplier of the mean catchment. Default 1.2 ⇒ no group's
-        // resulting posting may exceed 1.2 × mergeGroupSize × meanCatchment
-        // (i.e. ~1.2× of the uniform "fair share" if the group fills up).
-        // Set to 0 (or a huge number) to disable the cap.
-        double sizeCapMultiplier = 1.2;
-        if (const char* e = std::getenv("SPTAG_PERTAG_SIZE_CAP_MULT"))
-            sizeCapMultiplier = std::max(0.0, std::atof(e));
 
         // ---- Read per-vector tag column (one int per line) ----
         std::vector<int> perVecTag(data.R(), -1);
@@ -2803,7 +2922,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             if (!fin.good())
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "PerTagBKTMerge failed to open %s\n", tagsFile);
+                             "PerTagBKT failed to open %s\n", tagsFile);
                 return false;
             }
             int v; int idx = 0;
@@ -2812,7 +2931,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             if (idx != data.R())
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "PerTagBKTMerge tag file has %d entries, expected %d\n",
+                             "PerTagBKT tag file has %d entries, expected %d\n",
                              idx, data.R());
                 return false;
             }
@@ -2824,11 +2943,9 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             if (perVecTag[i] >= 0)
                 tagGroups[perVecTag[i]].push_back(static_cast<SizeType>(i));
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge: %zu distinct tag values "
-                     "(alpha=%.3f, cross-tag-knn=%d, group=%d)\n",
-                     tagGroups.size(), mergeAlpha, crossTagNeighbors, mergeGroupSize);
+                     "PerTagBKT: %zu distinct tag values\n", tagGroups.size());
 
-        // ---- Phase 1: per-tag BKT + SelectHeadDynamically ----
+        // ---- Per-tag BKT + SelectHeadDynamically ----
         // Target ratio for SelectHeadDynamically per tag = finalRatio directly.
         const double perTagTarget = std::min(0.9, finalRatio);
         const auto savedRatio    = m_options.m_ratio;
@@ -2839,19 +2956,15 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         const auto savedSamples  = m_options.m_iSamples;
 
         std::vector<int> initialHeads;     // global VIDs
-        std::vector<int> initialHeadTag;   // tag value of each initial head
 
         for (auto& kv : tagGroups)
         {
-            int tagVal = kv.first;
             std::vector<SizeType>& subIdx = kv.second;
             int subSize = static_cast<int>(subIdx.size());
             if (subSize <= 1)
             {
-                if (subSize == 1) {
+                if (subSize == 1)
                     initialHeads.push_back(static_cast<int>(subIdx[0]));
-                    initialHeadTag.push_back(tagVal);
-                }
                 continue;
             }
 
@@ -2882,10 +2995,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                 subSelected.push_back(static_cast<int>(subIdx[0]));
 
             for (int h : subSelected)
-            {
                 initialHeads.push_back(h);
-                initialHeadTag.push_back(tagVal);
-            }
         }
 
         // restore options for downstream Build phases
@@ -2897,293 +3007,22 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         m_options.m_iSamples = savedSamples;
 
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge Phase 1: %zu initial heads "
+                     "PerTagBKT: %zu per-tag heads "
                      "(finalRatio=%.3f%%, perTagTarget=%.3f%%, achieved=%.3f%%)\n",
                      initialHeads.size(),
                      100.0 * finalRatio,
                      100.0 * perTagTarget,
                      100.0 * initialHeads.size() / data.R());
 
-        // ---- Phase 2 prep: tag centroids + per-tag head lists ----
-        const int dim = data.C();
-        std::map<int, std::vector<int>> tagToHeadIdx;  // tag -> indices into initialHeads[]
-        for (size_t i = 0; i < initialHeads.size(); ++i)
-            tagToHeadIdx[initialHeadTag[i]].push_back(static_cast<int>(i));
-
-        // Per-tag centroid in float (float regardless of InternalDataType)
-        std::map<int, std::vector<float>> tagCentroid;
-        for (auto& kv : tagGroups)
-        {
-            std::vector<float> c(dim, 0.0f);
-            for (SizeType vid : kv.second)
-            {
-                const InternalDataType* p = data[vid];
-                for (int d = 0; d < dim; ++d) c[d] += static_cast<float>(p[d]);
-            }
-            float inv = 1.0f / std::max<size_t>(1, kv.second.size());
-            for (int d = 0; d < dim; ++d) c[d] *= inv;
-            tagCentroid[kv.first] = std::move(c);
-        }
-        // For each tag, list its top-K nearest other tags by centroid L2
-        std::map<int, std::vector<int>> tagNearest;
-        {
-            std::vector<int> tagList;
-            tagList.reserve(tagCentroid.size());
-            for (auto& kv : tagCentroid) tagList.push_back(kv.first);
-            for (int t : tagList)
-            {
-                std::vector<std::pair<float, int>> dlist;
-                dlist.reserve(tagList.size());
-                const auto& ct = tagCentroid[t];
-                for (int u : tagList)
-                {
-                    if (u == t) continue;
-                    const auto& cu = tagCentroid[u];
-                    float d = 0;
-                    for (int k = 0; k < dim; ++k) {
-                        float diff = ct[k] - cu[k];
-                        d += diff * diff;
-                    }
-                    dlist.emplace_back(d, u);
-                }
-                int k = std::min<int>(crossTagNeighbors, static_cast<int>(dlist.size()));
-                std::partial_sort(dlist.begin(), dlist.begin() + k, dlist.end());
-                std::vector<int> nb;
-                nb.reserve(k);
-                for (int i = 0; i < k; ++i) nb.push_back(dlist[i].second);
-                tagNearest[t] = std::move(nb);
-            }
-        }
-
-        auto headDist = [&](int hi, int hj) -> float {
-            const InternalDataType* a = data[initialHeads[hi]];
-            const InternalDataType* b = data[initialHeads[hj]];
-            float d = 0;
-            for (int k = 0; k < dim; ++k) {
-                float diff = static_cast<float>(a[k]) - static_cast<float>(b[k]);
-                d += diff * diff;
-            }
-            return d;  // squared L2, fine for comparisons
-        };
-
-        // ---- Compute mean 1-NN distance among initialHeads (sampled) ----
-        // For each sample head, scan its candidate set (same tag + nearest tags)
-        // and find the min distance to any other head. Mean of these = baseline.
-        float meanNN1 = 0.0f;
-        {
-            std::mt19937 rg(12345);
-            int n = static_cast<int>(initialHeads.size());
-            int sampleCount = std::min(n, 4096);
-            std::vector<int> samp(n);
-            for (int i = 0; i < n; ++i) samp[i] = i;
-            std::shuffle(samp.begin(), samp.end(), rg);
-            samp.resize(sampleCount);
-            double sum = 0;
-            int cnt = 0;
-            for (int hi : samp)
-            {
-                int t = initialHeadTag[hi];
-                std::vector<int> candTags = { t };
-                for (int u : tagNearest[t]) candTags.push_back(u);
-                float best = std::numeric_limits<float>::infinity();
-                for (int ct : candTags) {
-                    for (int hj : tagToHeadIdx[ct]) {
-                        if (hj == hi) continue;
-                        float d = headDist(hi, hj);
-                        if (d < best) best = d;
-                    }
-                }
-                if (std::isfinite(best)) {
-                    sum += std::sqrt(best);
-                    ++cnt;
-                }
-            }
-            meanNN1 = (cnt > 0) ? static_cast<float>(sum / cnt) : 1.0f;
-        }
-        const float mergeThresholdSq = (mergeAlpha * meanNN1) * (mergeAlpha * meanNN1);
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge Phase 2: meanNN1=%.4f, threshold=%.4f (alpha=%.3f, sq=%.4f)\n",
-                     meanNN1, mergeAlpha * meanNN1, mergeAlpha, mergeThresholdSq);
-
-        // ---- Estimate per-head catchment (# base vecs whose nearest head is i) ----
-        // Brute force within each tag partition: vecs in tag T snap to nearest
-        // head in {heads(T) ∪ heads(tagNearest[T])}. This is identical to the
-        // candidate set used during query routing and is what determines the
-        // post-merge posting size.
-        std::vector<int> catchment(initialHeads.size(), 0);
-        {
-            auto vecHeadDistSq = [&](SizeType vid, int hidx) -> float {
-                const InternalDataType* a = data[vid];
-                const InternalDataType* b = data[initialHeads[hidx]];
-                float d = 0;
-                for (int k = 0; k < dim; ++k) {
-                    float diff = static_cast<float>(a[k]) - static_cast<float>(b[k]);
-                    d += diff * diff;
-                }
-                return d;
-            };
-            std::vector<int> tagKeys;
-            tagKeys.reserve(tagGroups.size());
-            for (auto& kv : tagGroups) tagKeys.push_back(kv.first);
-
-            const int numThreads = std::max(1, m_options.m_iSSDNumberOfThreads);
-            std::vector<std::vector<int>> threadCatch(numThreads, std::vector<int>(initialHeads.size(), 0));
-            std::atomic<size_t> nextTag(0);
-            std::vector<std::thread> workers;
-            workers.reserve(numThreads);
-            for (int tid = 0; tid < numThreads; ++tid) {
-                workers.emplace_back([&, tid]() {
-                    auto& localCatch = threadCatch[tid];
-                    while (true) {
-                        size_t idx = nextTag.fetch_add(1, std::memory_order_relaxed);
-                        if (idx >= tagKeys.size()) return;
-                        int tagVal = tagKeys[idx];
-                        auto kvIt = tagGroups.find(tagVal);
-                        if (kvIt == tagGroups.end()) continue;
-                        std::vector<int> candHeads;
-                        auto it = tagToHeadIdx.find(tagVal);
-                        if (it != tagToHeadIdx.end())
-                            candHeads.insert(candHeads.end(), it->second.begin(), it->second.end());
-                        auto itN = tagNearest.find(tagVal);
-                        if (itN != tagNearest.end()) {
-                            for (int u : itN->second) {
-                                auto itu = tagToHeadIdx.find(u);
-                                if (itu != tagToHeadIdx.end())
-                                    candHeads.insert(candHeads.end(), itu->second.begin(), itu->second.end());
-                            }
-                        }
-                        if (candHeads.empty()) continue;
-                        for (SizeType vid : kvIt->second) {
-                            float best = std::numeric_limits<float>::infinity();
-                            int bestH = -1;
-                            for (int hidx : candHeads) {
-                                float d = vecHeadDistSq(vid, hidx);
-                                if (d < best) { best = d; bestH = hidx; }
-                            }
-                            if (bestH >= 0) {
-                                ++localCatch[bestH];
-                            }
-                        }
-                    }
-                });
-            }
-            for (auto& t : workers) t.join();
-            for (int tid = 0; tid < numThreads; ++tid) {
-                const auto& lc = threadCatch[tid];
-                for (size_t i = 0; i < catchment.size(); ++i) catchment[i] += lc[i];
-            }
-            double sum = 0; int nonzero = 0; int mx = 0;
-            for (int c : catchment) { sum += c; if (c > 0) ++nonzero; if (c > mx) mx = c; }
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                         "PerTagBKTMerge catchment: total=%.0f, heads=%zu, mean=%.2f, nonzero=%d, max=%d\n",
-                         sum, initialHeads.size(),
-                         sum / std::max<size_t>(1, initialHeads.size()), nonzero, mx);
-        }
-        const double meanCatchment =
-            static_cast<double>(data.R()) / std::max<size_t>(1, initialHeads.size());
-        // Per-group catchment-sum cap. If sizeCapMultiplier == 0, treat as disabled (∞).
-        const double groupCatchmentCap = (sizeCapMultiplier > 0)
-            ? sizeCapMultiplier * mergeGroupSize * meanCatchment
-            : std::numeric_limits<double>::infinity();
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge merge cap: meanCatchment=%.2f, groupCap=%.2f (mult=%.2f × groupSize=%d)\n",
-                     meanCatchment, groupCatchmentCap, sizeCapMultiplier, mergeGroupSize);
-
-        // ---- Greedy K-way merge ----
-        int n = static_cast<int>(initialHeads.size());
-        std::vector<int> mergedGroup(n, -1);  // -1 = unmerged, else group ID
-        std::vector<std::vector<int>> groups; // each = head indices in initialHeads[]
-        std::vector<int> order(n);
-        for (int i = 0; i < n; ++i) order[i] = i;
-        std::mt19937 rg(54321);
-        std::shuffle(order.begin(), order.end(), rg);
-
-        size_t mergedHeadCount = 0;
-        size_t capBlocked = 0;
-        for (int hi : order)
-        {
-            if (mergedGroup[hi] != -1) continue;
-            int t = initialHeadTag[hi];
-
-            // Build candidate set: heads in same tag or nearest tags, within
-            // mergeThresholdSq distance, not already merged.
-            std::vector<int> candTags = { t };
-            for (int u : tagNearest[t]) candTags.push_back(u);
-            std::vector<std::pair<float, int>> cands;
-            for (int ct : candTags) {
-                for (int hj : tagToHeadIdx[ct]) {
-                    if (hj == hi || mergedGroup[hj] != -1) continue;
-                    float d = headDist(hi, hj);
-                    if (d <= mergeThresholdSq)
-                        cands.emplace_back(d, hj);
-                }
-            }
-            // Sort by distance ascending; pick nearest, but skip any that would
-            // push the group's catchment sum beyond groupCatchmentCap.
-            std::sort(cands.begin(), cands.end());
-            std::vector<int> picked = { hi };
-            double pickedCatchment = static_cast<double>(catchment[hi]);
-            for (auto& c : cands) {
-                if (static_cast<int>(picked.size()) >= mergeGroupSize) break;
-                double newSum = pickedCatchment + static_cast<double>(catchment[c.second]);
-                if (newSum > groupCatchmentCap) { ++capBlocked; continue; }
-                picked.push_back(c.second);
-                pickedCatchment = newSum;
-            }
-            int gid = static_cast<int>(groups.size());
-            for (int idx : picked) mergedGroup[idx] = gid;
-            groups.push_back(picked);
-            if (picked.size() > 1) mergedHeadCount += picked.size();
-        }
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge merge done: %zu groups, %zu heads merged into groups, %zu candidates blocked by cap\n",
-                     groups.size(), mergedHeadCount, capBlocked);
-
-        // ---- Phase 3: re-elect representative head per group ----
-        std::vector<int> finalHeads;
-        finalHeads.reserve(groups.size());
-        for (auto& g : groups)
-        {
-            if (g.size() == 1) {
-                finalHeads.push_back(initialHeads[g[0]]);
-                continue;
-            }
-            // geometric mean (float) of group members
-            std::vector<float> mean(dim, 0.0f);
-            for (int idx : g) {
-                const InternalDataType* p = data[initialHeads[idx]];
-                for (int d = 0; d < dim; ++d) mean[d] += static_cast<float>(p[d]);
-            }
-            float inv = 1.0f / static_cast<float>(g.size());
-            for (int d = 0; d < dim; ++d) mean[d] *= inv;
-            // pick member nearest to mean
-            int best = g[0];
-            float bestD = std::numeric_limits<float>::infinity();
-            for (int idx : g) {
-                const InternalDataType* p = data[initialHeads[idx]];
-                float d = 0;
-                for (int k = 0; k < dim; ++k) {
-                    float diff = mean[k] - static_cast<float>(p[k]);
-                    d += diff * diff;
-                }
-                if (d < bestD) { bestD = d; best = idx; }
-            }
-            finalHeads.push_back(initialHeads[best]);
-        }
-
-        // dedup + sort
-        std::sort(finalHeads.begin(), finalHeads.end());
-        finalHeads.erase(std::unique(finalHeads.begin(), finalHeads.end()), finalHeads.end());
-        selected.swap(finalHeads);
-
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "PerTagBKTMerge Phase 3: %zu groups -> %zu final heads "
-                     "(%.3f%% of data, merged_in_groups=%zu)\n",
-                     groups.size(), selected.size(),
-                     100.0 * selected.size() / data.R(), mergedHeadCount);
+        // [merge path removed 2026-06-11] No cross-tag merge: the per-tag
+        // heads ARE the final head set. Dedup + sort for downstream phases.
+        std::sort(initialHeads.begin(), initialHeads.end());
+        initialHeads.erase(std::unique(initialHeads.begin(), initialHeads.end()),
+                           initialHeads.end());
+        selected.swap(initialHeads);
 
         if (selected.empty()) {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PerTagBKTMerge produced no heads\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "PerTagBKT produced no heads\n");
             return false;
         }
     }
@@ -3276,10 +3115,51 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                     std::round(extraRatio * static_cast<double>(n_h1)));
                 if (n_extras > nonHeads.size()) n_extras = nonHeads.size();
 
-                std::mt19937 rng(12345);
-                std::shuffle(nonHeads.begin(), nonHeads.end(), rng);
-                nonHeads.resize(n_extras);
-                std::sort(nonHeads.begin(), nonHeads.end());
+                // Extra step (env-gated): if SPTAG_UEXTRA_ID_FILE points to a binary
+                // file (int32 count, then int32[count] tenant-local VIDs, produced by
+                // Tools/benchmarks/select_uextra_rng.py via RNG dominate-count), use
+                // that explicit U_extra set. Otherwise keep the original random pick.
+                // This does not alter the default build flow.
+                bool uxLoaded = false;
+                if (const char* uxFile = std::getenv("SPTAG_UEXTRA_ID_FILE")) {
+                    if (*uxFile) {
+                        std::ifstream uf(uxFile, std::ios::binary);
+                        if (uf) {
+                            std::int32_t cnt = 0;
+                            uf.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
+                            std::vector<std::int32_t> tmp;
+                            if (cnt > 0) {
+                                tmp.resize(static_cast<size_t>(cnt));
+                                uf.read(reinterpret_cast<char*>(tmp.data()),
+                                        static_cast<std::streamsize>(cnt) * sizeof(std::int32_t));
+                            }
+                            std::vector<int> picked;
+                            picked.reserve(tmp.size());
+                            for (std::int32_t v : tmp)
+                                if (v >= 0 && v < data.R() && !h1set.count(v))
+                                    picked.push_back(static_cast<int>(v));
+                            std::sort(picked.begin(), picked.end());
+                            picked.erase(std::unique(picked.begin(), picked.end()), picked.end());
+                            nonHeads.swap(picked);
+                            n_extras = nonHeads.size();
+                            uxLoaded = true;
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                "DualPoolAugment: loaded %zu U_extra VIDs from %s (RNG-selected)\n",
+                                n_extras, uxFile);
+                        } else {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                "DualPoolAugment: cannot open SPTAG_UEXTRA_ID_FILE=%s; "
+                                "falling back to random selection\n", uxFile);
+                        }
+                    }
+                }
+
+                if (!uxLoaded) {
+                    std::mt19937 rng(12345);
+                    std::shuffle(nonHeads.begin(), nonHeads.end(), rng);
+                    nonHeads.resize(n_extras);
+                    std::sort(nonHeads.begin(), nonHeads.end());
+                }
 
                 selected.insert(selected.end(), nonHeads.begin(), nonHeads.end());
 

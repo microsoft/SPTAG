@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build a tenant-0 SPANN dual-pool index (PerTagBKTMerge head selection).
+"""Build a tenant-0 SPANN dual-pool index (PerTagBKT head selection).
 
 Reads the multi-tenant SIFT data produced by ``generate_tenant_tag_scenario.py``
 (tenant ids + 4-level tags), restricts to one tenant, and builds a SPANN index
-whose head selection uses ``PerTagBKTMerge`` with ``--group-target`` bundle
+whose head selection uses ``PerTagBKT`` with ``--group-target`` bundle
 subgraphs. Cross-edges between bundles are added afterwards by the
 ``augmentheadgraph`` binary (run separately).
 
@@ -46,15 +46,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scenario-file", default=DEFAULT_SCENARIO)
     p.add_argument("--index-dir", required=True)
     p.add_argument("--group-tag-file", default="/tmp/tenant0_group_tags.txt",
-                   help="Per-vector grouping signal consumed by PerTagBKTMerge.")
+                   help="Per-vector grouping signal consumed by PerTagBKT.")
     p.add_argument("--target-tenant", type=int, default=0)
-    # PerTagBKTMerge knobs
-    p.add_argument("--oversample", type=float, default=3.0)
-    p.add_argument("--merge-alpha", type=float, default=1.0)
+    # PerTagBKT knobs
     p.add_argument("--final-ratio", type=float, default=0.139)
-    p.add_argument("--cross-tag-knn", type=int, default=3)
-    p.add_argument("--merge-group", type=int, default=1)
-    p.add_argument("--size-cap-mult", type=float, default=1.2)
     p.add_argument("--group-target", type=int, default=4,
                    help="Number of bundle subgraphs (0/1 => single per-tag graph).")
     p.add_argument("--tail-replica", type=int, default=0,
@@ -153,13 +148,8 @@ def main() -> None:
     env_settings = {
         "SPTAG_HEAD_SELECT_DEBUG":    "1",
         "SPTAG_PER_VECTOR_TAGS_FILE": args.group_tag_file,
-        "SPTAG_PARTITION_OVERSAMPLE": str(args.oversample),
-        "SPTAG_MERGE_ALPHA":          str(args.merge_alpha),
-        "SPTAG_CROSS_TAG_NEIGHBORS":  str(args.cross_tag_knn),
-        "SPTAG_MERGE_GROUP_SIZE":     str(args.merge_group),
         "SPTAG_PERTAG_HEAD_RATIO":    str(args.final_ratio),
-        "SPTAG_PERTAG_SIZE_CAP_MULT": str(args.size_cap_mult),
-        "SPTAG_SELECT_TYPE_OVERRIDE": "PerTagBKTMerge",
+        "SPTAG_SELECT_TYPE_OVERRIDE": "PerTagBKT",
     }
     for k, v in env_settings.items():
         os.environ[k] = v
@@ -180,9 +170,12 @@ def main() -> None:
         if stale.is_dir():
             shutil.rmtree(stale)
 
-    print(f"[4] BuildFromDataWithTags (ratio={args.final_ratio}, group-target={args.group_target}, "
-          f"merge-group={args.merge_group})")
+    print(f"[4] BuildFromDataWithTags (ratio={args.final_ratio}, group-target={args.group_target})")
     mgr = SPTAG.CreateTenantIndexManager(dim, "SPANN", "Float")
+    storage_backend = os.environ.get("SPTAG_STORAGE_BACKEND", "FILEIO")
+    if storage_backend != "FILEIO":
+        mgr.SetStorageBackend(storage_backend)
+        print(f"    StorageBackend={storage_backend}")
     t0 = time.perf_counter()
     ok = mgr.BuildFromDataWithTags(
         sub_vectors.tobytes(), metadata, n_t0,

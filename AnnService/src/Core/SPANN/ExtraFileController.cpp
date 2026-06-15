@@ -531,6 +531,113 @@ bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType *> &p_dat
     return true;
 }
 
+bool FileIO::BlockController::ReadBlocks(const std::vector<AddressType *> &p_data,
+                                         std::vector<Helper::PageBuffer<std::uint8_t>> &p_values,
+                                         const std::vector<const std::vector<std::uint8_t>*> &p_pageSelect,
+                                         const std::chrono::microseconds &timeout,
+                                         std::vector<Helper::AsyncReadRequest> *reqs)
+{
+    m_batchReadTimes++;
+    std::uint32_t reqcount = 0;
+    std::uint32_t emptycount = 0;
+    for (size_t i = 0; i < p_data.size(); i++)
+    {
+        AddressType *p_data_i = p_data[i];
+        int numPages = (p_values[i].GetPageSize() >> PageSizeEx);
+
+        if (p_data_i == nullptr || (uintptr_t)p_data_i == 0xffffffffffffffff)
+        {
+            if (p_data_i != nullptr) p_values[i].SetAvailableSize(0);
+            for (std::uint32_t r = 0; r < (std::uint32_t)numPages; r++)
+            {
+                Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+                curr.m_readSize = 0;
+                reqcount++;
+                emptycount++;
+            }
+            continue;
+        }
+
+        std::size_t postingSize = (std::size_t)p_data_i[0];
+        // Keep full available size so record offsets in the buffer stay aligned;
+        // unselected pages are simply not filled (the scan loop skips them).
+        p_values[i].SetAvailableSize(postingSize);
+        const std::vector<std::uint8_t>* sel =
+            (i < p_pageSelect.size()) ? p_pageSelect[i] : nullptr;
+        const bool selectAll = (sel == nullptr || sel->empty());
+
+        AddressType currOffset = 0;
+        AddressType dataIdx = 1;
+        int pageIdx = 0;
+        while (currOffset < postingSize)
+        {
+            if ((int)dataIdx > numPages)
+            {
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "FileIO::BlockController::ReadBlocks(pagesel):  block (%lld) pos:%llu/%llu >= buffer page size (%d)\n",
+                    (long long)dataIdx - 1, (unsigned long long)currOffset,
+                    (unsigned long long)postingSize, numPages);
+                break;
+            }
+            if (reqcount >= reqs->size())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "FileIO::BlockController::ReadBlocks(pagesel):  req (%u) >= req array size (%u)\n",
+                             reqcount, (std::uint32_t)reqs->size());
+                return false;
+            }
+
+            bool readThis = selectAll ||
+                (pageIdx < (int)sel->size() && (*sel)[pageIdx] != 0);
+            Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+            if (readThis)
+            {
+                curr.m_readSize = (postingSize - currOffset) < PageSize ? (postingSize - currOffset) : PageSize;
+                curr.m_offset = p_data_i[dataIdx] * PageSize;
+            }
+            else
+            {
+                curr.m_readSize = 0;
+                emptycount++;
+            }
+            currOffset += PageSize;
+            dataIdx++;
+            pageIdx++;
+            reqcount++;
+        }
+
+        // Account for remaining (unread) blocks in this posting's pageBuffer slot.
+        while ((int)dataIdx - 1 < numPages)
+        {
+            if (reqcount >= reqs->size())
+            {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "FileIO::BlockController::ReadBlocks(pagesel):  req (%u) >= req array size (%u)\n",
+                             reqcount, (std::uint32_t)reqs->size());
+                return false;
+            }
+            Helper::AsyncReadRequest &curr = reqs->at(reqcount);
+            curr.m_readSize = 0;
+            dataIdx++;
+            reqcount++;
+            emptycount++;
+        }
+    }
+
+    std::uint32_t totalReads = m_fileHandle->BatchReadFile(reqs->data(), reqcount, timeout, m_batchSize);
+    read_submit_vec += reqcount - emptycount;
+    read_complete_vec += totalReads;
+    if (totalReads < reqcount - emptycount)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning, "FileIO::BlockController::ReadBlocks(pagesel): %u < %u\n",
+                     totalReads, reqcount - emptycount);
+        m_batchReadTimeouts++;
+        return false;
+    }
+    return true;
+}
+
 bool FileIO::BlockController::WriteBlocks(AddressType *p_data, int p_size, const std::string &p_value,
                                           const std::chrono::microseconds &timeout,
                                           std::vector<Helper::AsyncReadRequest> *reqs)
@@ -611,7 +718,7 @@ bool FileIO::BlockController::ShutDown()
         m_blockAddresses.try_pop(currBlockAddress);
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "FileIO::BlockController::Close file handler\n");
-    m_fileHandle->ShutDown();
+    if (m_fileHandle) m_fileHandle->ShutDown();
     return true;
 }
 

@@ -354,6 +354,16 @@ private:
     // path cannot know which level a single ACL tag belongs to.
     std::map<int, std::vector<uint32_t>> m_tenantTagLevelOffsets;
 
+    // Numeric attribute metadata per tenant: the first numeric tag-column index
+    // (numBaseCols) and the per-column quantization domain [lo,hi]. Used by the
+    // query path to build the quantized numeric pre-filter. Loaded from
+    // numeric_meta.bin; absent => no numeric columns.
+    struct NumericMeta {
+        int numBaseCols = 0;
+        std::vector<SPTAG::Cache::NumQuantParam> params;
+    };
+    std::map<int, NumericMeta> m_tenantNumericMeta;
+
     // Build-time pivot plan selected by the estimator.
     std::map<int, int> m_tenantPivotLevels;
     std::map<int, int> m_tenantPivotNodeCounts;

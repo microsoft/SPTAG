@@ -262,34 +262,65 @@ void VectorIndex::ClearHeadNodeMeta()
     m_headNodeGlobalVIDOffset = 0;
     m_headNodeBundleNodeIdOffset = 0;
     m_headNodeHeadOnlyOffset = 0;
+    m_headNodeNumQuantOffset = 0;
+    m_headNodeNumQuantCols = 0;
     m_headNodeMeta.clear();
 }
 
-void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples)
+void VectorIndex::InitializeHeadNodeMeta(SizeType p_numSamples, int p_numQuantCols)
 {
     ClearHeadNodeMeta();
     if (p_numSamples <= 0) return;
 
     // V3 layout per sample:
-    // | PostingBitmask | HierarchicalPostingMask own-tags | HierarchicalPostingMask posting-content | globalVID (4B) | bundleNodeId (2B) | headOnly (1B) |
-    // The own-tags mask is used by HeadNodeMatchesQuery (gating head centroids
-    // returned as top-K results), and the posting-content mask is used by the
-    // dense-path posting pre-filter.
+    // | PostingBitmask | HierarchicalOwnTags own-tags | HierarchicalPostingMask posting-content | globalVID (4B) | bundleNodeId (2B) | headOnly (1B) |
+    // V4 appends, after headOnly, a quantized numeric block of M*NUM_QUANT_WORDS
+    // uint64 (one 256-bit lane per numeric column). With M==0 the stride is
+    // byte-identical to V3, so V3 indexes load unchanged.
     m_headNodePSOffset = 0;
-    m_headNodeHierMaskOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(Cache::HierarchicalPostingMask));
-    m_headNodePostingHierMaskOffset = AlignUp(m_headNodeHierMaskOffset + sizeof(Cache::HierarchicalPostingMask), alignof(Cache::HierarchicalPostingMask));
-    m_headNodeGlobalVIDOffset = AlignUp(m_headNodePostingHierMaskOffset + sizeof(Cache::HierarchicalPostingMask), alignof(SizeType));
+    m_headNodeHierMaskOffset = AlignUp(m_headNodePSOffset + sizeof(Cache::PostingBitmask), alignof(Cache::HierarchicalOwnTags));
+    m_headNodePostingHierMaskOffset = AlignUp(m_headNodeHierMaskOffset + sizeof(Cache::HierarchicalOwnTags), alignof(Cache::HierarchicalPostingMask));
+    // Posting-content mask uses the runtime per-column width packing
+    // (HierPostingMaskBytes), not the type's compile-time sizeof, so narrow
+    // schemas shrink the per-head record. Width table must be set (build: env;
+    // load: V5 header) BEFORE this is called.
+    m_headNodeGlobalVIDOffset = AlignUp(m_headNodePostingHierMaskOffset + Cache::HierPostingMaskBytes(), alignof(SizeType));
     m_headNodeBundleNodeIdOffset = AlignUp(m_headNodeGlobalVIDOffset + sizeof(SizeType), alignof(int16_t));
     m_headNodeHeadOnlyOffset = AlignUp(m_headNodeBundleNodeIdOffset + sizeof(int16_t), alignof(std::uint8_t));
-    m_headNodeMetaStride = AlignUp(
-        m_headNodeHeadOnlyOffset + sizeof(std::uint8_t),
-        alignof(Cache::PostingBitmask));
+    m_headNodeNumQuantCols = p_numQuantCols > 0 ? p_numQuantCols : 0;
+    size_t afterHeadOnly = m_headNodeHeadOnlyOffset + sizeof(std::uint8_t);
+    if (m_headNodeNumQuantCols > 0) {
+        m_headNodeNumQuantOffset = AlignUp(afterHeadOnly, alignof(std::uint64_t));
+        afterHeadOnly = m_headNodeNumQuantOffset +
+            (size_t)m_headNodeNumQuantCols * Cache::NUM_QUANT_WORDS * sizeof(std::uint64_t);
+    } else {
+        m_headNodeNumQuantOffset = 0;
+    }
+    m_headNodeMetaStride = AlignUp(afterHeadOnly, alignof(Cache::PostingBitmask));
 
     m_headNodeMeta.assign(static_cast<size_t>(p_numSamples) * m_headNodeMetaStride, 0);
     for (SizeType sampleId = 0; sampleId < p_numSamples; ++sampleId) {
         SetHeadNodeGlobalVID(sampleId, MaxSize);
         SetHeadNodeBundleNodeId(sampleId, -1);
     }
+}
+
+std::uint64_t* VectorIndex::GetHeadNodeNumQuantMutable(SizeType p_sampleId)
+{
+    if (m_headNodeNumQuantCols <= 0 || m_headNodeMetaStride == 0) return nullptr;
+    size_t base = static_cast<size_t>(p_sampleId) * m_headNodeMetaStride + m_headNodeNumQuantOffset;
+    size_t bytes = (size_t)m_headNodeNumQuantCols * Cache::NUM_QUANT_WORDS * sizeof(std::uint64_t);
+    if (base + bytes > m_headNodeMeta.size()) return nullptr;
+    return reinterpret_cast<std::uint64_t*>(m_headNodeMeta.data() + base);
+}
+
+const std::uint64_t* VectorIndex::GetHeadNodeNumQuant(SizeType p_sampleId) const
+{
+    if (m_headNodeNumQuantCols <= 0 || m_headNodeMetaStride == 0) return nullptr;
+    size_t base = static_cast<size_t>(p_sampleId) * m_headNodeMetaStride + m_headNodeNumQuantOffset;
+    size_t bytes = (size_t)m_headNodeNumQuantCols * Cache::NUM_QUANT_WORDS * sizeof(std::uint64_t);
+    if (base + bytes > m_headNodeMeta.size()) return nullptr;
+    return reinterpret_cast<const std::uint64_t*>(m_headNodeMeta.data() + base);
 }
 
 SizeType VectorIndex::GetHeadNodeMetaSampleCount() const
@@ -347,25 +378,27 @@ bool VectorIndex::IsHeadNodeHeadOnly(SizeType p_sampleId) const
     return base != nullptr && base[m_headNodeHeadOnlyOffset] != 0;
 }
 
-void VectorIndex::SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask)
+void VectorIndex::SetHeadNodeHierMask(SizeType p_sampleId, const Cache::HierarchicalOwnTags& p_mask)
 {
     auto* base = HeadNodeMetaBase(this, p_sampleId);
     if (base == nullptr) return;
-    std::memcpy(base + m_headNodeHierMaskOffset, &p_mask, sizeof(Cache::HierarchicalPostingMask));
+    std::memcpy(base + m_headNodeHierMaskOffset, &p_mask, sizeof(Cache::HierarchicalOwnTags));
 }
 
-const Cache::HierarchicalPostingMask* VectorIndex::GetHeadNodeHierMask(SizeType p_sampleId) const
+const Cache::HierarchicalOwnTags* VectorIndex::GetHeadNodeHierMask(SizeType p_sampleId) const
 {
     const auto* base = HeadNodeMetaBase(this, p_sampleId);
     if (base == nullptr) return nullptr;
-    return reinterpret_cast<const Cache::HierarchicalPostingMask*>(base + m_headNodeHierMaskOffset);
+    return reinterpret_cast<const Cache::HierarchicalOwnTags*>(base + m_headNodeHierMaskOffset);
 }
 
 void VectorIndex::SetHeadNodePostingHierMask(SizeType p_sampleId, const Cache::HierarchicalPostingMask& p_mask)
 {
     auto* base = HeadNodeMetaBase(this, p_sampleId);
     if (base == nullptr) return;
-    std::memcpy(base + m_headNodePostingHierMaskOffset, &p_mask, sizeof(Cache::HierarchicalPostingMask));
+    // Copy only the bytes occupied by the current width packing (the mask's
+    // tail beyond HierPostingMaskBytes is unused and outside the per-head slot).
+    std::memcpy(base + m_headNodePostingHierMaskOffset, &p_mask, Cache::HierPostingMaskBytes());
 }
 
 const Cache::HierarchicalPostingMask* VectorIndex::GetHeadNodePostingHierMask(SizeType p_sampleId) const

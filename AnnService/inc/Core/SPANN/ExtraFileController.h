@@ -87,6 +87,10 @@ namespace SPTAG::SPANN {
             // filtered queries with one read.
             bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<Helper::PageBuffer<std::uint8_t>>& p_value, const std::vector<std::uint32_t>& maxBytesPerKey, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
 
+            // Page-selective: per-posting, read only pages whose selector byte is non-zero.
+            // A null/empty selector pointer for a key means read all pages for that key.
+            bool ReadBlocks(const std::vector<AddressType*>& p_data, std::vector<Helper::PageBuffer<std::uint8_t>>& p_value, const std::vector<const std::vector<std::uint8_t>*>& p_pageSelect, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
+
             bool WriteBlocks(AddressType* p_data, int p_size, const std::string& p_value, const std::chrono::microseconds& timeout, std::vector<Helper::AsyncReadRequest>* reqs);
 
             bool IOStatistics();
@@ -535,6 +539,25 @@ namespace SPTAG::SPANN {
             m_shutdownCalled = true;
 
             m_pShardedLRUCache = nullptr;
+
+            // OPQ-only static index: search resolves entirely via the OPQ sidecars
+            // (resident tag->vids + codes, mmap slim postings, vid->vector store).
+            // The main posting store (ssdmapping / ssdmapping_postings[_blockpool])
+            // is never read, so skip opening it -> those files can be dropped,
+            // shrinking the index ~10x. (Read-only: no updates in this mode.)
+            static const bool s_opqOnly = []() {
+                const char* e = std::getenv("SPTAG_OPQ_ONLY");
+                return e && e[0] == '1';
+            }();
+            if (s_opqOnly) {
+                m_pBlockMapping.Initialize(0, 1, 1024 * 1024, MaxSize);
+                m_disableCheckpoint = true;
+                m_shutdownCalled = false;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "FileIO: SPTAG_OPQ_ONLY=1 -> skipping main posting store (ssdmapping_postings); OPQ sidecars only\n");
+                return;
+            }
+
             int64_t capacity = static_cast<int64_t>(p_opt.m_cacheSize) << 30;
             if (capacity > 0) {
                 m_pShardedLRUCache = new ShardedLRUCache(p_opt.m_cacheShards, capacity, m_blockLimit, this);
@@ -761,6 +784,41 @@ namespace SPTAG::SPANN {
                 i++;
             }
             auto result = m_pBlockController.ReadBlocks(blocks, values, caps, timeout, reqs);
+            return result ? ErrorCode::Success : ErrorCode::Fail;
+        }
+
+        // Page-selective variant: per-posting, read only pages whose selector byte
+        // is non-zero. Empty selector for a key => read all pages for that key.
+        ErrorCode MultiGet(const std::vector<SizeType>& keys,
+            std::vector<Helper::PageBuffer<std::uint8_t>>& values,
+            const std::vector<std::vector<std::uint8_t>>& pageSelectPerKey,
+            const std::chrono::microseconds &timeout,
+            std::vector<Helper::AsyncReadRequest>* reqs) override {
+            std::vector<AddressType*> blocks;
+            std::vector<const std::vector<std::uint8_t>*> sels;
+            sels.reserve(keys.size());
+            static const std::vector<std::uint8_t> s_empty;
+            SizeType r;
+            int i = 0;
+            for (SizeType key : keys) {
+                r = m_pBlockMapping.R();
+                if (key < r) {
+                    if (m_pShardedLRUCache && m_pShardedLRUCache->get(key, values[i]))
+                    {
+                        blocks.push_back(nullptr);
+                        sels.push_back(&s_empty);
+                    } else {
+                        AddressType* addr = (AddressType*)(At(key));
+                        blocks.push_back(addr);
+                        sels.push_back(i < (int)pageSelectPerKey.size() ? &pageSelectPerKey[i] : &s_empty);
+                    }
+                }
+                else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Fail to read key:%d total key number:%d\n", key, r);
+                }
+                i++;
+            }
+            auto result = m_pBlockController.ReadBlocks(blocks, values, sels, timeout, reqs);
             return result ? ErrorCode::Success : ErrorCode::Fail;
         }
 

@@ -70,10 +70,22 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -mavx512dq -fPIC)
 endif()
 
+# Real (extended) RaBitQ store + estimator, isolated in its own AVX2/FMA unit so the
+# rest of SPTAG keeps default ISA flags (CPU here is AVX2-only; rabitqlib auto-selects
+# the AVX2 popcount path when AVX512 macros are undefined).
+add_library (RaBitQ2Lib STATIC
+    ${AnnService}/inc/Core/SPANN/RaBitQ2.h
+    ${AnnService}/src/RaBitQ/RaBitQ2.cpp
+    )
+target_include_directories(RaBitQ2Lib PRIVATE ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+    target_compile_options(RaBitQ2Lib PRIVATE -mavx2 -mfma -fPIC)
+endif()
+
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
+target_link_libraries (SPTAGLib DistanceUtils RaBitQ2Lib ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
+target_link_libraries (SPTAGLibStatic DistanceUtils RaBitQ2Lib ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(SPTAGLibStatic PRIVATE -fPIC)

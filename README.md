@@ -268,8 +268,8 @@ are selected via env vars and build-script arguments:
 | Mode | Head selection | Subgraphs | U_extra | Build command |
 | ---- | -------------- | --------- | ------- | ------------- |
 | **A. Vanilla** | `BKT` (global ratio) | 1 global | — | `build_tenant0_baseline.py --ratio R` |
-| **B. Dual-pool** | `PerTagBKTMerge` | `--group-target N` + cross-edges | — | `build_tenant0_pertag.py --final-ratio R --group-target N` |
-| **C. Dual-pool + U_extra** | `PerTagBKTMerge` | `N` + reverse H1→U_extra edges | `SPTAG_DUAL_POOL_AUGMENT=1` | Mode B + `SPTAG_DUAL_POOL_EXTRA_RATIO=0.10` |
+| **B. Dual-pool** | `PerTagBKT` | `--group-target N` + cross-edges | — | `build_tenant0_pertag.py --final-ratio R --group-target N` |
+| **C. Dual-pool + U_extra** | `PerTagBKT` | `N` + reverse H1→U_extra edges | `SPTAG_DUAL_POOL_AUGMENT=1` | Mode B + `SPTAG_DUAL_POOL_EXTRA_RATIO=0.10` |
 
 > Note: `--group-target 1` + no U_extra is **not** vanilla — head selection is still
 > per-tag. True vanilla also requires `selectType = BKT`.

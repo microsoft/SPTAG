@@ -306,6 +306,10 @@ namespace SPTAG {
             const uint32_t* m_queryTags = nullptr;
             int m_numQueryTags = 0;
 
+            // Optional DNF predicate. When set (non-null, non-empty), the posting
+            // scan uses exact DNF evaluation instead of the flat OR/IN m_queryTags.
+            const SPTAG::Cache::DNFPredicate* m_dnf = nullptr;
+
             std::function<void()> m_callback;
         };
 
@@ -333,6 +337,19 @@ namespace SPTAG {
                 std::shared_ptr<VectorIndex> p_index, const VectorIndex* p_spann) = 0;
 
             virtual ErrorCode SearchIndexWithoutParsing(ExtraWorkSpace* p_exWorkSpace) = 0;
+
+            // Exhaustive OPQ search over a single narrow tag's vids (load id -> ADC
+            // screen -> fetch survivors -> rerank). Returns false when unsupported or
+            // OPQ prefilter is off, so the caller can fall back.
+            virtual bool OPQTagPureSearch(QueryResult& /*p_queryResults*/, std::uint32_t /*tag*/) { return false; }
+
+            // Selectivity-routing helpers: number of (live + deleted) vids in a tag's
+            // exhaustive OPQ inverted list, and the tenant's total resident vector count.
+            // Return -1 when OPQ prefilter is off or the tag is unknown, so callers leave
+            // routing unchanged.
+            virtual std::int64_t GetOPQTagVidCount(std::uint32_t /*tag*/) { return -1; }
+            virtual std::int64_t GetOPQTotalVectors() { return -1; }
+            virtual bool GetRaBitQEnabled() { return false; }
 
             virtual ErrorCode SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults,
