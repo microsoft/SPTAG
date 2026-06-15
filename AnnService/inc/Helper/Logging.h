@@ -10,6 +10,7 @@
 #include <fstream>
 #include <atomic>
 #include <mutex>
+#include <ctime>
 
 #pragma warning(disable : 4996) // 'function': was declared deprecated
 #pragma warning(disable : 4018) // '<' : signed/unsigned mismatch
@@ -84,7 +85,8 @@ namespace SPTAG
             {
                 if (level < m_level) return;
 
-                if (level != LogLevel::LL_Empty) printf("[%d] ", (int)level);
+                std::time_t now = std::time(nullptr);
+                if (level != LogLevel::LL_Empty) printf("[%d] %s ", (int)level, std::ctime(&now));
 
                 va_list args;
                 va_start(args, format);
