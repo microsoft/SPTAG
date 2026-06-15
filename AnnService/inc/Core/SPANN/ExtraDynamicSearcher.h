@@ -630,6 +630,10 @@ namespace SPTAG::SPANN {
                     m_stat.m_splitLockSampleCount.fetch_add(1, std::memory_order_relaxed);
                 }
 
+                {
+                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
+                    m_splitList.unsafe_erase(headID);
+                }
                 int retry = 0;
              Retry:
                 if (!m_headIndex->ContainSample(headID, m_layer + 1)) return ErrorCode::Success;
@@ -719,10 +723,6 @@ namespace SPTAG::SPANN {
                     auto GCEnd = std::chrono::high_resolution_clock::now();
                     elapsedMSeconds = std::chrono::duration_cast<std::chrono::microseconds>(GCEnd - splitBegin).count();
                     m_stat.m_garbageCost += elapsedMSeconds;
-                    {
-                        std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                        m_splitList.unsafe_erase(headID);
-                    }
                     //SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "GC triggered: %lld, new length: %d\n", (std::int64_t)headID, index);
                     return ErrorCode::Success;
                 }
@@ -757,10 +757,6 @@ namespace SPTAG::SPANN {
                         return ret;
                     }
                     CheckCentroid(headID, newpostingList, "Split-one-cluster");
-                    {
-                        std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                        m_splitList.unsafe_erase(headID);
-                    }
                     return ErrorCode::Success;
                 }
 
@@ -825,10 +821,6 @@ namespace SPTAG::SPANN {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                                              "Split: new head VID %lld is being locked after %d retries. Skip merging and return split failed...\n",
                                              (std::int64_t)(newHeadVID), retry);
-                                {
-                                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                                    m_splitList.unsafe_erase(headID);
-                                }
                                 SplitAsync(headID, postingList.size() / m_vectorInfoSize);
                                 return ErrorCode::Success;
                             }
@@ -962,11 +954,6 @@ namespace SPTAG::SPANN {
                     }
                 }
 
-                {
-                    std::unique_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Info,"erase: %lld\n", (std::int64_t)headID);
-                    m_splitList.unsafe_erase(headID);
-                }
                 
                 for (int k = 0; k < 2; k++) {
                     if (args.counts[k] > m_postingSizeLimit) {
@@ -1583,22 +1570,6 @@ namespace SPTAG::SPANN {
 
                 ErrorCode ret;
                 if (!m_headIndex->ContainSample(headID, m_layer + 1)) {
-                    lock.unlock();
-                    goto checkDeleted;
-                }
-                {
-                    std::shared_lock<std::shared_timed_mutex> tmplock(m_splitListLock);
-                    auto it = m_splitList.find(headID);
-                    if (it != m_splitList.end()) {
-                        postingSize = it->second;
-                    }
-                }
-
-                if (postingSize + appendNum > (m_postingSizeLimit + m_bufferSizeLimit) && m_opt->m_storage == Storage::FILEIO) {
-                    //SPTAGLIB_LOG(Helper::LogLevel::LL_Debug, "After appending, the number of vectors in %lld exceeds the postingsize + buffersize (%d + %d)! Do split now...\n", (std::int64_t)headID, m_postingSizeLimit, m_bufferSizeLimit);
-                    ret = Split(p_exWorkSpace, headID, false);
-                    if (ret != ErrorCode::Success)
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Split %lld failed!\n", (std::int64_t)headID);
                     lock.unlock();
                     goto checkDeleted;
                 }
