@@ -588,49 +588,13 @@ namespace SPTAG::SPANN {
                         }
                     }
 
-                    // Mirror sender's version map for the records we're about
-                    // to persist so MergePostings + SearchIndex don't drop
-                    // them as "stale".
-                    {
-                        const uint8_t* basePtr = reinterpret_cast<const uint8_t*>(appendPosting.data());
-                        size_t totalRec = appendPosting.size() / m_vectorInfoSize;
-
-                        // Pre-build the candidate set and batch-read current
-                        // versions to avoid one TiKV Get per record.
-                        std::vector<size_t> candIdx;
-                        std::vector<SizeType> candVids;
-                        std::vector<uint8_t> candRecVers;
-                        candIdx.reserve(totalRec);
-                        candVids.reserve(totalRec);
-                        candRecVers.reserve(totalRec);
-                        for (size_t i = 0; i < totalRec; ++i) {
-                            const uint8_t* p = basePtr + i * m_vectorInfoSize;
-                            SizeType vid = *reinterpret_cast<const SizeType*>(p);
-                            uint8_t recVer = *(p + sizeof(SizeType));
-                            if (vid < 0) continue;
-                            if (recVer == 0xfe) continue;
-                            candIdx.push_back(i);
-                            candVids.push_back(vid);
-                            candRecVers.push_back(recVer);
-                        }
-                        std::vector<uint8_t> curVers;
-                        m_versionMap->BatchGetVersions(candVids, curVers);
-
-                        std::vector<SizeType> batchVids;
-                        std::vector<uint8_t> batchVers;
-                        batchVids.reserve(candVids.size());
-                        batchVers.reserve(candVids.size());
-                        for (size_t k = 0; k < candVids.size(); ++k) {
-                            uint8_t curVer = curVers[k];
-                            if (curVer == 0xfe) continue;
-                            if (curVer == candRecVers[k]) continue;
-                            batchVids.push_back(candVids[k]);
-                            batchVers.push_back(candRecVers[k]);
-                        }
-                        if (!batchVids.empty()) {
-                            m_versionMap->SetVersionBatch(batchVids, batchVers);
-                        }
-                    }
+                    // No receiver-side version-map mirror: the distributed
+                    // version map is a single shared TiKV keyspace (per-VID
+                    // global keys, no local cache) and the sender already
+                    // established the authoritative version before sending
+                    // (IncVersion on reassign; default version for new
+                    // inserts). Re-writing it here is redundant and only adds
+                    // TiKV write amplification.
                     return Append(ws, headID, appendNum, appendPosting, 0,
                                   /*p_skipRemoteBucketWait=*/fencingToken != 0);
                 });
@@ -651,17 +615,12 @@ namespace SPTAG::SPANN {
                     }
 
                     // Phase 1: per-head prep (race-condition wait,
-                    // resurrection or refusal) and per-item versionMap
-                    // mirroring.  Items refused at this phase count as
-                    // failures and are excluded from the MultiMerge.
+                    // resurrection or refusal).  Items refused at this phase
+                    // count as failures and are excluded from the MultiMerge.
+                    // No receiver-side version-map mirror: the shared TiKV
+                    // version map already holds the sender's authoritative
+                    // version (see single-append callback above).
                     std::vector<bool> alive(items.size(), true);
-                    // Accumulate every alive record's (vid, recVer) across the
-                    // whole chunk so the version-map mirror is one MultiGet +
-                    // one MultiPut for the entire chunk instead of a TiKV
-                    // round-trip pair per head (which stalled the append RPC
-                    // and caused remote-append timeouts under load).
-                    std::vector<SizeType> chunkVids;
-                    std::vector<uint8_t> chunkRecVers;
                     for (size_t i = 0; i < items.size(); ++i) {
                         auto* req = items[i];
                         if (req->m_appendPosting.empty() || req->m_appendNum == 0) {
@@ -685,44 +644,6 @@ namespace SPTAG::SPANN {
                                 req->m_headVec.size() / sizeof(ValueType));
                             m_headIndex->AddHeadIndex(req->m_headVec.data(),
                                 req->m_headID, 0, dim, m_layer + 1, ws);
-                        }
-
-                        // Collect this record's (vid, recVer) for the
-                        // chunk-wide version-map mirror issued after the loop.
-                        const uint8_t* basePtr =
-                            reinterpret_cast<const uint8_t*>(req->m_appendPosting.data());
-                        size_t totalRec = req->m_appendPosting.size() / m_vectorInfoSize;
-                        for (size_t k = 0; k < totalRec; ++k) {
-                            const uint8_t* p = basePtr + k * m_vectorInfoSize;
-                            SizeType vid = *reinterpret_cast<const SizeType*>(p);
-                            uint8_t recVer = *(p + sizeof(SizeType));
-                            if (vid < 0) continue;
-                            if (recVer == 0xfe) continue;
-                            chunkVids.push_back(vid);
-                            chunkRecVers.push_back(recVer);
-                        }
-                    }
-
-                    // Chunk-wide version-map mirror: a single MultiGet to read
-                    // current versions, then a single MultiPut for the records
-                    // whose stored version differs (otherwise MergePostings /
-                    // SearchIndex would drop them as stale).
-                    if (!chunkVids.empty()) {
-                        std::vector<uint8_t> curVers;
-                        m_versionMap->BatchGetVersions(chunkVids, curVers);
-                        std::vector<SizeType> batchVids;
-                        std::vector<uint8_t> batchVers;
-                        batchVids.reserve(chunkVids.size());
-                        batchVers.reserve(chunkVids.size());
-                        for (size_t k = 0; k < chunkVids.size(); ++k) {
-                            uint8_t curVer = curVers[k];
-                            if (curVer == 0xfe) continue;
-                            if (curVer == chunkRecVers[k]) continue;
-                            batchVids.push_back(chunkVids[k]);
-                            batchVers.push_back(chunkRecVers[k]);
-                        }
-                        if (!batchVids.empty()) {
-                            m_versionMap->SetVersionBatch(batchVids, batchVers);
                         }
                     }
 
