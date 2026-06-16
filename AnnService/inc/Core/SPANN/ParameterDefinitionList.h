@@ -109,10 +109,6 @@ DefineSSDParameter(m_bufferLength, int, 3, "BufferLength")
 DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
 
-// Coprocessor search
-DefineSSDParameter(m_useCoprocessorSearch, bool, false, "UseCoprocessorSearch")
-DefineSSDParameter(m_coprocessorTopN, int, 100, "CoprocessorTopN")
-
 // Multi-chunk posting
 DefineSSDParameter(m_useMultiChunkPosting, bool, false, "UseMultiChunkPosting")
 DefineSSDParameter(m_postingCountCacheCapacity, int, 100000, "PostingCountCacheCapacity")

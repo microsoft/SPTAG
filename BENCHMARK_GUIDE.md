@@ -4,12 +4,12 @@
 
 | Project | Repository | Branch | Description |
 |---------|-----------|--------|-------------|
-| SPTAG | https://github.com/microsoft/SPTAG | `users/qiazh/merge-spfresh-tikv` | TiKV storage backend + Region routing cache + Coprocessor |
-| TiKV | https://github.com/zqxjjz/tikv | `users/qiazh/vector-coprocessor` | Vector search Coprocessor support |
+| SPTAG | https://github.com/microsoft/SPTAG | `users/qiazh/merge-spfresh-tikv` | TiKV storage backend + Region routing cache |
+| TiKV | https://github.com/zqxjjz/tikv | `<compatible-tikv-branch>` | TiKV storage backend benchmark support |
 
 ```bash
 git clone https://github.com/microsoft/SPTAG.git && cd SPTAG && git checkout users/qiazh/merge-spfresh-tikv
-git clone https://github.com/zqxjjz/tikv.git && cd tikv && git checkout users/qiazh/vector-coprocessor
+git clone https://github.com/zqxjjz/tikv.git && cd tikv && git checkout <compatible-tikv-branch>
 ```
 
 ## 2. Prerequisites
@@ -331,41 +331,6 @@ PostingPageLimit=12
 BufferLength=8
 ```
 
-### 6.4 1M Coprocessor mode (`benchmark_1m_l2_coprocessor.ini`)
-
-> Note: You must first build the index using Section 6.1 config (Rebuild=true), then run this config for query-only (Rebuild=false).
-
-```ini
-[Benchmark]
-VectorPath=perftest_vector.bin.UInt8_1000000_128
-QueryPath=perftest_query.bin.UInt8_200_128
-TruthPath=truth_1m_l2_batchget
-IndexPath=/path/to/bench/proidx_1m_l2_batchget/spann_index
-ValueType=UInt8
-Dimension=128
-BaseVectorCount=990000
-InsertVectorCount=10000
-DeleteVectorCount=0
-BatchNum=10
-TopK=5
-NumThreads=16
-NumQueries=200
-DistMethod=L2
-Rebuild=false
-Resume=-1
-Layers=2
-
-Storage=TIKVIO
-TiKVPDAddresses=127.0.0.1:23791,127.0.0.1:23792,127.0.0.1:23793
-TiKVKeyPrefix=batchget_1m_l2
-
-[BuildSSDIndex]
-PostingPageLimit=12
-BufferLength=8
-UseCoprocessorSearch=true
-CoprocessorTopN=100
-```
-
 ## 7. Running Benchmarks
 
 ```bash
@@ -426,8 +391,6 @@ Resume=3          # resume from batch 4 (0-based index)
 | `TiKVKeyPrefix` | varies | TiKV key prefix; use different prefixes for different tests to avoid conflicts |
 | `PostingPageLimit` | `12` | Max pages per posting list |
 | `BufferLength` | `8` | Write buffer size |
-| `UseCoprocessorSearch` | `true/false` | Whether to enable Coprocessor pushdown computation |
-| `CoprocessorTopN` | `100` | Number of top-N results returned per posting by Coprocessor |
 
 ### Internal Search Parameters (hardcoded, no configuration needed)
 
@@ -453,7 +416,6 @@ These are set in source code and written to `indexloader.ini` during index build
 | 100K TiKV RawBatchGet | Mar 25 | 7.58 | 7.51 | 10.59 | 2054 | 0.924 |
 | 1M TiKV (old binary) | Mar 27 | 63.23 | 63.67 | 73.74 | 248 | 0.783 |
 | **1M TiKV (new binary)** | **Mar 27** | **14.98** | **13.98** | **27.11** | **1049** | **0.783** |
-| 1M TiKV Coprocessor | Mar 27 | 22.14 | 20.99 | 46.15 | 714 | 0.783 |
 | 1M TiKV fresh build (warm cache) | Mar 30 | 9.99 | 10.16 | 14.37 | 1563 | 0.792 |
 | 10M TiKV (old binary) | Mar 25 | 51.97 | 52.10 | 64.96 | 302 | 0.692 |
 | 100M TiKV (old binary) | Mar 25 | 48.09 | 48.36 | 59.66 | 326 | N/A |

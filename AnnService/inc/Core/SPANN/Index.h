@@ -253,6 +253,12 @@ namespace SPTAG
                     return m_extraSearchers[tolayer]->AddIndex(extraWorkspace, vectorSet, VID);
                 }
 
+                auto it = m_topGlobalToLocalID.find(VID);
+                if (it != m_topGlobalToLocalID.end()) {
+                    m_topIndex->ResetIndex(it->second);
+                    return ErrorCode::Success;
+                }
+
                 SizeType begin, end;
                 ErrorCode ret;
                 if ((ret = m_topIndex->AddIndexId(p_data, 1, p_dimension, begin, end)) != ErrorCode::Success)
@@ -293,7 +299,9 @@ namespace SPTAG
             }
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex, bool p_normalized, SizeType* VID);
             ErrorCode DeleteIndex(const SizeType& p_id) { return DeleteIndex(p_id, 0); }
+            ErrorCode ResetIndex(const SizeType& p_id) { return ResetIndex(p_id, 0); }
             ErrorCode DeleteIndex(const SizeType& p_id, int layer);
+            ErrorCode ResetIndex(const SizeType& p_id, int layer);
 
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
             ErrorCode RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO>> &p_indexStreams,

@@ -302,7 +302,7 @@ namespace SPTAG
                 keys.reserve(kBatchSize);
 
                 for (SizeType batchStart = 0; batchStart < count; batchStart += kBatchSize) {
-                    const SizeType batchEnd = std::min(batchStart + kBatchSize, count);
+                    const SizeType batchEnd = (std::min)(batchStart + kBatchSize, count);
                     keys.clear();
                     for (SizeType vid = batchStart; vid < batchEnd; vid++) {
                         keys.emplace_back(VersionKey(vid));

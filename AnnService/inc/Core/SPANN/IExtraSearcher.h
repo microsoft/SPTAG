@@ -599,6 +599,8 @@ namespace SPTAG {
             // the stripe formula when m_worker is enabled.
             virtual SizeType AllocateGlobalVID(SizeType p_localVID) const { return p_localVID; }
 
+            virtual ErrorCode ResetIndex(SizeType p_id) { return ErrorCode::Undefined; }
+            
             virtual SizeType GetNumSamples() const = 0;
 
             virtual bool ContainSample(const SizeType idx) const
