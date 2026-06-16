@@ -422,28 +422,38 @@ namespace SPTAG
                 if (n == 0) return;
 
                 SizeType count = m_count.load();
+                SizeType maxKey = -1;
                 std::vector<std::string> keys;
                 std::vector<std::string> values;
                 keys.reserve(n);
                 values.reserve(n);
                 for (size_t i = 0; i < n; ++i) {
-                    if (vids[i] < 0 || vids[i] >= count) {
+                    // Only a negative VID is a genuine torn/garbage read. In
+                    // distributed mode global VIDs are striped across nodes and
+                    // the version map is a shared global keyspace in TiKV, so a
+                    // remote-owned VID >= the local Count() is legitimate (these
+                    // calls exist precisely to mirror remote-appended records).
+                    // Mirror SetVersion(): accept any vid >= 0 and grow the
+                    // local count hint to cover it.
+                    if (vids[i] < 0) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
                             "TiKVVersionMap::SetVersionBatch: invalid key %d (max %d)\n",
                             vids[i], count);
                         continue;
                     }
+                    if (vids[i] > maxKey) maxKey = vids[i];
                     keys.push_back(VersionKey(vids[i]));
                     values.push_back(std::string(1, static_cast<char>(versions[i])));
                 }
                 if (keys.empty()) return;
+                if (maxKey >= 0) EnsureCountAtLeast(maxKey + 1);
 
                 auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
                 if (ret == ErrorCode::Undefined) {
                     // Backend lacks MultiPut: fall back to serial SetVersion
                     // which preserves m_deleted accounting.
                     for (size_t i = 0; i < n; ++i) {
-                        if (vids[i] >= 0 && vids[i] < count) {
+                        if (vids[i] >= 0) {
                             SetVersion(vids[i], versions[i]);
                         }
                     }
@@ -452,7 +462,7 @@ namespace SPTAG
                         "TiKVVersionMap::SetVersionBatch: MultiPut failed layer=%d ret=%d keys=%zu; falling back to per-VID SetVersion.\n",
                         m_layer, static_cast<int>(ret), keys.size());
                     for (size_t i = 0; i < n; ++i) {
-                        if (vids[i] >= 0 && vids[i] < count) {
+                        if (vids[i] >= 0) {
                             SetVersion(vids[i], versions[i]);
                         }
                     }

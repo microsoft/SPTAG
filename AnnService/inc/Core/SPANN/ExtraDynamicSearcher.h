@@ -655,6 +655,13 @@ namespace SPTAG::SPANN {
                     // mirroring.  Items refused at this phase count as
                     // failures and are excluded from the MultiMerge.
                     std::vector<bool> alive(items.size(), true);
+                    // Accumulate every alive record's (vid, recVer) across the
+                    // whole chunk so the version-map mirror is one MultiGet +
+                    // one MultiPut for the entire chunk instead of a TiKV
+                    // round-trip pair per head (which stalled the append RPC
+                    // and caused remote-append timeouts under load).
+                    std::vector<SizeType> chunkVids;
+                    std::vector<uint8_t> chunkRecVers;
                     for (size_t i = 0; i < items.size(); ++i) {
                         auto* req = items[i];
                         if (req->m_appendPosting.empty() || req->m_appendNum == 0) {
@@ -680,41 +687,39 @@ namespace SPTAG::SPANN {
                                 req->m_headID, 0, dim, m_layer + 1, ws);
                         }
 
-                        // Mirror sender's versionMap for the records we're
-                        // about to persist (otherwise MergePostings /
-                        // SearchIndex would drop them as stale).
+                        // Collect this record's (vid, recVer) for the
+                        // chunk-wide version-map mirror issued after the loop.
                         const uint8_t* basePtr =
                             reinterpret_cast<const uint8_t*>(req->m_appendPosting.data());
                         size_t totalRec = req->m_appendPosting.size() / m_vectorInfoSize;
-                        std::vector<size_t> candIdx;
-                        std::vector<SizeType> candVids;
-                        std::vector<uint8_t> candRecVers;
-                        candIdx.reserve(totalRec);
-                        candVids.reserve(totalRec);
-                        candRecVers.reserve(totalRec);
                         for (size_t k = 0; k < totalRec; ++k) {
                             const uint8_t* p = basePtr + k * m_vectorInfoSize;
                             SizeType vid = *reinterpret_cast<const SizeType*>(p);
                             uint8_t recVer = *(p + sizeof(SizeType));
                             if (vid < 0) continue;
                             if (recVer == 0xfe) continue;
-                            candIdx.push_back(k);
-                            candVids.push_back(vid);
-                            candRecVers.push_back(recVer);
+                            chunkVids.push_back(vid);
+                            chunkRecVers.push_back(recVer);
                         }
-                        std::vector<uint8_t> curVers;
-                        m_versionMap->BatchGetVersions(candVids, curVers);
+                    }
 
+                    // Chunk-wide version-map mirror: a single MultiGet to read
+                    // current versions, then a single MultiPut for the records
+                    // whose stored version differs (otherwise MergePostings /
+                    // SearchIndex would drop them as stale).
+                    if (!chunkVids.empty()) {
+                        std::vector<uint8_t> curVers;
+                        m_versionMap->BatchGetVersions(chunkVids, curVers);
                         std::vector<SizeType> batchVids;
                         std::vector<uint8_t> batchVers;
-                        batchVids.reserve(candVids.size());
-                        batchVers.reserve(candVids.size());
-                        for (size_t k = 0; k < candVids.size(); ++k) {
+                        batchVids.reserve(chunkVids.size());
+                        batchVers.reserve(chunkVids.size());
+                        for (size_t k = 0; k < chunkVids.size(); ++k) {
                             uint8_t curVer = curVers[k];
                             if (curVer == 0xfe) continue;
-                            if (curVer == candRecVers[k]) continue;
-                            batchVids.push_back(candVids[k]);
-                            batchVers.push_back(candRecVers[k]);
+                            if (curVer == chunkRecVers[k]) continue;
+                            batchVids.push_back(chunkVids[k]);
+                            batchVers.push_back(chunkRecVers[k]);
                         }
                         if (!batchVids.empty()) {
                             m_versionMap->SetVersionBatch(batchVids, batchVers);
@@ -1344,10 +1349,19 @@ namespace SPTAG::SPANN {
                 // version-byte read.
                 {
                     bool sawInvalid = false;
+                    // In distributed mode the version map's Count() is a per-node
+                    // local atomic. Global VIDs are striped across nodes, so a
+                    // vector owned/inserted by another node (global VID >= local
+                    // Count()) can be legitimately remote-appended into this
+                    // node's posting without growing the local count. Only treat
+                    // VID < 0 (a torn/garbage read) as corruption there; the
+                    // upper-bound check is single-node only. Downstream
+                    // BatchGetVersions handles out-of-range VIDs safely.
+                    bool distributed = (m_worker && m_worker->IsEnabled());
                     SizeType maxVid = m_versionMap->Count();
                     for (SizeType j = 0; j < postVectorNum; j++) {
                         SizeType VID = *((SizeType*)(postingP + j * m_vectorInfoSize));
-                        if (VID < 0 || VID >= maxVid) { sawInvalid = true; break; }
+                        if (VID < 0 || (!distributed && VID >= maxVid)) { sawInvalid = true; break; }
                     }
                     if (sawInvalid) {
                         if (retry < 3) {
@@ -2522,12 +2536,13 @@ namespace SPTAG::SPANN {
                 std::vector<uint8_t> cr_mapVers;
                 m_versionMap->BatchGetVersions(cr_vids, cr_mapVers);
                 const SizeType maxVid = m_versionMap->Count();
+                const bool distributed = (m_worker && m_worker->IsEnabled());
                 for (size_t j = 0; j < postVectorNum; j++) {
                     uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                     SizeType vid = cr_vids[j];
                     uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                     ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                    if (vid < 0 || vid >= maxVid) {
+                    if (vid < 0 || (!distributed && vid >= maxVid)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "CollectReAssign: skip invalid VID %lld in posting headID=%lld\n",
                                      (std::int64_t)vid, (std::int64_t)newHeadsID[i]);
@@ -2608,12 +2623,13 @@ namespace SPTAG::SPANN {
                     std::vector<uint8_t> nb_mapVers;
                     m_versionMap->BatchGetVersions(nb_vids, nb_mapVers);
                     const SizeType maxVid = m_versionMap->Count();
+                    const bool distributed = (m_worker && m_worker->IsEnabled());
                     for (size_t j = 0; j < postVectorNum; j++) {
                         uint8_t* vectorId = postingP + j * m_vectorInfoSize;
                         SizeType vid = nb_vids[j];
                         uint8_t version = *(reinterpret_cast<uint8_t*>(vectorId + sizeof(SizeType)));
                         ValueType* vector = reinterpret_cast<ValueType*>(vectorId + m_metaDataSize);
-                        if (vid < 0 || vid >= maxVid) {
+                        if (vid < 0 || (!distributed && vid >= maxVid)) {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                 "CollectReAssign(nearby): skip invalid VID %lld in posting headID=%lld\n",
                                 (std::int64_t)vid, (std::int64_t)HeadPrevTopK[i]);
