@@ -1997,7 +1997,7 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
-                    if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
+                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
@@ -2084,6 +2084,73 @@ namespace SPTAG::SPANN {
                 }
             }
             queryResults.SetScanned(listElements);
+            return ErrorCode::Success;
+        }
+
+        virtual ErrorCode SearchIndexIterativeScan(ExtraWorkSpace* p_exWorkSpace,
+            QueryResult& p_queryResults,
+            std::vector<BasicResult>& p_results,
+            bool p_checkVersionMap) override
+        {
+            COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
+
+            {
+                auto keys = DBKeys(p_exWorkSpace->m_postingIDs);
+                if (db->MultiGet(*keys, p_exWorkSpace->m_pageBuffers, m_hardLatencyLimit,
+                                 &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndexIterativeScan] read postings fail!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+
+            const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+            const bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
+            const bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch(p_checkVersionMap);
+            const std::size_t resultStart = p_results.size();
+            std::vector<SizeType> candidateVIDs;
+
+            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+                auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
+                char* p_postingListFullData = (char*)(buffer.GetBuffer());
+                int vectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
+
+                for (int i = 0; i < vectorNum; i++) {
+                    char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
+                    SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
+
+                    if (vectorID < 0 || vectorID >= m_versionMap->Count())
+                        return ErrorCode::Key_OverFlow;
+                    if (!isTiKV && m_versionMap->Deleted(vectorID))
+                        continue;
+                    if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
+                        continue;
+
+                    auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
+                    p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
+                        queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
+
+                    if (isTiKV && checkVersionMapInSearch) {
+                        candidateVIDs.emplace_back(vectorID);
+                    }
+                }
+            }
+
+            if (isTiKV && checkVersionMapInSearch && !candidateVIDs.empty()) {
+                std::vector<uint8_t> candidateContains;
+                ContainSamples(candidateVIDs, candidateContains, p_exWorkSpace->m_versionReadPolicy);
+                std::size_t write = resultStart;
+                for (std::size_t read = resultStart; read < p_results.size(); ++read) {
+                    std::size_t versionIndex = read - resultStart;
+                    bool keep = versionIndex < candidateContains.size() && candidateContains[versionIndex] != 0;
+                    if (keep) {
+                        if (write != read)
+                            p_results[write] = std::move(p_results[read]);
+                        ++write;
+                    }
+                }
+                p_results.resize(write);
+            }
             return ErrorCode::Success;
         }
 
