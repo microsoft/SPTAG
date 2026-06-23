@@ -223,6 +223,16 @@ namespace SPTAG {
             bool m_shareDB;
             std::shared_ptr<Helper::KeyValueIO> m_externalDB;
 
+            // In-posting quantization (unified config interface). See ParameterDefinitionList.h.
+            std::string m_postingQuantizer;   // None|RaBitQ|OPQ
+            int m_postingQuantBits;           // RaBitQ bits per dim
+            int m_postingQuantM;              // OPQ code bytes per vector
+            bool m_quantizeHead;              // quantize the head index too
+            std::string m_postingQuantFile;   // code sidecar path
+            std::string m_fullVectorFile;     // full-precision base for cold rerank
+            int m_rerankL;                    // exact-rerank depth (0 = default)
+            bool m_quantADCOnly;              // skip rerank, return ADC/estimate order
+
             Options() {
 #define DefineBasicParameter(VarName, VarType, DefaultValue, RepresentStr) \
                 VarName = DefaultValue; \

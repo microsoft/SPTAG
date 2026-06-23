@@ -694,7 +694,13 @@ namespace SPTAG
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: file %s opened, fd=%d threads=%d maxNumBlocks=%d\n", filePath, m_fileHandle, threadPoolSize, maxNumBlocks);
 
-                // Use shared AIO pool if available, otherwise create own contexts
+                // Use shared AIO pool if available, otherwise create own contexts.
+                // NOTE: the SharedAIOPool only holds libaio contexts; it does NOT carry
+                // io_uring rings. Under URING the read path submits via m_uring[iocp]
+                // (BatchReadFile), so taking the shared-pool branch would leave m_uring
+                // unsized -> out-of-bounds segfault. Bypass the shared pool entirely when
+                // built with io_uring so both m_iocps and m_uring are initialized together.
+#ifndef URING
                 if (SharedAIOPool::Instance().IsInitialized()) {
                     m_useSharedPool = true;
                     int poolSize = SharedAIOPool::Instance().NumContexts();
@@ -703,7 +709,9 @@ namespace SPTAG
                         m_iocps[i] = SharedAIOPool::Instance().GetContext(i);
                     }
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO: using SharedAIOPool (%d contexts)\n", poolSize);
-                } else {
+                } else
+#endif
+                {
                     m_useSharedPool = false;
                     m_iocps.resize(threadPoolSize);
 #ifdef URING

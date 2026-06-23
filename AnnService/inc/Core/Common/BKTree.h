@@ -229,11 +229,15 @@ namespace SPTAG
             float currDist = 0;
             SizeType subsize = (last - first - 1) / args._TH + 1;
 
-            std::vector<std::thread> mythreads;
-            mythreads.reserve(args._TH);
-            for (int tid = 0; tid < args._TH; tid++)
-            {
-                mythreads.emplace_back([tid, first, last, updateCenters, lambda, subsize, &data, &indices, &args, &currDist]() {
+            // Per-node head-selection BKT k-means: spawning args._TH std::threads for
+            // EVERY node is counterproductive at billion scale with small BKTLeafSize,
+            // where the tree has millions of tiny nodes and the futex spawn/join sync
+            // dominates wall-clock (main thread stuck in futex_do_wait, ~2/24 cores
+            // used). Define the per-stripe work once, then run it serially for small
+            // partitions (no thread spawn) and threaded only when the partition is
+            // large enough to amortize the spawn. Bit-identical results: each tid
+            // writes its own slots and the reduction below is unchanged.
+            auto kmeansWorker = [&](int tid) {
                     SizeType istart = first + tid * subsize;
                     SizeType iend = min(first + (tid + 1) * subsize, last);
                     SizeType *inewCounts = args.newCounts + tid * args._K;
@@ -289,19 +293,43 @@ namespace SPTAG
                         {
                             if (smallestDist <= iclusterDist[clusterid])
                             {
-                                iclusterDist[clusterid] = smallestDist;
-                                iclusterIdx[clusterid] = indices[i];
+                                // A medoid (real-vector cluster pivot) must be a valid
+                                // cluster representative. An all-zero vector is degenerate
+                                // (Cosine is undefined for it, and under L2 on shell-like
+                                // data it sits near the origin, ~equidistant to every point,
+                                // so it captures a runaway mega-cluster on re-assignment and
+                                // produces a pathologically unbalanced BKT). Reject all-zero
+                                // candidates so the medoid falls to the closest real point.
+                                const T* cand = (const T*)data[indices[i]];
+                                bool allZero = true;
+                                for (DimensionType j = 0; j < args._D; j++) { if (cand[j] != 0) { allZero = false; break; } }
+                                if (!allZero)
+                                {
+                                    iclusterDist[clusterid] = smallestDist;
+                                    iclusterIdx[clusterid] = indices[i];
+                                }
                             }
                         }
                     }
                     COMMON::Utils::atomic_float_add(&currDist, idist);
-                });
-            }
-            for (auto &t : mythreads)
+            };
+
+            // Serial fast-path: run inline (no thread spawn) for small partitions;
+            // spawn worker threads only when the partition is large enough to amortize
+            // the futex spawn/join cost. The big top-of-tree nodes still parallelize.
+            const SizeType kKmeansSerialThreshold = 4096;
+            if (args._TH <= 1 || (last - first) <= kKmeansSerialThreshold)
             {
-                t.join();
+                for (int tid = 0; tid < args._TH; tid++) kmeansWorker(tid);
             }
-            mythreads.clear();
+            else
+            {
+                std::vector<std::thread> mythreads;
+                mythreads.reserve(args._TH);
+                for (int tid = 0; tid < args._TH; tid++)
+                    mythreads.emplace_back([tid, &kmeansWorker]() { kmeansWorker(tid); });
+                for (auto &t : mythreads) t.join();
+            }
             for (int i = 1; i < args._TH; i++) {
                 for (int k = 0; k < args._DK; k++) {
                     args.newCounts[k] += args.newCounts[i * args._K + k];

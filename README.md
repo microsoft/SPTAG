@@ -279,6 +279,56 @@ Modes B/C also run `augmentheadgraph` to build cross-subgraph edges. See
 full commands, the asymmetric-edge U_extra design, the slim head store, and the
 complete environment-variable reference.
 
+#### Unfilter enhancement layers (enable together — default OFF)
+
+For good **unfiltered** recall/QPS on a partitioned (PerTagBKT + ACL hierarchy)
+index, **all three** layers below must be built. They are env/tool-gated and are
+**not** produced by a plain `spannbuilder` build, so they are easy to lose —
+without them, unfilter degrades to a bare per-node fan-out across the ACL bundle
+nodes. See **AGENTS.md → "Unfilter Enhancement Pipeline"** and
+**[docs/MultiTenant_SIFT1M_UnfilterTail.md](docs/MultiTenant_SIFT1M_UnfilterTail.md)**.
+
+| Layer | Enable (build) | Enable (search) |
+| ----- | -------------- | --------------- |
+| ① cross-graph | post-build: `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m 10 -t N -w true` | (auto) |
+| ② U_extra (~10% extra unfilter-only heads) | `SPTAG_DUAL_POOL_AUGMENT=1` `SPTAG_DUAL_POOL_EXTRA_RATIO=0.1` | (auto) |
+| ③ unfilter-tail (K nearest-head tail copies/vector) | `SPTAG_UNFILTER_TAIL_K_REPLICA=K` `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P` | `SPTAG_UNFILTER_TAIL=1` `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P` |
+
+#### Native `.ini` build config (recommended — single source of truth)
+
+Rather than exporting the `SPTAG_*` knobs above by hand, the attribute-aware build
+is driven by a **native SPANN sectioned `.ini`** (read by `Helper::IniReader`, the
+same loader the classic `IndexBuilder` uses). All build parameters — standard SPANN
+posting knobs *and* the multi-tenant/unfilter extensions — live in one committed
+file, so nothing is lost when `/tmp` is wiped:
+
+```bash
+# config = Script_AE/iniFile/build_spann_attr_spacev_opq25.ini
+Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher (derives paths from the ini)
+#   internally: Release/spannbuilder -c <config.ini>  +  post-build augmentheadgraph
+```
+
+- `[BuildSSDIndex]` (`Storage`, `ReplicaCount`, `PostingQuantizer`/`PostingQuantM`/
+  `PostingQuantizerFile`, `FullVectorFile`, `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`)
+  flows through the native `SetSSDBuildParam` path.
+- `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` carry the extensions (ACL routing,
+  hier widths, numeric cols, and the three unfilter layers above), bridged to their
+  existing `getenv` consumers.
+- Comments MUST start with `;`; an explicit CLI flag overrides any ini value.
+
+See **AGENTS.md → "Build Config — Native `.ini`"** for the full key→engine mapping.
+
+#### In-posting quantization + deep-queue rerank
+
+Postings can store a compact **RaBitQ/OPQ code** per vector instead of the full
+vector (~4× fewer bytes/scan); the top-`L` survivors are exact-reranked by cold
+O_DIRECT reads from the full-precision base, batched through a **deep-queue libaio**
+reader (one `io_submit` for all `L`, ~12µs/read). Enable at build via
+`[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ` + `PostingQuantM` + `FullVectorFile`
++ `RerankL`; at search via `SPTAG_INPOST_RBQ=1` + `SPTAG_INPOST_LIBAIO_RERANK=1`
+(do **not** combine the RaBitQ async path with `SPTAG_OPQ_PREFILTER`). See
+**AGENTS.md → "In-posting Quantization + Deep-queue Rerank"**.
+
 ### Build
 ```bash
 mkdir build && cd build && cmake ..

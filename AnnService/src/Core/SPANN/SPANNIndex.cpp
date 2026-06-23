@@ -46,6 +46,55 @@ namespace
 constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
 
+// SelectHead checkpoint ('HSST'): persists the PerTagBKT-derived in-memory state
+// (node head selections, per-bundle U_extra, node/primary vector assignments, head
+// vector owners, head roles) so a failed BuildHead/BuildSSDIndex can be restarted
+// WITHOUT re-running the expensive head-selection BKT k-means. Enabled by
+// SPTAG_PERSIST_SELECTHEAD=1; resumed by additionally setting SPTAG_RESUME_BUILD=1.
+constexpr std::uint32_t kHeadSelectStateMagic = 0x54535348U; // 'HSST'
+constexpr std::int32_t  kHeadSelectStateVersion = 1;
+
+struct HeadSelectStateHeader {
+    std::uint32_t magic;
+    std::int32_t  version;
+    std::int64_t  nodeHeadSelOuter;
+    std::int64_t  nodeUExtraOuter;
+    std::int64_t  nodeVecAssignOuter;
+    std::int64_t  primaryVecAssignOuter;
+    std::int64_t  headOwnersCount;
+    std::int64_t  headRolesCount;
+};
+
+static inline bool SpannEnvFlagOn(const char* name) {
+    const char* v = std::getenv(name);
+    return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
+}
+
+static bool WriteNestedSizeVec(FILE* f, const std::vector<std::vector<SizeType>>& v) {
+    for (const auto& inner : v) {
+        std::int64_t len = static_cast<std::int64_t>(inner.size());
+        if (fwrite(&len, sizeof(len), 1, f) != 1) return false;
+        if (len > 0 &&
+            fwrite(inner.data(), sizeof(SizeType), static_cast<size_t>(len), f) != static_cast<size_t>(len))
+            return false;
+    }
+    return true;
+}
+
+static bool ReadNestedSizeVec(FILE* f, std::vector<std::vector<SizeType>>& v, std::int64_t outer) {
+    v.assign(static_cast<size_t>(outer), std::vector<SizeType>());
+    for (std::int64_t i = 0; i < outer; ++i) {
+        std::int64_t len = 0;
+        if (fread(&len, sizeof(len), 1, f) != 1 || len < 0) return false;
+        v[static_cast<size_t>(i)].resize(static_cast<size_t>(len));
+        if (len > 0 &&
+            fread(v[static_cast<size_t>(i)].data(), sizeof(SizeType), static_cast<size_t>(len), f) !=
+                static_cast<size_t>(len))
+            return false;
+    }
+    return true;
+}
+
 // Helper to determine tag level from tag ID based on range
 // NOTE: Legacy thresholds below are a fallback ONLY. The real tag→level mapping
 // is data-driven: the per-tenant tag_level_offsets.bin (ascending per-level minimum
@@ -168,6 +217,15 @@ std::string HeadBundleManifestPath(const Options& p_options, const std::string& 
         root += FolderSep;
     }
     return root + p_options.m_headIndexFolder + FolderSep + "head_bundle_manifest.bin";
+}
+
+std::string HeadSelectStatePath(const Options& /*p_options*/, const std::string& p_baseDir)
+{
+    std::string root = p_baseDir;
+    if (!root.empty() && *(root.rbegin()) != FolderSep) {
+        root += FolderSep;
+    }
+    return root + "head_select_state.bin";
 }
 
 std::string HeadBundleNodeRelativePath(const Options& p_options, int nodeId)
@@ -409,6 +467,103 @@ template <typename T> ErrorCode Index<T>::LoadHeadBundleManifest(const std::stri
 
     m_headBundleNodes = std::move(nodes);
     return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::SaveHeadSelectState(const std::string& p_path) const
+{
+    const std::string tmpPath = p_path + ".tmp";
+    FILE* f = fopen(tmpPath.c_str(), "wb");
+    if (f == nullptr) {
+        return ErrorCode::FailedCreateFile;
+    }
+
+    HeadSelectStateHeader header{};
+    header.magic = kHeadSelectStateMagic;
+    header.version = kHeadSelectStateVersion;
+    header.nodeHeadSelOuter = static_cast<std::int64_t>(m_pendingNodeHeadSelections.size());
+    header.nodeUExtraOuter = static_cast<std::int64_t>(m_pendingNodeUExtraSelections.size());
+    header.nodeVecAssignOuter = static_cast<std::int64_t>(m_pendingNodeVectorAssignments.size());
+    header.primaryVecAssignOuter = static_cast<std::int64_t>(m_pendingPrimaryNodeVectorAssignments.size());
+    header.headOwnersCount = static_cast<std::int64_t>(m_pendingHeadVectorOwners.size());
+    header.headRolesCount = static_cast<std::int64_t>(m_pendingHeadRoles.size());
+
+    bool ok = fwrite(&header, sizeof(header), 1, f) == 1;
+    ok = ok && WriteNestedSizeVec(f, m_pendingNodeHeadSelections);
+    ok = ok && WriteNestedSizeVec(f, m_pendingNodeUExtraSelections);
+    ok = ok && WriteNestedSizeVec(f, m_pendingNodeVectorAssignments);
+    ok = ok && WriteNestedSizeVec(f, m_pendingPrimaryNodeVectorAssignments);
+    if (ok) {
+        for (const auto& kv : m_pendingHeadVectorOwners) {
+            SizeType key = kv.first;
+            std::int32_t val = static_cast<std::int32_t>(kv.second);
+            if (fwrite(&key, sizeof(key), 1, f) != 1 || fwrite(&val, sizeof(val), 1, f) != 1) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (ok && header.headRolesCount > 0) {
+        ok = fwrite(m_pendingHeadRoles.data(), 1, static_cast<size_t>(header.headRolesCount), f) ==
+             static_cast<size_t>(header.headRolesCount);
+    }
+
+    if (ok) ok = (fflush(f) == 0);
+    fclose(f);
+    if (!ok) {
+        remove(tmpPath.c_str());
+        return ErrorCode::Fail;
+    }
+    // Atomic publish so a crash mid-write never leaves a truncated checkpoint.
+    if (rename(tmpPath.c_str(), p_path.c_str()) != 0) {
+        remove(tmpPath.c_str());
+        return ErrorCode::Fail;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T> ErrorCode Index<T>::LoadHeadSelectState(const std::string& p_path)
+{
+    FILE* f = fopen(p_path.c_str(), "rb");
+    if (f == nullptr) {
+        return ErrorCode::Fail;
+    }
+
+    HeadSelectStateHeader header{};
+    bool ok = fread(&header, sizeof(header), 1, f) == 1 &&
+              header.magic == kHeadSelectStateMagic &&
+              header.version == kHeadSelectStateVersion &&
+              header.nodeHeadSelOuter >= 0 && header.nodeUExtraOuter >= 0 &&
+              header.nodeVecAssignOuter >= 0 && header.primaryVecAssignOuter >= 0 &&
+              header.headOwnersCount >= 0 && header.headRolesCount >= 0;
+
+    if (ok) ok = ReadNestedSizeVec(f, m_pendingNodeHeadSelections, header.nodeHeadSelOuter);
+    if (ok) ok = ReadNestedSizeVec(f, m_pendingNodeUExtraSelections, header.nodeUExtraOuter);
+    if (ok) ok = ReadNestedSizeVec(f, m_pendingNodeVectorAssignments, header.nodeVecAssignOuter);
+    if (ok) ok = ReadNestedSizeVec(f, m_pendingPrimaryNodeVectorAssignments, header.primaryVecAssignOuter);
+
+    if (ok) {
+        m_pendingHeadVectorOwners.clear();
+        m_pendingHeadVectorOwners.reserve(static_cast<size_t>(header.headOwnersCount));
+        for (std::int64_t i = 0; ok && i < header.headOwnersCount; ++i) {
+            SizeType key = 0;
+            std::int32_t val = 0;
+            if (fread(&key, sizeof(key), 1, f) != 1 || fread(&val, sizeof(val), 1, f) != 1) {
+                ok = false;
+                break;
+            }
+            m_pendingHeadVectorOwners[key] = static_cast<int>(val);
+        }
+    }
+    if (ok) {
+        m_pendingHeadRoles.resize(static_cast<size_t>(header.headRolesCount));
+        if (header.headRolesCount > 0) {
+            ok = fread(m_pendingHeadRoles.data(), 1, static_cast<size_t>(header.headRolesCount), f) ==
+                 static_cast<size_t>(header.headRolesCount);
+        }
+    }
+
+    fclose(f);
+    return ok ? ErrorCode::Success : ErrorCode::Fail;
 }
 
 template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std::string& p_baseDir)
@@ -2828,6 +2983,27 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         }
     }
 
+    // Allow pinning the BKT balance factor (m_fBalanceFactor) via env so a build can
+    // skip DynamicFactorSelect's ~14 full-scan per-group auto-search (the SelectHead
+    // I/O bottleneck at billion scale). 100 = SPTAG's canonical default (used by all
+    // SIFT/SPACEV SPANN reference configs); any value >= 0 disables the auto-search.
+    if (const char* lambdaOverride = std::getenv("SPTAG_BKT_LAMBDA_FACTOR"))
+    {
+        if (lambdaOverride[0] != '\0')
+        {
+            try {
+                float lf = std::stof(lambdaOverride);
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "SPTAG_BKT_LAMBDA_FACTOR: setting m_fBalanceFactor %.6f -> %.6f "
+                             "(%s)\n",
+                             m_options.m_fBalanceFactor, lf,
+                             lf < 0 ? "auto: DynamicFactorSelect searches balance factor"
+                                    : "pinned: skips DynamicFactorSelect auto-search");
+                m_options.m_fBalanceFactor = lf;
+            } catch (...) {}
+        }
+    }
+
     auto t1 = std::chrono::high_resolution_clock::now();
     SelectHeadAdjustOptions(data.R());
     std::vector<int> selected;
@@ -2855,7 +3031,9 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         bkt->m_iSamples = m_options.m_iSamples;
         bkt->m_iTreeNumber = m_options.m_iTreeNumber;
         bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-        bkt->m_pQuantizer = m_pQuantizer;
+        // Native clustering on raw vectors: do NOT route head selection through the
+        // quantizer reconstruct path (that's for posting encoding at BuildSSDIndex).
+        bkt->m_pQuantizer = nullptr;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start invoking BuildTrees.\n");
         SPTAGLIB_LOG(
             Helper::LogLevel::LL_Info,
@@ -2984,7 +3162,8 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             bkt->m_iSamples      = std::min(m_options.m_iSamples, subSize);
             bkt->m_iTreeNumber   = m_options.m_iTreeNumber;
             bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
-            bkt->m_pQuantizer    = m_pQuantizer;
+            // Native clustering on raw vectors (OPQ is posting-only, see BKT branch).
+            bkt->m_pQuantizer    = nullptr;
             bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod,
                                               m_options.m_iSelectHeadNumberOfThreads,
                                               &subIdx, nullptr, true);
@@ -3263,6 +3442,21 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
     double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t3 - t1).count();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Total used time: %.2lf minutes (about %.2lf hours).\n",
                  elapsedSeconds / 60.0, elapsedSeconds / 3600.0);
+
+    // SelectHead resume checkpoint: once head selection + per-node head files are on
+    // disk, persist the derived in-memory state so a later BuildHead/BuildSSDIndex
+    // failure can be retried without re-running the expensive BKT head selection.
+    if (!m_options.m_noOutput && SpannEnvFlagOn("SPTAG_PERSIST_SELECTHEAD")) {
+        const std::string statePath = HeadSelectStatePath(m_options, m_options.m_indexDirectory);
+        if (SaveHeadSelectState(statePath) == ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "SelectHead checkpoint written: %s (resume with SPTAG_RESUME_BUILD=1 to skip BKT)\n",
+                         statePath.c_str());
+        } else {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                         "SelectHead checkpoint FAILED to write: %s\n", statePath.c_str());
+        }
+    }
     return true;
 }
 
@@ -3278,17 +3472,45 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     }
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Select Head...\n");
     auto t1 = std::chrono::high_resolution_clock::now();
-    if (m_options.m_selectHead)
+
+    // Resume path: if a SelectHead checkpoint exists and resume is requested, reload
+    // the derived build state and skip the expensive BKT head selection. The per-node
+    // head vector files (preserved during the prior BuildHead run because persistence
+    // was enabled) and the global head files remain on disk for BuildHead/BuildSSDIndex.
+    bool resumedSelectHead = false;
+    if (SpannEnvFlagOn("SPTAG_PERSIST_SELECTHEAD") && SpannEnvFlagOn("SPTAG_RESUME_BUILD")) {
+        const std::string statePath = HeadSelectStatePath(m_options, m_options.m_indexDirectory);
+        if (fileexists(statePath.c_str())) {
+            if (LoadHeadSelectState(statePath) == ErrorCode::Success) {
+                resumedSelectHead = true;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                             "Resume: loaded SelectHead checkpoint %s (nodes=%zu, headRoles=%zu); "
+                             "skipping BKT head selection\n",
+                             statePath.c_str(), m_pendingNodeHeadSelections.size(),
+                             m_pendingHeadRoles.size());
+            } else {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                             "Resume: failed to load checkpoint %s; re-running SelectHead\n",
+                             statePath.c_str());
+            }
+        } else {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                         "Resume requested but no checkpoint at %s; running SelectHead normally\n",
+                         statePath.c_str());
+        }
+    }
+
+    if (m_options.m_selectHead && !resumedSelectHead)
     {
-        bool success = false;
-        if (m_pQuantizer)
-        {
-            success = SelectHeadInternal<std::uint8_t>(p_reader);
-        }
-        else
-        {
-            success = SelectHeadInternal<T>(p_reader);
-        }
+        // Head selection clusters the RAW vectors using their true ValueType T
+        // (native uint8/int8/float clustering). The previous `if (m_pQuantizer)`
+        // branch forced InternalDataType=std::uint8_t whenever a quantizer was set,
+        // which (a) silently reinterpreted signed int8 vectors as uint8 — flipping
+        // every negative coordinate (e.g. -10 -> 246) and producing a degenerate
+        // one-mega-cluster BKT — and (b) built a uint8 head index for an int8 main
+        // index (type-inconsistent). OPQ is applied to the SSD postings at
+        // BuildSSDIndex, NOT to head selection, so we always cluster on T here.
+        bool success = SelectHeadInternal<T>(p_reader);
         if (!success)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "SelectHead Failed!\n");
@@ -3302,8 +3524,14 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin Build Head...\n");
     if (m_options.m_buildHead)
     {
-        auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-        auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+        // QuantizeHead config gate: only build the head index on quantized vectors when
+        // a global quantizer is present AND m_quantizeHead is set. With in-posting
+        // quantization (the default for posting-OPQ/RaBitQ) m_pQuantizer is null and the
+        // head always stays full-precision; QuantizeHead only controls the native
+        // global-quantizer head path.
+        bool headQuant = (m_pQuantizer != nullptr) && m_options.m_quantizeHead;
+        auto valueType = headQuant ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
+        auto dims = headQuant ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
         auto buildHeadIndexFromFile = [&](const std::string& vectorFilePath, const std::string& saveDir,
                                           SizeType n_h1_split = -1) -> bool {
             std::shared_ptr<Helper::ReaderOptions> localVectorOptions(
@@ -3321,7 +3549,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             }
 
             localHeadIndex->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
-            localHeadIndex->SetQuantizer(m_pQuantizer);
+            localHeadIndex->SetQuantizer(headQuant ? m_pQuantizer : nullptr);
             for (const auto& iter : m_headParameters)
             {
                 localHeadIndex->SetParameter(iter.first.c_str(), iter.second.c_str());
@@ -3376,7 +3604,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     "DualPool approach-1: bundle %s built %d H1 + %d U_extra (no-back-edge)\n",
                     saveDir.c_str(), (int)n_h1, (int)n_extra);
             }
-            if (!m_options.m_quantizerFilePath.empty()) {
+            if (headQuant && !m_options.m_quantizerFilePath.empty()) {
                 localHeadIndex->SetQuantizerFileName(
                     m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
             }
@@ -3390,7 +3618,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
 
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
-        m_index->SetQuantizer(m_pQuantizer);
+        m_index->SetQuantizer(headQuant ? m_pQuantizer : nullptr);
         for (const auto &iter : m_headParameters)
         {
             m_index->SetParameter(iter.first.c_str(), iter.second.c_str());
@@ -3420,8 +3648,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 SizeType n_h1 = 0;
                 for (auto r : m_pendingHeadRoles) if (r == 0) ++n_h1;
                 if (n_h1 < headvectorset->Count()) {
-                    auto valueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-                    auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+                    auto valueType = headQuant ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
+                    auto dims = headQuant ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
                     ByteArray h1Bytes = ByteArray::Alloc(
                         static_cast<size_t>(n_h1) * static_cast<size_t>(dims) * sizeof(T));
                     std::memcpy(h1Bytes.Data(), headvectorset->GetData(),
@@ -3441,7 +3669,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 return ErrorCode::Fail;
             }
             if (n_extra_global > 0) {
-                auto dims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+                auto dims = headQuant ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
                 SizeType n_h1 = headvectorset->Count() - n_extra_global;
                 const T* uBase = static_cast<const T*>(headvectorset->GetData())
                                  + static_cast<size_t>(n_h1) * static_cast<size_t>(dims);
@@ -3451,7 +3679,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                                         static_cast<DimensionType>(dims), beginU, endU) == ErrorCode::Success)
                     m_index->AddIndexIdx(static_cast<SizeType>(beginU), static_cast<SizeType>(endU));
             }
-            if (!m_options.m_quantizerFilePath.empty())
+            if (headQuant && !m_options.m_quantizerFilePath.empty())
                 m_index->SetQuantizerFileName(
                     m_options.m_quantizerFilePath.substr(m_options.m_quantizerFilePath.find_last_of("/\\") + 1));
             if (m_index->SaveIndex(m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder) !=
@@ -3503,7 +3731,11 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     // SPTAGHeadVectors.bin (EnsureHeadBundleNodeLoaded uses vectors.bin
                     // via LoadIndex + SPTAGHeadVectorIDs.bin; AugmentHeadGraph likewise).
                     // Remove the redundant copy to halve per-node head-vector storage.
-                    if (fileexists(nodeVectorFile.c_str()) && remove(nodeVectorFile.c_str()) != 0) {
+                    // When resume persistence is enabled, keep it: BuildHead reads this
+                    // file, so preserving it makes BuildHead idempotent on a resume that
+                    // skips SelectHead (which otherwise re-wrote these per-node files).
+                    if (!SpannEnvFlagOn("SPTAG_PERSIST_SELECTHEAD") &&
+                        fileexists(nodeVectorFile.c_str()) && remove(nodeVectorFile.c_str()) != 0) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "Failed to remove redundant node head vector file %s\n",
                                      nodeVectorFile.c_str());

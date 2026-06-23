@@ -1395,7 +1395,8 @@ bool AnnIndex::Build(ByteArray p_data, SizeType p_num, bool p_normalized)
         return false;
     }
     return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_data.Data(), (SPTAG::SizeType)p_num,
-                                                             (SPTAG::DimensionType)m_dimension, p_normalized));
+                                                             (SPTAG::DimensionType)m_dimension, p_normalized,
+                                                             m_shareBuildOwnership));
 }
 
 bool AnnIndex::BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex,
@@ -2108,14 +2109,46 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         }
 
         size_t totalVectorSize = vectorRanges.size() * m_inputVectorSize;
-        uint8_t* tenantVectorBuffer = new uint8_t[totalVectorSize];
-        uint8_t* out = tenantVectorBuffer;
-        for (const auto& vec : vectorRanges)
-        {
-            memcpy(out, vec.first, vec.second);
-            out += vec.second;
+
+        // Zero-copy fast path (SPTAG_BUILD_SHARE_OWNERSHIP=1): when this tenant's
+        // vectors are already a contiguous slice of the caller-provided p_vectors
+        // buffer (the common single-tenant 1B-scale case where every vector maps
+        // to tenant 0 in order), borrow that slice directly instead of allocating
+        // and memcpy'ing a full duplicate. Combined with SetShareBuildOwnership
+        // (which forwards p_shareOwnership=true to the core BuildIndex) this avoids
+        // two full copies of the vector data (wrapper + core), each ~93 GB at 1B
+        // int8 vectors. The borrowed p_vectors buffer (a numpy memmap passed via
+        // the SWIG buffer protocol) must stay alive for the duration of the build.
+        static const bool kShareOwnership = []() {
+            const char* e = std::getenv("SPTAG_BUILD_SHARE_OWNERSHIP");
+            return e != nullptr && e[0] != '\0' && e[0] != '0';
+        }();
+        bool contiguous = kShareOwnership;
+        for (size_t i = 1; contiguous && i < vectorRanges.size(); ++i) {
+            if (vectorRanges[i].first != vectorRanges[i - 1].first + m_inputVectorSize) {
+                contiguous = false;
+            }
         }
-        ByteArray tenantVectors(tenantVectorBuffer, totalVectorSize, true);
+
+        ByteArray tenantVectors;
+        bool borrowedVectors = false;
+        if (contiguous) {
+            // own=false: ByteArray borrows the caller's contiguous slice.
+            tenantVectors = ByteArray(const_cast<uint8_t*>(vectorRanges[0].first), totalVectorSize, false);
+            borrowedVectors = true;
+            fprintf(stderr,
+                    "[INFO] Tenant %d: zero-copy build (borrowing %zu-byte contiguous slice)\n",
+                    tenantId, totalVectorSize);
+        } else {
+            uint8_t* tenantVectorBuffer = new uint8_t[totalVectorSize];
+            uint8_t* out = tenantVectorBuffer;
+            for (const auto& vec : vectorRanges)
+            {
+                memcpy(out, vec.first, vec.second);
+                out += vec.second;
+            }
+            tenantVectors = ByteArray(tenantVectorBuffer, totalVectorSize, true);
+        }
 
         std::string metaStr;
         for (size_t i = 0; i < tenantMetadataLines[tenantId].size(); ++i)
@@ -2298,9 +2331,59 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                 }
             }
 
-            std::string spannWorkDir = "/tmp/sptag_spann_tenant_" + std::to_string(tenantId);
-            RemovePathRecursive(spannWorkDir);
+            // SPANN scratch/work directory (head index + postings written here
+            // during build, then SaveAll copies to the final index dir). Defaults
+            // to /tmp; override with SPTAG_SPANN_WORK_DIR to place it on a fast
+            // disk with enough space for billion-scale postings.
+            //
+            // IN-PLACE build: when SPTAG_SPANN_INPLACE_DIR is set, build directly
+            // into the final per-tenant dir "<inplace>/tenant_<id>" (which must equal
+            // the dir SaveAll/SaveUnifiedStorage writes to). The SSD block pool is
+            // pre-allocated and incrementally flushed there during BuildSSDIndex, and
+            // SaveAll's srcDir==dstDir check skips the final copy entirely. This avoids
+            // the transient 2x disk footprint (work dir + final dir) and the copy time
+            // — essential at billion scale. Set SPTAG_SPANN_INPLACE_DIR to the same
+            // path passed to SaveAll (i.e. the ini IndexDirectory).
+            std::string spannWorkDir;
+            bool inPlaceBuild = false;
+            if (const char* ip = std::getenv("SPTAG_SPANN_INPLACE_DIR")) {
+                if (ip[0] != '\0') {
+                    inPlaceBuild = true;
+                    spannWorkDir = std::string(ip) + "/tenant_" + std::to_string(tenantId);
+                }
+            }
+            if (!inPlaceBuild) {
+                std::string spannWorkBase = "/tmp";
+                if (const char* e = std::getenv("SPTAG_SPANN_WORK_DIR")) {
+                    if (e[0] != '\0') spannWorkBase = e;
+                }
+                spannWorkDir = spannWorkBase + "/sptag_spann_tenant_" + std::to_string(tenantId);
+            }
+            // Resume: keep the existing work dir (head_select_state.bin + per-node head
+            // files from the prior run) so BuildIndexInternal can skip the BKT head
+            // selection. Wiping it would force a full SelectHead re-run, defeating the
+            // SPTAG_PERSIST_SELECTHEAD checkpoint.
+            const bool resumeBuild = []() {
+                const char* v = std::getenv("SPTAG_RESUME_BUILD");
+                return v && (v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y');
+            }();
+            const std::string checkpointFile = spannWorkDir + "/head_select_state.bin";
+            const bool checkpointExists = std::ifstream(checkpointFile, std::ios::binary).good();
+            if (resumeBuild && checkpointExists) {
+                fprintf(stderr, "[INFO] Tenant %d: RESUME — keeping work dir %s (checkpoint present, skipping wipe)\n",
+                        tenantId, spannWorkDir.c_str());
+            } else {
+                if (resumeBuild) {
+                    fprintf(stderr, "[INFO] Tenant %d: RESUME requested but no checkpoint at %s; full rebuild\n",
+                            tenantId, checkpointFile.c_str());
+                }
+                RemovePathRecursive(spannWorkDir);
+            }
             EnsureDir(spannWorkDir);
+            if (inPlaceBuild) {
+                fprintf(stderr, "[INFO] Tenant %d: IN-PLACE build — writing directly to final dir %s (SaveAll will skip the copy)\n",
+                        tenantId, spannWorkDir.c_str());
+            }
             tenantIndex->SetBuildParam("IndexDirectory", spannWorkDir.c_str(), "Base");
             tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Base");
             tenantIndex->SetBuildParam("isExecute", "true", "SelectHead");
@@ -2308,6 +2391,14 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             tenantIndex->SetBuildParam("isExecute", "true", "BuildSSDIndex");
             tenantIndex->SetBuildParam("BuildSsdIndex", "true", "BuildSSDIndex");
             tenantIndex->SetBuildParam("Storage", m_storageBackend.c_str(), "BuildSSDIndex");
+
+            // Apply staged in-posting quantization config (and any other extra
+            // [BuildSSDIndex] params) so they persist into the index's indexloader.ini.
+            for (const auto& kv : m_extraSSDBuildParams) {
+                tenantIndex->SetBuildParam(kv.first.c_str(), kv.second.c_str(), "BuildSSDIndex");
+                fprintf(stderr, "[INFO] Tenant %d: SSD build param %s = %s\n",
+                        tenantId, kv.first.c_str(), kv.second.c_str());
+            }
 
             // Replica fan-out: each base vector is inserted into its top-N nearest
             // heads' postings. Default 8 (SPANN historical). Lowering it shrinks the
@@ -2330,25 +2421,69 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             tenantIndex->SetBuildParam("DataCapacity", std::to_string(dataCapacity).c_str(), "Base");
             tenantIndex->SetBuildParam("DataBlockSize", std::to_string(std::min(dataCapacity, 1024 * 1024)).c_str(), "Base");
 
-            // Scale SSD file size: each posting can hold ~PostingVectorLimit(118) vectors
-            // Each vector in posting: dim*sizeof(float) + metadata overhead ~= dim*4+64 bytes
-            // With ReplicaCount=8, total data ~ assignments * replica * vec_bytes / page_size blocks.
-            int64_t estimatedBytes = postingAssignmentCount * static_cast<int64_t>(m_dimension * 4 + 64) * 10LL;
+            // Scale SSD file size: each posting record stores VID + version +
+            // per-vector tags + the vector payload. Vector bytes depend on the value
+            // type (Int8 = dim*1, Float = dim*4); using a fixed dim*4 here would
+            // over-preallocate the block pool 4x for Int8 / UInt8 datasets (e.g.
+            // billion-scale SIFT/SPACEV) and can exhaust the disk before build.
+            //
+            // IMPORTANT: when in-posting quantization (OPQ/RaBitQ) is enabled, the
+            // persisted posting record is the SLIM record (quant code + small meta),
+            // NOT the full vector. Estimating with the full vector over-allocates the
+            // block pool by ~(fullVec/slim) x (e.g. 100B vs ~50B for SPACEV M=25),
+            // which at billion scale pre-allocates StartFileSizeGB far past the disk
+            // and ENOSPC-fails the build before a single posting is written. So when a
+            // posting quantizer is staged, size the pool off the slim record instead.
+            const int64_t valueTypeBytes = static_cast<int64_t>(SPTAG::GetValueTypeSize(m_valueType));
+            int64_t postingQuantM = 0;
+            bool postingQuantized = false;
+            // If the caller explicitly pinned StartFileSizeGB / MaxFileSizeGB (e.g. via
+            // the spannbuilder --ssd-start-file-gb / --ssd-max-file-gb CLI flags, which
+            // stage them into m_extraSSDBuildParams), honor those exactly and DO NOT
+            // overwrite them with the auto estimate below. This keeps billion-scale
+            // disk budgeting explicit and reproducible from the build script.
+            bool explicitStart = false, explicitMax = false;
+            // NOTE: keys staged via the native .ini path are lowercased by IniReader
+            // (e.g. "startfilesizegb"), so these comparisons MUST be case-insensitive
+            // — a case-sensitive match silently fails to detect the explicit pin and
+            // lets the auto estimate clobber the reproducible disk budget.
+            for (const auto& kv : m_extraSSDBuildParams) {
+                if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(kv.first.c_str(), "PostingQuantizer") && kv.second != "None" && !kv.second.empty()) {
+                    postingQuantized = true;
+                } else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(kv.first.c_str(), "PostingQuantM")) {
+                    postingQuantM = std::max<int64_t>(0, atoll(kv.second.c_str()));
+                } else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(kv.first.c_str(), "StartFileSizeGB")) {
+                    explicitStart = true;
+                } else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(kv.first.c_str(), "MaxFileSizeGB")) {
+                    explicitMax = true;
+                }
+            }
+            // Slim record = quant code (M bytes) + meta (VID/version/tags/numeric-quant
+            // words, ~32B headroom). Full record = dim*valueTypeBytes + tags + 64.
+            const int64_t perVecBytes = (postingQuantized && postingQuantM > 0)
+                ? (postingQuantM + static_cast<int64_t>(m_buildNumTagsPerVec) * 4 + 32)
+                : (static_cast<int64_t>(m_dimension) * valueTypeBytes
+                   + static_cast<int64_t>(m_buildNumTagsPerVec) * 4 + 64);
+            int64_t estimatedBytes = postingAssignmentCount * perVecBytes * 10LL;
                 int startFileSizeGB = std::max(1, (int)(estimatedBytes / (1024LL * 1024LL * 1024LL)) + 1);
                 if (hasNodeAwarePlan) {
                 startFileSizeGB = std::max(startFileSizeGB, 4);
                 }
                 int maxFileSizeGB = std::max(startFileSizeGB * 3, hasNodeAwarePlan ? 32 : 10);
-            tenantIndex->SetBuildParam("StartFileSizeGB", std::to_string(startFileSizeGB).c_str(), "BuildSSDIndex");
+            if (!explicitStart) {
+                tenantIndex->SetBuildParam("StartFileSizeGB", std::to_string(startFileSizeGB).c_str(), "BuildSSDIndex");
+            }
+            if (!explicitMax) {
                 tenantIndex->SetBuildParam("MaxFileSizeGB", std::to_string(maxFileSizeGB).c_str(), "BuildSSDIndex");
+            }
 
             fprintf(stderr,
-                    "[INFO] Tenant %d: posting assignments=%lld raw_vectors=%d StartFileSizeGB=%d MaxFileSizeGB=%d DataCapacity=%d\n",
+                    "[INFO] Tenant %d: posting assignments=%lld raw_vectors=%d StartFileSizeGB=%s MaxFileSizeGB=%s DataCapacity=%d\n",
                     tenantId,
                     static_cast<long long>(postingAssignmentCount),
                     tenantVecCount,
-                    startFileSizeGB,
-                    maxFileSizeGB,
+                    explicitStart ? "<explicit>" : std::to_string(startFileSizeGB).c_str(),
+                    explicitMax ? "<explicit>" : std::to_string(maxFileSizeGB).c_str(),
                     dataCapacity);
 
             // Scale graph build parameters by tenant size to avoid fixed overhead on small tenants
@@ -2407,6 +2542,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                 if (!InjectSharedDB(tenantIndex, tenantId)) return false;
             }
 
+            tenantIndex->SetShareBuildOwnership(borrowedVectors);
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             m_tenantSpannWorkDirs[tenantId] = spannWorkDir;
             fprintf(stderr, "[INFO] Tenant %d: SPANN build (%d vectors)\n", tenantId, tenantVecCount);
@@ -2416,6 +2552,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             // Medium tenant: build in-memory BKT index
             tenantIndex = std::make_shared<AnnIndex>("BKT", valueTypeStr.c_str(), m_dimension);
             tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Index");
+            tenantIndex->SetShareBuildOwnership(borrowedVectors);
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             fprintf(stderr, "[INFO] Tenant %d: BKT build (%d vectors)\n", tenantId, tenantVecCount);
         }
@@ -2424,6 +2561,7 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             // Small tenant: build trivial BKT index (effectively brute force at this scale)
             tenantIndex = std::make_shared<AnnIndex>("BKT", valueTypeStr.c_str(), m_dimension);
             tenantIndex->SetBuildParam("DistCalcMethod", distMethod.c_str(), "Index");
+            tenantIndex->SetShareBuildOwnership(borrowedVectors);
             buildOk = tenantIndex->Build(tenantVectors, tenantVecCount, p_normalized);
             fprintf(stderr, "[INFO] Tenant %d: BruteForce build (%d vectors)\n", tenantId, tenantVecCount);
         }

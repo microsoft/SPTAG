@@ -281,6 +281,13 @@ namespace SPTAG
             void InitializeDefaultHeadBundle();
             ErrorCode SaveHeadBundleManifest(const std::string& p_baseDir) const;
             ErrorCode LoadHeadBundleManifest(const std::string& p_baseDir);
+
+            // SelectHead resume checkpoint: persist / reload the PerTagBKT-derived
+            // build state so a failed BuildHead/BuildSSDIndex can restart without
+            // re-running the head-selection BKT. Gated by SPTAG_PERSIST_SELECTHEAD
+            // (+ SPTAG_RESUME_BUILD to actually resume).
+            ErrorCode SaveHeadSelectState(const std::string& p_path) const;
+            ErrorCode LoadHeadSelectState(const std::string& p_path);
             ErrorCode InitializeHeadBundleRuntime(const std::string& p_baseDir);
             ErrorCode SetupMetadataOnlyHeadStore(const std::string& p_baseDir);
             ErrorCode EnsureHeadBundleNodeLoaded(int p_nodeId) const;

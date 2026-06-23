@@ -110,6 +110,13 @@ public:
     // Set build-time primary node ownership for SPANN head construction
     void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<int>>& primaryNodeVectorAssignments);
 
+    // When set, the next Build() borrows the caller's vector buffer instead of
+    // copying it into the core (passes p_shareOwnership=true to BuildIndex). The
+    // caller must keep the buffer alive for the duration of the build. Used by
+    // TenantIndexManager for the single contiguous tenant (1B-scale) build to
+    // avoid a full duplicate of the vector data.
+    void SetShareBuildOwnership(bool p_share) { m_shareBuildOwnership = p_share; }
+
     // Wrap an already-built/loaded VectorIndex (used internally and by
     // TenantIndexManager when injecting a shared RocksDB during load).
     AnnIndex(const std::shared_ptr<SPTAG::VectorIndex>& p_index);
@@ -124,6 +131,8 @@ private:
     SPTAG::IndexAlgoType m_algoType;
 
     SPTAG::VectorValueType m_inputValueType;
+
+    bool m_shareBuildOwnership = false;
 };
 
 // Per-tenant index strategy based on data size
@@ -294,6 +303,14 @@ public:
     void SetUseDirectIO(bool p_use) { m_useDirectIO = p_use; }
     void SetEnableWAL(bool p_enable) { m_enableWAL = p_enable; }
 
+    // Stage an extra [BuildSSDIndex] parameter (name/value as in indexloader.ini)
+    // to be applied before the SPANN build so it persists to the index config.
+    // Used to configure the in-posting quantization knobs (PostingQuantizer,
+    // PostingQuantM, QuantizeHead, ...) without environment variables.
+    void SetSSDBuildParam(const char* p_name, const char* p_value) {
+        m_extraSSDBuildParams.emplace_back(std::string(p_name), std::string(p_value));
+    }
+
 private:
     DimensionType m_dimension;
     SPTAG::IndexAlgoType m_algoType;
@@ -404,6 +421,10 @@ private:
 
     // Posting storage backend
     std::string m_storageBackend = "FILEIO";
+
+    // Extra [BuildSSDIndex] params staged via SetSSDBuildParam, applied before
+    // the SPANN build (e.g. in-posting quantization config).
+    std::vector<std::pair<std::string, std::string>> m_extraSSDBuildParams;
 
     // --- Shared RocksDB (multi-tenant) ---
     // When m_useSharedDB is true and m_storageBackend == "ROCKSDBIO", every

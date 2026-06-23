@@ -96,3 +96,127 @@ python setup.py build_ext --inplace
 - Keep tenant routing in wrapper, but rely on core IO/cache infrastructure for cache policy.
 - Dataset destructor safety patch location:
   - `AnnService/inc/Core/Common/Dataset.h`
+
+## Unfilter Enhancement Pipeline (DO NOT DROP)
+Multi-tenant SPANN partitions heads into ACL-hierarchy bundle nodes (PerTagBKT +
+`SPTAG_ACL_COLS`/`SPTAG_HIER_LEVEL_WIDTHS`). **Unfiltered** queries only perform
+well when all three augmentation layers below are built; otherwise unfilter
+degrades to a bare per-node fan-out (the `Using routed head bundle graph search
+across N nodes` log) and QPS/recall suffer. All three are **env/tool-gated and
+default OFF** — they are NOT produced by a plain `spannbuilder`/wrapper build, so
+they are easy to forget. Always enable them together for unfilter benchmarks.
+
+| Layer | What it builds | How to enable | Code |
+| ----- | -------------- | ------------- | ---- |
+| ① cross-graph | `head_cross_edges.bin` stitching the bundle nodes | ini `[MultiTenant] CrossEdges=1` (+ `CrossExtraEdges=N`) → launcher runs `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m N -t T -w true` **after** the build; `CrossEdges=0` skips it. Search-time kill switch: env `SPTAG_DISABLE_CROSS_EDGES=1`; filter queries skip cross edges unless `SPTAG_FILTER_KEEP_CROSS=1` | tool `AnnService/src/AugmentHeadGraph/main.cpp`; search `SPANNIndex.cpp` `CrossSubgraphGraphSearch` (~1886), gate ~1057-1063 |
+| ② U_extra (~10% extra unfilter-only heads) | `head_role.bin` | build env `SPTAG_DUAL_POOL_AUGMENT=1` + `SPTAG_DUAL_POOL_EXTRA_RATIO=0.1` | `SPANNIndex.cpp` DualPoolAugment (~3098-3192) |
+| ③ unfilter-tail (K nearest-head tail copies/vector) | tail edges (`dist=FLT_MAX`) appended to postings | build env `SPTAG_UNFILTER_TAIL_K_REPLICA=K` + `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P`; search env `SPTAG_UNFILTER_TAIL=1` + same buffer pages | `ExtraDynamicSearcher.h` Phase 4 (~4035-4090); SSD params `TailReplicaCount`/`UnfilterTailBufferLength` |
+
+### Billion-scale build options (resume / pin-balance / in-place)
+
+**SelectHead resume checkpoint** (avoid re-running the expensive BKT head selection when a later BuildHead/BuildSSDIndex fails): ini `[MultiTenant] PersistSelectHead=1` makes `SelectHeadInternal` write `head_select_state.bin` (the PerTagBKT-derived state: node head selections, per-bundle U_extra, node/primary vector assignments, head-vector owners, head roles) into the SPANN **work dir** and keep the per-node head vector files (normally deleted in BuildHead). To resume, re-run the launcher with `[MultiTenant] ResumeBuild=1` (→ env `SPTAG_RESUME_BUILD=1`): CoreInterface keeps the work dir (`CoreInterface.cpp` ~2342, guards `RemovePathRecursive`) and `BuildIndexInternal` (`SPANNIndex.cpp` ~3450) loads the checkpoint and reports `select head time: 0.00s`, going straight to BuildHead. The checkpoint lives in `$SPTAG_SPANN_WORK_DIR/sptag_spann_tenant_<id>` (default `/tmp`); **set `SPTAG_SPANN_WORK_DIR` to a persistent disk** so the checkpoint survives across runs (`/tmp` is wiped on reboot). Impl: `SaveHeadSelectState`/`LoadHeadSelectState` in `SPANNIndex.cpp`; magic `'HSST'`.
+
+**Pin BKT balance factor (skip DynamicFactorSelect)** (the SelectHead I/O bottleneck at billion scale): SPANN SelectHead defaults `BalanceFactor=-1`, which makes `BKTree::BuildTrees` run `DynamicFactorSelect` — an auto-search that does ~14 full `KmeansAssign` scans **per tag group** to pick the most-balanced lambda. On a ~250M-vector group over a slow disk this dominates SelectHead. ini `[SelectHead] BKTLambdaFactor=100` (→ `SpannAttrBuilder` exports env `SPTAG_BKT_LAMBDA_FACTOR`, consumed in `SelectHeadInternal`, `SPANNIndex.cpp` ~2986: overrides `m_options.m_fBalanceFactor`) pins the balance factor so `m_fBalanceFactor >= 0` skips the auto-search entirely (log: `pinning m_fBalanceFactor -1 -> 100 (skips DynamicFactorSelect auto-search)`, then `Start to build BKTree` with no `Best Lambda Factor` lines). **100 is SPTAG's canonical default** (BKT `ParameterDefinitionList.h`; all SIFT/SPACEV SPANN reference configs use it), so it is the low-risk standard value. Independent of BKTLambdaFactor, keep the SelectHead vector file on fast storage (NVMe) — the BKT tree recursion still scans the group vectors repeatedly.
+
+**In-place build (no final copy)** (avoid the transient 2× disk footprint + copy time at billion scale): by default the SPANN index is staged in a per-tenant **work dir** (`$SPTAG_SPANN_WORK_DIR/sptag_spann_tenant_<id>`, default `/tmp`) and `SaveAll` copies it to `IndexDirectory/tenant_<id>` at the end — which needs room for the postings *twice* (work + final) and re-writes the whole block pool. ini `[MultiTenant] InPlaceBuild=1` (→ launcher exports `SPTAG_SPANN_INPLACE_DIR=$IndexDirectory`) makes the build write the head index + SSD block pool **directly** into `IndexDirectory/tenant_<id>`. `SaveAll`/`SaveUnifiedStorage` then hit the `srcDir == dstDir` branch (`CoreInterface.cpp` ~3405, logs "already saved in place") and skip the copy. Note: the `StartFileSizeGB` block pool is pre-allocated in `IndexDirectory`'s filesystem, so that disk must hold it (for SPACEV-1B: `/datadisk`, 420–560GB). The SSD postings are already flushed incrementally to the FILEIO block pool during BuildSSDIndex, so in-place gives true streaming-to-final with no extra disk. Impl: work-dir computation in `CoreInterface.cpp` (~2334, honors `SPTAG_SPANN_INPLACE_DIR`).
+
+Search side: unfilter routes to all bundle nodes via cross-edge unified
+traversal (`SPANNIndex.cpp` ~1618; `m_globalHeadGraph` is no longer used for
+navigation). Cross-edge search toggles: `SPTAG_DISABLE_CROSS_EDGES`,
+`SPTAG_CROSSEDGE_UNFILTER`, `SPTAG_FILTER_KEEP_CROSS`.
+
+Full mode matrix and reproduce commands: `docs/MultiTenant_DualPool_Usage.md`,
+`docs/MultiTenant_SIFT1M_UnfilterTail.md`.
+
+## Build Config — Native `.ini` (single source of truth, DO NOT use env-soup)
+The attribute-aware SPANN build is driven by a **native SPANN sectioned `.ini`**
+read by `Helper::IniReader` (the same loader the classic `IndexBuilder` uses) —
+**not** a pile of `SPTAG_*` env exports in a shell script. The canonical config
++ launcher (both committed, so they survive `/tmp` wipes) are:
+- `Script_AE/iniFile/build_spann_attr_spacev_opq25.ini` — the config. Run it with
+  `Release/spannbuilder -c <config.ini>`.
+- `Tools/benchmarks/run_spann_attr_build.sh` — thin launcher. Carries ONLY what is
+  not a build param (process-loader env + the post-build `augmentheadgraph` step,
+  now gated by ini `[MultiTenant] CrossEdges`/`CrossExtraEdges` + copying
+  `opq_quantizer.bin`); derives every path FROM the ini via `sed`.
+
+How the `.ini` maps to the engine (`Wrappers/src/SpannAttrBuilder.cpp` `-c` reader):
+- `[Base]/[Tags]/[Build]` → data-layout args (Resolve: CLI flag > ini > default).
+- `[BuildSSDIndex]` → native `mgr.SetSSDBuildParam(k,v)` staging path (the ONLY
+  section with a native pre-build hook): `Storage`, `ReplicaCount`,
+  `PostingQuantizer`/`PostingQuantM`/`PostingQuantizerFile`, `FullVectorFile`,
+  `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`.
+- `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` → bridged to the existing
+  `getenv` consumers via `setenv` (these extensions have no native SPANN param):
+  `Ratio`→`SPTAG_PERTAG_HEAD_RATIO`, `SelectType`→`SPTAG_SELECT_TYPE_OVERRIDE`,
+  `DistCalcMethod`→`SPTAG_DIST_METHOD`, `NumberOfThreads`→`SPTAG_BUILD_HEAD_THREADS`,
+  `ACLCols`/`HierLevelWidths`/`NumericCols`/`PerVectorTagsFile`, and the three
+  unfilter layers (`DualPoolAugment`/`DualPoolExtraRatio`/`UnfilterTailKReplica`/
+  `UnfilterTailBufferPages`).
+
+Gotchas (`Helper/SimpleIniReader.cpp`): comments MUST start with `;` (lines
+starting with `#` are parsed as params → `ReadIni_FailedParseParam`); inline
+comments are NOT stripped, so a value line must contain only the value; sections
+and keys are lowercased (case-insensitive). An explicit CLI flag still overrides
+any ini value (later `SetSSDBuildParam` push wins).
+
+## Billion-scale derived inputs — pure-C++ prep (no Python, no generic quantizer)
+The attribute SPANN build needs three derived sidecars that are NOT in the repo
+(too large). Generate them in **C++** via `spannbuilder` subcommands — mirroring
+`AnnService/src/Quantizer/main.cpp` — so they match the in-posting convention the
+engine trusts. Canonical driver: `Tools/benchmarks/prep_spacev1b_inputs.sh`
+(optional `N` arg builds a smoke subset). Subcommands (`SpannAttrBuilder.cpp`):
+- `--merge-tags5`  interleave `tags.npy[N,4]` + `num_attr.npy[N]` → `*_tags5.u32`
+  `[N,5]` (4 ACL cols + numeric) **and** `*_group_tags.txt` (routing key = ACL
+  col 0, one int/line). Parses `.npy` v1.0 headers (data at `10+hlen`).
+- `--gen-opq-codes`  load OPQ codebook with `IQuantizer::LoadIQuantizer`, mmap base,
+  **widen raw bytes to float (NO normalization)**, `QuantizeVector(vf, code, ADC=false)`,
+  write header-less `N*M` `opq_codes_m<M>.bin`. This replicates `ExtraDynamicSearcher.h`
+  ~5165. **Do NOT use the generic `Release/quantizer`** — it normalizes and writes an
+  8-byte `(n,d)` header, so its codes do NOT match (validated per-byte ≈ random).
+Validated byte-exact vs the 3M `opq_codes_m25.bin` (per-byte 0.9999996). Reuses the
+3M-trained `opq_quantizer.bin` (copied for search-time ADC).
+
+## SSD Block-Pool Sizing (billion-scale, OPQ/RaBitQ)
+The FileIO posting store (`ssdmapping_postings`) is a pre-allocated block pool:
+it starts at `StartFileSizeGB`, grows by `GrowthFileSizeGB`, capped at
+`MaxFileSizeGB` (`ParameterDefinitionList.h:216-218`,
+`ExtraFileController.cpp:13-45`). The wrapper auto-estimates these from
+`postingAssignmentCount × perVecBytes × 10` (`CoreInterface.cpp` ~2388).
+
+Two gotchas, both fixed:
+- The estimate is now **slim-aware**: when a posting quantizer is staged
+  (`--posting-quantizer OPQ/RaBitQ`), `perVecBytes` uses the slim record
+  (`PostingQuantM + numTags*4 + 32`) not the full vector. Otherwise it
+  over-allocated ~4.7× (1B SPACEV → `StartFileSizeGB=1840` → instant ENOSPC
+  before the first posting is written). Real 1B OPQ-25 posting data ≈ 388 GB.
+- For reproducibility, **pin the budget in the build script** with explicit
+  CLI flags (preferred over env): `--ssd-start-file-gb <GB> --ssd-max-file-gb <GB>`
+  (`--ssd-growth-file-gb` optional). When provided, the estimator does NOT
+  override them. 1B SPACEV example: `--ssd-start-file-gb 420 --ssd-max-file-gb 560`
+  (real ~388 GB, fits the 761 GB NVMe alongside the ~120 GB head index).
+  Wired in `SpannAttrBuilder.cpp` (`--ssd-*-file-gb` → `SetSSDBuildParam`).
+
+
+## In-posting Quantization + Deep-queue Rerank (search & build)
+SPANN postings can store a compact **in-posting quantization code** (RaBitQ / OPQ)
+per vector instead of the full-precision vector, so a posting scan reads ~4× fewer
+bytes. The top-`L` survivors are then **exact-reranked** by cold O_DIRECT reads from
+the full-precision base file (vid-indexed, never page-cache resident). This is the
+billion-scale path: the ~1TB full-vector posting store is never materialized — only
+the slim `[meta | code]` end-state hits disk.
+
+- **Build** (one source of truth = the `.ini`): `[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ`
+  + `PostingQuantM=<bytes>` + `PostingQuantizerFile=<codebook>` + `FullVectorFile=<base>`
+  (rerank source) + `RerankL`. The native single-pass writer streams slim postings
+  directly (no full-vector intermediate). RaBitQ code sidecars are pre-encoded with
+  `Release/rabitq2_encode_stream` (value-type-aware, scales to 1B); OPQ codes with
+  `spannbuilder --gen-opq-codes` (see prep script). Internals: `TransformInPostings*`
+  / build-slim writers in `ExtraDynamicSearcher.h` (markers `inpost_rbq.bin`,
+  `inpost_opq.bin`).
+- **Search**: RaBitQ async path = env `SPTAG_INPOST_RBQ=1` (+ `SPTAG_INPOST_RBQ_FILE`),
+  with rerank via the **deep-queue libaio** reader (`SPTAG_INPOST_LIBAIO_RERANK=1`,
+  `RerankBaseDirectBatch()` — one `io_submit` for all `L` candidates, ~12µs/read vs
+  ~56µs serial). **Do NOT set `SPTAG_OPQ_PREFILTER`** with the RaBitQ async path — it
+  routes to the serial `SearchIndexOPQ` path (~6× slower cold). OPQ in-posting uses the
+  matching codebook (`opq_quantizer.bin`, ADC) on the same libaio rerank fast path.

@@ -159,6 +159,25 @@ target_compile_definitions(keyvaluetest PRIVATE _exe)
 target_compile_definitions(usefultool PRIVATE _exe)
 target_compile_definitions(augmentheadgraph PRIVATE _exe)
 
+# Native C++ attribute-aware SPANN build entry (the C++ analog of the Python
+# build_yfcc_facetA.py / build_5col.py demo). Drives TenantIndexManager from
+# Wrappers/src/CoreInterface.cpp directly, mmapping the vector/tag files so
+# billion-scale builds stream from disk.
+add_executable(spannbuilder ${PROJECT_SOURCE_DIR}/Wrappers/src/SpannAttrBuilder.cpp ${PROJECT_SOURCE_DIR}/Wrappers/src/CoreInterface.cpp)
+target_include_directories(spannbuilder PRIVATE ${PROJECT_SOURCE_DIR}/Wrappers)
+target_link_libraries(spannbuilder SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
+
+# Offline RaBitQ2 in-posting code-sidecar encoders. rabitq2_encode loads the full
+# float matrix into RAM (small/legacy); rabitq2_encode_stream streams the base file
+# in chunks and is value-type-aware (Int8/UInt8/Float) so it scales to 1B vectors.
+# Both compile against rabitqlib with AVX2/FMA, matching RaBitQ2Lib.
+add_executable(rabitq2_encode ${PROJECT_SOURCE_DIR}/Tools/rabitq2_encode.cpp)
+target_include_directories(rabitq2_encode PRIVATE ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
+target_compile_options(rabitq2_encode PRIVATE -mavx2 -mfma)
+add_executable(rabitq2_encode_stream ${PROJECT_SOURCE_DIR}/Tools/rabitq2_encode_stream.cpp)
+target_include_directories(rabitq2_encode_stream PRIVATE ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
+target_compile_options(rabitq2_encode_stream PRIVATE -mavx2 -mfma)
+
 # for Test
 add_library(ssdservingLib ${SSD_SERVING_HDR_FILES} ${SSD_SERVING_FILES})
 target_link_libraries(ssdservingLib SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})

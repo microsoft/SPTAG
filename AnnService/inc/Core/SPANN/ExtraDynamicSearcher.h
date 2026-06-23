@@ -273,6 +273,39 @@ namespace SPTAG::SPANN {
         size_t m_inpostBaseN = 0;
         int m_inpostBaseDim = 0;
 
+        // Build-time slim (native): write [meta | RaBitQ-code] postings DIRECTLY during
+        // the fresh build, never materializing the full-vector posting store. This is the
+        // billion-scale path: the full ~1TB intermediate (replicas x full-vector records)
+        // is never written; only the slim end-state (replicas x [meta|code]) hits disk.
+        // Posting MEMBERSHIP is still full-stride-based (m_postingSizeLimit computed from
+        // the full record), so the result is byte-compatible with the post-build transform
+        // TransformInPostingsRbqContig (same members, slim records). The per-vector codes
+        // come from a pre-encoded sidecar (rabitq2_encode_stream) mmap'd, indexed by VID.
+        // Env: SPTAG_INPOST_RBQ=1 + SPTAG_INPOST_RBQ_BUILD_NATIVE=1 + SPTAG_INPOST_RBQ_FILE.
+        bool   m_buildSlimRbq = false;
+        void*  m_buildRbqMap = nullptr;
+        size_t m_buildRbqMapSize = 0;
+        const uint8_t* m_buildRbqCodes = nullptr;
+        int    m_buildRbqCodeBytes = 0;
+        int    m_buildRbqN = 0;
+        int    m_buildSlimStride = 0;            // m_metaDataSize + codeBytes (slim record)
+        int    m_quantFullVectorInfoSize = 0;    // full [meta|vector] stride, for build-time membership sizing
+        std::string m_inpostRbqPathResolved;     // resolved code sidecar path, for BuildIndex slim writer setup
+
+        // Build-time slim (native) for in-posting OPQ: same single-pass mechanism as the
+        // RaBitQ path above, but the per-VID codes come from the raw opq_codes_m<M>.bin
+        // sidecar (N*M uint8, vid-indexed, no header) instead of the rabitq2 stream. The
+        // build writes [meta | M-byte OPQ code] postings directly, so the full-vector
+        // posting store is never materialized (billion-scale path). Byte-compatible with
+        // the post-build transform TransformInPostingsOpq (same members, slim records).
+        bool   m_buildSlimOpq = false;
+        void*  m_buildOpqMap = nullptr;
+        size_t m_buildOpqMapSize = 0;
+        const uint8_t* m_buildOpqCodes = nullptr;
+        int    m_buildOpqM = 0;
+        SizeType m_buildOpqN = 0;
+        std::string m_opqCodesPathResolved;      // resolved opq_codes_m<M>.bin path, for BuildIndex slim writer setup
+
         // Page-selective directory: per posting, a 256-bit signature per 4KB page
         // (OR of the tags of the records whose bytes fall in that page). Used by
         // filtered queries (env SPTAG_PAGE_SELECT=1) to read only the pages that
@@ -429,29 +462,37 @@ namespace SPTAG::SPANN {
             // RaBitQ2 rotator/centroid meta-only (zero resident codes) to learn the
             // code byte width, and mmaps the full-precision base file for rerank.
             {
-                const char* rb = std::getenv("SPTAG_INPOST_RBQ");
-                if (rb && rb[0] == '1' && sizeof(ValueType) == 1) {
+                if (Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "RaBitQ") && sizeof(ValueType) == 1) {
                     std::string dir = p_opt.m_indexDirectory + FolderSep;
-                    const char* fe = std::getenv("SPTAG_INPOST_RBQ_FILE");
-                    if (fe && *fe) m_inpostRbqFile = fe;
+                    if (!p_opt.m_postingQuantFile.empty()) m_inpostRbqFile = p_opt.m_postingQuantFile;
+                    // The sidecar may be given as an absolute path (build-time slim, where
+                    // the codes are pre-encoded into a known location independent of the
+                    // index work dir) or as a name relative to the index directory.
+                    std::string rbqPath = (!m_inpostRbqFile.empty() && m_inpostRbqFile[0] == '/')
+                        ? m_inpostRbqFile : (dir + m_inpostRbqFile);
                     auto store = std::make_shared<RaBitQ2>();
-                    if (store->LoadMeta(dir + m_inpostRbqFile)) {
+                    if (store->LoadMeta(rbqPath)) {
                         m_inpostRbq = true;
                         m_inpostRbq2 = store;
                         m_inpostRbqBinBytes = store->GetBinBytes();
                         m_inpostRbqExBytes = store->GetExBytes();
+                        // The on-disk postings are always slim [meta|code]; size the search
+                        // stride accordingly. During a fresh build, BuildIndex restores the
+                        // full stride for membership and installs the slim writer
+                        // (SetupBuildSlimRbq) using m_inpostRbqPathResolved.
+                        m_quantFullVectorInfoSize = p_opt.m_dim * sizeof(ValueType) + m_metaDataSize;
                         m_vectorInfoSize = m_metaDataSize + m_inpostRbqBinBytes + m_inpostRbqExBytes;
-                        const char* le = std::getenv("SPTAG_INPOST_RERANK_L");
-                        if (le && *le) { int L = std::atoi(le); if (L > 0) m_inpostRerankL = L; }
+                        m_inpostRbqPathResolved = rbqPath;
+                        if (p_opt.m_rerankL > 0) m_inpostRerankL = p_opt.m_rerankL;
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                             "[InpostRBQ] %s binBytes=%d exBytes=%d vectorInfoSize=%d (full=%d) rerankL=%d\n",
-                            m_inpostRbqFile.c_str(), m_inpostRbqBinBytes, m_inpostRbqExBytes, m_vectorInfoSize,
-                            (int)(p_opt.m_dim * sizeof(ValueType) + m_metaDataSize), m_inpostRerankL);
+                            rbqPath.c_str(), m_inpostRbqBinBytes, m_inpostRbqExBytes, m_vectorInfoSize,
+                            (int)m_quantFullVectorInfoSize, m_inpostRerankL);
                         // Open the full-precision base O_DIRECT for cold per-survivor
                         // rerank reads. It is NEVER mmap'd / page-cache resident, so every
                         // rerank vector fetch is a device read (apples-to-apples with
                         // PipeANN's on-disk rerank).
-                        const char* bp = std::getenv("SPTAG_INPOST_BASE");
+                        const char* bp = p_opt.m_fullVectorFile.empty() ? nullptr : p_opt.m_fullVectorFile.c_str();
                         if (bp && *bp) {
                             int hfd = open(bp, O_RDONLY);
                             if (hfd >= 0) {
@@ -512,13 +553,26 @@ namespace SPTAG::SPANN {
             // ValueType stride is only a transient local in TransformInPostingsOpq().
             // Enabled by env SPTAG_OPQ_INPOST_DB=<M> (M = OPQ subvector/code-byte count).
             {
-                const char* idb = std::getenv("SPTAG_OPQ_INPOST_DB");
-                if (idb && *idb && sizeof(ValueType) == 1) {
-                    int M = std::atoi(idb);
+                if (Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "OPQ") && sizeof(ValueType) == 1) {
+                    int M = p_opt.m_postingQuantM;
                     if (M > 0) {
                         m_opqInpostDb = true;
                         m_opqInpostDbM = M;
                         m_vectorInfoSize = m_metaDataSize + M;
+                        // Build-time slim (native): BuildIndex restores the full stride for
+                        // membership and installs the slim writer (SetupBuildSlimOpq), which
+                        // reads the per-VID codes from opq_codes_m<M>.bin. Resolve that path
+                        // now: an absolute PostingQuantizerFile overrides; otherwise the code
+                        // sidecar lives in the index directory under its canonical name.
+                        m_quantFullVectorInfoSize = p_opt.m_dim * sizeof(ValueType) + m_metaDataSize;
+                        if (!p_opt.m_postingQuantFile.empty() && p_opt.m_postingQuantFile[0] == '/') {
+                            m_opqCodesPathResolved = p_opt.m_postingQuantFile;
+                        } else {
+                            char codeName[64];
+                            snprintf(codeName, sizeof(codeName), "opq_codes_m%d.bin", M);
+                            m_opqCodesPathResolved = p_opt.m_indexDirectory + FolderSep + codeName;
+                        }
+                        if (p_opt.m_rerankL > 0) m_inpostRerankL = p_opt.m_rerankL;
                         // Open the flat O_DIRECT base so OPQ rerank uses the SAME deep-queue
                         // libaio path as RaBitQ (fair estimator comparison at equal IO).
                         EnsureInpostBaseFd();
@@ -787,6 +841,125 @@ namespace SPTAG::SPANN {
                 memset(ptr + sizeof(VID) + sizeof(version), 0, m_tagBytesPerVec);
             }
             memcpy(ptr + m_metaDataSize, vector, m_vectorInfoSize - m_metaDataSize);
+        }
+
+        // Build-time slim setup: mmap the pre-encoded RaBitQ2 sidecar (rabitq2_encode_stream
+        // output) and expose its per-VID code region. Same on-disk layout as the post-build
+        // transform reads (TransformInPostingsRbqContig): header 7xint32 [magic,N,dim,pdim,
+        // ex_bits,rotator_type,rotator_bytes], then rotator dump, then float32 centroid_rot
+        // [pdim], then per-vec [bin|ex]. The slim record written into postings is
+        // [meta | bin|ex] of stride m_buildSlimStride.
+        bool SetupBuildSlimRbq(const std::string& rbqPath) {
+            if (m_inpostRbqBinBytes <= 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostRBQ-native] meta not loaded, cannot slim-build\n");
+                return false;
+            }
+            int cfd = open(rbqPath.c_str(), O_RDONLY);
+            if (cfd < 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostRBQ-native] open sidecar %s fail\n", rbqPath.c_str());
+                return false;
+            }
+            off_t csz = lseek(cfd, 0, SEEK_END);
+            void* cmap = mmap(nullptr, (size_t)csz, PROT_READ, MAP_SHARED, cfd, 0);
+            close(cfd);
+            if (cmap == MAP_FAILED) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostRBQ-native] mmap sidecar fail\n");
+                return false;
+            }
+            const int32_t* h = reinterpret_cast<const int32_t*>(cmap);
+            int32_t N = h[1], pdim = h[3], rbytes = h[6];
+            int codeBytes = m_inpostRbqBinBytes + m_inpostRbqExBytes;
+            size_t codeBase = (size_t)7 * 4 + (size_t)rbytes + (size_t)pdim * sizeof(float);
+            m_buildRbqMap = cmap;
+            m_buildRbqMapSize = (size_t)csz;
+            m_buildRbqCodes = reinterpret_cast<const uint8_t*>(cmap) + codeBase;
+            m_buildRbqCodeBytes = codeBytes;
+            m_buildRbqN = N;
+            m_buildSlimStride = m_metaDataSize + codeBytes;
+            m_buildSlimRbq = true;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[InpostRBQ-native] build-time slim ENABLED: N=%d codeBytes=%d slimStride=%d (full record kept for membership)\n",
+                N, codeBytes, m_buildSlimStride);
+            return true;
+        }
+
+        // Slim posting record writer used by the build-time-slim path: writes
+        // [id | version | tags | RaBitQ-code(VID)] of stride m_buildSlimStride. The code is
+        // fetched from the mmapped sidecar by global VID. Mirrors Serialize's meta layout.
+        inline void SerializeSlim(char* ptr, SizeType VID, std::uint8_t version) {
+            memcpy(ptr, &VID, sizeof(VID));
+            memcpy(ptr + sizeof(VID), &version, sizeof(version));
+            if (m_tagBytesPerVec > 0 && VID >= 0 && (size_t)VID * m_numTagsPerVec < m_vectorTags.size()) {
+                memcpy(ptr + sizeof(VID) + sizeof(version),
+                       &m_vectorTags[(size_t)VID * m_numTagsPerVec],
+                       m_tagBytesPerVec);
+            } else if (m_tagBytesPerVec > 0) {
+                memset(ptr + sizeof(VID) + sizeof(version), 0, m_tagBytesPerVec);
+            }
+            if (VID >= 0 && VID < m_buildRbqN) {
+                memcpy(ptr + m_metaDataSize,
+                       m_buildRbqCodes + (size_t)VID * m_buildRbqCodeBytes,
+                       m_buildRbqCodeBytes);
+            } else {
+                memset(ptr + m_metaDataSize, 0, m_buildRbqCodeBytes);
+            }
+        }
+
+        // Build-time slim setup for in-posting OPQ: mmap the raw opq_codes_m<M>.bin sidecar
+        // (N*M uint8, vid-indexed, no header) and expose its per-VID code region. The slim
+        // record written into postings is [meta | M-byte OPQ code] of stride
+        // m_buildSlimStride. mmap (not resident) so the billion-scale codes (e.g. 1B*25 =
+        // 25GB) page in on demand.
+        bool SetupBuildSlimOpq(int M) {
+            if (M <= 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostOPQ-native] invalid M=%d, cannot slim-build\n", M);
+                return false;
+            }
+            int cfd = open(m_opqCodesPathResolved.c_str(), O_RDONLY);
+            if (cfd < 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostOPQ-native] open codes %s fail\n", m_opqCodesPathResolved.c_str());
+                return false;
+            }
+            off_t csz = lseek(cfd, 0, SEEK_END);
+            void* cmap = mmap(nullptr, (size_t)csz, PROT_READ, MAP_SHARED, cfd, 0);
+            close(cfd);
+            if (cmap == MAP_FAILED) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[InpostOPQ-native] mmap codes fail\n");
+                return false;
+            }
+            m_buildOpqMap = cmap;
+            m_buildOpqMapSize = (size_t)csz;
+            m_buildOpqCodes = reinterpret_cast<const uint8_t*>(cmap);
+            m_buildOpqM = M;
+            m_buildOpqN = (SizeType)((size_t)csz / (size_t)M);
+            m_buildSlimStride = m_metaDataSize + M;
+            m_buildSlimOpq = true;
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[InpostOPQ-native] build-time slim ENABLED: codes=%s N=%d M=%d slimStride=%d (full record kept for membership)\n",
+                m_opqCodesPathResolved.c_str(), (int)m_buildOpqN, M, m_buildSlimStride);
+            return true;
+        }
+
+        // Slim posting record writer for the OPQ build-time-slim path: writes
+        // [id | version | tags | OPQ-code(VID)] of stride m_buildSlimStride. The code is
+        // fetched from the mmapped sidecar by global VID. Mirrors SerializeSlim's meta layout.
+        inline void SerializeSlimOpq(char* ptr, SizeType VID, std::uint8_t version) {
+            memcpy(ptr, &VID, sizeof(VID));
+            memcpy(ptr + sizeof(VID), &version, sizeof(version));
+            if (m_tagBytesPerVec > 0 && VID >= 0 && (size_t)VID * m_numTagsPerVec < m_vectorTags.size()) {
+                memcpy(ptr + sizeof(VID) + sizeof(version),
+                       &m_vectorTags[(size_t)VID * m_numTagsPerVec],
+                       m_tagBytesPerVec);
+            } else if (m_tagBytesPerVec > 0) {
+                memset(ptr + sizeof(VID) + sizeof(version), 0, m_tagBytesPerVec);
+            }
+            if (VID >= 0 && VID < m_buildOpqN) {
+                memcpy(ptr + m_metaDataSize,
+                       m_buildOpqCodes + (size_t)VID * m_buildOpqM,
+                       m_buildOpqM);
+            } else {
+                memset(ptr + m_metaDataSize, 0, m_buildOpqM);
+            }
         }
 
         void CalculatePostingDistribution(VectorIndex* p_index)
@@ -2195,12 +2368,14 @@ namespace SPTAG::SPANN {
             LoadOrInitPostingPureCounts();
             // Dual-pool v3: head role sidecar (optional; absent = all heads are H1).
             LoadHeadRole();
-            // OPQ prefilter: optional offline sidecar export, or load-for-search.
+            // OPQ prefilter: optional offline sidecar export, or load-for-search. In-posting
+            // OPQ-DB mode (config PostingQuantizer=OPQ) auto-loads the codebook for the ADC
+            // screen + rerank, so the index is searchable config-only (no env needed).
             {
                 const char* ex = std::getenv("SPTAG_OPQ_EXPORT");
                 if (ex && ex[0] == '1') ExportOPQSidecars();
                 const char* pf = std::getenv("SPTAG_OPQ_PREFILTER");
-                if (pf && pf[0] == '1') LoadOPQPrefilter();
+                if ((pf && pf[0] == '1') || m_opqInpostDb) LoadOPQPrefilter();
             }
             // In-posting quantization: one-time offline transform (rewrites postings
             // to slim quantized records, writes the inpost_quant.bin marker).
@@ -3264,6 +3439,35 @@ namespace SPTAG::SPANN {
             // (includes tag bytes if m_numTagsPerVec > 0)
             m_vectorInfoSize = m_opt->m_dim * sizeof(ValueType) + m_metaDataSize;
 
+            // In-posting quantization: the constructor sized the search stride to the
+            // SLIM record. A fresh build needs FULL-stride membership (so each posting
+            // holds the same vectors as a full build), then writes SLIM codes. Restore
+            // the full-stride size limits here and install the build-time slim writer.
+            if (m_inpostRbq && m_quantFullVectorInfoSize > 0) {
+                m_postingSizeLimit = m_opt->m_postingPageLimit * PageSize / m_vectorInfoSize;
+                m_bufferSizeLimit = m_opt->m_bufferLength * PageSize / m_vectorInfoSize;
+                m_tailBufferSizeLimit = m_opt->m_unfilterTailBufferLength * PageSize / m_vectorInfoSize;
+                if (!m_buildSlimRbq && !m_inpostRbqPathResolved.empty()) {
+                    SetupBuildSlimRbq(m_inpostRbqPathResolved);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[InpostRBQ] build-time slim: full stride=%d postingSizeLimit=%d, writing slim stride=%d\n",
+                    m_vectorInfoSize, m_postingSizeLimit, m_buildSlimStride);
+            }
+            // In-posting OPQ: same single-pass slim build as RaBitQ above (full-stride
+            // membership, slim [meta|OPQ-code] records written via SerializeSlimOpq).
+            else if (m_opqInpostDb && m_quantFullVectorInfoSize > 0) {
+                m_postingSizeLimit = m_opt->m_postingPageLimit * PageSize / m_vectorInfoSize;
+                m_bufferSizeLimit = m_opt->m_bufferLength * PageSize / m_vectorInfoSize;
+                m_tailBufferSizeLimit = m_opt->m_unfilterTailBufferLength * PageSize / m_vectorInfoSize;
+                if (!m_buildSlimOpq) {
+                    SetupBuildSlimOpq(m_opqInpostDbM);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[InpostOPQ] build-time slim: full stride=%d postingSizeLimit=%d, writing slim stride=%d\n",
+                    m_vectorInfoSize, m_postingSizeLimit, m_buildSlimStride);
+            }
+
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Build SSD Index.\n");
 
             std::vector<std::vector<SizeType>> plannedNodeVectors;
@@ -4129,6 +4333,35 @@ namespace SPTAG::SPANN {
             }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "SPFresh: Writing SSD Info and checkSum\n");
+            // Build-time slim: postings were written as [meta|RaBitQ-code]. Reflect the slim
+            // stride in m_vectorInfoSize (so ssdinfo/metadata and any reload math are slim)
+            // and drop the inpost_rbq.bin marker so the post-build transform is a no-op and
+            // the index loads in in-posting-RBQ mode.
+            if (m_buildSlimRbq) {
+                m_vectorInfoSize = m_buildSlimStride;
+                std::string marker = m_opt->m_indexDirectory + FolderSep + "inpost_rbq.bin";
+                std::ofstream mf(marker, std::ios::binary);
+                int hdr[2] = { 1, m_inpostRbqBinBytes };
+                mf.write((const char*)hdr, sizeof(hdr));
+                mf.close();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[InpostRBQ-native] build-time slim DONE: slimStride=%d, marker written\n",
+                    m_buildSlimStride);
+            }
+            // In-posting OPQ build-time slim: drop the inpost_opq.bin marker (same format
+            // TransformInPostingsOpq writes) so the post-build transform is a no-op and the
+            // index loads in in-posting-OPQ-DB mode.
+            if (m_buildSlimOpq) {
+                m_vectorInfoSize = m_buildSlimStride;
+                std::string marker = m_opt->m_indexDirectory + FolderSep + "inpost_opq.bin";
+                std::ofstream mf(marker, std::ios::binary);
+                int hdr[2] = { m_buildOpqM, m_buildSlimStride };
+                mf.write((const char*)hdr, sizeof(hdr));
+                mf.close();
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[InpostOPQ-native] build-time slim DONE: M=%d slimStride=%d, marker written\n",
+                    m_buildOpqM, m_buildSlimStride);
+            }
             m_postingSizes.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdInfoFile);
             m_checkSums.Save(m_opt->m_indexDirectory + FolderSep + m_opt->m_checksumFile);
             SavePostingPureCounts();
@@ -4156,7 +4389,13 @@ namespace SPTAG::SPANN {
                 {
                     index = vectorsSent.fetch_add(1);
                     if (index < m_postingSizes.GetPostingNum()) {
-                        std::string postinglist(m_vectorInfoSize * m_postingSizes.GetSize(index), '\0');
+                        // Build-time slim: write [meta|RaBitQ-code] records (stride
+                        // m_buildSlimStride) instead of [meta|full-vector] (m_vectorInfoSize),
+                        // so the full-vector posting store is never materialized. Membership
+                        // count (m_postingSizes.GetSize) is unchanged (full-stride-based),
+                        // so the on-disk result matches the post-build slim transform.
+                        const int stride = (m_buildSlimRbq || m_buildSlimOpq) ? m_buildSlimStride : m_vectorInfoSize;
+                        std::string postinglist((size_t)stride * m_postingSizes.GetSize(index), '\0');
                         char* ptr = (char*)postinglist.c_str();
 			            std::size_t selectIdx = p_postingSelections.lower_bound((int)index);
                         for (int j = 0; j < m_postingSizes.GetSize(index); ++j)
@@ -4169,9 +4408,15 @@ namespace SPTAG::SPANN {
                             SizeType fullID = p_postingSelections[selectIdx++].tonode;
                             // if (id == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ID: %d\n", fullID);
                             uint8_t version = m_versionMap->GetVersion(fullID);
-                            // First Vector ID, then version, then Vector
-                            Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
-                            ptr += m_vectorInfoSize;
+                            // First Vector ID, then version, then Vector (or slim code)
+                            if (m_buildSlimRbq) {
+                                SerializeSlim(ptr, fullID, version);
+                            } else if (m_buildSlimOpq) {
+                                SerializeSlimOpq(ptr, fullID, version);
+                            } else {
+                                Serialize(ptr, fullID, version, p_fullVectors->GetVector(fullID));
+                            }
+                            ptr += stride;
                         }
                         ErrorCode tmp;
                         if ((tmp = db->Put(index, postinglist, MaxTimeout, &(workSpace.m_diskRequests))) !=
@@ -4182,7 +4427,7 @@ namespace SPTAG::SPANN {
                             return;
                         }
                         *m_checkSums[index] = m_checkSum.CalcChecksum(postinglist.c_str(), (int)(postinglist.size()));
-                        if (m_opt->m_consistencyCheck && (tmp = db->Check(index, m_postingSizes.GetSize(index) * m_vectorInfoSize, nullptr)) !=
+                        if (m_opt->m_consistencyCheck && (tmp = db->Check(index, m_postingSizes.GetSize(index) * stride, nullptr)) !=
                             ErrorCode::Success)
                         {
                             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "WriteDB: Check failed after Put %d\n", index);
@@ -5169,10 +5414,19 @@ namespace SPTAG::SPANN {
 #endif
             if (!m_opqVecDB) {
                 // Fallback: single mmap'd point store (one vector copy, vid-indexed).
+                // In-posting-DB build-native mode reranks survivors from the FullVectorFile
+                // O_DIRECT base (m_inpostBaseFd) instead, so neither a vecstore nor a
+                // pointstore is required when that base is open.
                 if (!MmapRO(dir + "opq_pointstore.bin", p, b)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[OPQ prefilter] no vector store (vecstore/pointstore) found\n"); return;
+                    if (m_opqInpostDb && m_inpostBaseFd >= 0) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                            "[OPQ prefilter] no vecstore/pointstore; rerank via FullVectorFile O_DIRECT base\n");
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[OPQ prefilter] no vector store (vecstore/pointstore) found\n"); return;
+                    }
+                } else {
+                    m_psVec = (const ValueType*)p;
                 }
-                m_psVec = (const ValueType*)p;
             }
             if (!m_opqInpostDb) {
                 // Resident / mmap-slim modes read the slim postings from the opq_slim.bin
@@ -5216,6 +5470,10 @@ namespace SPTAG::SPANN {
                     "[OPQ prefilter] in-posting code mode: slimRec=%d (meta=%d + code=%d), zero resident codes\n",
                     m_slimRec, m_metaDataSize, m_opqM);
             }
+            // OPQ in-posting survivor count: unify with the RaBitQ rerank knob — config
+            // RerankL drives it (so PostingQuantizer=OPQ + RerankL=N needs no env), and the
+            // legacy SPTAG_OPQ_L env still overrides for ad-hoc sweeps.
+            if (m_opqInpostDb && m_opt->m_rerankL > 0) m_opqL = m_opt->m_rerankL;
             const char* lenv = std::getenv("SPTAG_OPQ_L");
             if (lenv && *lenv) m_opqL = std::max(1, atoi(lenv));
             m_opqPF = true;
@@ -5875,7 +6133,7 @@ namespace SPTAG::SPANN {
         void EnsureInpostBaseFd()
         {
             if (m_inpostBaseFd >= 0) return;
-            const char* bp = std::getenv("SPTAG_INPOST_BASE");
+            const char* bp = (m_opt && !m_opt->m_fullVectorFile.empty()) ? m_opt->m_fullVectorFile.c_str() : nullptr;
             if (!bp || !*bp) return;
             int hfd = open(bp, O_RDONLY);
             if (hfd >= 0) {
