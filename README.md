@@ -318,6 +318,13 @@ Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher (derives path
 
 See **AGENTS.md → "Build Config — Native `.ini`"** for the full key→engine mapping.
 
+#### End-to-end experiment workflow
+
+For the full reproducible pipeline — generate attributes → derived builder inputs
+→ groundtruth → build index → query/benchmark — see
+**[docs/Experiment_Workflow.md](docs/Experiment_Workflow.md)** (worked example:
+SPACEV-1B).
+
 #### In-posting quantization + deep-queue rerank
 
 Postings can store a compact **RaBitQ/OPQ code** per vector instead of the full
