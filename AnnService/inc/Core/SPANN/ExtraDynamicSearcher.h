@@ -519,7 +519,7 @@ namespace SPTAG::SPANN {
 
                                 if (VID == globalID) hasHead = true;
 
-                                *(vectorId + sizeof(SizeType)) = -1;
+                                *(vectorId + sizeof(SizeType)) = 0xff;
                                 if (j != vectorCount)
                                 {
                                     memcpy(postingP + vectorCount * m_vectorInfoSize, vectorId, m_vectorInfoSize);
@@ -561,7 +561,7 @@ namespace SPTAG::SPANN {
                 globalIDs.clear();
                 m_versionMap->GetContainedIDs(globalIDs);
                 for (auto id : globalIDs) {
-                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, -1);
+                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, 0xff);
                 }
 
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
@@ -1854,8 +1854,8 @@ namespace SPTAG::SPANN {
                                 {
                                     char *vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
                                     SizeType VID = *(reinterpret_cast<SizeType *>(vectorInfo));
-                                    m_versionMap->SetVersion(VID, -1);
-                                    Serialize(ptr, VID, -1, vectorInfo + sizeof(SizeType));
+                                    m_versionMap->SetVersion(VID, 0xff);
+                                    Serialize(ptr, VID, 0xff, vectorInfo + sizeof(SizeType));
                                 }
                                 if (GetWritePosting(&workSpace, allPostingIDs[index], newPosting, true) != ErrorCode::Success)
                                 {
@@ -2394,11 +2394,11 @@ namespace SPTAG::SPANN {
             if (p_localToGlobal.R() > 0) {
                 for (SizeType i = 0; i < p_localToGlobal.R(); i++) {
                     SizeType globalID = *(p_localToGlobal[i]);
-                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, -1);
+                    if (m_versionMap->Deleted(globalID)) m_versionMap->SetVersion(globalID, 0xff);
                 }
             } else {
                 for (SizeType i = 0; i < m_opt->m_vectorSize; i++) {
-                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, -1);
+                    if (m_versionMap->Deleted(i)) m_versionMap->SetVersion(i, 0xff);
                 }
             }
 
@@ -2680,7 +2680,7 @@ namespace SPTAG::SPANN {
                 SizeType VID = begin + v;
                 uint8_t version;
                 if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
-                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, 0xff);
                     version = m_versionMap->GetVersion(VID);
                 }
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
@@ -2721,7 +2721,7 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode ResetIndex(SizeType p_id) override {
-            m_versionMap->SetVersion(p_id, -1);
+            m_versionMap->SetVersion(p_id, 0xff);
             return ErrorCode::Success;
         }
 

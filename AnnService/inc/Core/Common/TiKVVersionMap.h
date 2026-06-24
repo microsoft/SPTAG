@@ -37,7 +37,7 @@ namespace SPTAG
             int m_layer{0};
             std::atomic<SizeType> m_count{0};
             std::atomic<SizeType> m_deleted{0};
-            uint8_t m_defaultVersion{0x00};
+            uint8_t m_defaultVersion{0xff};
             std::atomic<bool> m_metadataDirty{false};
             SizeType m_lastPersistedCount{0};
 
@@ -63,7 +63,7 @@ namespace SPTAG
 
             uint8_t DefaultVersionForLayer() const
             {
-                return m_layer == 0 ? 0x00 : 0xfe;
+                return m_layer == 0 ? 0xff : 0xfe;
             }
 
             ErrorCode PutByte(const std::string& key, uint8_t value)
