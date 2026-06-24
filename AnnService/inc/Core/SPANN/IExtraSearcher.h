@@ -519,6 +519,13 @@ namespace SPTAG {
 
             COMMON::OptHashPosVector m_deduper;
 
+            COMMON::OptHashPosVector* m_deduperOverride = nullptr;
+
+            COMMON::OptHashPosVector& Deduper()
+            {
+                return (m_deduperOverride == nullptr) ? m_deduper : *m_deduperOverride;
+            }
+
             Helper::RequestQueue m_processIocp;
 
             std::vector<Helper::PageBuffer<std::uint8_t>> m_pageBuffers;
@@ -537,13 +544,74 @@ namespace SPTAG {
 
             int m_offset = 0;
 
-            bool m_loadPosting = false;
-
             bool m_relaxedMono = false;
 
             COMMON::VersionReadPolicy m_versionReadPolicy = COMMON::VersionReadPolicy::UseCache;
 
             int m_loadedPostingNum = 0;
+
+            bool m_iteratorHeadInitialized = false;
+
+            struct IteratorLayerState
+            {
+                std::vector<BasicResult> m_results;
+                std::size_t m_cursor = 0;
+                std::unique_ptr<COMMON::OptHashPosVector> m_deduper;
+
+                void Reset(int p_maxCheck, int p_hashExp)
+                {
+                    m_results.clear();
+                    m_cursor = 0;
+                    if (!m_deduper)
+                    {
+                        m_deduper.reset(new COMMON::OptHashPosVector());
+                        m_deduper->Init(p_maxCheck, p_hashExp);
+                    }
+                    else
+                    {
+                        m_deduper->clear();
+                    }
+                }
+
+                std::size_t Available() const
+                {
+                    return (m_cursor < m_results.size()) ? (m_results.size() - m_cursor) : 0;
+                }
+
+                void CompactConsumed()
+                {
+                    if (m_cursor == 0)
+                        return;
+
+                    if (m_cursor >= m_results.size())
+                    {
+                        m_results.clear();
+                        m_cursor = 0;
+                        return;
+                    }
+
+                    if (m_cursor > 4096 && m_cursor * 2 > m_results.size())
+                    {
+                        m_results.erase(m_results.begin(), m_results.begin() + m_cursor);
+                        m_cursor = 0;
+                    }
+                }
+            };
+
+            std::vector<IteratorLayerState> m_iteratorLayerStates;
+
+            void ResetIteratorState(int p_layerCount, int p_maxCheck, int p_hashExp)
+            {
+                m_iteratorLayerStates.resize(p_layerCount);
+                for (auto& state : m_iteratorLayerStates)
+                {
+                    state.Reset(p_maxCheck, p_hashExp);
+                }
+                m_deduperOverride = nullptr;
+                m_iteratorHeadInitialized = false;
+                m_loadedPostingNum = 0;
+                m_relaxedMono = false;
+            }
 
             std::function<bool(const ByteArray&)> m_filterFunc;
 
@@ -567,6 +635,11 @@ namespace SPTAG {
             virtual ErrorCode SearchIndex(ExtraWorkSpace* p_exWorkSpace,
                 QueryResult& p_queryResults,
                 SearchStats* p_stats, std::set<SizeType>* truth = nullptr, std::map<SizeType, std::set<SizeType>>* found = nullptr,
+                bool p_checkVersionMap = true) = 0;
+
+            virtual ErrorCode SearchIndexIterativeScan(ExtraWorkSpace* p_exWorkSpace,
+                QueryResult& p_queryResults,
+                std::vector<BasicResult>& p_results,
                 bool p_checkVersionMap = true) = 0;
 
             virtual ErrorCode SearchIterativeNext(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
