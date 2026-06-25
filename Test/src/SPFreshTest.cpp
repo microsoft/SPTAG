@@ -594,7 +594,8 @@ template <typename T>
 void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_ptr<VectorSet> &queryset,
                                std::shared_ptr<VectorSet> &truth, const std::string &truthPath,
                                SizeType baseVectorCount, int topK, int searchK, int numThreads, int numQueries, int batches, int totalbatches,
-                               std::ostream &benchmarkData, std::string prefix = "")
+                               std::ostream &benchmarkData, std::string prefix = "",
+                               const std::string &searchResultPath = "")
 {
     // Benchmark: Query performance with detailed latency stats
     std::vector<float> latencies(numQueries);
@@ -640,6 +641,36 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
     auto batchEnd = std::chrono::high_resolution_clock::now();
     float batchLatency =
         std::chrono::duration_cast<std::chrono::microseconds>(batchEnd - batchStart).count() / 1000000.0f;
+
+    // Optional: dump per-query top-K to disk for downstream union-recall scripts.
+    // Format: [int64 numQueries][int32 topK][numQueries * topK * (int64 VID + float Dist)]
+    // Empty slots from QueryResult come through as VID=-1 / Dist=FLT_MAX, matching
+    // the convention expected by Tools/union_recall.py.
+    if (!searchResultPath.empty()) {
+        std::ofstream fout(searchResultPath, std::ios::binary | std::ios::trunc);
+        if (!fout.is_open()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                "[SearchResult] Failed to open dump path: %s\n", searchResultPath.c_str());
+        } else {
+            std::int64_t nq = numQueries;
+            std::int32_t tk = topK;
+            fout.write(reinterpret_cast<const char*>(&nq), sizeof(nq));
+            fout.write(reinterpret_cast<const char*>(&tk), sizeof(tk));
+            for (int q = 0; q < numQueries; ++q) {
+                for (int kk = 0; kk < topK; ++kk) {
+                    const auto* rr = results[q].GetResult(kk);
+                    std::int64_t vid = (rr && kk < searchK) ? static_cast<std::int64_t>(rr->VID) : -1;
+                    float dist = (rr && kk < searchK) ? rr->Dist : (std::numeric_limits<float>::max)();
+                    fout.write(reinterpret_cast<const char*>(&vid), sizeof(vid));
+                    fout.write(reinterpret_cast<const char*>(&dist), sizeof(dist));
+                }
+            }
+            fout.close();
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[SearchResult] Dumped %d queries x %d topK to %s\n",
+                numQueries, topK, searchResultPath.c_str());
+        }
+    }
 
     // Calculate statistics
     float mean = 0, minLat = (std::numeric_limits<float>::max)(), maxLat = 0;
@@ -973,16 +1004,29 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     std::shared_ptr<VectorSet> truth;
     if (generateTruth)
     {
-        truth = TestUtils::TestDataGenerator<float>::LoadVectorSet(ptruth, K);
+        // Goal: allow pointing TruthPath at an arbitrary pre-computed truth file
+        // instead of always loading the auto-generated perftest_batchtruth.* name.
+        // The file is expected to be in the same format the generator writes (a
+        // saved BasicVectorSet), so the standard loader parses it directly.
+        std::string truthFile = ptruth;
+        if (!truthPath.empty() && truthPath != "none" && fileexists(truthPath.c_str())) {
+            BOOST_TEST_MESSAGE("Using TruthPath from config (overriding auto-generated name): " << truthPath);
+            truthFile = truthPath;
+        }
+        truth = TestUtils::TestDataGenerator<float>::LoadVectorSet(truthFile, K);
     }
+
+    // Optional: per-bucket result dump path for union-recall workflows.
+    std::string searchResultPath = iniReader.GetParameter("Benchmark", "SearchResult", std::string(""));
 
     // Benchmark 0: Query performance before insertions (round 1 — cold cache)
     BOOST_TEST_MESSAGE("\n=== Benchmark 0: Query Before Insertions (Round 1) ===");
     BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                  numSearchThreads, numQueries, 0, batches, tmpbenchmark);
     jsonFile << "    \"benchmark0_query_before_insert\": ";
+    // Only dump SearchResult on this single invocation to avoid redundant rewrites.
     BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
-                                 numSearchThreads, numQueries, 0, batches, jsonFile);
+                                 numSearchThreads, numQueries, 0, batches, jsonFile, "", searchResultPath);
     jsonFile << ",\n";
     jsonFile.flush();
 
