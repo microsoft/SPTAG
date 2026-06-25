@@ -38,7 +38,7 @@ namespace SPTAG
             int m_layer{0};
             std::atomic<SizeType> m_count{0};
             std::atomic<SizeType> m_deleted{0};
-            uint8_t m_defaultVersion{0x00};
+            uint8_t m_defaultVersion{0xff};
             std::atomic<bool> m_metadataDirty{false};
             SizeType m_lastPersistedCount{0};
 
@@ -64,7 +64,7 @@ namespace SPTAG
 
             uint8_t DefaultVersionForLayer() const
             {
-                return m_layer == 0 ? 0x00 : 0xfe;
+                return m_layer == 0 ? 0xff : 0xfe;
             }
 
             ErrorCode PutByte(const std::string& key, uint8_t value)
@@ -250,7 +250,7 @@ namespace SPTAG
                     std::vector<std::string> values;
                     keys.reserve(kBatchSize);
                     values.reserve(kBatchSize);
-                    const std::string aliveByte(1, static_cast<char>(0x00));
+                    const std::string aliveByte(1, static_cast<char>(0xff));
                     for (size_t i = 0; i < aliveSorted.size(); i++) {
                         keys.push_back(VersionKey(aliveSorted[i]));
                         values.push_back(aliveByte);
@@ -261,14 +261,14 @@ namespace SPTAG
                             } else if (ret == ErrorCode::Undefined) {
                                 // Backend lacks MultiPut: fall back to serial PutByte.
                                 for (const auto& k : keys) {
-                                    if (PutByte(k, 0x00) == ErrorCode::Success) written++;
+                                    if (PutByte(k, 0xff) == ErrorCode::Success) written++;
                                 }
                             } else {
                                 SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                     "TiKVVersionMap::Initialize: MultiPut batch failed layer=%d ret=%d size=%zu; falling back to serial PutByte for this batch.\n",
                                     m_layer, static_cast<int>(ret), keys.size());
                                 for (const auto& k : keys) {
-                                    if (PutByte(k, 0x00) == ErrorCode::Success) written++;
+                                    if (PutByte(k, 0xff) == ErrorCode::Success) written++;
                                 }
                             }
                             keys.clear();

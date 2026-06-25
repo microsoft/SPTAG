@@ -1117,7 +1117,7 @@ namespace SPTAG::SPANN {
 
                                 if (VID == globalID) hasHead = true;
 
-                                *(vectorId + sizeof(SizeType)) = -1;
+                                *(vectorId + sizeof(SizeType)) = 0xff;
                                 if (j != vectorCount)
                                 {
                                     memcpy(postingP + vectorCount * m_vectorInfoSize, vectorId, m_vectorInfoSize);
@@ -1159,7 +1159,7 @@ namespace SPTAG::SPANN {
                 globalIDs.clear();
                 m_versionMap->GetContainedIDs(globalIDs);
                 for (auto id : globalIDs) {
-                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, -1);
+                    if (!m_versionMap->Deleted(id)) m_versionMap->SetVersion(id, 0xff);
                 }
 
                 auto preReassignTimeEnd = std::chrono::high_resolution_clock::now();
@@ -3042,8 +3042,8 @@ namespace SPTAG::SPANN {
                                 {
                                     char *vectorInfo = postingP + j * (m_vectorInfoSize - sizeof(uint8_t));
                                     SizeType VID = *(reinterpret_cast<SizeType *>(vectorInfo));
-                                    m_versionMap->SetVersion(VID, -1);
-                                    Serialize(ptr, VID, -1, vectorInfo + sizeof(SizeType));
+                                    m_versionMap->SetVersion(VID, 0xff);
+                                    Serialize(ptr, VID, 0xff, vectorInfo + sizeof(SizeType));
                                 }
                                 if (GetWritePosting(&workSpace, allPostingIDs[index], newPosting, true) != ErrorCode::Success)
                                 {
@@ -3188,7 +3188,7 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
-                    if(p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) {
+                    if(p_exWorkSpace->Deduper().CheckAndSet(vectorID)) {
                         listElements--;
                         continue;
                     }
@@ -3275,6 +3275,73 @@ namespace SPTAG::SPANN {
                 }
             }
             queryResults.SetScanned(listElements);
+            return ErrorCode::Success;
+        }
+
+        virtual ErrorCode SearchIndexIterativeScan(ExtraWorkSpace* p_exWorkSpace,
+            QueryResult& p_queryResults,
+            std::vector<BasicResult>& p_results,
+            bool p_checkVersionMap) override
+        {
+            COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
+
+            {
+                auto keys = DBKeys(p_exWorkSpace->m_postingIDs);
+                if (db->MultiGet(*keys, p_exWorkSpace->m_pageBuffers, m_hardLatencyLimit,
+                                 &(p_exWorkSpace->m_diskRequests)) != ErrorCode::Success)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndexIterativeScan] read postings fail!\n");
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+
+            const auto postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+            const bool isTiKV = (m_opt->m_storage == Storage::TIKVIO);
+            const bool checkVersionMapInSearch = ShouldCheckVersionMapInSearch(p_checkVersionMap);
+            const std::size_t resultStart = p_results.size();
+            std::vector<SizeType> candidateVIDs;
+
+            for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+                auto& buffer = (p_exWorkSpace->m_pageBuffers[pi]);
+                char* p_postingListFullData = (char*)(buffer.GetBuffer());
+                int vectorNum = (int)(buffer.GetAvailableSize() / m_vectorInfoSize);
+
+                for (int i = 0; i < vectorNum; i++) {
+                    char* vectorInfo = p_postingListFullData + i * m_vectorInfoSize;
+                    SizeType vectorID = *(reinterpret_cast<SizeType*>(vectorInfo));
+
+                    if (vectorID < 0 || vectorID >= m_versionMap->Count())
+                        return ErrorCode::Key_OverFlow;
+                    if (!isTiKV && m_versionMap->Deleted(vectorID))
+                        continue;
+                    if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
+                        continue;
+
+                    auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
+                    p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
+                        queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
+
+                    if (isTiKV && checkVersionMapInSearch) {
+                        candidateVIDs.emplace_back(vectorID);
+                    }
+                }
+            }
+
+            if (isTiKV && checkVersionMapInSearch && !candidateVIDs.empty()) {
+                std::vector<uint8_t> candidateContains;
+                ContainSamples(candidateVIDs, candidateContains, p_exWorkSpace->m_versionReadPolicy);
+                std::size_t write = resultStart;
+                for (std::size_t read = resultStart; read < p_results.size(); ++read) {
+                    std::size_t versionIndex = read - resultStart;
+                    bool keep = versionIndex < candidateContains.size() && candidateContains[versionIndex] != 0;
+                    if (keep) {
+                        if (write != read)
+                            p_results[write] = std::move(p_results[read]);
+                        ++write;
+                    }
+                }
+                p_results.resize(write);
+            }
             return ErrorCode::Success;
         }
 
@@ -3581,20 +3648,21 @@ namespace SPTAG::SPANN {
             if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(m_opt->m_iSSDNumberOfThreads);
 
             // Initialize the per-layer version map. For TiKVVersionMap this:
-            //   - layer 0 (default=0x00 alive): bumps m_count only; no per-VID
-            //     writes. Inserts later rely on the default 0x00 == alive.
-            //   - layer >0 (default=0xfe deleted): writes 0x00 explicitly for
+            //   - layer 0 (default=0xff alive): bumps m_count only; no per-VID
+            //     writes. Inserts later rely on the default 0xff == alive.
+            //   - layer >0 (default=0xfe deleted): writes 0xff explicitly for
             //     each alive head in p_localToGlobal so MergePostings'
-            //     Deleted()/GetVersion filter (L2021) doesn't silently drop
-            //     legitimate base heads during async merges. Without this,
-            //     layer-1 MergePostings reads stored version=0xfe, sees
-            //     Deleted()=true (because per-VID byte is missing → reads
-            //     default 0xfe), filters every entry, and writes back a
-            //     corrupted near-empty posting -- destroying recall after
-            //     even a single async merge.
-            // LocalVersionMap (hashmap) treats missing keys as deleted
-            // (returns 0xfe) and so has the same problem; its Initialize
-            // override also persists 0x00 for each globalID.
+            //     Deleted()/GetVersion filter doesn't silently drop legitimate
+            //     base heads during async merges. Without this, layer-1
+            //     MergePostings reads stored version=0xfe, sees Deleted()=true
+            //     (because per-VID byte is missing → reads default 0xfe),
+            //     filters every entry, and writes back a corrupted near-empty
+            //     posting -- destroying recall after even a single async merge.
+            // The alive marker is 0xff to match the unified version convention
+            // (0xff = alive/default/reset, 0xfe = deleted) introduced on the
+            // pre-merge-tikv-bugfix branch; this is the batched-MultiPut
+            // equivalent of that branch's per-head
+            // "if (Deleted(globalID)) SetVersion(globalID, 0xff)" loop.
             m_versionMap->Initialize(m_opt->m_vectorSize,
                                      p_headIndex->m_iDataBlockSize,
                                      p_headIndex->m_iDataCapacity,
@@ -3878,7 +3946,7 @@ namespace SPTAG::SPANN {
                 SizeType VID = begin + v;
                 uint8_t version;
                 if (!m_versionMap->TryGetDefaultVersionForNewVector(version)) {
-                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, -1);
+                    if (m_versionMap->Deleted(VID)) m_versionMap->SetVersion(VID, 0xff);
                     version = m_versionMap->GetVersion(VID);
                 }
                 std::vector<BasicResult> selections(static_cast<size_t>(m_opt->m_replicaCount));
@@ -3929,7 +3997,7 @@ namespace SPTAG::SPANN {
         }
 
         ErrorCode ResetIndex(SizeType p_id) override {
-            m_versionMap->SetVersion(p_id, -1);
+            m_versionMap->SetVersion(p_id, 0xff);
             return ErrorCode::Success;
         }
 

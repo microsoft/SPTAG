@@ -395,41 +395,186 @@ ErrorCode Index<T>::SearchIndexIterative(QueryResult &p_headQuery, QueryResult &
                                          COMMON::WorkSpace *p_indexWorkspace, ExtraWorkSpace *p_extraWorkspace,
                                          int p_batch, int &resultCount, bool first) const
 {
-    /*
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
 
     COMMON::QueryResultSet<T> *p_headQueryResults = (COMMON::QueryResultSet<T> *)&p_headQuery;
     COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
+    resultCount = 0;
+
+    const int layerCount = static_cast<int>(m_extraSearchers.size());
+    if (layerCount == 0)
+        return ErrorCode::EmptyIndex;
+
+    const int internalResultNum = m_options.m_searchInternalResultNum;
+    const int refillBatch = max(1, internalResultNum / 2);
+    const int headBatch = max(m_options.m_headBatch, internalResultNum);
+
+    const bool iteratorStateSizeMismatch = static_cast<int>(p_extraWorkspace->m_iteratorLayerStates.size()) != layerCount;
+    if (!first && iteratorStateSizeMismatch)
+        return ErrorCode::Fail;
 
     if (first)
     {
-        p_headQueryResults->SetResultNum(m_options.m_searchInternalResultNum);
-        p_headQueryResults->Reset();
-        m_topIndex->SearchIndexIterativeFromNeareast(*p_headQueryResults, p_indexWorkspace, true);
-        p_extraWorkspace->m_loadPosting = true;
+        p_extraWorkspace->ResetIteratorState(layerCount, m_options.m_maxCheck, m_options.m_hashExp);
+        p_extraWorkspace->m_versionReadPolicy = COMMON::VersionReadPolicy::BypassCacheNoFill;
     }
 
-    bool continueSearch = true;
-    resultCount = 0;
-    while (continueSearch && resultCount < p_batch)
-    {
-        bool oldRelaxedMono = p_extraWorkspace->m_relaxedMono;
-        ErrorCode ret = SearchDiskIndexIterative(p_headQuery, p_query, p_extraWorkspace);
-        bool found = (ret == ErrorCode::Success);
-        if (!found && ret != ErrorCode::VectorNotFound) return ret;
-        p_extraWorkspace->m_loadPosting = false;
-        if (!found)
+    auto fetchHeadCandidates = [&](int p_count) {
+        std::vector<BasicResult> candidates;
+        candidates.reserve(p_count);
+        while (static_cast<int>(candidates.size()) < p_count)
         {
-            p_headQueryResults->SetResultNum(m_options.m_headBatch);
+            p_headQueryResults->SetResultNum(p_extraWorkspace->m_iteratorHeadInitialized ? headBatch : internalResultNum);
             p_headQueryResults->Reset();
-            continueSearch = m_topIndex->SearchIndexIterativeFromNeareast(*p_headQueryResults, p_indexWorkspace, false);
-            p_extraWorkspace->m_loadPosting = true;
+            bool found = m_topIndex->SearchIndexIterativeFromNeareast(
+                *p_headQueryResults, p_indexWorkspace, !p_extraWorkspace->m_iteratorHeadInitialized);
+            p_extraWorkspace->m_iteratorHeadInitialized = true;
+            if (!found)
+                break;
 
-            if (!oldRelaxedMono && p_extraWorkspace->m_relaxedMono)
-                continueSearch = false;
+            for (int i = 0; i < p_headQueryResults->GetResultNum() && static_cast<int>(candidates.size()) < p_count; ++i)
+            {
+                auto res = p_headQueryResults->GetResult(i);
+                if (res == nullptr || res->VID < 0 || m_topLocalToGlobalID.R() == 0)
+                    continue;
+
+                SizeType globalVID = static_cast<SizeType>(*(m_topLocalToGlobalID[res->VID]));
+                if (globalVID == MaxSize)
+                    continue;
+
+                BasicResult candidate = *res;
+                candidate.VID = globalVID;
+                candidates.emplace_back(std::move(candidate));
+            }
         }
-        else
+        return candidates;
+    };
+
+    std::function<ErrorCode(int, std::size_t)> ensureLayerQueueFilled;
+    std::function<std::vector<BasicResult>(int, int)> popLayerCandidates;
+    ErrorCode refillError = ErrorCode::Success;
+
+    auto appendLayerResults = [&](int p_layer, const std::vector<BasicResult>& p_postings) {
+        if (p_postings.empty())
+            return ErrorCode::Success;
+
+        if (!m_extraSearchers[p_layer])
+            return ErrorCode::Fail;
+
+        auto& state = p_extraWorkspace->m_iteratorLayerStates[p_layer];
+        p_extraWorkspace->m_postingIDs.clear();
+        p_extraWorkspace->m_postingIDs.reserve(p_postings.size());
+        for (const auto& posting : p_postings)
+        {
+            if (posting.VID >= 0)
+                p_extraWorkspace->m_postingIDs.emplace_back(posting.VID);
+        }
+        if (p_extraWorkspace->m_postingIDs.empty())
+            return ErrorCode::Success;
+
+        std::vector<BasicResult> fetched;
+        struct DeduperOverrideGuard
+        {
+            ExtraWorkSpace* m_workspace;
+
+            DeduperOverrideGuard(ExtraWorkSpace* p_workspace, COMMON::OptHashPosVector* p_deduper) :
+                m_workspace(p_workspace)
+            {
+                m_workspace->m_deduperOverride = p_deduper;
+            }
+
+            ~DeduperOverrideGuard()
+            {
+                m_workspace->m_deduperOverride = nullptr;
+            }
+        } deduperOverrideGuard(p_extraWorkspace, state.m_deduper.get());
+        ErrorCode ret = m_extraSearchers[p_layer]->SearchIndexIterativeScan(
+            p_extraWorkspace, p_query, fetched, p_layer == 0);
+        if (ret != ErrorCode::Success)
+            return ret;
+
+        state.CompactConsumed();
+        std::size_t sortBegin = state.m_cursor;
+        state.m_results.insert(state.m_results.end(), fetched.begin(), fetched.end());
+        std::sort(state.m_results.begin() + sortBegin, state.m_results.end(), COMMON::Compare);
+        if (p_layer == 0)
+            p_extraWorkspace->m_loadedPostingNum += static_cast<int>(p_extraWorkspace->m_postingIDs.size());
+        return ErrorCode::Success;
+    };
+
+    popLayerCandidates = [&](int p_layer, int p_count) {
+        std::vector<BasicResult> candidates;
+        if (p_layer < 0 || p_layer >= layerCount || p_count <= 0)
+            return candidates;
+
+        ErrorCode ret = ensureLayerQueueFilled(p_layer, p_count);
+        if (ret != ErrorCode::Success)
+        {
+            refillError = ret;
+            return candidates;
+        }
+
+        auto& state = p_extraWorkspace->m_iteratorLayerStates[p_layer];
+        while (static_cast<int>(candidates.size()) < p_count && state.m_cursor < state.m_results.size())
+        {
+            candidates.emplace_back(state.m_results[state.m_cursor++]);
+        }
+        return candidates;
+    };
+
+    ensureLayerQueueFilled = [&](int p_layer, std::size_t p_desired) {
+        if (p_layer < 0 || p_layer >= layerCount)
+            return ErrorCode::Fail;
+
+        auto& state = p_extraWorkspace->m_iteratorLayerStates[p_layer];
+        while (state.Available() < p_desired)
+        {
+            const int fetchBatch = (state.m_results.empty() && state.m_cursor == 0) ? internalResultNum : refillBatch;
+            refillError = ErrorCode::Success;
+            std::vector<BasicResult> postings = (p_layer == layerCount - 1)
+                ? fetchHeadCandidates(fetchBatch)
+                : popLayerCandidates(p_layer + 1, fetchBatch);
+            if (refillError != ErrorCode::Success)
+                return refillError;
+            if (postings.empty())
+                break;
+
+            std::size_t oldSize = state.m_results.size();
+            ErrorCode ret = appendLayerResults(p_layer, postings);
+            if (ret != ErrorCode::Success)
+                return ret;
+            if (state.m_results.size() == oldSize && postings.size() < static_cast<std::size_t>(refillBatch))
+                break;
+        }
+        return ErrorCode::Success;
+    };
+
+    ErrorCode ret = ensureLayerQueueFilled(0, first ? internalResultNum : 1);
+    if (ret != ErrorCode::Success)
+        return ret;
+
+    auto& finalState = p_extraWorkspace->m_iteratorLayerStates[0];
+    while (resultCount < p_batch)
+    {
+        if (finalState.Available() <= static_cast<std::size_t>(refillBatch))
+        {
+            ret = ensureLayerQueueFilled(0, finalState.Available() + refillBatch);
+            if (ret != ErrorCode::Success)
+                return ret;
+        }
+
+        if (finalState.Available() == 0)
+            break;
+
+        p_extraWorkspace->m_relaxedMono = p_extraWorkspace->m_loadedPostingNum > internalResultNum;
+        auto result = finalState.m_results[finalState.m_cursor++];
+        if (p_extraWorkspace->m_filterFunc != nullptr &&
+            (m_pMetadata == nullptr || !p_extraWorkspace->m_filterFunc(m_pMetadata->GetMetadata(result.VID))))
+        {
+            continue;
+        }
+        if (p_queryResults->AddPoint(result.VID, result.Dist, result.Vec))
             resultCount++;
     }
     p_queryResults->SortResult();
@@ -443,8 +588,6 @@ ErrorCode Index<T>::SearchIndexIterative(QueryResult &p_headQuery, QueryResult &
         }
     }
     return ErrorCode::Success;
-    */
-   return ErrorCode::Undefined;
 }
 
 template <typename T>
@@ -468,6 +611,7 @@ std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool
     extraWorkspace->m_loadedPostingNum = 0;
     extraWorkspace->m_deduper.clear();
     extraWorkspace->m_postingIDs.clear();
+    extraWorkspace->ResetIteratorState(static_cast<int>(m_extraSearchers.size()), m_options.m_maxCheck, m_options.m_hashExp);
     std::shared_ptr<ResultIterator> resultIterator = std::make_shared<SPANNResultIterator<T>>(
         this, m_topIndex.get(), p_target, std::move(extraWorkspace),
         max(m_options.m_headBatch, m_options.m_searchInternalResultNum), p_maxCheck);
