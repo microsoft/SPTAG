@@ -773,9 +773,11 @@ namespace SPTAG::SPANN {
                     first = (k == 0) ? 0 : args.counts[0];
                     newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
                     char* ptr = (char*)(newPostingLists[k].c_str());
+                    hasHead = false;
                     for (int j = 0; j < args.counts[k]; j++, ptr += m_vectorInfoSize)
                     {
                         memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
+                        if (*((SizeType*)(ptr)) == headID) hasHead = true;
                     }
                     if (!theSameHead && m_headIndex->ComputeDistance(args.centers + k * args._D, headVec->c_str() + m_metaDataSize) < Epsilon) {
                         newHeadsID[k] = headID;
