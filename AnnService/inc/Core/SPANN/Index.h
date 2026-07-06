@@ -31,6 +31,7 @@
 #include <functional>
 #include <shared_mutex>
 #include <atomic>
+#include <cstdint>
 
 namespace SPTAG
 {
@@ -89,7 +90,16 @@ namespace SPTAG
             mutable std::vector<std::vector<SizeType>> m_headBundleLocalToGlobalHIDs;
             mutable std::unordered_map<SizeType, SizeType> m_globalHeadVIDToLocalHID;
             mutable std::mutex m_headBundleLoadLock;
-            mutable std::unordered_map<SizeType, std::vector<SizeType>> m_headCrossEdges;
+            // Cross-edge graph, resolved into the same dense head-local-id (B) space as
+            // ordinary RNG neighbors. This keeps cross edges on the hot path as plain
+            // adjacency-list reads: source B -> targets B[], with target B resolved to
+            // (bundle node, local id) by dense arrays. It replaces the old
+            // unordered_map<globalVID, vector<globalVID>> + per-edge hash lookups.
+            mutable std::vector<std::uint32_t> m_headCrossEdgeOffsetByB;  // UINT32_MAX => no edges
+            mutable std::vector<std::uint16_t> m_headCrossEdgeCountByB;
+            mutable std::vector<SizeType> m_headCrossEdgeTargetsB;
+            mutable std::vector<std::int16_t> m_headBundleNodeByB;        // -1 if unresolved
+            mutable std::vector<SizeType> m_headBundleLocalByB;           // local id inside bundle
             mutable std::atomic<bool> m_headCrossEdgesLoaded{false};
             mutable std::mutex m_headCrossEdgesMutex;
             // globalVID -> (bundleNodeId, localHidWithinBundle) reverse map, populated

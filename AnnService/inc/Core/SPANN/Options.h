@@ -72,6 +72,7 @@ namespace SPTAG {
             bool m_recursiveCheckSmallCluster;
             bool m_printSizeCount;
             std::string m_selectType;
+            bool m_parallelBKTBuild;
 
             // Section 3: for build head
             bool m_buildHead;
@@ -224,9 +225,9 @@ namespace SPTAG {
             std::shared_ptr<Helper::KeyValueIO> m_externalDB;
 
             // In-posting quantization (unified config interface). See ParameterDefinitionList.h.
-            std::string m_postingQuantizer;   // None|RaBitQ|OPQ
+            std::string m_postingQuantizer;   // None|RaBitQ|OPQ|PipePQ
             int m_postingQuantBits;           // RaBitQ bits per dim
-            int m_postingQuantM;              // OPQ code bytes per vector
+            int m_postingQuantM;              // OPQ/PipePQ code bytes per vector
             bool m_quantizeHead;              // quantize the head index too
             std::string m_postingQuantFile;   // code sidecar path
             std::string m_fullVectorFile;     // full-precision base for cold rerank

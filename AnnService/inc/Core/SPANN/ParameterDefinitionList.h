@@ -47,6 +47,7 @@ DefineSelectHeadParameter(m_fBalanceFactor, float, -1.0F, "BKTLambdaFactor")
 
 DefineSelectHeadParameter(m_iSelectHeadNumberOfThreads, int, 4, "NumberOfThreads") // Mutable
 DefineSelectHeadParameter(m_saveBKT, bool, false, "SaveBKT")
+DefineSelectHeadParameter(m_parallelBKTBuild, bool, false, "ParallelBKTBuild")
 
 DefineSelectHeadParameter(m_analyzeOnly, bool, false, "AnalyzeOnly")
 DefineSelectHeadParameter(m_calcStd, bool, false, "CalcStd")
@@ -238,9 +239,9 @@ DefineSSDParameter(m_shareDB, bool, false, "ShareDB")
 // place of the full ValueType vector; the full vectors stay on disk for cold rerank.
 // PostingQuantizer selects the in-posting codec; the head index is independently
 // kept full-precision unless QuantizeHead=true.
-DefineSSDParameter(m_postingQuantizer, std::string, std::string("None"), "PostingQuantizer") // None|RaBitQ|OPQ
+DefineSSDParameter(m_postingQuantizer, std::string, std::string("None"), "PostingQuantizer") // None|RaBitQ|OPQ|PipePQ
 DefineSSDParameter(m_postingQuantBits, int, 2, "PostingQuantBits")          // RaBitQ bits per dim (1 or 2)
-DefineSSDParameter(m_postingQuantM, int, 0, "PostingQuantM")                // OPQ code bytes per vector (subvector count)
+DefineSSDParameter(m_postingQuantM, int, 0, "PostingQuantM")                // OPQ/PipePQ code bytes per vector (subvector/chunk count)
 DefineSSDParameter(m_quantizeHead, bool, false, "QuantizeHead")             // build the head index on quantized vectors
 DefineSSDParameter(m_postingQuantFile, std::string, std::string(""), "PostingQuantizerFile") // code sidecar (abs or rel to index dir)
 DefineSSDParameter(m_fullVectorFile, std::string, std::string(""), "FullVectorFile")         // full-precision base for cold rerank

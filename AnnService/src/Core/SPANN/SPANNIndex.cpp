@@ -574,6 +574,12 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
     m_loadedHeadBundleIndexes.clear();
     m_headBundleLocalToGlobalHIDs.clear();
     m_globalHeadVIDToLocalHID.clear();
+    m_headCrossEdgeOffsetByB.clear();
+    m_headCrossEdgeCountByB.clear();
+    m_headCrossEdgeTargetsB.clear();
+    m_headBundleNodeByB.clear();
+    m_headBundleLocalByB.clear();
+    m_headCrossEdgesLoaded.store(false, std::memory_order_release);
 
     if (!m_headBundleNodes.empty())
     {
@@ -874,6 +880,15 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         return ErrorCode::Success;
     }
 
+    // The resolved adjacency is keyed by dense head-local-id B and target edges
+    // are also stored as B ids. Ensure every bundle is loaded first so both
+    // globalVID->B and B->(bundle node, local id) maps are complete.
+    for (const auto& bundleNodeInfo : m_headBundleNodes) {
+        if (EnsureHeadBundleNodeLoaded(bundleNodeInfo.nodeId) != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+
     std::string baseDir = m_headBundleBaseDir;
     if (baseDir.empty()) baseDir = m_options.m_indexDirectory;
     if (baseDir.empty()) {
@@ -904,9 +919,65 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
         return ErrorCode::Success;
     }
 
-    m_headCrossEdges.clear();
-    m_headCrossEdges.reserve(static_cast<size_t>(header.totalHeads));
+    const SizeType headCount = (m_vectorTranslateMap.R() > 0)
+        ? static_cast<SizeType>(m_vectorTranslateMap.R())
+        : (m_index ? m_index->GetNumSamples() : 0);
+    if (headCount <= 0) {
+        std::fclose(fp);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "head_cross_edges.bin loaded before head id map is ready — ignoring.\n");
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
+
+    m_headCrossEdgeOffsetByB.assign(static_cast<size_t>(headCount), UINT32_MAX);
+    m_headCrossEdgeCountByB.assign(static_cast<size_t>(headCount), 0);
+    m_headBundleNodeByB.assign(static_cast<size_t>(headCount), static_cast<std::int16_t>(-1));
+    m_headBundleLocalByB.assign(static_cast<size_t>(headCount), static_cast<SizeType>(-1));
+
+    for (size_t nodeId = 0; nodeId < m_headBundleLocalToGlobalHIDs.size(); ++nodeId) {
+        const auto& localToB = m_headBundleLocalToGlobalHIDs[nodeId];
+        for (SizeType local = 0; local < static_cast<SizeType>(localToB.size()); ++local) {
+            SizeType b = localToB[static_cast<size_t>(local)];
+            if (b >= 0 && b < headCount) {
+                m_headBundleNodeByB[static_cast<size_t>(b)] = static_cast<std::int16_t>(nodeId);
+                m_headBundleLocalByB[static_cast<size_t>(b)] = local;
+            }
+        }
+    }
+
+    SizeType maxGlobalVID = 0;
+    for (SizeType b = 0; b < headCount; ++b) {
+        SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[b]));
+        if (globalVID != MaxSize && globalVID > maxGlobalVID) maxGlobalVID = globalVID;
+    }
+    std::vector<SizeType> globalToB(static_cast<size_t>(maxGlobalVID) + 1, MaxSize);
+    for (SizeType b = 0; b < headCount; ++b) {
+        SizeType globalVID = static_cast<SizeType>(*(m_vectorTranslateMap[b]));
+        if (globalVID != MaxSize && globalVID >= 0 && globalVID <= maxGlobalVID) {
+            globalToB[static_cast<size_t>(globalVID)] = b;
+        }
+    }
+
+    size_t edgeReserve = 0;
+    {
+        struct stat st {};
+        if (stat(path.c_str(), &st) == 0) {
+            const size_t fixedBytes = sizeof(Helper::HeadCrossEdgesHeader)
+                + static_cast<size_t>(header.totalHeads) * 2 * sizeof(std::int32_t);
+            if (static_cast<size_t>(st.st_size) > fixedBytes) {
+                edgeReserve = (static_cast<size_t>(st.st_size) - fixedBytes)
+                    / sizeof(Helper::HeadCrossEdgeEntry);
+            }
+        }
+    }
+    m_headCrossEdgeTargetsB.clear();
+    if (edgeReserve > 0) m_headCrossEdgeTargetsB.reserve(edgeReserve);
+
     bool ok = true;
+    size_t nonEmpty = 0;
+    size_t rawEdges = 0;
+    size_t keptEdges = 0;
     for (std::int32_t i = 0; i < header.totalHeads && ok; ++i) {
         std::int32_t globalVID = 0;
         std::int32_t edgeCount = 0;
@@ -918,22 +989,46 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
             std::fread(entries.data(), sizeof(Helper::HeadCrossEdgeEntry), entries.size(), fp) != entries.size()) {
             ok = false; break;
         }
-        auto& neighbors = m_headCrossEdges[static_cast<SizeType>(globalVID)];
-        neighbors.reserve(entries.size());
+        rawEdges += static_cast<size_t>(edgeCount);
+        SizeType srcB = MaxSize;
+        if (globalVID >= 0 && static_cast<SizeType>(globalVID) <= maxGlobalVID) {
+            srcB = globalToB[static_cast<size_t>(globalVID)];
+        }
+        if (srcB == MaxSize || srcB < 0 || srcB >= headCount) continue;
+        const size_t begin = m_headCrossEdgeTargetsB.size();
         for (const auto& e : entries) {
-            neighbors.push_back(static_cast<SizeType>(e.neighborGlobalVID));
+            SizeType nbrGlobal = static_cast<SizeType>(e.neighborGlobalVID);
+            if (nbrGlobal < 0 || nbrGlobal > maxGlobalVID) continue;
+            SizeType nbrB = globalToB[static_cast<size_t>(nbrGlobal)];
+            if (nbrB == MaxSize || nbrB < 0 || nbrB >= headCount) continue;
+            if (m_headBundleNodeByB[static_cast<size_t>(nbrB)] < 0) continue;
+            m_headCrossEdgeTargetsB.push_back(nbrB);
+        }
+        const size_t count = m_headCrossEdgeTargetsB.size() - begin;
+        if (count > 0) {
+            if (begin > UINT32_MAX || count > UINT16_MAX) {
+                ok = false;
+                break;
+            }
+            m_headCrossEdgeOffsetByB[static_cast<size_t>(srcB)] = static_cast<std::uint32_t>(begin);
+            m_headCrossEdgeCountByB[static_cast<size_t>(srcB)] = static_cast<std::uint16_t>(count);
+            ++nonEmpty;
+            keptEdges += count;
         }
     }
     std::fclose(fp);
+    std::vector<SizeType>().swap(globalToB);
 
     if (!ok) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                      "head_cross_edges.bin truncated at %s — partial load (%zu entries).\n",
-                     path.c_str(), m_headCrossEdges.size());
+                     path.c_str(), m_headCrossEdgeTargetsB.size());
     } else {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                     "Loaded head_cross_edges.bin: %d records, M=%d, K=%d.\n",
-                     header.totalHeads, header.maxEdgesPerHead, header.searchTopK);
+                     "Loaded head_cross_edges.bin resolved: records=%d nonEmpty=%zu rawEdges=%zu keptEdges=%zu "
+                     "M=%d K=%d (dense B adjacency).\n",
+                     header.totalHeads, nonEmpty, rawEdges, keptEdges,
+                     header.maxEdgesPerHead, header.searchTopK);
     }
     m_headCrossEdgesLoaded.store(true, std::memory_order_release);
     return ErrorCode::Success;
@@ -982,7 +1077,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     if (p_candidateNodes.empty() || p_queryResults == nullptr || m_index == nullptr) {
         return ErrorCode::Fail;
     }
-    if (LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdges.empty()) {
+    if (LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdgeTargetsB.empty()) {
         return ErrorCode::Fail;
     }
 
@@ -1039,23 +1134,27 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         }
     }
 
-    // Open priority queue (min-heap by distance) and visited set on globalVID.
+    // Open priority queue (min-heap by distance) and visited set on dense head id B.
     struct Cand {
         float dist;
         int nodeId;
         SizeType bundleLocal;
-        SizeType globalA;     // tenant data global VID
-        SizeType m_idx_B;     // m_index local hid (for AddPoint + PS lookup)
+        SizeType headB;       // m_index local hid (for AddPoint + PS lookup)
     };
     auto cmp = [](const Cand& a, const Cand& b) { return a.dist > b.dist; };
     std::priority_queue<Cand, std::vector<Cand>, decltype(cmp)> pq(cmp);
-    std::unordered_set<SizeType> visitedA;
-    visitedA.reserve(static_cast<size_t>(p_graphResultNum) * 16);
+    std::unordered_set<SizeType> visitedB;
+    visitedB.reserve(static_cast<size_t>(p_graphResultNum) * 16);
 
-    auto pushCandidate = [&](int nodeId, SizeType bundleLocal, SizeType globalA,
-                             SizeType m_idx_B, float dist) {
-        if (visitedA.count(globalA)) return;
-        pq.push({dist, nodeId, bundleLocal, globalA, m_idx_B});
+    auto pushCandidate = [&](int nodeId, SizeType bundleLocal, SizeType headB, float dist) {
+        // Dedup at push: mark a node the first time it is queued. A node reachable
+        // from several expanded heads was otherwise distance-evaluated and pushed
+        // once per discovery; since the query->node distance is path-independent,
+        // the first evaluation is authoritative. This removes redundant
+        // m_fComputeDistance calls (the dominant walk cost) and shrinks the heap,
+        // with zero change to the set of expanded nodes (=> identical recall).
+        if (!visitedB.insert(headB).second) return;
+        pq.push({dist, nodeId, bundleLocal, headB});
     };
 
     // Phase 1: seed from EVERY routed node. Cross-edges alone are too sparse
@@ -1070,16 +1169,49 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // for a 4-node org query that's 16k ops before the unified PQ even
     // starts. We override with a tight budget here; the unified RNG +
     // cross-edge expansion below does the heavy lifting.
+    // Default: unfilter behaves like one logical graph search, so seed from the
+    // entry bundle only and let dense cross edges carry the traversal. Filtered
+    // queries still seed every routed bundle by default to preserve per-filter
+    // coverage. Override with SPTAG_CROSS_SINGLE_SEED=0/1 for A/B.
+    static const int s_crossSingleSeedOverride = []() {
+        const char* e = std::getenv("SPTAG_CROSS_SINGLE_SEED");
+        if (!e || e[0] == '\0') return -1;
+        return (e[0] == '1' || e[0] == 't' || e[0] == 'T' ||
+                e[0] == 'y' || e[0] == 'Y') ? 1 : 0;
+    }();
+    const bool defaultSingleSeed = (p_queryTags == nullptr || p_numQueryTags == 0);
+    const bool useSingleSeed = (s_crossSingleSeedOverride >= 0)
+        ? (s_crossSingleSeedOverride == 1)
+        : defaultSingleSeed;
+    std::vector<int> seedNodes;
+    if (useSingleSeed) {
+        seedNodes.push_back(entryNode);
+    } else {
+        seedNodes = p_candidateNodes;
+    }
     int totalSeedK = std::max(16, std::min(p_graphResultNum, 64));
-    int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(p_candidateNodes.size()));
+    int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(seedNodes.size()));
     int seedMaxCheck = std::max(64, perNodeSeed * 8);
+    // Diagnostic knobs: distinguish a seeding-coverage cap from a fundamental
+    // partition-connectivity loss. SPTAG_CROSS_PERNODESEED raises seeds/bundle;
+    // SPTAG_CROSS_SEEDMAXCHECK deepens each bundle's seed KDT search. Default off.
+    static const int s_crossPerNodeSeed = []() {
+        const char* e = std::getenv("SPTAG_CROSS_PERNODESEED");
+        return e ? std::atoi(e) : 0;
+    }();
+    static const int s_crossSeedMaxCheck = []() {
+        const char* e = std::getenv("SPTAG_CROSS_SEEDMAXCHECK");
+        return e ? std::atoi(e) : 0;
+    }();
+    if (s_crossPerNodeSeed > 0) perNodeSeed = s_crossPerNodeSeed;
+    if (s_crossSeedMaxCheck > 0) seedMaxCheck = s_crossSeedMaxCheck;
     int scanned = 0;
     int totalSeeded = 0;
     int seedDroppedByTag = 0;
 
     auto _bktT0 = std::chrono::high_resolution_clock::now();
 
-    for (int nodeId : p_candidateNodes) {
+    for (int nodeId : seedNodes) {
         if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
         const auto& nodeIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
         const auto& nodeL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
@@ -1100,9 +1232,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
             if (static_cast<size_t>(r->VID) >= nodeL2G.size()) continue;
             SizeType bundleLocal = r->VID;
             SizeType m_idx_B = nodeL2G[static_cast<size_t>(bundleLocal)];
-            SizeType globalA = m_index->GetHeadNodeGlobalVID(m_idx_B);
-            if (globalA == MaxSize) continue;
-            pushCandidate(nodeId, bundleLocal, globalA, m_idx_B, r->Dist);
+            pushCandidate(nodeId, bundleLocal, m_idx_B, r->Dist);
             ++totalSeeded;
         }
     }
@@ -1135,15 +1265,24 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // is +inf until then, so it wouldn't trigger anyway, but pq could also be
     // tiny right after seeding).
     int minChecks = std::max(p_graphResultNum, std::min(256, maxChecks));
+    // Diagnostic knob: force the unified traversal to keep exploring up to N
+    // checks (mirrors the fallback m_index->SearchIndex m_maxCheck budget) before
+    // the worstDist early-termination gate is allowed to fire. Default off.
+    static const int s_crossMinChecks = []() {
+        const char* e = std::getenv("SPTAG_CROSS_MINCHECKS");
+        return e ? std::atoi(e) : 0;
+    }();
+    if (s_crossMinChecks > 0) minChecks = std::min(s_crossMinChecks, maxChecks);
 
     while (!pq.empty() && checks < maxChecks) {
         Cand cur = pq.top();
         pq.pop();
 
-        if (visitedA.count(cur.globalA)) continue;
-        visitedA.insert(cur.globalA);
+        // Nodes are deduped at push time, so every popped candidate is unique and
+        // expanded exactly once (no stale-duplicate skip needed here).
         ++checks;
-        const bool curIsUExtra = s_logUExtra && s_hasRoles && IsHeadRoleUnfilterOnly(cur.globalA);
+        const bool curIsUExtra = s_logUExtra && s_hasRoles && m_extraSearcher &&
+            m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(cur.headB));
         if (curIsUExtra) ++uextraChecked;
 
         // Early termination: once we've done minChecks and the closest remaining
@@ -1155,7 +1294,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
             break;
         }
 
-        // Push to result heap. AddPoint uses m_idx_B (m_index local hid space) to
+        // Push to result heap. AddPoint uses headB (m_index local hid space) to
         // match the existing post-graph code path that translates B -> tenant
         // data globalVID downstream via translateHeadVID.
         // Tag-aware in-filter: only commit head as a result (and thus its posting
@@ -1163,10 +1302,10 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // (RNG / cross-edge expansion) regardless so navigation isn't cut.
         bool keepHead = true;
         if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
-            keepHead = m_index->HeadPostingHierMaskMayIntersect(cur.m_idx_B, queryHierMask);
+            keepHead = m_index->HeadPostingHierMaskMayIntersect(cur.headB, queryHierMask);
         }
         if (keepHead) {
-            p_queryResults->AddPoint(cur.m_idx_B, cur.dist);
+            p_queryResults->AddPoint(cur.headB, cur.dist);
             if (curIsUExtra) ++uextraKept;
         }
 
@@ -1184,13 +1323,11 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
                     if (nbrLocal >= homeAcc.numSamples) continue;
                     if (static_cast<size_t>(nbrLocal) >= homeL2G.size()) continue;
                     SizeType nbr_B = homeL2G[static_cast<size_t>(nbrLocal)];
-                    SizeType nbr_A = m_index->GetHeadNodeGlobalVID(nbr_B);
-                    if (nbr_A == MaxSize) continue;
-                    if (visitedA.count(nbr_A)) continue;
+                    if (visitedB.count(nbr_B)) continue;
                     const T* nbrVec = homeAcc.getSample(nbrLocal);
                     if (nbrVec == nullptr) continue;
                     float d = m_fComputeDistance(qTarget, nbrVec, dim);
-                    pushCandidate(cur.nodeId, nbrLocal, nbr_A, nbr_B, d);
+                    pushCandidate(cur.nodeId, nbrLocal, nbr_B, d);
                 }
             }
         }
@@ -1214,22 +1351,34 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // SPTAG_DISABLE_CROSS_EDGES=1 still disables cross edges globally.
         static const bool s_disableCross = (std::getenv("SPTAG_DISABLE_CROSS_EDGES") != nullptr);
         static const bool s_filterKeepCross = (std::getenv("SPTAG_FILTER_KEEP_CROSS") != nullptr);
+        // Cross-edge expansion is memory-scattered and dominates the walk cost.
+        // Cross-edges emanating from the far (late-popped) candidates rarely
+        // introduce new top-graphResultNum heads. Gate expansion to the nearest
+        // N popped candidates (candidates pop nearest-first from the min-heap).
+        // SPTAG_CROSS_EXPAND_LIMIT=N (default 0 = unlimited = legacy behavior).
+        static const int s_crossExpandLimit = []() {
+            const char* e = std::getenv("SPTAG_CROSS_EXPAND_LIMIT");
+            return e ? std::atoi(e) : 0;
+        }();
         const bool filterMode = (p_queryTags != nullptr && p_numQueryTags > 0);
-        const bool useCrossHere = !s_disableCross && (!filterMode || s_filterKeepCross);
-        auto crossIt = useCrossHere ? m_headCrossEdges.find(cur.globalA) : m_headCrossEdges.end();
-        if (crossIt != m_headCrossEdges.end()) {
-            for (SizeType nbrA : crossIt->second) {
-                if (nbrA < 0) continue;
+        const bool withinCrossBudget = (s_crossExpandLimit <= 0) || (checks <= s_crossExpandLimit);
+        const bool useCrossHere = !s_disableCross && (!filterMode || s_filterKeepCross) && withinCrossBudget;
+        if (useCrossHere && cur.headB >= 0 &&
+            static_cast<size_t>(cur.headB) < m_headCrossEdgeOffsetByB.size()) {
+            std::uint32_t off = m_headCrossEdgeOffsetByB[static_cast<size_t>(cur.headB)];
+            std::uint16_t cnt = m_headCrossEdgeCountByB[static_cast<size_t>(cur.headB)];
+            if (off != UINT32_MAX && cnt > 0) {
+            for (std::uint16_t ei = 0; ei < cnt; ++ei) {
+                SizeType nbr_B = m_headCrossEdgeTargetsB[static_cast<size_t>(off) + ei];
+                if (nbr_B < 0) continue;
                 ++crossEdgesSeen;
-                if (s_logUExtra && s_hasRoles && IsHeadRoleUnfilterOnly(nbrA)) ++uextraCrossTargets;
-                if (visitedA.count(nbrA)) continue;
+                if (s_logUExtra && s_hasRoles && m_extraSearcher &&
+                    m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(nbr_B))) ++uextraCrossTargets;
+                if (visitedB.count(nbr_B)) continue;
 
                 // Hierarchical mask filter: skip neighbors that don't match query
                 // This replaces the old HeadNodeMatchesAnyQueryTag check and integrates
                 // bundle node routing.
-                auto bIt = m_globalHeadVIDToLocalHID.find(nbrA);
-                if (bIt == m_globalHeadVIDToLocalHID.end()) continue;
-                SizeType nbr_B = bIt->second;
                 if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
                     // Bundle node routing check (separate from tag content)
                     if (!routedNodeMask.empty()) {
@@ -1251,24 +1400,21 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
 
                 // Locate which bundle node hosts this head and compute query
                 // distance against its sample vector.
-                std::pair<int, SizeType> loc;
-                {
-                    std::lock_guard<std::mutex> lk(m_globalVIDToBundleLocMutex);
-                    auto locIt = m_globalVIDToBundleLoc.find(nbrA);
-                    if (locIt == m_globalVIDToBundleLoc.end()) continue;
-                    loc = locIt->second;
-                }
-                if (loc.first < 0 || loc.first >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
-                const auto& othIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(loc.first)];
+                if (static_cast<size_t>(nbr_B) >= m_headBundleNodeByB.size()) continue;
+                int nodeId = static_cast<int>(m_headBundleNodeByB[static_cast<size_t>(nbr_B)]);
+                SizeType local = m_headBundleLocalByB[static_cast<size_t>(nbr_B)];
+                if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
+                const auto& othIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
                 auto othAcc = AccessHeadBundleIndex<T>(othIdx.get());
                 if (!othAcc.valid) continue;
-                if (loc.second < 0 || loc.second >= othAcc.numSamples) continue;
-                const T* nbrVec = othAcc.getSample(loc.second);
+                if (local < 0 || local >= othAcc.numSamples) continue;
+                const T* nbrVec = othAcc.getSample(local);
                 if (nbrVec == nullptr) continue;
 
                 float d = m_fComputeDistance(qTarget, nbrVec, dim);
-                pushCandidate(loc.first, loc.second, nbrA, nbr_B, d);
+                pushCandidate(nodeId, local, nbr_B, d);
                 ++crossHopCount;
+            }
             }
         }
     }
@@ -1282,8 +1428,8 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         for (int i = 0; i < finalCount; ++i) {
             auto* r = p_queryResults->GetResult(i);
             if (r == nullptr || r->VID < 0) continue;
-            SizeType gA = m_index->GetHeadNodeGlobalVID(r->VID);
-            if (gA != MaxSize && s_hasRoles && IsHeadRoleUnfilterOnly(gA)) ++uextraInFinal;
+            if (s_hasRoles && m_extraSearcher &&
+                m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(r->VID))) ++uextraInFinal;
         }
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "UExtraDBG: hasRoles=%d filterMode=%d crossSeen=%d uextraCrossTargets=%d "
@@ -1297,7 +1443,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "CrossSubgraph: nodes=%zu totalSeeded=%d checks=%d crossHops=%d nodesVisited=%zu "
             "crossEdgesSeen=%d crossDroppedByTag=%d (tagPass=%.3f)\n",
-            p_candidateNodes.size(), totalSeeded, checks, crossHopCount, visitedA.size(),
+            p_candidateNodes.size(), totalSeeded, checks, crossHopCount, visitedB.size(),
             crossEdgesSeen, crossDroppedByTag,
             crossEdgesSeen > 0 ? 1.0 - (double)crossDroppedByTag / crossEdgesSeen : 0.0);
     }
@@ -1308,9 +1454,9 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     static const bool s_logCS = (std::getenv("SPTAG_LOG_CROSS_STATS") != nullptr);
     if (s_logCS) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "CSStats: nodes=%zu seeded=%d seedDropTag=%d checks=%d cross=%d crossDropTag=%d visited=%zu maxC=%d\n",
-            p_candidateNodes.size(), totalSeeded, seedDroppedByTag, checks, crossEdgesSeen, crossDroppedByTag,
-            visitedA.size(), maxChecks);
+            "CSStats: nodes=%zu seedNodes=%zu seeded=%d seedDropTag=%d checks=%d cross=%d crossDropTag=%d visited=%zu maxC=%d\n",
+            p_candidateNodes.size(), seedNodes.size(), totalSeeded, seedDroppedByTag, checks,
+            crossEdgesSeen, crossDroppedByTag, visitedB.size(), maxChecks);
     }
     return ErrorCode::Success;
 }
@@ -2003,7 +2149,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
     }
 
-    if (!usedHeadBundleGraphSearch && !candidateNodes.empty())
+    static const bool s_forceGlobalHead =
+        (std::getenv("SPTAG_FORCE_GLOBAL_HEAD") != nullptr);
+    if (!usedHeadBundleGraphSearch && !candidateNodes.empty() && !s_forceGlobalHead)
     {
         bool canUseHeadBundle = true;
         for (int nodeId : candidateNodes)
@@ -2029,7 +2177,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // engaged via SPTAG_CROSSEDGE_UNFILTER also flow through here.
             bool useCrossSubgraph = (candidateNodes.size() > 1)
                 && (LoadHeadCrossEdges() == ErrorCode::Success)
-                && (!m_headCrossEdges.empty());
+                && (!m_headCrossEdgeTargetsB.empty());
+            static const bool s_disableCrossSubgraph =
+                (std::getenv("SPTAG_DISABLE_CROSSSUBGRAPH") != nullptr);
+            if (s_disableCrossSubgraph) useCrossSubgraph = false;
 
             static const bool s_logPathStats = (std::getenv("SPTAG_LOG_PATH_STATS") != nullptr);
             if (s_logPathStats) {
@@ -2157,6 +2308,33 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // U_extra heads, so its tree cannot navigate H1; skip this dead fallback.
         if (!m_metadataOnlyHeadStore && (ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
             return ret;
+    }
+
+    // Diagnostic: dump the selected head set (m_index-local hid + dist) for the
+    // first SPTAG_DUMP_HEADS queries so cross-subgraph vs fallback head selection
+    // can be diffed in the SAME id space. Set SPTAG_DUMP_HEADS=N.
+    {
+        static const int s_dumpHeads = []() {
+            const char* e = std::getenv("SPTAG_DUMP_HEADS");
+            return e ? std::atoi(e) : 0;
+        }();
+        if (s_dumpHeads > 0) {
+            static std::atomic<int> s_dumpQ{0};
+            int qi = s_dumpQ.fetch_add(1);
+            if (qi < s_dumpHeads) {
+                int n = p_queryResults->GetResultNum();
+                std::string line = "DUMPHEADS q=" + std::to_string(qi) +
+                    " cross=" + std::to_string(usedHeadBundleGraphSearch ? 1 : 0) +
+                    " n=" + std::to_string(n) + " :";
+                for (int di = 0; di < n; ++di) {
+                    auto* r = p_queryResults->GetResult(di);
+                    if (r == nullptr || r->VID < 0) continue;
+                    line += " " + std::to_string(r->VID) + ":" +
+                            std::to_string(r->Dist);
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", line.c_str());
+            }
+        }
     }
 
     auto _phT1 = s_phaseTime ? std::chrono::high_resolution_clock::now()
@@ -3041,7 +3219,15 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber,
             m_options.m_iSelectHeadNumberOfThreads);
 
-        bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
+        // Parallel BKT build is opt-in via [SelectHead] ParallelBKTBuild=true,
+        // with an env override SPTAG_PARALLEL_BKT (1/true/yes) for ad-hoc runs.
+        bool useParallelBKT = m_options.m_parallelBKTBuild;
+        if (const char* e = std::getenv("SPTAG_PARALLEL_BKT")) useParallelBKT = (e[0]=='1'||e[0]=='t'||e[0]=='T'||e[0]=='y'||e[0]=='Y');
+        if (useParallelBKT)
+            bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
+                                              nullptr, nullptr, true);
+        else
+            bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
                                           nullptr, nullptr, true);
         auto t2 = std::chrono::high_resolution_clock::now();
         double elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count();
@@ -3092,6 +3278,13 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         double finalRatio = 0.016;
         if (const char* e = std::getenv("SPTAG_PERTAG_HEAD_RATIO"))
             finalRatio = std::max(1e-5, std::atof(e));
+
+        // Parallel per-tag BKT build (level-order sibling-node parallelism within
+        // each tag's tree). Opt-in via [SelectHead] ParallelBKTBuild=true, with an
+        // env override SPTAG_PARALLEL_BKT (1/true/yes). Especially beneficial when grouping
+        // by a low-cardinality column yields a few very large per-tag trees.
+        bool perTagParallelBKT = m_options.m_parallelBKTBuild;
+        if (const char* e = std::getenv("SPTAG_PARALLEL_BKT")) perTagParallelBKT = (e[0]=='1'||e[0]=='t'||e[0]=='T'||e[0]=='y'||e[0]=='Y');
 
         // ---- Read per-vector tag column (one int per line) ----
         std::vector<int> perVecTag(data.R(), -1);
@@ -3164,7 +3357,12 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
             // Native clustering on raw vectors (OPQ is posting-only, see BKT branch).
             bkt->m_pQuantizer    = nullptr;
-            bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod,
+            if (perTagParallelBKT)
+                bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod,
+                                                  m_options.m_iSelectHeadNumberOfThreads,
+                                                  &subIdx, nullptr, true);
+            else
+                bkt->BuildTrees<InternalDataType>(data, m_options.m_distCalcMethod,
                                               m_options.m_iSelectHeadNumberOfThreads,
                                               &subIdx, nullptr, true);
 

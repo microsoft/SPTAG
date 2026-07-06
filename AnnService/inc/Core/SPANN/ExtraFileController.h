@@ -1022,6 +1022,54 @@ namespace SPTAG::SPANN {
             return Put(std::stoi(key), value, timeout, reqs, true);
         }
 
+        // Offline rewrite helper for layout transforms that preserve a key's posting
+        // identity but change the record stride (e.g. [meta|OPQ25] -> [meta|PipePQ32]).
+        // Unlike Put(), this updates the existing block list in place and allocates only
+        // the page-count delta, avoiding a full copy-on-write old+new transient footprint.
+        ErrorCode RewriteInPlace(const SizeType key, const std::string& value,
+                                 const std::chrono::microseconds& timeout,
+                                 std::vector<Helper::AsyncReadRequest>* reqs) {
+            m_dirty.store(true, std::memory_order_relaxed);
+            int blocks = (int)(((value.size() + PageSize - 1) >> PageSizeEx));
+            if (blocks >= m_blockLimit) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "Fail to rewrite key:%d value:%lld since value too long!\n", key, value.size());
+                return ErrorCode::Posting_OverFlow;
+            }
+            if (key >= m_pBlockMapping.R() || At(key) == 0xffffffffffffffff) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[RewriteInPlace] key not found:%d\n", key);
+                return ErrorCode::Key_NotFound;
+            }
+            int64_t* postingSize = (int64_t*)At(key);
+            if (*postingSize < 0) return ErrorCode::Posting_SizeError;
+            int oldblocks = (int)((*postingSize + PageSize - 1) >> PageSizeEx);
+            if (blocks > oldblocks) {
+                if (!m_pBlockController.GetBlocks(postingSize + 1 + oldblocks, blocks - oldblocks)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[RewriteInPlace] not enough blocks for key:%d delta:%d\n", key, blocks - oldblocks);
+                    return ErrorCode::DiskIOFail;
+                }
+            }
+            if (!m_pBlockController.WriteBlocks(postingSize + 1, blocks, value, timeout, reqs)) {
+                if (blocks > oldblocks) {
+                    m_pBlockController.ReleaseBlocks(postingSize + 1 + oldblocks, blocks - oldblocks);
+                    memset(postingSize + 1 + oldblocks, -1, sizeof(AddressType) * (blocks - oldblocks));
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[RewriteInPlace] write key:%d failed\n", key);
+                return ErrorCode::DiskIOFail;
+            }
+            if (blocks < oldblocks) {
+                if (!m_pBlockController.ReleaseBlocks(postingSize + 1 + blocks, oldblocks - blocks)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[RewriteInPlace] release old blocks failed for key:%d\n", key);
+                    return ErrorCode::DiskIOFail;
+                }
+                memset(postingSize + 1 + blocks, -1, sizeof(AddressType) * (oldblocks - blocks));
+            }
+            *postingSize = (int64_t)value.size();
+            return ErrorCode::Success;
+        }
+
         ErrorCode Check(const SizeType key, int size, std::vector<std::uint8_t> *visited) override
         {
             SizeType r = m_pBlockMapping.R();

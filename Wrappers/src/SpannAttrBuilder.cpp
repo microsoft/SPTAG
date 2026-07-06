@@ -44,6 +44,7 @@
 #include "inc/Core/CommonDataStructure.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/IQuantizer.h"
+#include "inc/Core/SPANN/PipePQ.h"
 #include "inc/Helper/SimpleIniReader.h"
 
 using namespace SPTAG;
@@ -255,6 +256,82 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // --- PipeANN fixed-chunk PQ code generation mode ---
+    // Uses the PipeANN pq_pivots.bin format and writes a raw, header-less N*M
+    // uint8 sidecar consumed by PostingQuantizer=PipePQ. Existing PipeANN
+    // compressed.bin files ([uint32 N][uint32 M] + codes) are also accepted
+    // directly by the SPANN build/search transform path, so this mode is mainly
+    // for same-algorithm/same-code-length experiments such as PQ25.
+    if (ArgFlag(argc, argv, "--gen-pipepq-codes")) {
+        const char* vectors = ArgVal(argc, argv, "--vectors", nullptr);
+        const char* pivots = ArgVal(argc, argv, "--pivots", nullptr);
+        const char* outF = ArgVal(argc, argv, "--out", nullptr);
+        const int dim = (int)std::strtol(ArgVal(argc, argv, "--dim", "0"), nullptr, 10);
+        const int M = (int)std::strtol(ArgVal(argc, argv, "--posting-quant-m", "0"), nullptr, 10);
+        const long vecOff = std::strtol(ArgVal(argc, argv, "--vec-offset", "8"), nullptr, 10);
+        const long nArg = std::strtol(ArgVal(argc, argv, "--n", "-1"), nullptr, 10);
+        const std::string valueType = ArgVal(argc, argv, "--value-type", "Int8");
+        if (!vectors || !pivots || !outF || dim <= 0 || M <= 0) {
+            fprintf(stderr, "usage: spannbuilder --gen-pipepq-codes --vectors <base.i8bin> "
+                            "--pivots <pipeann_pq_pivots.bin> --out <pipepq_codes_m<M>.bin> "
+                            "--dim <D> --posting-quant-m <M> [--vec-offset 8] [--n <count>] "
+                            "[--value-type Int8]\n");
+            return 2;
+        }
+        const size_t valSize = ValueTypeSize(valueType);
+        if (valSize == 0) { fprintf(stderr, "[spannbuilder] bad value-type\n"); return 2; }
+
+        SPTAG::SPANN::PipePQTable table;
+        if (!table.Load(pivots, M) || table.Dim() != dim) {
+            fprintf(stderr, "[spannbuilder][gen-pipepq-codes] failed to load pivots=%s dim=%d M=%d\n",
+                    pivots, dim, M);
+            return 1;
+        }
+
+        MappedFile mf;
+        if (!mf.Map(vectors)) return 1;
+        const size_t recBytes = (size_t)dim * valSize;
+        const size_t avail = (mf.length > (size_t)vecOff) ? (mf.length - (size_t)vecOff) : 0;
+        long N = (long)(avail / recBytes);
+        if (nArg >= 0 && nArg < N) N = nArg;
+        if (N <= 0) { fprintf(stderr, "[spannbuilder] no vectors (avail=%zu rec=%zu)\n", avail, recBytes); return 1; }
+        const char* basePtr = static_cast<const char*>(mf.base) + vecOff;
+
+        FILE* out = std::fopen(outF, "wb");
+        if (!out) { fprintf(stderr, "[spannbuilder] cannot open out: %s\n", outF); return 1; }
+        fprintf(stderr, "[spannbuilder][gen-pipepq-codes] encoding %ld vectors -> %s (%ld bytes), M=%d\n",
+                N, outF, (long)N * M, M);
+
+        const size_t CHUNK = 1u << 16;
+        std::vector<std::uint8_t> codes(CHUNK * (size_t)M);
+        std::vector<float> vf((size_t)dim);
+        for (long s = 0; s < N; s += (long)CHUNK) {
+            const long e = std::min<long>(s + (long)CHUNK, N);
+            for (long i = s; i < e; ++i) {
+                const char* rec = basePtr + (size_t)i * recBytes;
+                if (valueType == "Float" || valueType == "float") {
+                    const float* v = reinterpret_cast<const float*>(rec);
+                    for (int d = 0; d < dim; ++d) vf[d] = v[d];
+                } else if (valSize == 2) {
+                    const std::int16_t* v = reinterpret_cast<const std::int16_t*>(rec);
+                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
+                } else if (valueType == "UInt8" || valueType == "uint8") {
+                    const std::uint8_t* v = reinterpret_cast<const std::uint8_t*>(rec);
+                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
+                } else {
+                    const std::int8_t* v = reinterpret_cast<const std::int8_t*>(rec);
+                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
+                }
+                table.Encode(vf.data(), &codes[(size_t)(i - s) * M]);
+            }
+            std::fwrite(codes.data(), 1, (size_t)(e - s) * M, out);
+            fprintf(stderr, "\r[spannbuilder][gen-pipepq-codes] %ld/%ld", e, N);
+        }
+        std::fclose(out);
+        fprintf(stderr, "\n[spannbuilder][gen-pipepq-codes] done.\n");
+        return 0;
+    }
+
     // --- Tag-merge mode: build the builder's 5-col tag sidecar from the dataset's
     //     .npy attribute arrays (C++, no Python). Reads tags.npy [N,acl] uint32 +
     //     num_attr.npy [N] int32 and writes:
@@ -350,6 +427,8 @@ int main(int argc, char** argv) {
             IniEnv(ini, "SelectHead",  "Ratio",                   "SPTAG_PERTAG_HEAD_RATIO");
             IniEnv(ini, "SelectHead",  "SelectType",              "SPTAG_SELECT_TYPE_OVERRIDE");
             IniEnv(ini, "SelectHead",  "BKTLambdaFactor",         "SPTAG_BKT_LAMBDA_FACTOR");
+            IniEnv(ini, "SelectHead",  "NumberOfThreads",         "SPTAG_SELECT_HEAD_THREADS");
+            IniEnv(ini, "SelectHead",  "ParallelBKTBuild",        "SPTAG_PARALLEL_BKT");
             IniEnv(ini, "BuildHead",   "NumberOfThreads",         "SPTAG_BUILD_HEAD_THREADS");
             // (b) Multi-tenant ACL routing + numeric attribute layout.
             IniEnv(ini, "MultiTenant", "ACLCols",                 "SPTAG_ACL_COLS");
@@ -360,8 +439,8 @@ int main(int argc, char** argv) {
             // (c) Unfilter-enhancement layers (U_extra heads + unfilter tail).
             IniEnv(ini, "MultiTenant", "DualPoolAugment",         "SPTAG_DUAL_POOL_AUGMENT");
             IniEnv(ini, "MultiTenant", "DualPoolExtraRatio",      "SPTAG_DUAL_POOL_EXTRA_RATIO");
-            IniEnv(ini, "MultiTenant", "UnfilterTailKReplica",    "SPTAG_UNFILTER_TAIL_K_REPLICA");
-            IniEnv(ini, "MultiTenant", "UnfilterTailBufferPages", "SPTAG_UNFILTER_TAIL_BUFFER_PAGES");
+            // Unfilter-tail K/buffer are native SSD params (TailReplicaCount /
+            // UnfilterTailBufferLength) set via [BuildSSDIndex]; no env bridge.
         }
     }
 
@@ -379,7 +458,7 @@ int main(int argc, char** argv) {
             "--num-tags-per-vec <K> --index-dir <out> [--tenant 0] "
             "[--storage-backend FILEIO|ROCKSDBIO] [--build-signatures] "
             "[--with-meta-index] [--normalized] "
-            "[--posting-quantizer None|RaBitQ|OPQ] [--posting-quant-m <B>] "
+            "[--posting-quantizer None|RaBitQ|OPQ|PipePQ] [--posting-quant-m <B>] "
             "[--posting-quant-bits <b>] [--posting-quant-file <f>] "
             "[--full-vector-file <f>] [--rerank-l <L>] [--quantize-head] [--quant-adc-only] "
             "[--ssd-start-file-gb <GB>] [--ssd-max-file-gb <GB>] [--ssd-growth-file-gb <GB>]\n");
@@ -472,7 +551,7 @@ int main(int argc, char** argv) {
     // In-posting quantization config (unified, env-free). Explicit CLI flags override
     // the ini (pushed after the [BuildSSDIndex] loop -> applied later -> win).
     {
-        const char* pq = ArgVal(argc, argv, "--posting-quantizer", nullptr);   // None|RaBitQ|OPQ
+        const char* pq = ArgVal(argc, argv, "--posting-quantizer", nullptr);   // None|RaBitQ|OPQ|PipePQ
         if (pq) mgr.SetSSDBuildParam("PostingQuantizer", pq);
         const char* pqm = ArgVal(argc, argv, "--posting-quant-m", nullptr);     // OPQ code bytes
         if (pqm) mgr.SetSSDBuildParam("PostingQuantM", pqm);
@@ -499,6 +578,26 @@ int main(int argc, char** argv) {
     }
 
     fprintf(stderr, "[spannbuilder] BuildFromDataWithTags ...\n");
+    const bool routingOnly = ArgFlag(argc, argv, "--routing-only") ||
+                             (std::getenv("SPTAG_ROUTING_ONLY") != nullptr);
+    if (routingOnly) {
+        // Repair mode: the index store already exists on disk; only (re)generate
+        // the query-time tag->bundle-node routing sidecar (tag_node_index.bin).
+        // Skips the full SPANN rebuild and BuildSignatures' posting scan.
+        setenv("SPTAG_ROUTING_ONLY", "1", 1);
+        fprintf(stderr, "[spannbuilder] ROUTING-ONLY: LoadAll(%s) ...\n", indexDir);
+        if (!mgr.LoadAll(indexDir)) {
+            fprintf(stderr, "[spannbuilder] ROUTING-ONLY LoadAll FAILED\n");
+            return 1;
+        }
+        fprintf(stderr, "[spannbuilder] ROUTING-ONLY: BuildSignatures ...\n");
+        if (!mgr.BuildSignatures(tenant, tags, (SizeType)n, numTagsPerVec)) {
+            fprintf(stderr, "[spannbuilder] ROUTING-ONLY BuildSignatures FAILED\n");
+            return 1;
+        }
+        fprintf(stderr, "[spannbuilder] ROUTING-ONLY done.\n");
+        return 0;
+    }
     bool ok = mgr.BuildFromDataWithTags(vectors, metadata, (SizeType)n,
                                         tags, numTagsPerVec, withMetaIndex, normalized);
     if (!ok) {
