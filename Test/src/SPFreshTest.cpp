@@ -1338,7 +1338,16 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     std::shared_ptr<VectorSet> truth;
     if (generateTruth)
     {
-        truth = TestUtils::TestDataGenerator<float>::LoadVectorSet(ptruth, K);
+        // Goal: allow pointing TruthPath at an arbitrary pre-computed truth file
+        // instead of always loading the auto-generated perftest_batchtruth.* name.
+        // The file is expected to be in the same format the generator writes (a
+        // saved BasicVectorSet), so the standard loader parses it directly.
+        std::string truthFile = ptruth;
+        if (!truthPath.empty() && truthPath != "none" && fileexists(truthPath.c_str())) {
+            BOOST_TEST_MESSAGE("Using TruthPath from config (overriding auto-generated name): " << truthPath);
+            truthFile = truthPath;
+        }
+        truth = TestUtils::TestDataGenerator<float>::LoadVectorSet(truthFile, K);
     }
 
     // Benchmark 0/0b: query performance before insertions. Skip in BuildOnly
