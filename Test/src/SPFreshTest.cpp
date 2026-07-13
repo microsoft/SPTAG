@@ -745,13 +745,53 @@ void InsertVectors(SPANN::Index<ValueType> *p_index, int insertThreads, int step
 }
 
 
+// Dump per-query top-K results to disk in the format consumed by the offline
+// union-recall / cross-validation tooling (added in #452):
+//   [int64 numQueries][int32 topK][numQueries * topK * (int64 VID + float Dist)]
+// Out-of-range / empty slots are written as VID=-1 / Dist=FLT_MAX.
+//
+// In a single-node run `results` covers the whole query set, so the file is a
+// complete baseline. In a distributed run each node only holds its own
+// contiguous query slice [myStart, myStart+count); callers pass count = slice
+// length and suffix the path with ".node<idx>", so the disjoint per-node files
+// can be concatenated in node order offline and diffed against the single-node
+// baseline to independently validate head-replication / posting consistency.
+static void DumpSearchResultFile(const std::string& path,
+                                 const std::vector<QueryResult>& results,
+                                 int count, int topK, int searchK)
+{
+    std::ofstream fout(path, std::ios::binary | std::ios::trunc);
+    if (!fout.is_open()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+            "[SearchResult] Failed to open dump path: %s\n", path.c_str());
+        return;
+    }
+    std::int64_t nq = count;
+    std::int32_t tk = topK;
+    fout.write(reinterpret_cast<const char*>(&nq), sizeof(nq));
+    fout.write(reinterpret_cast<const char*>(&tk), sizeof(tk));
+    for (int q = 0; q < count; ++q) {
+        for (int kk = 0; kk < topK; ++kk) {
+            const auto* rr = results[q].GetResult(kk);
+            std::int64_t vid = (rr && kk < searchK) ? static_cast<std::int64_t>(rr->VID) : -1;
+            float dist = (rr && kk < searchK) ? rr->Dist : (std::numeric_limits<float>::max)();
+            fout.write(reinterpret_cast<const char*>(&vid), sizeof(vid));
+            fout.write(reinterpret_cast<const char*>(&dist), sizeof(dist));
+        }
+    }
+    fout.close();
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+        "[SearchResult] Dumped %d queries x %d topK to %s\n", count, topK, path.c_str());
+}
+
 template <typename T>
 void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_ptr<VectorSet> &queryset,
                                std::shared_ptr<VectorSet> &truth, const std::string &truthPath,
                                SizeType baseVectorCount, int topK, int searchK, int numThreads, int numQueries, int batches, int totalbatches,
                                std::ostream &benchmarkData, std::string prefix = "",
                                int nodeIndex = 0, SPANN::WorkerNode* router = nullptr,
-                               SPANN::DispatcherNode* dispatcher = nullptr)
+                               SPANN::DispatcherNode* dispatcher = nullptr,
+                               const std::string& searchResultPath = "")
 {
     // Use hash ring node count (workers only) for partitioning, not GetNumNodes() (includes dispatcher)
     auto ring = (router && router->IsEnabled()) ? router->GetHashRing() : nullptr;
@@ -800,6 +840,17 @@ void BenchmarkQueryPerformance(std::shared_ptr<VectorIndex> &index, std::shared_
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "BenchmarkQueryPerformance round %d: local=%.1fms (%d queries), max=%.1fms, QPS=%.1f\n",
             round, localWallTime * 1000, myCount, batchLatency * 1000, numQueries / batchLatency);
+    }
+
+    // Cross-validation dump: persist this node's per-query top-K so a
+    // distributed run can be diffed offline against a single-node baseline.
+    // Single-node writes the full set to <path> (baseline); each distributed
+    // node writes only its contiguous slice to <path>.node<idx>.
+    if (!searchResultPath.empty()) {
+        std::string dumpPath = distributed
+            ? (searchResultPath + ".node" + std::to_string(nodeIndex))
+            : searchResultPath;
+        DumpSearchResultFile(dumpPath, results, myCount, topK, searchK);
     }
 
     // Calculate statistics (from this node's queries)
@@ -1124,6 +1175,18 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
     int insertBatchSize = insertVectorCount / max(batches, 1);
     int deleteBatchSize = deleteVectorCount / max(batches, 1);
 
+    // Optional cross-validation dump path (Benchmark/SearchResult).  Re-read
+    // from the config file since RunBenchmark isn't handed the IniReader.  When
+    // set, each BenchmarkQueryPerformance call persists its per-query top-K;
+    // see DumpSearchResultFile.  Last search round wins (final index state).
+    std::string searchResultPath;
+    if (const char* cfgPath = std::getenv("BENCHMARK_CONFIG")) {
+        Helper::IniReader srIni;
+        if (srIni.LoadIniFile(cfgPath) == ErrorCode::Success) {
+            searchResultPath = srIni.GetParameter("Benchmark", "SearchResult", std::string(""));
+        }
+    }
+
     // Use distributed config for multi-node partitioning
     int nodeIndex = distCfg.workerIndex;
     int numNodes = distCfg.GetNumWorkers();
@@ -1358,11 +1421,11 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
         BOOST_TEST_MESSAGE("\n=== Benchmark 0: Query Before Insertions (Round 1) ===");
         BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                      numSearchThreads, numQueries, 0, batches, tmpbenchmark, "",
-                                     nodeIndex, workerPtr, dispatcher.get());
+                                     nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
         jsonFile << "    \"benchmark0_query_before_insert\": ";
         BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                      numSearchThreads, numQueries, 0, batches, jsonFile, "",
-                                     nodeIndex, workerPtr, dispatcher.get());
+                                     nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
         jsonFile << ",\n";
         jsonFile.flush();
 
@@ -1370,11 +1433,11 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
         BOOST_TEST_MESSAGE("\n=== Benchmark 0b: Query Before Insertions (Round 2) ===");
         BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                      numSearchThreads, numQueries, 0, batches, tmpbenchmark, "",
-                                     nodeIndex, workerPtr, dispatcher.get());
+                                     nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
         jsonFile << "    \"benchmark0b_query_before_insert_round2\": ";
         BenchmarkQueryPerformance<T>(index, queryset, truth, truthPath, baseVectorCount, topK, SearchK,
                                      numSearchThreads, numQueries, 0, batches, jsonFile, "",
-                                     nodeIndex, workerPtr, dispatcher.get());
+                                     nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
         jsonFile << ",\n";
         jsonFile.flush();
     } else {
@@ -1579,20 +1642,20 @@ void RunBenchmark(const std::string &vectorPath, const std::string &queryPath, c
                 jsonFile << "        \"search\":";
                 BenchmarkQueryPerformance<T>(cloneIndex, queryset, truth, truthPath, baseVectorCount, topK, SearchK, numSearchThreads,
                                              numQueries, iter + 1, batches, tmpbenchmark, "    ",
-                                             nodeIndex, workerPtr, dispatcher.get());
+                                             nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
                 BenchmarkQueryPerformance<T>(cloneIndex, queryset, truth, truthPath, baseVectorCount,
                                              topK, SearchK, numSearchThreads, numQueries, iter + 1, batches, jsonFile, "    ",
-                                             nodeIndex, workerPtr, dispatcher.get());
+                                             nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
                 jsonFile << ",\n";
 
                 BOOST_TEST_MESSAGE("\n=== Benchmark 2b: Query After Insertions and Deletions (Round 2) ===");
                 jsonFile << "        \"search_round2\":";
                 BenchmarkQueryPerformance<T>(cloneIndex, queryset, truth, truthPath, baseVectorCount, topK, SearchK, numSearchThreads,
                                              numQueries, iter + 1, batches, tmpbenchmark, "    ",
-                                             nodeIndex, workerPtr, dispatcher.get());
+                                             nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
                 BenchmarkQueryPerformance<T>(cloneIndex, queryset, truth, truthPath, baseVectorCount,
                                              topK, SearchK, numSearchThreads, numQueries, iter + 1, batches, jsonFile, "    ",
-                                             nodeIndex, workerPtr, dispatcher.get());
+                                             nodeIndex, workerPtr, dispatcher.get(), searchResultPath);
                 jsonFile << ",\n";
 
                 start = std::chrono::high_resolution_clock::now();
@@ -2864,6 +2927,16 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
 
     // Load query set
     int searchK = topK;
+    // Optional cross-validation dump path (Benchmark/SearchResult); re-read
+    // from config since RunWorker isn't handed the IniReader.  Each Search
+    // round this worker dumps its contiguous query slice to <path>.node<idx>.
+    std::string searchResultPath;
+    if (const char* cfgPath = std::getenv("BENCHMARK_CONFIG")) {
+        Helper::IniReader srIni;
+        if (srIni.LoadIniFile(cfgPath) == ErrorCode::Success) {
+            searchResultPath = srIni.GetParameter("Benchmark", "SearchResult", std::string(""));
+        }
+    }
     std::string pqueryset = "perftest_query.bin." + typeStr + "_" + std::to_string(numQueries) + "_" + std::to_string(dimension);
     auto queryset = TestUtils::TestDataGenerator<T>::LoadVectorSet(pqueryset, dimension);
     BOOST_REQUIRE_MESSAGE(queryset != nullptr, "Worker: Failed to load query set from " << pqueryset);
@@ -2906,6 +2979,14 @@ void RunWorker(const std::string& indexPath, int dimension, int baseVectorCount,
                 index.get(), queryset, myStart, myCount, searchK,
                 std::min(numSearchThreads, myCount),
                 results, /*latenciesOut=*/nullptr, /*statsOut=*/nullptr);
+
+            // Cross-validation dump: this worker's contiguous query slice.
+            // Overwritten each round, so the file reflects the final index
+            // state (last search round before Stop), aligned with the driver.
+            if (!searchResultPath.empty()) {
+                DumpSearchResultFile(searchResultPath + ".node" + std::to_string(nodeIndex),
+                                     results, myCount, topK, searchK);
+            }
 
             // Drain merge hints accumulated during this search round.
             // Search-side AsyncMergeInSearch on remote-owned heads enqueues

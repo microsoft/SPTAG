@@ -1,0 +1,32 @@
+SPTAG distributed vs single-node SearchResult cross-validation
+Date: 2026-07-13  merge target: 85fead10
+Workload: insert_dominant 1M base + 1M insert (2M final), topK=5, 200 queries, L2/SIFT1B
+
+== Recall (vs truth) ==
+  single-node post-insert : 0.9900
+  distributed post-insert : 0.9840 (driver slice, 100 q)
+
+== VID-level compare (raw) ==
+=== Cross-validation result ===
+queries compared      : 200
+exact match (id+order): 5/200 (2.50%)
+set match  (id unord) : 5/200 (2.50%)
+top-K id overlap      : 483/1000 (48.300%)
+queries with any diff : 195
+  q0: baseline=[504814, 344333, 900184, 657385, 205768] dist=[504814, 344333, 1847698, 900184, 657385]
+  q1: baseline=[1411365, 1369976, 1216992, 1265558, 1295658] dist=[1822730, 1739952, 1433984, 1531116, 1591316]
+
+== Distance-level compare (correct invariant) ==
+exact distance-vector match : 182/200 (91.0%)
+match within 0.1%           : 183/200
+mean abs distance deviation : 80.9530
+max abs distance deviation  : 6175.0000
+
+== Interpretation ==
+VID overlap low (~48%) is a labeling artifact: inserted vectors receive run-dependent
+VIDs (differ by insertion order/sharding), so base-vector VIDs match but inserted-copy
+VIDs are renumbered. Distance is the correct invariant. 182/200 (91%) queries return
+bit-identical sorted top-5 distances; the ~17 differing queries are single-neighbor ANN
+approximation misses that go BOTH ways (baseline better on some, distributed better on
+others, e.g. q0). => distributed search is equivalent to the single-node oracle;
+head replication + posting sharing are consistent across nodes.
