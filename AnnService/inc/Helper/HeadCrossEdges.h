@@ -19,6 +19,7 @@ namespace Helper
 constexpr std::uint32_t kHeadCrossEdgesMagic = 0x48434548U; // 'HCEH'
 constexpr std::int32_t  kHeadCrossEdgesVersion = 1;
 constexpr const char*   kHeadCrossEdgesFileName = "head_cross_edges.bin";
+constexpr const char*   kHeadCrossEdgesDirtyFileName = "head_cross_edges.dirty";
 
 #pragma pack(push, 1)
 struct HeadCrossEdgesHeader

@@ -159,8 +159,8 @@ def main() -> None:
             print(f"    {opt}={os.environ[opt]}  (U_extra augmentation ON)")
 
     if args.tail_replica > 0:
-        os.environ["SPTAG_UNFILTER_TAIL_K_REPLICA"] = str(args.tail_replica)
-        print(f"    SPTAG_UNFILTER_TAIL_K_REPLICA={args.tail_replica}  (unfilter-tail K_replica ON)")
+        # Unfilter-tail K is now ini-only: set [BuildSSDIndex] TailReplicaCount=K.
+        print(f"    [BuildSSDIndex] TailReplicaCount={args.tail_replica}  (unfilter-tail K_replica ON)")
 
     out = Path(args.index_dir)
     if out.exists():

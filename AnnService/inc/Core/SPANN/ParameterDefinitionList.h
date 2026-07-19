@@ -87,10 +87,11 @@ DefineSSDParameter(m_zstdCompressLevel, int, 0, "ZstdCompressLevel")
 DefineSSDParameter(m_internalResultNum, int, 64, "InternalResultNum")
 DefineSSDParameter(m_postingPageLimit, int, 3, "PostingPageLimit")
 DefineSSDParameter(m_replicaCount, int, 8, "ReplicaCount")
-// Independent tail replica (K_replica) for the unfilter-tail. Each base vector
-// inserts into its top-m_tailReplicaCount nearest heads' tail region (tag-agnostic,
-// scanned only by unfilter queries). Decoupled from m_replicaCount above, which
-// governs the per-tag pure posting region. Default 0 = unfilter-tail disabled.
+// Independent tail replica Kmax for the unfilter-tail. Each base vector considers
+// its top-m_tailReplicaCount nearest heads for the tag-agnostic tail region, then
+// the build trims per-head tail by page budget (currently <=2 pages, sparse page-2
+// dropped). Decoupled from m_replicaCount above, which governs the per-tag pure
+// posting region. Default 0 = unfilter-tail disabled.
 DefineSSDParameter(m_tailReplicaCount, int, 0, "TailReplicaCount")
 DefineSSDParameter(m_outputEmptyReplicaID, bool, false, "OutputEmptyReplicaID")
 DefineSSDParameter(m_batches, int, 1, "Batches")
@@ -134,6 +135,8 @@ DefineSSDParameter(m_queryCountLimit, int, (std::numeric_limits<int>::max)(), "Q
 DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler") // Mutable
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum") // Mutable
+DefineSSDParameter(m_fixedNprobe, int, 0, "FixedNprobe") // Mutable; 0 uses adaptive budget
+DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 uses adaptive seed budget
 DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
 DefineSSDParameter(m_forceDenseTagSearch, bool, false, "ForceDenseTagSearch") // Mutable
 DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Mutable
@@ -142,6 +145,7 @@ DefineSSDParameter(m_filteredSearchTargetRecall, float, 1.0f, "FilteredSearchTar
 DefineSSDParameter(m_filteredSearchCoverageExponent, float, 0.0f, "FilteredSearchCoverageExponent") // Mutable; 0 disables coverage-driven over-probing
 DefineSSDParameter(m_enableAdaptiveFilteredNprobe, bool, true, "EnableAdaptiveFilteredNprobe") // Mutable
 DefineSSDParameter(m_logAdaptiveNprobe, bool, false, "LogAdaptiveNprobe") // Mutable; per-query observability
+DefineSSDParameter(m_logPhaseTime, bool, false, "LogPhaseTime") // Mutable; diagnostic timing only
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
@@ -187,6 +191,8 @@ DefineSSDParameter(m_reassignThreadNum, int, 0, "ReassignThreadNum") // Mutable
 DefineSSDParameter(m_batch, int, 1000, "Batch")
 // Total Vector Path
 DefineSSDParameter(m_fullVectorPath, std::string, std::string(""), "FullVectorPath")
+// Appended full-precision vectors for dynamic in-posting PQ updates
+DefineSSDParameter(m_updateVectorFile, std::string, std::string("update_vectors.bin"), "UpdateVectorFile")
 // Steady State: update trace
 DefineSSDParameter(m_updateFilePrefix, std::string, std::string(""), "UpdateFilePrefix")
 // Steady State: update mapping
@@ -235,6 +241,13 @@ DefineSSDParameter(m_headBatch, int, 32, "IterativeSearchHeadBatch") // Mutable
 
 DefineSSDParameter(m_shareDB, bool, false, "ShareDB")
 
+// Primary-head CSR bypass. The build emits one exact primary owner per vector;
+// project-filtered searches can expand graph heads from RAM without posting IO.
+DefineSSDParameter(m_buildPrimaryHeadCSR, bool, false, "BuildPrimaryHeadCSR")
+DefineSSDParameter(m_primaryHeadCSRFile, std::string, std::string("primary_head_csr.bin"), "PrimaryHeadCSRFile")
+DefineSSDParameter(m_enablePrimaryHeadBypass, bool, false, "EnablePrimaryHeadBypass")
+DefineSSDParameter(m_primaryHeadBypassRerankL, int, 0, "PrimaryHeadBypassRerankL")
+
 // In-posting quantization (unified): postings store a compact code [meta|code] in
 // place of the full ValueType vector; the full vectors stay on disk for cold rerank.
 // PostingQuantizer selects the in-posting codec; the head index is independently
@@ -244,6 +257,7 @@ DefineSSDParameter(m_postingQuantBits, int, 2, "PostingQuantBits")          // R
 DefineSSDParameter(m_postingQuantM, int, 0, "PostingQuantM")                // OPQ/PipePQ code bytes per vector (subvector/chunk count)
 DefineSSDParameter(m_quantizeHead, bool, false, "QuantizeHead")             // build the head index on quantized vectors
 DefineSSDParameter(m_postingQuantFile, std::string, std::string(""), "PostingQuantizerFile") // code sidecar (abs or rel to index dir)
+DefineSSDParameter(m_pipePQPivotsFile, std::string, std::string(""), "PipePQPivotsFile")     // PipeANN pivot sidecar (abs or rel to index dir)
 DefineSSDParameter(m_fullVectorFile, std::string, std::string(""), "FullVectorFile")         // full-precision base for cold rerank
 DefineSSDParameter(m_rerankL, int, 0, "RerankL")                            // exact-rerank depth over screened survivors (0 = default)
 DefineSSDParameter(m_quantADCOnly, bool, false, "QuantADCOnly")             // skip full-vector rerank, return ADC/estimate order

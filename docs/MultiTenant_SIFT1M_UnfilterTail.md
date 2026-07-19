@@ -62,39 +62,101 @@ Tail insertion competes with pure replicas for posting capacity:
 
 **Shared cap** (initial design, `K_replica = 2` / `4`):
 
-```
-relaxLimit = m_postingSizeLimit + m_bufferSizeLimit   ≈ 145 records
-```
-
-Pure replicas fill first; once a posting is full, every subsequent tail edge
-is rejected. In dense regions (where the unfilter improvement matters most)
-this caps tail effect.
-
-**Independent tail buffer (Option A, recommended):**
+Pure routing is built and cut first. Tail capacity is then calculated per
+posting from its persisted pure prefix:
 
 ```
-tailRelaxLimit = relaxLimit + m_unfilterTailBufferLength * PageSize / m_vectorInfoSize
+purePages = ceil(pure_count * recordBytes / PageSize)
+tailCapPages = purePages + UnfilterTailBufferLength
 ```
 
-A new SSD parameter `UnfilterTailBufferLength` (in pages) extends the
-per-posting block budget *only* for tail insertions. Pure routing logic is
-unchanged. With `UnfilterTailBufferLength = 5` and `K_replica = 4`:
-
-* `cap_skip` drops 422K → 96K (-77%)
-* `tail_added` grows 764K → 1 089K (+42%)
-* mapping `ncols` grows 20 → 25 (max 24 blocks/posting)
+`UnfilterTailBufferLength` therefore means **additional physical pages beyond
+the pure prefix**, rather than an absolute target based on
+`PostingPageLimit + BufferLength`. Tail records may fill unused bytes in the
+pure prefix's final page at no additional page cost. A final page containing
+only tail is discarded when it is below 10% occupied.
 
 ## Parameters & env knobs
 
 | Knob | Where | Effect |
 | --- | --- | --- |
-| `UnfilterTailKReplica` (`SPTAG_UNFILTER_TAIL_K_REPLICA`) | build-time SSD param / env | number of tag-agnostic tail copies per vector |
-| `UnfilterTailBufferLength` (`SPTAG_UNFILTER_TAIL_BUFFER_PAGES`) | build & search SSD param / env | per-posting extra pages reserved for tail |
+| `TailReplicaCount` (`[BuildSSDIndex]`) | build-time SSD param (ini only) | number of tag-agnostic tail copies per vector |
+| `UnfilterTailBufferLength` (`[BuildSSDIndex]`) | build & search SSD param (ini only) | maximum extra physical tail pages beyond each posting's pure prefix |
 | `SPTAG_UNFILTER_TAIL` | search env, `0/1` | gate the truncated-MultiGet branch at query time |
 
-`SPTAG_UNFILTER_TAIL_BUFFER_PAGES` is read **before** the `FileIO`
-constructor in `ExtraDynamicSearcher`, so the same env var sizes the on-disk
-mapping at build time and the in-memory workspace at search time.
+`UnfilterTailBufferLength` is a native SSD param persisted in `indexloader.ini`,
+so the same ini value sizes the on-disk mapping at build time and the in-memory
+workspace at search time. The ini is the single source of truth — there is no
+env override (`SPTAG_UNFILTER_TAIL_K_REPLICA` / `SPTAG_UNFILTER_TAIL_BUFFER_PAGES`
+have been removed).
+
+## Tagged online inserts
+
+Tag-bearing SPANN indexes must use the tag-aware insert API:
+`AnnIndex.AddWithTags(vectors, packed_uint32_tags, count, tags_per_vector,
+normalized)`. The generic `Add` API is deliberately rejected for tagged or
+bundle indexes because it cannot supply posting tags, route a pure record to
+the correct bundle, or encode a valid compact posting payload.
+
+For every inserted vector, the update path:
+
+1. routes **pure** replicas only within the persisted tag-routing bundle and
+   inserts them immediately before that posting's tail boundary;
+2. selects **tail** replicas across all head bundles and appends them after the
+   pure prefix;
+3. preserves the `purePages + UnfilterTailBufferLength` page budget. A pure
+   insertion that needs room trims the far end of the tail; a tail insertion
+   without remaining budget is skipped.
+
+The full-precision update vector is also persisted in
+`UpdateVectorFile` (default `update_vectors.bin`) because a new VID is absent
+from the immutable `FullVectorFile` used by exact reranking. Call `Save` after
+updates to checkpoint the posting mappings, pure-count sidecar, delete/version
+map, and update-vector sidecar together.
+
+### Split, merge, and cross-edge maintenance
+
+An overfull pure prefix is split only inside its owning bundle. The update is
+first appended, then the live pure records determine two local centroids and
+the tails are reassigned to those finalized centroids. New local graph heads
+follow the native SPANN append/refine lifecycle; obsolete heads are logical
+tombstones, so existing graph references remain valid and `ContainSample`
+suppresses them at query time. A failed rewrite restores the original posting
+and tombstones every newly appended local head.
+
+Search queues fully scanned low-live postings for same-bundle merge
+maintenance. `Save` and `Checkpoint` drain that queue, persist the mutated
+bundle graphs and their local/global head-ID maps, and keep a self-contained
+copy of every bundle, `update_vectors.bin`, slim-root metadata, and the
+tag-to-bundle routing map under the checkpoint root.
+When a split appends heads, save/checkpoint refreshes the slim-root logical
+head count; recovery reads both that metadata and `posting_pure_counts.bin`
+from the checkpoint rather than the original index root.
+
+Any split or merge invalidates the immutable global cross-edge snapshot.
+The index writes `HeadIndex/head_cross_edges.dirty` and disables cross-bundle
+edge traversal after reload until it is regenerated:
+
+```bash
+Release/augmentheadgraph -d <index>/HeadIndex -k 15 -m 10 -t <threads> --overwrite
+```
+
+The successful rebuild removes the dirty marker. `U_extra` is intentionally
+outside this incremental maintenance path. A single insertion batch currently
+must fit across two pure-capacity postings; larger batches fail safely and
+should be chunked by the caller.
+
+Current constraints:
+
+* Online compact-code encoding is supported for `PostingQuantizer=PipePQ`
+  (Float and UInt8 vectors). OPQ, RaBitQ, and bit-packed posting encoders reject
+  inserts rather than write invalid records.
+* `EnableWAL=true` is unsupported for `AddWithTags`: the legacy WAL does not
+  record the required pure/tail target assignment, so it cannot replay a tagged
+  update safely.
+* A failed multi-posting insert invalidates all VIDs from that batch. Any bytes
+  already written remain unreachable and can be reclaimed only by a later
+  compaction/rebuild.
 
 ## Experiments (SIFT-1M tenant_0, `r069` family)
 
@@ -212,9 +274,8 @@ drop later replicas. Sidecar `posting_pure_counts.bin` ≈ 111 KB.
 
 ```bash
 # build with K_replica=4 and +5 tail pages
+# (set [BuildSSDIndex] TailReplicaCount=4 / UnfilterTailBufferLength=5 in the ini)
 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 \
-SPTAG_UNFILTER_TAIL_K_REPLICA=4 \
-SPTAG_UNFILTER_TAIL_BUFFER_PAGES=5 \
 PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     /home/v-mochengli/test/build_tenant0_pertag.py \
     --final-ratio 0.069 --oversample 1.0 --merge-alpha 0.0 \
@@ -222,9 +283,9 @@ PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     --unfilter-tail-k-replica 4 \
     -o /home/v-mochengli/test/tenant_index_huffman_pure_r069_ut4_extbuf
 
-# sweep with truncated unfilter read
+# sweep with truncated unfilter read (tail buffer comes from the persisted ini)
 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 \
-SPTAG_UNFILTER_TAIL=1 SPTAG_UNFILTER_TAIL_BUFFER_PAGES=5 \
+SPTAG_UNFILTER_TAIL=1 \
 PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     /home/v-mochengli/test/huffman_sweeps/strong_sweep_fine.py \
     /home/v-mochengli/test/tenant_index_huffman_pure_r069_ut4_extbuf \

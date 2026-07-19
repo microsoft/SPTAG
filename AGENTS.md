@@ -99,18 +99,17 @@ python setup.py build_ext --inplace
 
 ## Unfilter Enhancement Pipeline (DO NOT DROP)
 Multi-tenant SPANN partitions heads into ACL-hierarchy bundle nodes (PerTagBKT +
-`SPTAG_ACL_COLS`/`SPTAG_HIER_LEVEL_WIDTHS`). **Unfiltered** queries only perform
-well when all three augmentation layers below are built; otherwise unfilter
-degrades to a bare per-node fan-out (the `Using routed head bundle graph search
-across N nodes` log) and QPS/recall suffer. All three are **env/tool-gated and
-default OFF** — they are NOT produced by a plain `spannbuilder`/wrapper build, so
-they are easy to forget. Always enable them together for unfilter benchmarks.
+`SPTAG_ACL_COLS`/`SPTAG_HIER_LEVEL_WIDTHS`). **Unfiltered** queries need the
+cross-graph stitch plus H1 unfilter-tail replicas; otherwise unfilter degrades to
+a bare per-node fan-out (the `Using routed head bundle graph search across N nodes`
+log) and QPS/recall suffer. U_extra is optional and defaults OFF in canonical
+configs after SPACEV-1B ablation showed no recall gain once H1 tails are enabled.
 
 | Layer | What it builds | How to enable | Code |
 | ----- | -------------- | ------------- | ---- |
 | ① cross-graph | `head_cross_edges.bin` stitching the bundle nodes | ini `[MultiTenant] CrossEdges=1` (+ `CrossExtraEdges=N`) → launcher runs `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m N -t T -w true` **after** the build; `CrossEdges=0` skips it. Search-time kill switch: env `SPTAG_DISABLE_CROSS_EDGES=1`; filter queries skip cross edges unless `SPTAG_FILTER_KEEP_CROSS=1` | tool `AnnService/src/AugmentHeadGraph/main.cpp`; search `SPANNIndex.cpp` `CrossSubgraphGraphSearch` (~1886), gate ~1057-1063 |
-| ② U_extra (~10% extra unfilter-only heads) | `head_role.bin` | build env `SPTAG_DUAL_POOL_AUGMENT=1` + `SPTAG_DUAL_POOL_EXTRA_RATIO=0.1` | `SPANNIndex.cpp` DualPoolAugment (~3098-3192) |
-| ③ unfilter-tail (K nearest-head tail copies/vector) | tail edges (`dist=FLT_MAX`) appended to postings | build env `SPTAG_UNFILTER_TAIL_K_REPLICA=K` + `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P`; search env `SPTAG_UNFILTER_TAIL=1` + same buffer pages | `ExtraDynamicSearcher.h` Phase 4 (~4035-4090); SSD params `TailReplicaCount`/`UnfilterTailBufferLength` |
+| ② U_extra (~10% extra unfilter-only heads; optional, default OFF) | `head_role.bin` | ini `[MultiTenant] DualPoolAugment=1` (+ `DualPoolExtraRatio=0.1`) if explicitly needed; canonical SPACEV config uses `DualPoolAugment=0` | `SPANNIndex.cpp` DualPoolAugment (~3098-3192) |
+| ③ unfilter-tail (K nearest-head tail copies/vector) | tail edges appended after each pure prefix, ordered by true head distance | build: native SSD params `[BuildSSDIndex] TailReplicaCount=K` + `UnfilterTailBufferLength=P`, where P is max extra physical tail pages beyond pure pages (tail may fill pure-page slack); search env `SPTAG_UNFILTER_TAIL=1` | `ExtraDynamicSearcher.h` Phase 4 (~4035-4090); SSD params `TailReplicaCount`/`UnfilterTailBufferLength` |
 
 ### Billion-scale build options (resume / pin-balance / in-place)
 
@@ -144,15 +143,17 @@ How the `.ini` maps to the engine (`Wrappers/src/SpannAttrBuilder.cpp` `-c` read
 - `[Base]/[Tags]/[Build]` → data-layout args (Resolve: CLI flag > ini > default).
 - `[BuildSSDIndex]` → native `mgr.SetSSDBuildParam(k,v)` staging path (the ONLY
   section with a native pre-build hook): `Storage`, `ReplicaCount`,
-  `PostingQuantizer`/`PostingQuantM`/`PostingQuantizerFile`, `FullVectorFile`,
-  `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`.
+  `PostingQuantizer`/`PostingQuantM`/`PostingQuantizerFile`/`PipePQPivotsFile`,
+  `FullVectorFile`, `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`.
 - `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` → bridged to the existing
   `getenv` consumers via `setenv` (these extensions have no native SPANN param):
   `Ratio`→`SPTAG_PERTAG_HEAD_RATIO`, `SelectType`→`SPTAG_SELECT_TYPE_OVERRIDE`,
   `DistCalcMethod`→`SPTAG_DIST_METHOD`, `NumberOfThreads`→`SPTAG_BUILD_HEAD_THREADS`,
-  `ACLCols`/`HierLevelWidths`/`NumericCols`/`PerVectorTagsFile`, and the three
-  unfilter layers (`DualPoolAugment`/`DualPoolExtraRatio`/`UnfilterTailKReplica`/
-  `UnfilterTailBufferPages`).
+  `ACLCols`/`HierLevelWidths`/`NumericCols`/`PerVectorTagsFile`, and the U_extra
+  layer (`DualPoolAugment`/`DualPoolExtraRatio`, default `0` in canonical configs).
+  The unfilter-tail K/buffer are
+  native SSD params (`[BuildSSDIndex] TailReplicaCount`/`UnfilterTailBufferLength`),
+  read straight from the ini — no env bridge/override.
 
 Gotchas (`Helper/SimpleIniReader.cpp`): comments MUST start with `;` (lines
 starting with `#` are parsed as params → `ReadIni_FailedParseParam`); inline
@@ -206,14 +207,17 @@ the full-precision base file (vid-indexed, never page-cache resident). This is t
 billion-scale path: the ~1TB full-vector posting store is never materialized — only
 the slim `[meta | code]` end-state hits disk.
 
-- **Build** (one source of truth = the `.ini`): `[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ`
+- **Build** (one source of truth = the `.ini`): `[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ|PipePQ`
   + `PostingQuantM=<bytes>` + `PostingQuantizerFile=<codebook>` + `FullVectorFile=<base>`
-  (rerank source) + `RerankL`. The native single-pass writer streams slim postings
-  directly (no full-vector intermediate). RaBitQ code sidecars are pre-encoded with
+  (rerank source) + `RerankL`. PipePQ additionally requires
+  `PipePQPivotsFile=<PipeANN *_pq_pivots.bin>`; use PipeANN's native
+  `*_pq_compressed.bin` as `PostingQuantizerFile` for byte-identical code assignment.
+  The native single-pass writer streams slim postings directly (no full-vector
+  intermediate). RaBitQ code sidecars are pre-encoded with
   `Release/rabitq2_encode_stream` (value-type-aware, scales to 1B); OPQ codes with
   `spannbuilder --gen-opq-codes` (see prep script). Internals: `TransformInPostings*`
   / build-slim writers in `ExtraDynamicSearcher.h` (markers `inpost_rbq.bin`,
-  `inpost_opq.bin`).
+  `inpost_opq.bin`, `inpost_pipepq.bin`).
 - **Search**: RaBitQ async path = env `SPTAG_INPOST_RBQ=1` (+ `SPTAG_INPOST_RBQ_FILE`),
   with rerank via the **deep-queue libaio** reader (`SPTAG_INPOST_LIBAIO_RERANK=1`,
   `RerankBaseDirectBatch()` — one `io_submit` for all `L` candidates, ~12µs/read vs

@@ -31,6 +31,7 @@
 #include <functional>
 #include <shared_mutex>
 #include <atomic>
+#include <algorithm>
 #include <cstdint>
 
 namespace SPTAG
@@ -53,6 +54,55 @@ namespace SPTAG
             SizeType postingOffset = 0;
             SizeType postingCount = 0;
             SizeType assignmentCount = 0;
+        };
+
+        struct CrossGraphCandidateCompare
+        {
+            bool operator()(const NodeDistPair& p_left, const NodeDistPair& p_right) const
+            {
+                return p_left.distance > p_right.distance;
+            }
+        };
+
+        struct CrossGraphWorkSpace : public COMMON::WorkSpace
+        {
+            void Prepare(int p_maxCheck, int p_resultNum, int p_hashExp)
+            {
+                if (m_capacity < p_maxCheck || m_hashExp != p_hashExp) {
+                    Initialize(p_maxCheck, p_hashExp);
+                    m_capacity = p_maxCheck;
+                    m_hashExp = p_hashExp;
+                }
+                Reset(p_maxCheck, p_resultNum);
+                const size_t frontierCapacity = std::max(
+                    static_cast<size_t>(p_maxCheck) * 2,
+                    static_cast<size_t>(p_resultNum) * 16);
+                if (m_frontier.capacity() < frontierCapacity) {
+                    m_frontier.reserve(frontierCapacity);
+                }
+                m_frontier.clear();
+            }
+
+            bool FrontierEmpty() const { return m_frontier.empty(); }
+
+            void PushFrontier(const NodeDistPair& p_candidate)
+            {
+                m_frontier.push_back(p_candidate);
+                std::push_heap(m_frontier.begin(), m_frontier.end(), CrossGraphCandidateCompare{});
+            }
+
+            NodeDistPair PopFrontier()
+            {
+                std::pop_heap(m_frontier.begin(), m_frontier.end(), CrossGraphCandidateCompare{});
+                NodeDistPair candidate = m_frontier.back();
+                m_frontier.pop_back();
+                return candidate;
+            }
+
+        private:
+            int m_capacity = 0;
+            int m_hashExp = -1;
+            std::vector<NodeDistPair> m_frontier;
         };
 
         template<typename T>
@@ -78,6 +128,11 @@ namespace SPTAG
             virtual void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments) = 0;
             virtual void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments) = 0;
             virtual void SetSharedDB(std::shared_ptr<Helper::KeyValueIO> p_db) = 0;
+            virtual bool BuildPrimaryHeadCSRBackfill(const void* vectors, SizeType vectorCount,
+                                                     const uint32_t* tags, int numTagsPerVec) = 0;
+            virtual ErrorCode AddIndexWithTags(const void* data, SizeType vectorNum,
+                                                DimensionType dimension, const uint32_t* tags,
+                                                int numTagsPerVec, bool normalized) = 0;
         };
 
         template<typename T>
@@ -102,6 +157,8 @@ namespace SPTAG
             mutable std::vector<SizeType> m_headBundleLocalByB;           // local id inside bundle
             mutable std::atomic<bool> m_headCrossEdgesLoaded{false};
             mutable std::mutex m_headCrossEdgesMutex;
+            mutable std::atomic<bool> m_headCrossEdgesDirty{false};
+            mutable std::shared_timed_mutex m_headTopologyLock;
             // globalVID -> (bundleNodeId, localHidWithinBundle) reverse map, populated
             // on each EnsureHeadBundleNodeLoaded for the loaded node only.
             mutable std::unordered_map<SizeType, std::pair<int, SizeType>> m_globalVIDToBundleLoc;
@@ -118,17 +175,12 @@ namespace SPTAG
             // on the search hot path (the unordered_map + mutex path was a 4x unfilter
             // regression).
             mutable std::vector<const void*> m_metaOnlyHeadVectorPtrs;
-            // Single global head graph (KDT/RNG over ALL heads, local id == hid) used for
-            // efficient one-entry unfilter navigation, replacing the per-bundle multi-seed
-            // + cross-edge stitched walk for tag-less queries. Loaded from (or built+saved
-            // to) HeadIndex/global_head/ at load on slim indexes. Default ON;
-            // SPTAG_GLOBAL_HEAD_GRAPH=0 disables. nullptr => fall back to per-bundle walk.
-            mutable std::shared_ptr<VectorIndex> m_globalHeadGraph;
             std::unordered_map<std::string, std::string> m_headParameters;
 
             COMMON::VersionLabel m_versionMap;
             std::shared_ptr<IExtraSearcher> m_extraSearcher;
             std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<ExtraWorkSpace>> m_workSpaceFactory;
+            std::unique_ptr<SPTAG::COMMON::IWorkSpaceFactory<CrossGraphWorkSpace>> m_crossGraphWorkSpaceFactory;
 
             Options m_options;
 
@@ -157,6 +209,8 @@ namespace SPTAG
             Index()
             {
                 m_workSpaceFactory = std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<ExtraWorkSpace>>();
+                m_crossGraphWorkSpaceFactory =
+                    std::make_unique<SPTAG::COMMON::ThreadLocalWorkSpaceFactory<CrossGraphWorkSpace>>();
                 //m_workSpaceFactory = std::make_unique<SPTAG::COMMON::SharedPoolWorkSpaceFactory<ExtraWorkSpace>>();
                 m_fComputeDistance = std::function<float(const T*, const T*, DimensionType)>(COMMON::DistanceCalcSelector<T>(m_options.m_distCalcMethod));
                 m_iBaseSquare = (m_options.m_distCalcMethod == DistCalcMethod::Cosine) ? COMMON::Utils::GetBase<T>() * COMMON::Utils::GetBase<T>() : 1;
@@ -206,6 +260,9 @@ namespace SPTAG
             {
                 m_pendingPrimaryNodeVectorAssignments = primaryNodeVectorAssignments;
             }
+
+            bool BuildPrimaryHeadCSRBackfill(const void* vectors, SizeType vectorCount,
+                                             const uint32_t* tags, int numTagsPerVec) override;
 
             // Shared-DB hook: when set BEFORE BuildIndex / LoadIndex, the
             // ExtraDynamicSearcher will reuse this KeyValueIO instead of opening
@@ -329,6 +386,9 @@ namespace SPTAG
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const { return ErrorCode::Undefined; }
             ErrorCode SearchTree(QueryResult& p_query) const { return ErrorCode::Undefined; }
             ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false);
+            ErrorCode AddIndexWithTags(const void* p_data, SizeType p_vectorNum,
+                                       DimensionType p_dimension, const uint32_t* p_tags,
+                                       int p_numTagsPerVec, bool p_normalized) override;
             ErrorCode DeleteIndex(const SizeType& p_id);
 
             ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum);
@@ -402,6 +462,12 @@ namespace SPTAG
             ErrorCode GetPostingDebug(SizeType vid, std::vector<SizeType>& VIDs, std::shared_ptr<VectorSet>& vecs);
 
         private:
+            struct TaggedHeadLocation
+            {
+                int m_bundleSlot = -1;
+                SizeType m_localHeadID = -1;
+            };
+
             bool CheckHeadIndexType();
             void SelectHeadAdjustOptions(int p_vectorCount);
             int SelectHeadDynamicallyInternal(const std::shared_ptr<COMMON::BKTree> p_tree, int p_nodeID, const Options& p_opts, std::vector<int>& p_selected);
@@ -411,6 +477,23 @@ namespace SPTAG
             bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
+            ErrorCode GetTaggedHeadLocation(SizeType p_headID, TaggedHeadLocation& p_location) const;
+            ErrorCode AddTaggedHeadToBundle(int p_bundleSlot, const T* p_center, SizeType p_anchorVID,
+                                            SizeType p_templateHeadID, SizeType& p_headID);
+            ErrorCode SplitTaggedPosting(ExtraWorkSpace* p_workspace, SizeType p_headID,
+                                         const T* p_preferredCenter, SizeType p_preferredVID);
+            ErrorCode MergeTaggedPosting(ExtraWorkSpace* p_workspace, SizeType p_headID);
+            void TombstoneTaggedHeads(ExtraWorkSpace* p_workspace,
+                                      const std::vector<SizeType>& p_headIDs,
+                                      const TaggedPostingSnapshot* p_restorePosting = nullptr);
+            ErrorCode EnsureTaggedPureCapacity(ExtraWorkSpace* p_workspace,
+                                               std::shared_ptr<VectorSet>& p_vectors,
+                                               SizeType p_begin,
+                                               PostingUpdateTargets& p_targets,
+                                               bool& p_topologyChanged);
+            ErrorCode DrainTaggedMergeMaintenance();
+            ErrorCode SaveLoadedHeadBundles(const std::string& p_baseDir);
+            ErrorCode MarkCrossEdgesDirty(const std::string& p_baseDir = std::string());
 
         public:
             bool AllFinished() { if (m_options.m_storage != Storage::STATIC) return m_extraSearcher->AllFinished(); return true; }
@@ -453,10 +536,13 @@ namespace SPTAG
                 if (m_options.m_persistentBufferPath == "") return ErrorCode::FailedCreateFile;
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Locking Index\n");
                 std::unique_lock<std::shared_timed_mutex> lock(m_checkPointLock);
+                std::unique_lock<std::mutex> dataLock(m_dataAddLock);
 
                 // Flush block pool states & block mapping states
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving storage states\n");
                 ErrorCode ret;
+                if ((ret = DrainTaggedMergeMaintenance()) != ErrorCode::Success)
+                    return ret;
                 if ((ret = m_extraSearcher->Checkpoint(m_options.m_persistentBufferPath)) != ErrorCode::Success)
                     return ret;
 
@@ -465,6 +551,8 @@ namespace SPTAG
                 // Flush SPTAG
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Saving in-memory index to %s\n", filename.c_str());
                 if ((ret = m_index->SaveIndex(filename)) != ErrorCode::Success)
+                    return ret;
+                if ((ret = SaveLoadedHeadBundles(m_options.m_persistentBufferPath)) != ErrorCode::Success)
                     return ret;
                 return ErrorCode::Success;
             }

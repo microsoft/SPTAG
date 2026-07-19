@@ -347,6 +347,55 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 }
 
 template <typename T>
+ErrorCode Index<T>::SearchIndexWithMaxCheck(QueryResult& p_query, int maxCheck,
+                                             bool p_searchDeleted) const
+{
+    if (!m_bReady)
+        return ErrorCode::EmptyIndex;
+
+    auto workSpace = RentWorkSpace(p_query.GetResultNum(), nullptr, maxCheck);
+    COMMON::QueryResultSet<T>* p_results = (COMMON::QueryResultSet<T>*)&p_query;
+
+    if (m_pQuantizer)
+    {
+        if (!p_results->HasQuantizedTarget())
+        {
+            p_results->SetTarget(p_results->GetTarget(), m_pQuantizer);
+        }
+        switch (m_pQuantizer->GetReconstructType())
+        {
+#define DefineVectorValueType(Name, Type)                                                                              \
+    case VectorValueType::Name:                                                                                        \
+        SearchIndex<Type>(*p_results, *workSpace, p_searchDeleted);                                                    \
+        break;
+
+#include "inc/Core/DefinitionList.h"
+#undef DefineVectorValueType
+
+        default:
+            break;
+        }
+    }
+    else
+    {
+        SearchIndex<T>(*p_results, *workSpace, p_searchDeleted);
+    }
+
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+
+    if (p_query.WithMeta() && nullptr != m_pMetadata)
+    {
+        for (int i = 0; i < p_query.GetResultNum(); ++i)
+        {
+            SizeType result = p_query.GetResult(i)->VID;
+            p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+        }
+    }
+
+    return ErrorCode::Success;
+}
+
+template <typename T>
 std::shared_ptr<ResultIterator> Index<T>::GetIterator(const void *p_target, bool p_searchDeleted,  std::function<bool(const ByteArray&)> p_filterFunc, int p_maxCheck) const
 {
     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "ITERATIVE NOT SUPPORT FOR KDT");

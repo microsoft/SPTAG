@@ -136,6 +136,8 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
+            int m_fixedNprobe;
+            int m_seedMaxCheck;
             bool m_forceDenseTagSearch;
             int m_directSparseMaxPostings;
             float m_filteredSearchNprobeSafety;
@@ -143,6 +145,7 @@ namespace SPTAG {
             float m_filteredSearchCoverageExponent;
             bool m_enableAdaptiveFilteredNprobe;
             bool m_logAdaptiveNprobe;
+            bool m_logPhaseTime;
             int m_rerank;
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;
@@ -181,6 +184,7 @@ namespace SPTAG {
             int m_reassignThreadNum;
             int m_batch;
             std::string m_fullVectorPath;
+            std::string m_updateVectorFile;
 
             // Steady State Update
             std::string m_updateFilePrefix;
@@ -224,12 +228,19 @@ namespace SPTAG {
             bool m_shareDB;
             std::shared_ptr<Helper::KeyValueIO> m_externalDB;
 
+            // Primary-head CSR bypass for sparse categorical filters.
+            bool m_buildPrimaryHeadCSR;
+            std::string m_primaryHeadCSRFile;
+            bool m_enablePrimaryHeadBypass;
+            int m_primaryHeadBypassRerankL;
+
             // In-posting quantization (unified config interface). See ParameterDefinitionList.h.
             std::string m_postingQuantizer;   // None|RaBitQ|OPQ|PipePQ
             int m_postingQuantBits;           // RaBitQ bits per dim
             int m_postingQuantM;              // OPQ/PipePQ code bytes per vector
             bool m_quantizeHead;              // quantize the head index too
             std::string m_postingQuantFile;   // code sidecar path
+            std::string m_pipePQPivotsFile;   // PipeANN PQ pivot sidecar path
             std::string m_fullVectorFile;     // full-precision base for cold rerank
             int m_rerankL;                    // exact-rerank depth (0 = default)
             bool m_quantADCOnly;              // skip rerank, return ADC/estimate order

@@ -70,10 +70,14 @@ public:
                     for (int center = 0; center < 256; ++center)
                         chunkDists[center] -= q * m_tables[static_cast<size_t>(center) * m_dim + d];
                 } else {
+                    // Match PipeANN's AVX2 scalar fallback exactly: subtraction is
+                    // performed in float, then the square is evaluated in double
+                    // before accumulating as float.
                     const float q = query[d] - m_centroid[d];
                     for (int center = 0; center < 256; ++center) {
                         const float diff = m_tables[static_cast<size_t>(center) * m_dim + d] - q;
-                        chunkDists[center] += diff * diff;
+                        chunkDists[center] += static_cast<float>(
+                            static_cast<double>(diff) * static_cast<double>(diff));
                     }
                 }
             }

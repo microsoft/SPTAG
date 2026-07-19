@@ -472,13 +472,31 @@ void VectorIndex::ResetThreadLocalPostingScanStats()
 void VectorIndex::SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings,
                                                  uint64_t p_prePSPostings,
                                                  uint64_t p_scannedVectors,
-                                                 uint64_t p_matchedVectors)
+                                                 uint64_t p_matchedVectors,
+                                                 uint64_t p_primaryHeadCandidates,
+                                                 uint64_t p_postingPageReads,
+                                                 uint64_t p_postingLogicalBytes,
+                                                 uint64_t p_postingPhysicalBytes,
+                                                 uint64_t p_adcScannedVectors,
+                                                 uint64_t p_adcSurvivors,
+                                                 uint64_t p_rerankCandidates,
+                                                 uint64_t p_rerankReadRequests,
+                                                 uint64_t p_rerankPhysicalBytes)
 {
     g_threadLocalPostingScanStats.m_readPostings = p_readPostings;
     g_threadLocalPostingScanStats.m_matchedPostings = p_matchedPostings;
     g_threadLocalPostingScanStats.m_prePSPostings = p_prePSPostings;
     g_threadLocalPostingScanStats.m_scannedVectors = p_scannedVectors;
     g_threadLocalPostingScanStats.m_matchedVectors = p_matchedVectors;
+    g_threadLocalPostingScanStats.m_primaryHeadCandidates = p_primaryHeadCandidates;
+    g_threadLocalPostingScanStats.m_postingPageReads = p_postingPageReads;
+    g_threadLocalPostingScanStats.m_postingLogicalBytes = p_postingLogicalBytes;
+    g_threadLocalPostingScanStats.m_postingPhysicalBytes = p_postingPhysicalBytes;
+    g_threadLocalPostingScanStats.m_adcScannedVectors = p_adcScannedVectors;
+    g_threadLocalPostingScanStats.m_adcSurvivors = p_adcSurvivors;
+    g_threadLocalPostingScanStats.m_rerankCandidates = p_rerankCandidates;
+    g_threadLocalPostingScanStats.m_rerankReadRequests = p_rerankReadRequests;
+    g_threadLocalPostingScanStats.m_rerankPhysicalBytes = p_rerankPhysicalBytes;
 }
 
 VectorIndex::PostingScanStats VectorIndex::GetThreadLocalPostingScanStats()

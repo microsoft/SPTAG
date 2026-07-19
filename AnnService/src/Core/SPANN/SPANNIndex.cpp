@@ -7,8 +7,11 @@
 #include "inc/Helper/VectorSetReaders/MemoryReader.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/ExtraStaticSearcher.h"
+#include "inc/Core/SPANN/PrimaryHeadCSR.h"
 #include "inc/Helper/HeadCrossEdges.h"
+#include <algorithm>
 #include <chrono>
+#include <array>
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
@@ -17,6 +20,7 @@
 #include <functional>
 #include <map>
 #include <limits>
+#include <numeric>
 #include <queue>
 #include <random>
 #include <shared_mutex>
@@ -45,6 +49,58 @@ namespace
 {
 constexpr std::uint32_t kHeadBundleManifestMagic = 0x48424D46U;
 constexpr std::int32_t kHeadBundleManifestVersion = 2;
+
+constexpr std::int32_t kHeadNodeRoutingIndexVersion = 1;
+struct HeadNodeRoutingIndexFileHeader {
+    std::int32_t version;
+    std::int32_t pivotLevel;
+    std::int32_t nodeCount;
+    std::int32_t numHeadSamples;
+    std::int32_t numTagMappings;
+};
+
+static bool LoadUpdateRoutingNodes(const std::string& indexDir, const std::string& headIndexFolder,
+                                   int& pivotLevel,
+                                   std::unordered_map<std::uint32_t, std::vector<int>>& tagToNodes)
+{
+    pivotLevel = -1;
+    tagToNodes.clear();
+    FILE* file = fopen((indexDir + FolderSep + headIndexFolder + FolderSep + "tag_node_index.bin").c_str(), "rb");
+    if (file == nullptr) return false;
+
+    HeadNodeRoutingIndexFileHeader header {};
+    bool ok = fread(&header, sizeof(header), 1, file) == 1 &&
+              header.version == kHeadNodeRoutingIndexVersion &&
+              header.pivotLevel >= 0 && header.nodeCount >= 0 &&
+              header.numHeadSamples >= 0 && header.numTagMappings >= 0;
+    for (int node = 0; ok && node < header.nodeCount; ++node) {
+        std::int32_t count = 0;
+        ok = fread(&count, sizeof(count), 1, file) == 1 && count >= 0;
+        if (ok && count > 0) {
+            std::vector<std::uint32_t> ignored(static_cast<size_t>(count));
+            ok = fread(ignored.data(), sizeof(std::uint32_t), ignored.size(), file) == ignored.size();
+        }
+    }
+    for (int mapping = 0; ok && mapping < header.numTagMappings; ++mapping) {
+        std::uint32_t tag = 0;
+        std::int32_t count = 0;
+        ok = fread(&tag, sizeof(tag), 1, file) == 1 &&
+             fread(&count, sizeof(count), 1, file) == 1 && count >= 0;
+        if (!ok) break;
+        std::vector<int> nodes(static_cast<size_t>(count));
+        if (count > 0) {
+            ok = fread(nodes.data(), sizeof(std::int32_t), nodes.size(), file) == nodes.size();
+        }
+        if (ok) tagToNodes.emplace(tag, std::move(nodes));
+    }
+    fclose(file);
+    if (!ok) {
+        tagToNodes.clear();
+        return false;
+    }
+    pivotLevel = header.pivotLevel;
+    return true;
+}
 
 // SelectHead checkpoint ('HSST'): persists the PerTagBKT-derived in-memory state
 // (node head selections, per-bundle U_extra, node/primary vector assignments, head
@@ -155,24 +211,7 @@ bool UseUnifiedNprobeBudget()
     return enabled;
 }
 
-// SPTAG_FIXED_NPROBE=N : if set to a positive integer, override adaptive
-// nprobe estimation entirely and always use N as graphResultNum (still
-// clamped to candidate posting count). Useful when adaptive estimation
-// is uncertain and we want to fix the IO budget.
-int GetFixedNprobeOverride()
-{
-    static const int v = []() {
-        const char* value = std::getenv("SPTAG_FIXED_NPROBE");
-        if (value == nullptr || *value == '\0') return 0;
-        char* end = nullptr;
-        long parsed = std::strtol(value, &end, 10);
-        if (end == value || parsed <= 0 || parsed > 100000) return 0;
-        return static_cast<int>(parsed);
-    }();
-    return v;
-}
-
-// SPTAG_MAX_NPROBE: a CEILING on postingTarget (unlike SPTAG_FIXED_NPROBE which
+// SPTAG_MAX_NPROBE: a CEILING on postingTarget (unlike FixedNprobe which
 // forces a fixed value). Filtered queries that already pick a small nprobe are
 // unaffected; only large scans (notably unfilter, which otherwise scans nearly
 // all postings) are clamped. This bounds the search workspace page-buffer
@@ -259,6 +298,73 @@ std::string JoinPath(const std::string& baseDir, const std::string& relativePath
         root += FolderSep;
     }
     return root + relativePath;
+}
+
+bool CopyFileAtomically(const std::string& sourcePath, const std::string& targetPath)
+{
+    if (sourcePath == targetPath) return true;
+    std::ifstream source(sourcePath, std::ios::binary);
+    const std::string temporaryPath = targetPath + ".tmp";
+    std::ofstream target(temporaryPath, std::ios::binary | std::ios::trunc);
+    if (!source || !target) {
+        std::remove(temporaryPath.c_str());
+        return false;
+    }
+
+    std::vector<char> buffer(1 << 20);
+    while (source) {
+        source.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize bytes = source.gcount();
+        if (bytes > 0) target.write(buffer.data(), bytes);
+    }
+    target.close();
+    if (!source.eof() || !target) {
+        std::remove(temporaryPath.c_str());
+        return false;
+    }
+    if (std::rename(temporaryPath.c_str(), targetPath.c_str()) != 0) {
+        std::remove(temporaryPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool CopyMetadataOnlyHeadStore(const std::string& sourcePath, const std::string& targetPath,
+                               SizeType totalHeads)
+{
+    std::ifstream source(sourcePath, std::ios::binary);
+    std::uint32_t magic = 0;
+    std::int32_t version = 0;
+    std::int64_t ignoredTotal = 0;
+    std::int64_t ignoredH1Split = 0;
+    std::int32_t dimension = 0;
+    if (!source.read(reinterpret_cast<char*>(&magic), sizeof(magic)) ||
+        !source.read(reinterpret_cast<char*>(&version), sizeof(version)) ||
+        !source.read(reinterpret_cast<char*>(&ignoredTotal), sizeof(ignoredTotal)) ||
+        !source.read(reinterpret_cast<char*>(&ignoredH1Split), sizeof(ignoredH1Split)) ||
+        !source.read(reinterpret_cast<char*>(&dimension), sizeof(dimension)) ||
+        magic != 0x484D4F31u || version != 1 || totalHeads < 0) {
+        return false;
+    }
+    source.close();
+
+    const std::string temporaryPath = targetPath + ".tmp";
+    std::ofstream target(temporaryPath, std::ios::binary | std::ios::trunc);
+    const std::int64_t persistedHeadCount = static_cast<std::int64_t>(totalHeads);
+    const bool written = target &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&magic), sizeof(magic))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&version), sizeof(version))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&persistedHeadCount),
+                                       sizeof(persistedHeadCount))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&persistedHeadCount),
+                                       sizeof(persistedHeadCount))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&dimension), sizeof(dimension)));
+    target.close();
+    if (!written || !target || std::rename(temporaryPath.c_str(), targetPath.c_str()) != 0) {
+        std::remove(temporaryPath.c_str());
+        return false;
+    }
+    return true;
 }
 
 template <typename InternalDataType>
@@ -404,6 +510,120 @@ template <typename T> ErrorCode Index<T>::SaveHeadBundleManifest(const std::stri
 
     fclose(manifestFile);
     return success ? ErrorCode::Success : ErrorCode::Fail;
+}
+
+template <typename T> ErrorCode Index<T>::SaveLoadedHeadBundles(const std::string& p_baseDir)
+{
+    const std::string baseDir = p_baseDir.empty() ? m_options.m_indexDirectory : p_baseDir;
+    if (m_index == nullptr || baseDir.empty()) {
+        return ErrorCode::Fail;
+    }
+
+    std::unique_lock<std::shared_timed_mutex> topologyLock(m_headTopologyLock);
+    ErrorCode ret = m_vectorTranslateMap.Save(
+        baseDir + FolderSep + m_options.m_headIDFile);
+    if (ret != ErrorCode::Success) return ret;
+
+    const std::string sourceBaseDir =
+        m_headBundleBaseDir.empty() ? m_options.m_indexDirectory : m_headBundleBaseDir;
+    const std::string sourceHeadDir = JoinPath(sourceBaseDir, m_options.m_headIndexFolder);
+    const std::string targetHeadDir = JoinPath(baseDir, m_options.m_headIndexFolder);
+    const bool sourceCrossEdgesDirty = fileexists(
+        (sourceHeadDir + FolderSep + Helper::kHeadCrossEdgesDirtyFileName).c_str());
+    if (!EnsureDirectory(targetHeadDir)) return ErrorCode::FailedCreateFile;
+    const std::string sourceMetaOnly = sourceHeadDir + FolderSep + "head_metaonly.bin";
+    {
+        std::ifstream probe(sourceMetaOnly, std::ios::binary);
+        if (probe && !CopyMetadataOnlyHeadStore(
+                         sourceMetaOnly, targetHeadDir + FolderSep + "head_metaonly.bin",
+                         m_vectorTranslateMap.R())) {
+            return ErrorCode::FailedCreateFile;
+        }
+    }
+
+    const std::string bundleBaseDir = baseDir;
+    const size_t bundleCount = m_headBundleNodes.size();
+    if (bundleCount > 1) {
+        const std::string sourceRouting = sourceHeadDir + FolderSep + "tag_node_index.bin";
+        const std::string targetRouting = targetHeadDir + FolderSep + "tag_node_index.bin";
+        if (!CopyFileAtomically(sourceRouting, targetRouting)) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "[TaggedUpdate] failed to checkpoint routing map %s.\n",
+                         sourceRouting.c_str());
+            return ErrorCode::FailedCreateFile;
+        }
+    }
+    const bool rootOnlyBundle = !m_metadataOnlyHeadStore && bundleCount == 1 &&
+        m_headBundleNodes.front().headIndexRelativePath == m_options.m_headIndexFolder;
+    if (rootOnlyBundle) {
+        if ((ret = SaveHeadBundleManifest(baseDir)) != ErrorCode::Success) return ret;
+        if (sourceCrossEdgesDirty || m_headCrossEdgesDirty.load(std::memory_order_acquire)) {
+            if ((ret = MarkCrossEdgesDirty(baseDir)) != ErrorCode::Success) return ret;
+        }
+        return ErrorCode::Success;
+    }
+
+    if (m_loadedHeadBundleIndexes.size() < bundleCount ||
+        m_headBundleLocalToGlobalHIDs.size() < bundleCount) {
+        return ErrorCode::Fail;
+    }
+
+    // A recovery checkpoint is self-contained: unchanged bundles must be copied
+    // as well as the bundle that received the tagged topology mutation.
+    for (size_t slot = 0; slot < bundleCount; ++slot) {
+        if (EnsureHeadBundleNodeLoaded(static_cast<int>(slot)) != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+    }
+
+    for (size_t slot = 0; slot < bundleCount; ++slot) {
+        const auto& bundleIndex = m_loadedHeadBundleIndexes[slot];
+        if (bundleIndex == nullptr) continue;
+        const std::string nodeDir = JoinPath(
+            bundleBaseDir, m_headBundleNodes[slot].headIndexRelativePath);
+        if (!EnsureDirectory(nodeDir)) return ErrorCode::FailedCreateFile;
+        if ((ret = bundleIndex->SaveIndex(nodeDir)) != ErrorCode::Success) return ret;
+
+        const auto& localToGlobal = m_headBundleLocalToGlobalHIDs[slot];
+        if (static_cast<SizeType>(localToGlobal.size()) != bundleIndex->GetNumSamples()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "[TaggedUpdate] bundle %d has %zu ID mappings for %d local heads.\n",
+                         m_headBundleNodes[slot].nodeId, localToGlobal.size(),
+                         bundleIndex->GetNumSamples());
+            return ErrorCode::Fail;
+        }
+        const std::string idPath = nodeDir + FolderSep + m_options.m_headIDFile;
+        const std::string tmpPath = idPath + ".tmp";
+        std::ofstream output(tmpPath, std::ios::binary | std::ios::trunc);
+        if (!output) return ErrorCode::FailedCreateFile;
+        const SizeType count = static_cast<SizeType>(localToGlobal.size());
+        const DimensionType dimension = 1;
+        output.write(reinterpret_cast<const char*>(&count), sizeof(count));
+        output.write(reinterpret_cast<const char*>(&dimension), sizeof(dimension));
+        for (SizeType globalHeadID : localToGlobal) {
+            if (globalHeadID < 0 || globalHeadID >= m_vectorTranslateMap.R()) {
+                output.close();
+                std::remove(tmpPath.c_str());
+                return ErrorCode::Key_OverFlow;
+            }
+            const std::uint64_t globalVID = *(m_vectorTranslateMap[globalHeadID]);
+            output.write(reinterpret_cast<const char*>(&globalVID), sizeof(globalVID));
+        }
+        output.close();
+        if (!output) {
+            std::remove(tmpPath.c_str());
+            return ErrorCode::FailedCreateFile;
+        }
+        if (std::rename(tmpPath.c_str(), idPath.c_str()) != 0) {
+            std::remove(tmpPath.c_str());
+            return ErrorCode::FailedCreateFile;
+        }
+    }
+    if ((ret = SaveHeadBundleManifest(baseDir)) != ErrorCode::Success) return ret;
+    if (sourceCrossEdgesDirty || m_headCrossEdgesDirty.load(std::memory_order_acquire)) {
+        if ((ret = MarkCrossEdgesDirty(baseDir)) != ErrorCode::Success) return ret;
+    }
+    return ErrorCode::Success;
 }
 
 template <typename T> ErrorCode Index<T>::LoadHeadBundleManifest(const std::string& p_baseDir)
@@ -580,6 +800,7 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
     m_headBundleNodeByB.clear();
     m_headBundleLocalByB.clear();
     m_headCrossEdgesLoaded.store(false, std::memory_order_release);
+    m_headCrossEdgesDirty.store(false, std::memory_order_release);
 
     if (!m_headBundleNodes.empty())
     {
@@ -634,7 +855,9 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
         }
     }
 
-    const std::string nodeDir = JoinPath(m_headBundleBaseDir, nodeInfo.headIndexRelativePath);
+    const std::string bundleBaseDir =
+        m_headBundleBaseDir.empty() ? m_options.m_indexDirectory : m_headBundleBaseDir;
+    const std::string nodeDir = JoinPath(bundleBaseDir, nodeInfo.headIndexRelativePath);
     if (localToGlobalHIDs.empty())
     {
         COMMON::Dataset<std::uint64_t> nodeHeadIDs;
@@ -795,75 +1018,6 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
 
     m_metadataOnlyHeadStore = true;
 
-    // Build (or load) a single global head graph (KDT/RNG over ALL H1 heads,
-    // local id == hid) for efficient one-entry unfilter navigation. The slim store
-    // discards the global head graph (only U_extra persisted; when U_extra==0 the
-    // root is a 1-sample dummy), forcing tag-less queries onto the per-bundle
-    // multi-seed + cross-edge walk which is far slower than a flat scan at matched
-    // recall (measured: per-bundle plateaus ~0.964 @ 2.5qps to reach scan recall;
-    // the global graph reaches 0.966 @ 412qps, and matches old recall at 2x QPS).
-    // We reconstruct it from the per-hid bundle vector pointers (raw bundle distance
-    // space, already resolved above) and persist it next to the head index so the
-    // ~minutes-long graph build happens only once.
-    // Default ON for slim indexes; SPTAG_GLOBAL_HEAD_GRAPH=0 disables (falls back to
-    // the per-bundle cross-edge walk).
-    static const bool s_disableGlobalHeadGraph = []() {
-        const char* v = std::getenv("SPTAG_GLOBAL_HEAD_GRAPH");
-        return (v && v[0] == '0');
-    }();
-    if (!s_disableGlobalHeadGraph && h1Split_ > 0) {
-        const std::string gDir = headDir + FolderSep + "global_head";
-        // Try to load a previously-persisted global head graph first.
-        std::shared_ptr<VectorIndex> g;
-        if (VectorIndex::LoadIndex(gDir, g) == ErrorCode::Success && g != nullptr
-            && g->GetNumSamples() == h1Split_) {
-            g->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-            m_globalHeadGraph = g;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                "Global head graph loaded from %s: %d heads.\n", gDir.c_str(), static_cast<int>(h1Split_));
-        } else {
-            const DimensionType gdim = static_cast<DimensionType>(m_options.m_dim);
-            ByteArray gbytes = ByteArray::Alloc(static_cast<size_t>(h1Split_) * gdim * sizeof(T));
-            T* gdst = reinterpret_cast<T*>(gbytes.Data());
-            SizeType missing = 0;
-            for (SizeType hid = 0; hid < h1Split_; ++hid) {
-                const void* sv = (hid < static_cast<SizeType>(m_metaOnlyHeadVectorPtrs.size()))
-                                     ? m_metaOnlyHeadVectorPtrs[static_cast<size_t>(hid)] : nullptr;
-                if (sv == nullptr) {
-                    std::memset(gdst + static_cast<size_t>(hid) * gdim, 0, gdim * sizeof(T));
-                    ++missing;
-                } else {
-                    std::memcpy(gdst + static_cast<size_t>(hid) * gdim, sv, gdim * sizeof(T));
-                }
-            }
-            auto gvset = std::make_shared<BasicVectorSet>(gbytes, GetEnumValueType<T>(), gdim, h1Split_);
-            g = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, GetEnumValueType<T>());
-            if (g != nullptr) {
-                g->SetParameter("DistCalcMethod",
-                    SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
-                for (const auto& kv : m_headParameters) g->SetParameter(kv.first.c_str(), kv.second.c_str());
-                // p_normalized=false: bundle-resolved vectors are not guaranteed
-                // normalized; cosine BuildIndex must normalize them (idempotent if
-                // already normalized). Passing true here corrupts cross-vector
-                // cosine distances and tanks recall to ~0.
-                if (g->BuildIndex(gvset, nullptr, false, /*p_normalized*/false, /*p_shareOwnership*/false) == ErrorCode::Success) {
-                    g->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
-                    m_globalHeadGraph = g;
-                    if (g->SaveIndex(gDir) != ErrorCode::Success) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                            "Global head graph: failed to persist to %s (will rebuild next load).\n", gDir.c_str());
-                    }
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "Global head graph built+saved: %d heads (missing=%d) -> %s\n",
-                        static_cast<int>(h1Split_), static_cast<int>(missing), gDir.c_str());
-                } else {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                        "Global head graph build failed; unfilter falls back to per-bundle walk.\n");
-                }
-            }
-        }
-    }
-
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
         "Dual-pool slim head store enabled: total=%d H1Split=%d (U_extra from root, H1 from bundles).\n",
         static_cast<int>(total), static_cast<int>(h1Split_));
@@ -872,10 +1026,17 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
 
 template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
 {
+    if (m_headCrossEdgesDirty.load(std::memory_order_acquire)) {
+        return ErrorCode::Success;
+    }
     if (m_headCrossEdgesLoaded.load(std::memory_order_acquire)) {
         return ErrorCode::Success;
     }
     std::lock_guard<std::mutex> lock(m_headCrossEdgesMutex);
+    if (m_headCrossEdgesDirty.load(std::memory_order_relaxed)) {
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        return ErrorCode::Success;
+    }
     if (m_headCrossEdgesLoaded.load(std::memory_order_relaxed)) {
         return ErrorCode::Success;
     }
@@ -900,6 +1061,18 @@ template <typename T> ErrorCode Index<T>::LoadHeadCrossEdges() const
     if (!path.empty() && path.back() != FolderSep) path += FolderSep;
     path += m_options.m_headIndexFolder;
     if (!path.empty() && path.back() != FolderSep) path += FolderSep;
+    const std::string dirtyPath = path + Helper::kHeadCrossEdgesDirtyFileName;
+    FILE* dirtyFile = std::fopen(dirtyPath.c_str(), "rb");
+    if (dirtyFile != nullptr) {
+        std::fclose(dirtyFile);
+        m_headCrossEdgesDirty.store(true, std::memory_order_release);
+        m_headCrossEdgesLoaded.store(true, std::memory_order_release);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "[TaggedUpdate] ignoring stale cross-edge snapshot; rebuild it with augmentheadgraph --overwrite "
+                     "after topology maintenance (%s).\n",
+                     dirtyPath.c_str());
+        return ErrorCode::Success;
+    }
     path += Helper::kHeadCrossEdgesFileName;
 
     FILE* fp = std::fopen(path.c_str(), "rb");
@@ -1039,10 +1212,30 @@ template <typename T>
 struct HeadBundleAccess {
     const COMMON::RelativeNeighborhoodGraph* graph = nullptr;
     DimensionType nbrSize = 0;
-    std::function<const T*(SizeType)> getSample;
+    const void* sampleSource = nullptr;
+    const T* (*getSample)(const void*, SizeType) = nullptr;
     SizeType numSamples = 0;
     bool valid = false;
+
+    const T* GetSample(SizeType p_local) const
+    {
+        return getSample == nullptr ? nullptr : getSample(sampleSource, p_local);
+    }
 };
+
+template <typename T>
+static const T* GetBKTBundleSample(const void* p_source, SizeType p_local)
+{
+    const auto* index = static_cast<const BKT::Index<T>*>(p_source);
+    return static_cast<const T*>(index->GetSample(p_local));
+}
+
+template <typename T>
+static const T* GetKDTBundleSample(const void* p_source, SizeType p_local)
+{
+    const auto* index = static_cast<const KDT::Index<T>*>(p_source);
+    return static_cast<const T*>(index->GetSample(p_local));
+}
 
 template <typename T>
 static HeadBundleAccess<T> AccessHeadBundleIndex(VectorIndex* p_idx) {
@@ -1051,13 +1244,15 @@ static HeadBundleAccess<T> AccessHeadBundleIndex(VectorIndex* p_idx) {
     if (auto* b = dynamic_cast<BKT::Index<T>*>(p_idx)) {
         a.graph = &b->GetGraph();
         a.nbrSize = b->GetNeighborhoodSize();
-        a.getSample = [b](SizeType i) { return static_cast<const T*>(b->GetSample(i)); };
+        a.sampleSource = b;
+        a.getSample = &GetBKTBundleSample<T>;
         a.numSamples = b->GetNumSamples();
         a.valid = true;
     } else if (auto* k = dynamic_cast<KDT::Index<T>*>(p_idx)) {
         a.graph = &k->GetGraph();
         a.nbrSize = k->GetNeighborhoodSize();
-        a.getSample = [k](SizeType i) { return static_cast<const T*>(k->GetSample(i)); };
+        a.sampleSource = k;
+        a.getSample = &GetKDTBundleSample<T>;
         a.numSamples = k->GetNumSamples();
         a.valid = true;
     }
@@ -1077,7 +1272,8 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     if (p_candidateNodes.empty() || p_queryResults == nullptr || m_index == nullptr) {
         return ErrorCode::Fail;
     }
-    if (LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdgeTargetsB.empty()) {
+    if (m_headCrossEdgesDirty.load(std::memory_order_acquire) ||
+        LoadHeadCrossEdges() != ErrorCode::Success || m_headCrossEdgeTargetsB.empty()) {
         return ErrorCode::Fail;
     }
 
@@ -1094,14 +1290,16 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     if (entryNode < 0 || entryNode >= static_cast<int>(m_loadedHeadBundleIndexes.size())) {
         return ErrorCode::Fail;
     }
-    const auto& entryIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(entryNode)];
     const auto& entryL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(entryNode)];
-    if (entryIdx == nullptr || entryL2G.empty()) {
+    if (entryL2G.empty()) {
         return ErrorCode::Fail;
     }
 
-    auto entryAcc = AccessHeadBundleIndex<T>(entryIdx.get());
-    if (!entryAcc.valid) {
+    std::vector<HeadBundleAccess<T>> bundleAccesses(m_loadedHeadBundleIndexes.size());
+    for (size_t nodeId = 0; nodeId < m_loadedHeadBundleIndexes.size(); ++nodeId) {
+        bundleAccesses[nodeId] = AccessHeadBundleIndex<T>(m_loadedHeadBundleIndexes[nodeId].get());
+    }
+    if (!bundleAccesses[static_cast<size_t>(entryNode)].valid) {
         return ErrorCode::Fail;
     }
 
@@ -1134,27 +1332,30 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         }
     }
 
-    // Open priority queue (min-heap by distance) and visited set on dense head id B.
-    struct Cand {
-        float dist;
-        int nodeId;
-        SizeType bundleLocal;
-        SizeType headB;       // m_index local hid (for AddPoint + PS lookup)
-    };
-    auto cmp = [](const Cand& a, const Cand& b) { return a.dist > b.dist; };
-    std::priority_queue<Cand, std::vector<Cand>, decltype(cmp)> pq(cmp);
-    std::unordered_set<SizeType> visitedB;
-    visitedB.reserve(static_cast<size_t>(p_graphResultNum) * 16);
+    // Reuse BKT's per-thread compact deduper while preserving the prior
+    // std::priority_queue tie behavior for this finite-budget traversal. Unlike
+    // BKT's result-gated traversal, nonmatching heads remain valid bridges.
+    const int maxChecks = std::max(m_options.m_maxCheck, p_graphResultNum * 4);
+    auto crossGraphWorkspace = m_crossGraphWorkSpaceFactory->GetWorkSpace();
+    if (!crossGraphWorkspace) {
+        crossGraphWorkspace.reset(new CrossGraphWorkSpace());
+    }
+    crossGraphWorkspace->Prepare(maxChecks, p_graphResultNum, m_options.m_hashExp);
 
-    auto pushCandidate = [&](int nodeId, SizeType bundleLocal, SizeType headB, float dist) {
-        // Dedup at push: mark a node the first time it is queued. A node reachable
-        // from several expanded heads was otherwise distance-evaluated and pushed
-        // once per discovery; since the query->node distance is path-independent,
-        // the first evaluation is authoritative. This removes redundant
-        // m_fComputeDistance calls (the dominant walk cost) and shrinks the heap,
-        // with zero change to the set of expanded nodes (=> identical recall).
-        if (!visitedB.insert(headB).second) return;
-        pq.push({dist, nodeId, bundleLocal, headB});
+    size_t visitedCount = 0;
+    auto pushKnownCandidate = [&](SizeType headB, float dist) -> bool {
+        if (crossGraphWorkspace->CheckAndSet(headB)) return false;
+        crossGraphWorkspace->PushFrontier(NodeDistPair(headB, dist));
+        ++visitedCount;
+        return true;
+    };
+
+    auto pushSampleCandidate = [&](SizeType headB, const T* sample) -> bool {
+        if (sample == nullptr || crossGraphWorkspace->CheckAndSet(headB)) return false;
+        const float dist = m_fComputeDistance(qTarget, sample, dim);
+        crossGraphWorkspace->PushFrontier(NodeDistPair(headB, dist));
+        ++visitedCount;
+        return true;
     };
 
     // Phase 1: seed from EVERY routed node. Cross-edges alone are too sparse
@@ -1169,10 +1370,10 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // for a 4-node org query that's 16k ops before the unified PQ even
     // starts. We override with a tight budget here; the unified RNG +
     // cross-edge expansion below does the heavy lifting.
-    // Default: unfilter behaves like one logical graph search, so seed from the
-    // entry bundle only and let dense cross edges carry the traversal. Filtered
-    // queries still seed every routed bundle by default to preserve per-filter
-    // coverage. Override with SPTAG_CROSS_SINGLE_SEED=0/1 for A/B.
+    // Unfilter behaves like one logical graph search, so seed from the entry
+    // bundle only and let dense cross edges carry the traversal. Filtered queries
+    // seed every routed bundle to preserve per-filter coverage. Keep an explicit
+    // diagnostic override to isolate single-entry coverage from head quality.
     static const int s_crossSingleSeedOverride = []() {
         const char* e = std::getenv("SPTAG_CROSS_SINGLE_SEED");
         if (!e || e[0] == '\0') return -1;
@@ -1191,23 +1392,14 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     }
     int totalSeedK = std::max(16, std::min(p_graphResultNum, 64));
     int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(seedNodes.size()));
-    int seedMaxCheck = std::max(64, perNodeSeed * 8);
-    // Diagnostic knobs: distinguish a seeding-coverage cap from a fundamental
-    // partition-connectivity loss. SPTAG_CROSS_PERNODESEED raises seeds/bundle;
-    // SPTAG_CROSS_SEEDMAXCHECK deepens each bundle's seed KDT search. Default off.
-    static const int s_crossPerNodeSeed = []() {
-        const char* e = std::getenv("SPTAG_CROSS_PERNODESEED");
-        return e ? std::atoi(e) : 0;
-    }();
-    static const int s_crossSeedMaxCheck = []() {
-        const char* e = std::getenv("SPTAG_CROSS_SEEDMAXCHECK");
-        return e ? std::atoi(e) : 0;
-    }();
-    if (s_crossPerNodeSeed > 0) perNodeSeed = s_crossPerNodeSeed;
-    if (s_crossSeedMaxCheck > 0) seedMaxCheck = s_crossSeedMaxCheck;
+    const int adaptiveSeedMaxCheck = std::max(64, perNodeSeed * 8);
+    const int seedMaxCheck = (m_options.m_seedMaxCheck > 0)
+        ? m_options.m_seedMaxCheck
+        : adaptiveSeedMaxCheck;
     int scanned = 0;
     int totalSeeded = 0;
     int seedDroppedByTag = 0;
+    int seedIndexMaxCheck = 0;
 
     auto _bktT0 = std::chrono::high_resolution_clock::now();
 
@@ -1216,14 +1408,23 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         const auto& nodeIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
         const auto& nodeL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
         if (nodeIdx == nullptr || nodeL2G.empty()) continue;
-        auto nodeAcc = AccessHeadBundleIndex<T>(nodeIdx.get());
+        const auto& nodeAcc = bundleAccesses[static_cast<size_t>(nodeId)];
         if (!nodeAcc.valid) continue;
 
         int seedK = std::min(perNodeSeed, static_cast<int>(nodeL2G.size()));
         if (seedK <= 0) continue;
-
         COMMON::QueryResultSet<T> seedResults(qTarget, seedK);
-        if (nodeIdx->SearchIndex(seedResults) != ErrorCode::Success) continue;
+
+        ErrorCode seedStatus = ErrorCode::Fail;
+        if (auto* bkt = dynamic_cast<BKT::Index<T>*>(nodeIdx.get())) {
+            seedIndexMaxCheck = std::max(seedIndexMaxCheck, bkt->GetCurrMaxCheck());
+            seedStatus = bkt->SearchIndexWithFilter(seedResults, nullptr, seedMaxCheck);
+        } else if (auto* kdt = dynamic_cast<KDT::Index<T>*>(nodeIdx.get())) {
+            seedIndexMaxCheck = std::max(seedIndexMaxCheck, kdt->GetCurrMaxCheck());
+            seedStatus = kdt->SearchIndexWithMaxCheck(seedResults, seedMaxCheck);
+        }
+
+        if (seedStatus != ErrorCode::Success) continue;
         scanned += seedResults.GetScanned();
 
         for (int i = 0; i < seedResults.GetResultNum(); ++i) {
@@ -1232,7 +1433,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
             if (static_cast<size_t>(r->VID) >= nodeL2G.size()) continue;
             SizeType bundleLocal = r->VID;
             SizeType m_idx_B = nodeL2G[static_cast<size_t>(bundleLocal)];
-            pushCandidate(nodeId, bundleLocal, m_idx_B, r->Dist);
+            pushKnownCandidate(m_idx_B, r->Dist);
             ++totalSeeded;
         }
     }
@@ -1240,13 +1441,13 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     if (totalSeeded == 0) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "CrossSubgraph DBG: totalSeeded=0 nodes=%zu seedMaxCheck=%d perNodeSeed=%d\n",
                      p_candidateNodes.size(), seedMaxCheck, perNodeSeed);
+        m_crossGraphWorkSpaceFactory->ReturnWorkSpace(std::move(crossGraphWorkspace));
         return ErrorCode::Fail;
     }
 
     auto _bktT1 = std::chrono::high_resolution_clock::now();
     g_bktSeedMs = std::chrono::duration<double, std::milli>(_bktT1 - _bktT0).count();
 
-    int maxChecks = std::max(m_options.m_maxCheck, p_graphResultNum * 4);
     int checks = 0;
     int crossHopCount = 0;
     int crossEdgesSeen = 0;
@@ -1259,30 +1460,20 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     int uextraChecked = 0;       // U_extra heads popped/visited in the PQ
     int uextraKept = 0;          // U_extra heads committed to the result heap
 
-    // Early termination floor: ensure result heap is filled and PQ has settled
-    // before allowing the worstDist gate to kick in. Without this, we would
-    // exit before AddPoint has accumulated graphResultNum candidates (worstDist
-    // is +inf until then, so it wouldn't trigger anyway, but pq could also be
-    // tiny right after seeding).
-    int minChecks = std::max(p_graphResultNum, std::min(256, maxChecks));
-    // Diagnostic knob: force the unified traversal to keep exploring up to N
-    // checks (mirrors the fallback m_index->SearchIndex m_maxCheck budget) before
-    // the worstDist early-termination gate is allowed to fire. Default off.
-    static const int s_crossMinChecks = []() {
-        const char* e = std::getenv("SPTAG_CROSS_MINCHECKS");
-        return e ? std::atoi(e) : 0;
-    }();
-    if (s_crossMinChecks > 0) minChecks = std::min(s_crossMinChecks, maxChecks);
+    // Match the original BKT termination rule: once the requested result heap
+    // can be full, let worstDist stop a settled frontier. The old 256-pop floor
+    // was custom to the cross path and forced extra graph work at TopK=10.
+    const int minChecks = p_graphResultNum;
 
-    while (!pq.empty() && checks < maxChecks) {
-        Cand cur = pq.top();
-        pq.pop();
+    while (!crossGraphWorkspace->FrontierEmpty() && checks < maxChecks) {
+        const NodeDistPair cur = crossGraphWorkspace->PopFrontier();
+        const SizeType curHeadB = cur.node;
 
         // Nodes are deduped at push time, so every popped candidate is unique and
         // expanded exactly once (no stale-duplicate skip needed here).
         ++checks;
         const bool curIsUExtra = s_logUExtra && s_hasRoles && m_extraSearcher &&
-            m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(cur.headB));
+            m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(curHeadB));
         if (curIsUExtra) ++uextraChecked;
 
         // Early termination: once we've done minChecks and the closest remaining
@@ -1290,7 +1481,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // distance, no future candidate can improve the result heap. This is the
         // same idea KDT uses (gnode.distance > p_query.worstDist()) but applied
         // to the cross-subgraph unified PQ.
-        if (checks >= minChecks && cur.dist > p_queryResults->worstDist()) {
+        if (checks >= minChecks && cur.distance > p_queryResults->worstDist()) {
             break;
         }
 
@@ -1302,32 +1493,41 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // (RNG / cross-edge expansion) regardless so navigation isn't cut.
         bool keepHead = true;
         if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
-            keepHead = m_index->HeadPostingHierMaskMayIntersect(cur.headB, queryHierMask);
+            keepHead = m_index->HeadPostingHierMaskMayIntersect(curHeadB, queryHierMask);
         }
         if (keepHead) {
-            p_queryResults->AddPoint(cur.headB, cur.dist);
+            p_queryResults->AddPoint(curHeadB, cur.distance);
             if (curIsUExtra) ++uextraKept;
         }
 
         // Expand RNG neighbors within the home node's head index (BKT or KDT).
-        if (cur.nodeId >= 0 && cur.nodeId < static_cast<int>(m_loadedHeadBundleIndexes.size())) {
-            const auto& homeIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(cur.nodeId)];
-            const auto& homeL2G = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(cur.nodeId)];
-            auto homeAcc = AccessHeadBundleIndex<T>(homeIdx.get());
-            if (homeAcc.valid && cur.bundleLocal >= 0 &&
-                cur.bundleLocal < homeAcc.numSamples) {
-                const SizeType* nbrs = (*homeAcc.graph)[cur.bundleLocal];
-                for (DimensionType i = 0; i < homeAcc.nbrSize; ++i) {
-                    SizeType nbrLocal = nbrs[i];
-                    if (nbrLocal < 0) break;
-                    if (nbrLocal >= homeAcc.numSamples) continue;
-                    if (static_cast<size_t>(nbrLocal) >= homeL2G.size()) continue;
-                    SizeType nbr_B = homeL2G[static_cast<size_t>(nbrLocal)];
-                    if (visitedB.count(nbr_B)) continue;
-                    const T* nbrVec = homeAcc.getSample(nbrLocal);
-                    if (nbrVec == nullptr) continue;
-                    float d = m_fComputeDistance(qTarget, nbrVec, dim);
-                    pushCandidate(cur.nodeId, nbrLocal, nbr_B, d);
+        if (curHeadB >= 0 && static_cast<size_t>(curHeadB) < m_headBundleNodeByB.size()) {
+            const int homeNodeId =
+                static_cast<int>(m_headBundleNodeByB[static_cast<size_t>(curHeadB)]);
+            const SizeType homeLocal = m_headBundleLocalByB[static_cast<size_t>(curHeadB)];
+            if (homeNodeId >= 0 &&
+                homeNodeId < static_cast<int>(bundleAccesses.size())) {
+                const auto& homeL2G =
+                    m_headBundleLocalToGlobalHIDs[static_cast<size_t>(homeNodeId)];
+                const auto& homeAcc = bundleAccesses[static_cast<size_t>(homeNodeId)];
+                if (homeAcc.valid && homeLocal >= 0 && homeLocal < homeAcc.numSamples) {
+                    const SizeType* nbrs = (*homeAcc.graph)[homeLocal];
+                    COMMON::PrefetchGraphNeighbors(
+                        nbrs, homeAcc.nbrSize,
+                        [&homeAcc](SizeType neighbor) -> const void* {
+                            return neighbor >= 0 && neighbor < homeAcc.numSamples
+                                ? homeAcc.GetSample(neighbor)
+                                : nullptr;
+                        });
+                    for (DimensionType i = 0; i < homeAcc.nbrSize; ++i) {
+                        SizeType nbrLocal = nbrs[i];
+                        if (nbrLocal < 0) break;
+                        if (nbrLocal >= homeAcc.numSamples) continue;
+                        if (static_cast<size_t>(nbrLocal) >= homeL2G.size()) continue;
+                        SizeType nbr_B = homeL2G[static_cast<size_t>(nbrLocal)];
+                        if (nbr_B < 0 || crossGraphWorkspace->Contains(nbr_B)) continue;
+                        pushSampleCandidate(nbr_B, homeAcc.GetSample(nbrLocal));
+                    }
                 }
             }
         }
@@ -1363,58 +1563,67 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         const bool filterMode = (p_queryTags != nullptr && p_numQueryTags > 0);
         const bool withinCrossBudget = (s_crossExpandLimit <= 0) || (checks <= s_crossExpandLimit);
         const bool useCrossHere = !s_disableCross && (!filterMode || s_filterKeepCross) && withinCrossBudget;
-        if (useCrossHere && cur.headB >= 0 &&
-            static_cast<size_t>(cur.headB) < m_headCrossEdgeOffsetByB.size()) {
-            std::uint32_t off = m_headCrossEdgeOffsetByB[static_cast<size_t>(cur.headB)];
-            std::uint16_t cnt = m_headCrossEdgeCountByB[static_cast<size_t>(cur.headB)];
+        if (useCrossHere && curHeadB >= 0 &&
+            static_cast<size_t>(curHeadB) < m_headCrossEdgeOffsetByB.size()) {
+            std::uint32_t off = m_headCrossEdgeOffsetByB[static_cast<size_t>(curHeadB)];
+            std::uint16_t cnt = m_headCrossEdgeCountByB[static_cast<size_t>(curHeadB)];
             if (off != UINT32_MAX && cnt > 0) {
-            for (std::uint16_t ei = 0; ei < cnt; ++ei) {
-                SizeType nbr_B = m_headCrossEdgeTargetsB[static_cast<size_t>(off) + ei];
-                if (nbr_B < 0) continue;
-                ++crossEdgesSeen;
-                if (s_logUExtra && s_hasRoles && m_extraSearcher &&
-                    m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(nbr_B))) ++uextraCrossTargets;
-                if (visitedB.count(nbr_B)) continue;
+                const SizeType* crossNeighbors =
+                    m_headCrossEdgeTargetsB.data() + static_cast<size_t>(off);
+                _mm_prefetch((const char*)crossNeighbors, _MM_HINT_T0);
+                for (std::uint16_t ei = 0; ei < cnt; ++ei) {
+                    const SizeType nbrB = crossNeighbors[ei];
+                    if (nbrB < 0 || static_cast<size_t>(nbrB) >= m_headBundleNodeByB.size()) continue;
+                    const int nodeId =
+                        static_cast<int>(m_headBundleNodeByB[static_cast<size_t>(nbrB)]);
+                    const SizeType local = m_headBundleLocalByB[static_cast<size_t>(nbrB)];
+                    if (nodeId < 0 || nodeId >= static_cast<int>(bundleAccesses.size())) continue;
+                    const auto& access = bundleAccesses[static_cast<size_t>(nodeId)];
+                    if (!access.valid || local < 0 || local >= access.numSamples) continue;
+                    const T* sample = access.GetSample(local);
+                    if (sample != nullptr) {
+                        _mm_prefetch((const char*)sample, _MM_HINT_T0);
+                    }
+                }
 
-                // Hierarchical mask filter: skip neighbors that don't match query
-                // This replaces the old HeadNodeMatchesAnyQueryTag check and integrates
-                // bundle node routing.
-                if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
-                    // Bundle node routing check (separate from tag content)
-                    if (!routedNodeMask.empty()) {
-                        int16_t bundleNodeId = m_index->GetHeadNodeBundleNodeId(nbr_B);
-                        if (bundleNodeId >= 0) {
-                            if (static_cast<size_t>(bundleNodeId) >= routedNodeMask.size() ||
-                                routedNodeMask[static_cast<size_t>(bundleNodeId)] == 0) {
+                for (std::uint16_t ei = 0; ei < cnt; ++ei) {
+                    const SizeType nbrB = crossNeighbors[ei];
+                    if (nbrB < 0) continue;
+                    ++crossEdgesSeen;
+                    if (s_logUExtra && s_hasRoles && m_extraSearcher &&
+                        m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(nbrB))) {
+                        ++uextraCrossTargets;
+                    }
+                    if (crossGraphWorkspace->Contains(nbrB)) continue;
+
+                    // Hierarchical mask filter: skip neighbors that don't match query.
+                    if (p_queryTags != nullptr && p_numQueryTags > 0 && m_index->HasHeadNodeMeta()) {
+                        if (!routedNodeMask.empty()) {
+                            const int16_t bundleNodeId = m_index->GetHeadNodeBundleNodeId(nbrB);
+                            if (bundleNodeId >= 0 &&
+                                (static_cast<size_t>(bundleNodeId) >= routedNodeMask.size() ||
+                                 routedNodeMask[static_cast<size_t>(bundleNodeId)] == 0)) {
                                 ++crossDroppedByTag;
                                 continue;
                             }
                         }
+                        if (!m_index->HeadPostingHierMaskMayIntersect(nbrB, queryHierMask)) {
+                            ++crossDroppedByTag;
+                            continue;
+                        }
                     }
-                    // Tag-content check via posting hier_mask (no IsHeadNodeHeadOnly gate)
-                    if (!m_index->HeadPostingHierMaskMayIntersect(nbr_B, queryHierMask)) {
-                        ++crossDroppedByTag;
-                        continue;
+
+                    if (static_cast<size_t>(nbrB) >= m_headBundleNodeByB.size()) continue;
+                    const int nodeId =
+                        static_cast<int>(m_headBundleNodeByB[static_cast<size_t>(nbrB)]);
+                    const SizeType local = m_headBundleLocalByB[static_cast<size_t>(nbrB)];
+                    if (nodeId < 0 || nodeId >= static_cast<int>(bundleAccesses.size())) continue;
+                    const auto& access = bundleAccesses[static_cast<size_t>(nodeId)];
+                    if (!access.valid || local < 0 || local >= access.numSamples) continue;
+                    if (pushSampleCandidate(nbrB, access.GetSample(local))) {
+                        ++crossHopCount;
                     }
                 }
-
-                // Locate which bundle node hosts this head and compute query
-                // distance against its sample vector.
-                if (static_cast<size_t>(nbr_B) >= m_headBundleNodeByB.size()) continue;
-                int nodeId = static_cast<int>(m_headBundleNodeByB[static_cast<size_t>(nbr_B)]);
-                SizeType local = m_headBundleLocalByB[static_cast<size_t>(nbr_B)];
-                if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size())) continue;
-                const auto& othIdx = m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
-                auto othAcc = AccessHeadBundleIndex<T>(othIdx.get());
-                if (!othAcc.valid) continue;
-                if (local < 0 || local >= othAcc.numSamples) continue;
-                const T* nbrVec = othAcc.getSample(local);
-                if (nbrVec == nullptr) continue;
-
-                float d = m_fComputeDistance(qTarget, nbrVec, dim);
-                pushCandidate(nodeId, local, nbr_B, d);
-                ++crossHopCount;
-            }
             }
         }
     }
@@ -1443,7 +1652,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "CrossSubgraph: nodes=%zu totalSeeded=%d checks=%d crossHops=%d nodesVisited=%zu "
             "crossEdgesSeen=%d crossDroppedByTag=%d (tagPass=%.3f)\n",
-            p_candidateNodes.size(), totalSeeded, checks, crossHopCount, visitedB.size(),
+            p_candidateNodes.size(), totalSeeded, checks, crossHopCount, visitedCount,
             crossEdgesSeen, crossDroppedByTag,
             crossEdgesSeen > 0 ? 1.0 - (double)crossDroppedByTag / crossEdgesSeen : 0.0);
     }
@@ -1452,12 +1661,16 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         g_pqGraphMs = std::chrono::duration<double, std::milli>(_pqT1 - _bktT1).count();
     }
     static const bool s_logCS = (std::getenv("SPTAG_LOG_CROSS_STATS") != nullptr);
-    if (s_logCS) {
+    if (m_options.m_logPhaseTime || s_logCS) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "CSStats: nodes=%zu seedNodes=%zu seeded=%d seedDropTag=%d checks=%d cross=%d crossDropTag=%d visited=%zu maxC=%d\n",
-            p_candidateNodes.size(), seedNodes.size(), totalSeeded, seedDroppedByTag, checks,
-            crossEdgesSeen, crossDroppedByTag, visitedB.size(), maxChecks);
+            "CSStats: nodes=%zu seedNodes=%zu seeded=%d seedScanned=%d seedBudget=%d "
+            "seedConfiguredMaxC=%d seedIndexMaxC=%d seedDropTag=%d checks=%d cross=%d "
+            "crossDropTag=%d visited=%zu maxC=%d\n",
+            p_candidateNodes.size(), seedNodes.size(), totalSeeded, scanned, seedMaxCheck,
+            m_options.m_seedMaxCheck, seedIndexMaxCheck, seedDroppedByTag, checks,
+            crossEdgesSeen, crossDroppedByTag, visitedCount, maxChecks);
     }
+    m_crossGraphWorkSpaceFactory->ReturnWorkSpace(std::move(crossGraphWorkspace));
     return ErrorCode::Success;
 }
 
@@ -1607,8 +1820,25 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
     m_index->SetReady(true);
 
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading headID map\n");
-    m_vectorTranslateMap.Load(p_indexStreams[m_index->GetIndexFiles()->size()], m_index->m_iDataBlockSize,
-                              m_index->m_iDataCapacity);
+    if (m_options.m_recovery) {
+        const std::string headIDPath =
+            m_options.m_persistentBufferPath + FolderSep + m_options.m_headIDFile;
+        std::shared_ptr<Helper::DiskIO> headIDStream = SPTAG::f_createIO();
+        if (headIDStream == nullptr ||
+            !headIDStream->Initialize(headIDPath.c_str(), std::ios::binary | std::ios::in) ||
+            m_vectorTranslateMap.Load(headIDStream,
+                                      m_options.m_datasetRowsInBlock,
+                                      m_options.m_datasetCapacity) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Cannot load checkpoint head-ID map %s.\n", headIDPath.c_str());
+            return ErrorCode::Fail;
+        }
+    } else if (m_vectorTranslateMap.Load(
+                   p_indexStreams[m_index->GetIndexFiles()->size()],
+                   m_options.m_datasetRowsInBlock,
+                   m_options.m_datasetCapacity) != ErrorCode::Success) {
+        return ErrorCode::Fail;
+    }
 
     std::string kvpath = m_options.m_indexDirectory + FolderSep + m_options.m_KVFile;
     std::string ssdmappingpath = m_options.m_indexDirectory + FolderSep + m_options.m_ssdMappingFile;
@@ -1659,6 +1889,187 @@ ErrorCode Index<T>::LoadIndexData(const std::vector<std::shared_ptr<Helper::Disk
         return ErrorCode::Fail;
 
     return ErrorCode::Success;
+}
+
+template <typename T>
+bool Index<T>::BuildPrimaryHeadCSRBackfill(const void* vectors, SizeType vectorCount,
+                                           const uint32_t* tags, int numTagsPerVec)
+{
+    if (vectors == nullptr || tags == nullptr || vectorCount <= 0 || numTagsPerVec < 5 ||
+        m_headBundleNodes.empty() || m_loadedHeadBundleIndexes.empty()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[PrimaryHeadCSR] backfill requires vectors, five tags, and loaded head bundles.\n");
+        return false;
+    }
+
+    const SizeType headCount = TotalHeadSampleCount();
+    if (headCount <= 0 || headCount > std::numeric_limits<std::uint32_t>::max()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] invalid head count for backfill.\n");
+        return false;
+    }
+
+    std::uint32_t tagBases[4] = {
+        std::numeric_limits<std::uint32_t>::max(),
+        std::numeric_limits<std::uint32_t>::max(),
+        std::numeric_limits<std::uint32_t>::max(),
+        std::numeric_limits<std::uint32_t>::max()
+    };
+    for (SizeType vid = 0; vid < vectorCount; ++vid) {
+        const uint32_t* row = tags + static_cast<size_t>(vid) * numTagsPerVec;
+        for (int level = 0; level < 4; ++level) tagBases[level] = std::min(tagBases[level], row[level]);
+    }
+    for (SizeType vid = 0; vid < vectorCount; ++vid) {
+        const uint32_t* row = tags + static_cast<size_t>(vid) * numTagsPerVec;
+        for (int level = 0; level < 4; ++level) {
+            if (row[level] - tagBases[level] > 0xffU) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "[PrimaryHeadCSR] categorical level %d exceeds uint8 packing range.\n", level);
+                return false;
+            }
+        }
+    }
+
+    // The persisted SIFT bundle layout routes level-0 (org) tag 0..3 to
+    // bundle node 0..3. Refuse a schema that cannot satisfy that invariant.
+    std::vector<int> bundleForOrg(256, -1);
+    for (size_t bundle = 0; bundle < m_headBundleNodes.size(); ++bundle) {
+        const int nodeId = m_headBundleNodes[bundle].nodeId;
+        if (nodeId >= 0 && nodeId < static_cast<int>(bundleForOrg.size())) {
+            bundleForOrg[static_cast<size_t>(nodeId)] = nodeId;
+        }
+    }
+
+    std::vector<std::uint32_t> primaryHeads(static_cast<size_t>(vectorCount),
+                                            std::numeric_limits<std::uint32_t>::max());
+    std::atomic<SizeType> nextVID(0);
+    std::atomic<bool> failed(false);
+    const T* typedVectors = reinterpret_cast<const T*>(vectors);
+    const int workers = std::max(1, m_options.m_iSSDNumberOfThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+    for (int worker = 0; worker < workers; ++worker) {
+        threads.emplace_back([&, worker]() {
+            (void)worker;
+            while (!failed.load(std::memory_order_relaxed)) {
+                const SizeType vid = nextVID.fetch_add(1, std::memory_order_relaxed);
+                if (vid >= vectorCount) return;
+                const uint32_t* row = tags + static_cast<size_t>(vid) * numTagsPerVec;
+                const std::uint32_t org = row[0] - tagBases[0];
+                if (org >= bundleForOrg.size()) {
+                    failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+                const int nodeId = bundleForOrg[org];
+                if (nodeId < 0 || nodeId >= static_cast<int>(m_loadedHeadBundleIndexes.size()) ||
+                    m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)] == nullptr ||
+                    m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)].empty()) {
+                    failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                COMMON::QueryResultSet<T> result(
+                    typedVectors + static_cast<size_t>(vid) * m_options.m_dim, 1);
+                if (m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)]->SearchIndex(result) != ErrorCode::Success) {
+                    failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+                BasicResult* nearest = result.GetResult(0);
+                if (nearest == nullptr || nearest->VID < 0 ||
+                    nearest->VID >= static_cast<SizeType>(
+                        m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)].size())) {
+                    failed.store(true, std::memory_order_relaxed);
+                    return;
+                }
+                primaryHeads[static_cast<size_t>(vid)] = static_cast<std::uint32_t>(
+                    m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)]
+                                                   [static_cast<size_t>(nearest->VID)]);
+
+                if ((vid & ((1 << 20) - 1)) == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                                 "[PrimaryHeadCSR] assignment %d/%d\n",
+                                 static_cast<int>(vid), static_cast<int>(vectorCount));
+                }
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+    if (failed.load(std::memory_order_relaxed)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] nearest-head assignment failed.\n");
+        return false;
+    }
+
+    std::vector<std::uint32_t> offsets(static_cast<size_t>(headCount) + 1, 0);
+    for (std::uint32_t head : primaryHeads) {
+        if (head >= headCount || offsets[static_cast<size_t>(head) + 1] == std::numeric_limits<std::uint32_t>::max()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] invalid primary head assignment.\n");
+            return false;
+        }
+        ++offsets[static_cast<size_t>(head) + 1];
+    }
+    for (SizeType head = 0; head < headCount; ++head) {
+        const std::uint64_t next = static_cast<std::uint64_t>(offsets[static_cast<size_t>(head)]) +
+                                   offsets[static_cast<size_t>(head) + 1];
+        if (next > std::numeric_limits<std::uint32_t>::max()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] offset overflow.\n");
+            return false;
+        }
+        offsets[static_cast<size_t>(head) + 1] = static_cast<std::uint32_t>(next);
+    }
+
+    std::unique_ptr<std::atomic_uint32_t[]> cursors(
+        new std::atomic_uint32_t[static_cast<size_t>(headCount)]);
+    for (SizeType head = 0; head < headCount; ++head) {
+        cursors[static_cast<size_t>(head)].store(offsets[static_cast<size_t>(head)], std::memory_order_relaxed);
+    }
+    std::vector<PrimaryHeadCSREntry> entries(static_cast<size_t>(vectorCount));
+    nextVID.store(0, std::memory_order_relaxed);
+    threads.clear();
+    for (int worker = 0; worker < workers; ++worker) {
+        threads.emplace_back([&, worker]() {
+            (void)worker;
+            while (true) {
+                const SizeType vid = nextVID.fetch_add(1, std::memory_order_relaxed);
+                if (vid >= vectorCount) return;
+                const std::uint32_t head = primaryHeads[static_cast<size_t>(vid)];
+                const std::uint32_t pos =
+                    cursors[static_cast<size_t>(head)].fetch_add(1, std::memory_order_relaxed);
+                const uint32_t* row = tags + static_cast<size_t>(vid) * numTagsPerVec;
+                std::uint32_t packedTags = 0;
+                for (int level = 0; level < 4; ++level) {
+                    packedTags |= ((row[level] - tagBases[level]) & 0xffU) << (level * 8);
+                }
+                entries[pos].vid = static_cast<std::uint32_t>(vid);
+                entries[pos].attributes = static_cast<std::uint64_t>(packedTags) |
+                                          (static_cast<std::uint64_t>(row[4]) << 32);
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+
+    PrimaryHeadCSRHeader header;
+    header.headCount = static_cast<std::uint32_t>(headCount);
+    header.entryCount = static_cast<std::uint64_t>(vectorCount);
+    for (int level = 0; level < 4; ++level) header.tagBases[level] = tagBases[level];
+    const std::string path = m_options.m_indexDirectory + FolderSep + m_options.m_primaryHeadCSRFile;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] cannot create %s.\n", path.c_str());
+        return false;
+    }
+    output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    output.write(reinterpret_cast<const char*>(offsets.data()),
+                 static_cast<std::streamsize>(offsets.size() * sizeof(std::uint32_t)));
+    output.write(reinterpret_cast<const char*>(entries.data()),
+                 static_cast<std::streamsize>(entries.size() * sizeof(PrimaryHeadCSREntry)));
+    output.close();
+    if (!output) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[PrimaryHeadCSR] write failed for %s.\n", path.c_str());
+        return false;
+    }
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "[PrimaryHeadCSR] backfilled %d vectors across %d heads to %s.\n",
+                 static_cast<int>(vectorCount), static_cast<int>(headCount), path.c_str());
+    return true;
 }
 
 template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::DiskIO> p_configOut)
@@ -1721,7 +2132,11 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
+    std::unique_lock<std::mutex> dataLock(m_dataAddLock);
     ErrorCode ret;
+    if ((ret = DrainTaggedMergeMaintenance()) != ErrorCode::Success)
+        return ret;
+
     if ((ret = m_index->SaveIndexData(p_indexStreams)) != ErrorCode::Success)
         return ret;
 
@@ -1731,7 +2146,7 @@ ErrorCode Index<T>::SaveIndexData(const std::vector<std::shared_ptr<Helper::Disk
     if ((ret = m_extraSearcher->Checkpoint(m_options.m_indexDirectory)) != ErrorCode::Success)
         return ret;
 
-    if ((ret = SaveHeadBundleManifest(m_options.m_indexDirectory)) != ErrorCode::Success)
+    if ((ret = SaveLoadedHeadBundles(m_options.m_indexDirectory)) != ErrorCode::Success)
         return ret;
     return ErrorCode::Success;
 }
@@ -1743,6 +2158,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
 
+    std::shared_lock<std::shared_timed_mutex> topologyLock(m_headTopologyLock);
     SPTAG::VectorIndex::ResetThreadLocalPostingScanStats();
 
     const auto* threadLocalSearchContext = SPTAG::VectorIndex::GetThreadLocalSearchContext();
@@ -1821,7 +2237,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             workSpace->m_postingProbeStats.m_matchedPostings,
             workSpace->m_postingProbeStats.m_prePSPostings,
             workSpace->m_postingProbeStats.m_scannedVectors,
-            workSpace->m_postingProbeStats.m_matchedVectors);
+            workSpace->m_postingProbeStats.m_matchedVectors,
+            workSpace->m_postingProbeStats.m_primaryHeadCandidates,
+            workSpace->m_postingProbeStats.m_postingPageReads,
+            workSpace->m_postingProbeStats.m_postingLogicalBytes,
+            workSpace->m_postingProbeStats.m_postingPhysicalBytes,
+            workSpace->m_postingProbeStats.m_adcScannedVectors,
+            workSpace->m_postingProbeStats.m_adcSurvivors,
+            workSpace->m_postingProbeStats.m_rerankCandidates,
+            workSpace->m_postingProbeStats.m_rerankReadRequests,
+            workSpace->m_postingProbeStats.m_rerankPhysicalBytes);
 
         if (ret == ErrorCode::Success &&
             queryTags != nullptr &&
@@ -2060,11 +2485,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
     }
 
-    // SPTAG_FIXED_NPROBE override: if set, force a fixed posting budget for
-    // all tag queries regardless of adaptive estimation. Still clamped to
-    // available posting count.
+    // FixedNprobe is a native index parameter. When positive, it overrides
+    // adaptive estimation while remaining clamped to available postings.
     {
-        int fixedNprobe = GetFixedNprobeOverride();
+        int fixedNprobe = m_options.m_fixedNprobe;
         if (fixedNprobe > 0) {
             SizeType cap = HasHeadBundleNodes() ? TotalHeadSampleCount() : (m_index ? m_index->GetNumSamples() : fixedNprobe);
             if (!candidateNodes.empty()) {
@@ -2115,43 +2539,20 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
     ErrorCode ret;
     bool usedHeadBundleGraphSearch = false;
-    static const bool s_phaseTime = (std::getenv("SPTAG_LOG_PHASE_TIME") != nullptr);
+    // Primary-head CSR owns an independent one-vector-per-head assignment.
+    // Its exact attributes are evaluated after graph navigation, so the old
+    // physical-posting tag mask must not remove a primary owner before CSR
+    // expansion.
+    const bool primaryHeadBypassRequested =
+        m_options.m_enablePrimaryHeadBypass && m_extraSearcher != nullptr &&
+        m_extraSearcher->HasPrimaryHeadCSR();
+    const bool s_phaseTime = m_options.m_logPhaseTime;
     g_bktSeedMs = 0.0;
     g_pqGraphMs = 0.0;
     auto _phT0 = s_phaseTime ? std::chrono::high_resolution_clock::now()
                              : std::chrono::high_resolution_clock::time_point{};
 
-    // Unfilter (tag-less) fast path: navigate the single global head graph from one
-    // entry point (classic greedy SPANN head search) instead of the per-bundle
-    // multi-seed + cross-edge stitched walk. The global graph's local id == head hid,
-    // so results feed the downstream posting scan unchanged. Filtered queries still
-    // use the bundle/cross path (they need per-bundle tag routing).
-    const bool unfilterGlobal = (m_globalHeadGraph != nullptr) && (numQueryTags == 0);
-    if (unfilterGlobal)
-    {
-        p_queryResults->Reset();
-        COMMON::QueryResultSet<T> headResults((const T*)p_query.GetTarget(), graphResultNum);
-        if ((ret = m_globalHeadGraph->SearchIndex(headResults)) == ErrorCode::Success)
-        {
-            for (int i = 0; i < headResults.GetResultNum(); ++i)
-            {
-                auto* r = headResults.GetResult(i);
-                if (r == nullptr || r->VID < 0) continue;
-                p_queryResults->AddPoint(r->VID, r->Dist);
-            }
-            p_queryResults->SortResult();
-            p_queryResults->SetScanned(headResults.GetScanned());
-            usedHeadBundleGraphSearch = true;
-        }
-        else
-        {
-            p_queryResults->Reset();
-        }
-    }
-
-    static const bool s_forceGlobalHead =
-        (std::getenv("SPTAG_FORCE_GLOBAL_HEAD") != nullptr);
-    if (!usedHeadBundleGraphSearch && !candidateNodes.empty() && !s_forceGlobalHead)
+    if (!usedHeadBundleGraphSearch && !candidateNodes.empty())
     {
         bool canUseHeadBundle = true;
         for (int nodeId : candidateNodes)
@@ -2175,7 +2576,8 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // The tag-aware in-filter inside CrossSubgraphGraphSearch is
             // self-guarded (no-op when numQueryTags==0), so unfilter queries
             // engaged via SPTAG_CROSSEDGE_UNFILTER also flow through here.
-            bool useCrossSubgraph = (candidateNodes.size() > 1)
+            bool useCrossSubgraph = !m_headCrossEdgesDirty.load(std::memory_order_acquire)
+                && (candidateNodes.size() > 1)
                 && (LoadHeadCrossEdges() == ErrorCode::Success)
                 && (!m_headCrossEdgeTargetsB.empty());
             static const bool s_disableCrossSubgraph =
@@ -2206,20 +2608,21 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             }
             else
             {
-                // Tag-aware head pre-filter: when a hierarchical query mask is
-                // present, expand KDT search by alpha and filter returned heads
-                // by hier_mask intersection so the downstream posting scan
-                // budget is spent on tag-relevant heads (in-filter).
+                // Tag-aware head in-filtering is opt-in. For sparse filters,
+                // distance-first head traversal followed by exact inline posting
+                // filtering preserves replica/bridge coverage better than
+                // spending the finite head-result budget on mask-matching heads.
                 static const int s_tagAwareExpansion = []() {
                     const char* e = std::getenv("SPTAG_TAG_AWARE_HEAD_EXPANSION");
-                    int v = (e != nullptr) ? std::atoi(e) : 4;
+                    int v = (e != nullptr) ? std::atoi(e) : 1;
                     if (v < 1) v = 1;
                     if (v > 32) v = 32;
                     return v;
                 }();
                 const bool hasTagFilterLocal = (queryTags != nullptr && numQueryTags > 0);
                 SPTAG::Cache::HierarchicalPostingMask tagAwareQueryMask;
-                const bool tagAwareEnabled = hasTagFilterLocal && s_tagAwareExpansion > 1
+                const bool tagAwareEnabled = !primaryHeadBypassRequested &&
+                    hasTagFilterLocal && s_tagAwareExpansion > 1
                     && m_index != nullptr && m_index->HasHeadNodeMeta();
                 if (tagAwareEnabled) {
                     tagAwareQueryMask.Clear();
@@ -2414,6 +2817,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         };
 
         float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
+        const bool usePrimaryHeadBypass = primaryHeadBypassRequested;
         int i = 0;
         for (; i < graphResultNum; ++i)
         {
@@ -2424,8 +2828,11 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             SizeType localHid = res->VID;
             if (m_extraSearcher->CheckValidPosting(localHid))
             {
-                // Post-graph PS filter: only add postings that pass PS check
-                if (!workSpace->m_postingFilter || workSpace->m_postingFilter(localHid)) {
+                // The primary-owner sidecar is independent of the retained physical
+                // posting membership. It must receive every graph head, including
+                // heads whose current posting mask rejects this query.
+                if (usePrimaryHeadBypass ||
+                    !workSpace->m_postingFilter || workSpace->m_postingFilter(localHid)) {
                     workSpace->m_postingIDs.emplace_back(localHid);
                 }
             }
@@ -2437,6 +2844,24 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             } else {
                 res->VID = globalVID;
             }
+        }
+
+        if (usePrimaryHeadBypass) {
+        ret = m_extraSearcher->SearchPrimaryHeadCandidates(workSpace.get(), *p_queryResults, m_index);
+        if (ret == ErrorCode::Success) {
+            SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
+                0, 0, 0, 0, 0, workSpace->m_postingProbeStats.m_primaryHeadCandidates);
+            m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
+            p_queryResults->SortResult();
+            if (p_queryResults != (COMMON::QueryResultSet<T> *)&p_query) {
+                std::copy(p_queryResults->GetResults(),
+                          p_queryResults->GetResults() + p_query.GetResultNum(),
+                          p_query.GetResults());
+                p_query.SetScanned(p_queryResults->GetScanned());
+                delete p_queryResults;
+            }
+            return ErrorCode::Success;
+        }
         }
 
         for (; i < p_queryResults->GetResultNum(); ++i)
@@ -2505,7 +2930,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             workSpace->m_postingProbeStats.m_matchedPostings,
             workSpace->m_postingProbeStats.m_prePSPostings,
             workSpace->m_postingProbeStats.m_scannedVectors,
-            workSpace->m_postingProbeStats.m_matchedVectors);
+            workSpace->m_postingProbeStats.m_matchedVectors,
+            workSpace->m_postingProbeStats.m_primaryHeadCandidates,
+            workSpace->m_postingProbeStats.m_postingPageReads,
+            workSpace->m_postingProbeStats.m_postingLogicalBytes,
+            workSpace->m_postingProbeStats.m_postingPhysicalBytes,
+            workSpace->m_postingProbeStats.m_adcScannedVectors,
+            workSpace->m_postingProbeStats.m_adcSurvivors,
+            workSpace->m_postingProbeStats.m_rerankCandidates,
+            workSpace->m_postingProbeStats.m_rerankReadRequests,
+            workSpace->m_postingProbeStats.m_rerankPhysicalBytes);
         if (ret != ErrorCode::Success)
             return ret;
         m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
@@ -3917,10 +4351,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 {
                     const std::string nodeDir = HeadBundleNodeAbsolutePath(m_options, m_options.m_indexDirectory, static_cast<int>(nodeId));
                     const std::string nodeVectorFile = nodeDir + FolderSep + m_options.m_headVectorFile;
+                    const std::string nodeCanonicalVectorFile = nodeDir + FolderSep + "vectors.bin";
+                    const std::string buildInputVectorFile =
+                        fileexists(nodeVectorFile.c_str()) ? nodeVectorFile : nodeCanonicalVectorFile;
                     // Pass the H1 split so the bundle BKT tree is built over H1
                     // only and U_extra are appended graph-only (no back-edges).
                     SizeType n_h1_node = static_cast<SizeType>(m_pendingNodeHeadSelections[nodeId].size());
-                    if (!buildHeadIndexFromFile(nodeVectorFile, nodeDir, n_h1_node)) {
+                    if (!buildHeadIndexFromFile(buildInputVectorFile, nodeDir, n_h1_node)) {
                         return ErrorCode::Fail;
                     }
                     // The bundle subgraph's SaveIndex has written node vectors.bin,
@@ -3929,11 +4366,9 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                     // SPTAGHeadVectors.bin (EnsureHeadBundleNodeLoaded uses vectors.bin
                     // via LoadIndex + SPTAGHeadVectorIDs.bin; AugmentHeadGraph likewise).
                     // Remove the redundant copy to halve per-node head-vector storage.
-                    // When resume persistence is enabled, keep it: BuildHead reads this
-                    // file, so preserving it makes BuildHead idempotent on a resume that
-                    // skips SelectHead (which otherwise re-wrote these per-node files).
-                    if (!SpannEnvFlagOn("SPTAG_PERSIST_SELECTHEAD") &&
-                        fileexists(nodeVectorFile.c_str()) && remove(nodeVectorFile.c_str()) != 0) {
+                    // BuildHead can resume from vectors.bin if the transient input is
+                    // already gone, so never keep this duplicate in the final index.
+                    if (fileexists(nodeVectorFile.c_str()) && remove(nodeVectorFile.c_str()) != 0) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                                      "Failed to remove redundant node head vector file %s\n",
                                      nodeVectorFile.c_str());
@@ -4093,19 +4528,13 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     }
 
     // ---- Dual-pool slim (metadata-only) head root ----
-    // When SPTAG_METAONLY_HEAD_ROOT is set for a bundle build, rewrite
-    // HeadIndex/{vectors,tree,graph,deletes}.bin so the root KDT physically holds ONLY
-    // the U_extra head vectors (logical ids [h1Split,total)); every H1 head vector is
-    // dropped from the root and resolved at search time from the per-bundle subgraph
+    // For bundle builds, rewrite HeadIndex/{vectors,tree,graph,deletes}.bin to a tiny
+    // compatibility KDT and resolve ALL real head vectors from the per-bundle subgraph
     // stores (see SetupMetadataOnlyHeadStore). A head_metaonly.bin sidecar records
-    // totalHeads/h1Split/dim. For a build with no U_extra (e.g. Mode B) the root keeps a
-    // single dummy placeholder sample (never resolved) so the KDT is non-empty, and ALL
-    // heads resolve from bundles. This removes the full H1 copy (~29 MB on SIFT-1M).
-    static const bool s_slimHeadRoot = []() {
-        const char* v = std::getenv("SPTAG_METAONLY_HEAD_ROOT");
-        return (v && (v[0] == '1' || v[0] == 't' || v[0] == 'T'));
-    }();
-    if (s_slimHeadRoot && !m_pendingNodeHeadSelections.empty() && m_index != nullptr)
+    // totalHeads/h1Split/dim. h1Split is set to totalHeads so no real head vector is
+    // physically stored in the root. This removes the obsolete full global head graph
+    // from the persisted index.
+    if (!m_pendingNodeHeadSelections.empty() && m_index != nullptr)
     {
         SizeType total = m_vectorTranslateMap.R();
         SizeType n_h1 = total;
@@ -4122,26 +4551,18 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             }
             else
             {
-                n_h1 = 0;
-                for (auto r : m_pendingHeadRoles) if (r == 0) ++n_h1;
-                n_extra = total - n_h1;
+                n_h1 = total;   // all heads resolve from bundle stores
+                n_extra = 0;
             }
         }
         if (rolesOk)
         {
             auto slimValueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
             auto slimDims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
-            SizeType physCount = (n_extra > 0) ? n_extra : 1; // never persist a 0-sample KDT
+            SizeType physCount = 1; // compatibility dummy only; real heads live in bundles
             ByteArray slimBytes = ByteArray::Alloc(
                 static_cast<size_t>(physCount) * static_cast<size_t>(slimDims) * sizeof(T));
             std::memset(slimBytes.Data(), 0, slimBytes.Length());
-            for (SizeType j = 0; j < n_extra; ++j)
-            {
-                const void* src = m_index->GetSample(n_h1 + j);
-                if (src)
-                    std::memcpy(slimBytes.Data() + static_cast<size_t>(j) * slimDims * sizeof(T),
-                                src, static_cast<size_t>(slimDims) * sizeof(T));
-            }
             auto slimVecSet = std::make_shared<BasicVectorSet>(
                 slimBytes, slimValueType, static_cast<DimensionType>(slimDims), physCount);
             auto slim = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, slimValueType);
@@ -4447,6 +4868,12 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
         return ErrorCode::EmptyData;
     if (p_dimension != GetFeatureDim())
         return ErrorCode::DimensionSizeMismatch;
+    if (m_options.m_numTagsPerVec > 0 || !m_headBundleNodes.empty()) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] this index requires AddIndexWithTags so posting tags and "
+                     "pure/tail membership stay consistent.\n");
+        return ErrorCode::Undefined;
+    }
 
     SizeType begin, end;
     {
@@ -4522,6 +4949,1128 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     workSpace->m_deduper.clear();
     workSpace->m_postingIDs.clear();
     return m_extraSearcher->AddIndex(workSpace.get(), vectorSet, m_index, begin);
+}
+
+template <typename T>
+ErrorCode Index<T>::GetTaggedHeadLocation(SizeType p_headID, TaggedHeadLocation& p_location) const
+{
+    p_location = {};
+    if (p_headID < 0) return ErrorCode::Key_OverFlow;
+
+    // A non-slim single-head index is the original SPANN topology: the root
+    // graph owns the posting IDs directly.
+    if (!m_metadataOnlyHeadStore &&
+        (m_headBundleNodes.empty() || m_headBundleNodes.size() == 1)) {
+        if (m_index == nullptr || p_headID >= m_index->GetNumSamples()) {
+            return ErrorCode::Key_OverFlow;
+        }
+        p_location.m_localHeadID = p_headID;
+        return ErrorCode::Success;
+    }
+
+    for (size_t slot = 0; slot < m_headBundleNodes.size(); ++slot) {
+        if (EnsureHeadBundleNodeLoaded(static_cast<int>(slot)) != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+        const auto& localToGlobal = m_headBundleLocalToGlobalHIDs[slot];
+        const auto it = std::find(localToGlobal.begin(), localToGlobal.end(), p_headID);
+        if (it != localToGlobal.end()) {
+            p_location.m_bundleSlot = static_cast<int>(slot);
+            p_location.m_localHeadID = static_cast<SizeType>(it - localToGlobal.begin());
+            return ErrorCode::Success;
+        }
+    }
+    return ErrorCode::Key_OverFlow;
+}
+
+template <typename T>
+ErrorCode Index<T>::MarkCrossEdgesDirty(const std::string& p_baseDir)
+{
+    if (m_headBundleNodes.size() <= 1) return ErrorCode::Success;
+    m_headCrossEdgesDirty.store(true, std::memory_order_release);
+
+    const std::string baseDir = p_baseDir.empty()
+        ? (m_headBundleBaseDir.empty() ? m_options.m_indexDirectory : m_headBundleBaseDir)
+        : p_baseDir;
+    if (baseDir.empty()) return ErrorCode::FailedCreateFile;
+    std::string headDir = baseDir;
+    if (!headDir.empty() && headDir.back() != FolderSep) headDir += FolderSep;
+    headDir += m_options.m_headIndexFolder;
+    if (!EnsureDirectory(headDir)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "[TaggedUpdate] cannot create cross-edge marker directory %s.\n",
+                     headDir.c_str());
+        return ErrorCode::FailedCreateFile;
+    }
+    const std::string marker = headDir + FolderSep + Helper::kHeadCrossEdgesDirtyFileName;
+    std::ofstream out(marker + ".tmp", std::ios::trunc);
+    if (!out) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "[TaggedUpdate] cannot mark cross-edge snapshot dirty at %s.\n",
+                     marker.c_str());
+        return ErrorCode::FailedCreateFile;
+    }
+    out << "subset-local head topology changed; rebuild head_cross_edges.bin before the next deployment\n";
+    out.close();
+    if (std::rename((marker + ".tmp").c_str(), marker.c_str()) != 0) {
+        std::remove((marker + ".tmp").c_str());
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "[TaggedUpdate] cannot publish cross-edge dirty marker %s.\n",
+                     marker.c_str());
+        return ErrorCode::FailedCreateFile;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::AddTaggedHeadToBundle(int p_bundleSlot, const T* p_center,
+                                          SizeType p_anchorVID, SizeType p_templateHeadID,
+                                          SizeType& p_headID)
+{
+    p_headID = -1;
+    if (p_center == nullptr || p_anchorVID < 0 || m_extraSearcher == nullptr ||
+        m_index == nullptr) {
+        return ErrorCode::Fail;
+    }
+    if (m_metadataOnlyHeadStore && dynamic_cast<KDT::Index<T>*>(m_index.get()) == nullptr) {
+        return ErrorCode::Fail;
+    }
+
+    std::shared_ptr<VectorIndex> graph;
+    if (p_bundleSlot < 0) {
+        graph = m_index;
+    } else {
+        if (p_bundleSlot >= static_cast<int>(m_headBundleNodes.size()) ||
+            EnsureHeadBundleNodeLoaded(p_bundleSlot) != ErrorCode::Success) {
+            return ErrorCode::Fail;
+        }
+        graph = m_loadedHeadBundleIndexes[static_cast<size_t>(p_bundleSlot)];
+    }
+    if (graph == nullptr) return ErrorCode::Fail;
+
+    // Cross-edge snapshots cannot represent a newly appended local graph head.
+    // Publish the dirty marker before any topology mutation becomes visible.
+    const ErrorCode dirtyRet = MarkCrossEdgesDirty();
+    if (dirtyRet != ErrorCode::Success) return dirtyRet;
+    const SizeType newHeadID = m_vectorTranslateMap.R();
+    int begin = -1;
+    int end = -1;
+    ErrorCode ret = graph->AddIndexId(p_center, 1, m_options.m_dim, begin, end);
+    if (ret != ErrorCode::Success || begin < 0 || end != begin + 1) {
+        return ret == ErrorCode::Success ? ErrorCode::Fail : ret;
+    }
+    ret = graph->AddIndexIdx(static_cast<SizeType>(begin), static_cast<SizeType>(end));
+    if (ret != ErrorCode::Success) {
+        graph->DeleteIndex(static_cast<SizeType>(begin));
+        return ret;
+    }
+
+    ret = m_extraSearcher->ReserveTaggedPosting(newHeadID);
+    if (ret != ErrorCode::Success) {
+        graph->DeleteIndex(static_cast<SizeType>(begin));
+        return ret;
+    }
+    if (m_vectorTranslateMap.AddBatch(1) != ErrorCode::Success) {
+        graph->DeleteIndex(static_cast<SizeType>(begin));
+        return ErrorCode::MemoryOverFlow;
+    }
+    *(m_vectorTranslateMap.At(newHeadID)) = static_cast<std::uint64_t>(p_anchorVID);
+
+    if (m_index->HasHeadNodeMeta()) {
+        const SizeType oldMetaCount = m_index->GetHeadNodeMetaSampleCount();
+        const size_t stride = m_index->GetHeadNodeMetaStride();
+        if (oldMetaCount != newHeadID || stride == 0) {
+            graph->DeleteIndex(static_cast<SizeType>(begin));
+            return ErrorCode::Fail;
+        }
+        auto& blob = m_index->GetHeadNodeMetaBlob();
+        const size_t oldBytes = blob.size();
+        blob.resize(oldBytes + stride, 0);
+        if (p_templateHeadID >= 0 && p_templateHeadID < oldMetaCount) {
+            std::memcpy(blob.data() + oldBytes,
+                        blob.data() + static_cast<size_t>(p_templateHeadID) * stride,
+                        stride);
+        }
+        m_index->SetHeadNodeGlobalVID(newHeadID, p_anchorVID);
+        m_index->SetHeadNodeBundleNodeId(
+            newHeadID, static_cast<std::int16_t>(p_bundleSlot < 0 ? 0 : p_bundleSlot));
+    }
+
+    if (p_bundleSlot >= 0) {
+        auto& localToGlobal = m_headBundleLocalToGlobalHIDs[static_cast<size_t>(p_bundleSlot)];
+        localToGlobal.push_back(newHeadID);
+        auto& node = m_headBundleNodes[static_cast<size_t>(p_bundleSlot)];
+        ++node.headCount;
+        ++node.postingCount;
+        {
+            std::lock_guard<std::mutex> lock(m_globalVIDToBundleLocMutex);
+            m_globalHeadVIDToLocalHID[p_anchorVID] = newHeadID;
+            m_globalVIDToBundleLoc[p_anchorVID] =
+                std::make_pair(p_bundleSlot, static_cast<SizeType>(begin));
+        }
+    } else if (!m_headBundleNodes.empty()) {
+        ++m_headBundleNodes.front().headCount;
+        ++m_headBundleNodes.front().postingCount;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_headCrossEdgesMutex);
+        if (!m_headBundleNodeByB.empty()) {
+            m_headBundleNodeByB.resize(static_cast<size_t>(newHeadID) + 1, -1);
+            m_headBundleLocalByB.resize(static_cast<size_t>(newHeadID) + 1, -1);
+            m_headCrossEdgeOffsetByB.resize(static_cast<size_t>(newHeadID) + 1, UINT32_MAX);
+            m_headCrossEdgeCountByB.resize(static_cast<size_t>(newHeadID) + 1, 0);
+            m_headBundleNodeByB[static_cast<size_t>(newHeadID)] =
+                static_cast<std::int16_t>(p_bundleSlot < 0 ? 0 : p_bundleSlot);
+            m_headBundleLocalByB[static_cast<size_t>(newHeadID)] = static_cast<SizeType>(begin);
+        }
+    }
+    if (m_metadataOnlyHeadStore) {
+        auto* metadataOnlyIndex = dynamic_cast<KDT::Index<T>*>(m_index.get());
+        metadataOnlyIndex->SetMetadataOnly(newHeadID + 1, newHeadID + 1);
+        m_metaOnlyHeadVectorPtrs.resize(static_cast<size_t>(newHeadID) + 1, nullptr);
+        m_metaOnlyHeadVectorPtrs[static_cast<size_t>(newHeadID)] =
+            graph->GetSample(static_cast<SizeType>(begin));
+    }
+
+    p_headID = newHeadID;
+    return ErrorCode::Success;
+}
+
+template <typename T>
+void Index<T>::TombstoneTaggedHeads(ExtraWorkSpace* p_workspace,
+                                    const std::vector<SizeType>& p_headIDs,
+                                    const TaggedPostingSnapshot* p_restorePosting)
+{
+    if (p_workspace == nullptr || p_headIDs.empty() || m_extraSearcher == nullptr) return;
+
+    if (MarkCrossEdgesDirty() != ErrorCode::Success) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] could not persist the cross-edge dirty marker during split rollback.\n");
+    }
+    std::vector<TaggedPostingSnapshot> rewrites;
+    rewrites.reserve(p_headIDs.size() + (p_restorePosting == nullptr ? 0 : 1));
+    if (p_restorePosting != nullptr) {
+        rewrites.push_back(*p_restorePosting);
+    }
+
+    for (SizeType headID : p_headIDs) {
+        TaggedHeadLocation location;
+        if (GetTaggedHeadLocation(headID, location) == ErrorCode::Success) {
+            std::shared_ptr<VectorIndex> graph = location.m_bundleSlot < 0
+                ? m_index
+                : m_loadedHeadBundleIndexes[static_cast<size_t>(location.m_bundleSlot)];
+            if (graph != nullptr && graph->ContainSample(location.m_localHeadID)) {
+                const ErrorCode ret = graph->DeleteIndex(location.m_localHeadID);
+                if (ret != ErrorCode::Success && ret != ErrorCode::VectorNotFound) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "[TaggedUpdate] failed to tombstone rollback head %d (error %d).\n",
+                                 headID, static_cast<int>(ret));
+                }
+            }
+        }
+        TaggedPostingSnapshot empty;
+        empty.m_headID = headID;
+        rewrites.emplace_back(std::move(empty));
+    }
+
+    if (m_extraSearcher->RewriteTaggedPostings(p_workspace, rewrites) != ErrorCode::Success) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] failed to restore posting state while rolling back split heads.\n");
+    }
+}
+
+template <typename T>
+ErrorCode Index<T>::SplitTaggedPosting(ExtraWorkSpace* p_workspace, SizeType p_headID,
+                                       const T* p_preferredCenter, SizeType p_preferredVID)
+{
+    if (p_workspace == nullptr || p_preferredCenter == nullptr || m_extraSearcher == nullptr) {
+        return ErrorCode::Fail;
+    }
+
+    TaggedHeadLocation location;
+    ErrorCode ret = GetTaggedHeadLocation(p_headID, location);
+    if (ret != ErrorCode::Success) return ret;
+    std::shared_ptr<VectorIndex> graph = location.m_bundleSlot < 0
+        ? m_index
+        : m_loadedHeadBundleIndexes[static_cast<size_t>(location.m_bundleSlot)];
+    if (graph == nullptr || !graph->ContainSample(location.m_localHeadID)) {
+        return ErrorCode::VectorNotFound;
+    }
+
+    TaggedPostingSnapshot source;
+    ret = m_extraSearcher->GetTaggedPostingSnapshot(p_workspace, p_headID, source);
+    if (ret != ErrorCode::Success) return ret;
+    const int stride = m_extraSearcher->GetTaggedRecordSize();
+    const int pureCapacity = m_extraSearcher->GetTaggedPureCapacity();
+    if (stride <= 0 || pureCapacity <= 0 || source.m_records.empty()) {
+        return ErrorCode::Posting_OverFlow;
+    }
+    const int total = static_cast<int>(source.m_records.size() / static_cast<size_t>(stride));
+
+    struct LiveRecord
+    {
+        int m_record = -1;
+        SizeType m_vid = -1;
+    };
+    std::vector<LiveRecord> pureRecords;
+    std::vector<LiveRecord> tailRecords;
+    pureRecords.reserve(static_cast<size_t>(source.m_pureCount));
+    tailRecords.reserve(static_cast<size_t>(std::max(0, total - source.m_pureCount)));
+    for (int record = 0; record < total; ++record) {
+        const char* bytes = source.m_records.data() + static_cast<size_t>(record) * stride;
+        SizeType vid = -1;
+        std::uint8_t version = 0;
+        std::memcpy(&vid, bytes, sizeof(vid));
+        std::memcpy(&version, bytes + sizeof(vid), sizeof(version));
+        if (vid < 0 || vid >= m_versionMap.Count() || m_versionMap.Deleted(vid) ||
+            m_versionMap.GetVersion(vid) != version) {
+            continue;
+        }
+        if (record < source.m_pureCount) pureRecords.push_back({record, vid});
+        else tailRecords.push_back({record, vid});
+    }
+
+    if (static_cast<int>(pureRecords.size()) <= pureCapacity) {
+        // Stale records consumed the buffer. Compact without changing topology.
+        TaggedPostingSnapshot compacted;
+        compacted.m_headID = p_headID;
+        compacted.m_pureCount = static_cast<int>(pureRecords.size());
+        for (const auto& record : pureRecords) {
+            compacted.m_records.append(
+                source.m_records.data() + static_cast<size_t>(record.m_record) * stride,
+                static_cast<size_t>(stride));
+        }
+        for (const auto& record : tailRecords) {
+            compacted.m_records.append(
+                source.m_records.data() + static_cast<size_t>(record.m_record) * stride,
+                static_cast<size_t>(stride));
+        }
+        return m_extraSearcher->RewriteTaggedPostings(p_workspace, {compacted});
+    }
+    if (pureRecords.size() < 2) return ErrorCode::Posting_OverFlow;
+
+    // Centroids are learned only from the filtered-visible pure prefix. Tail
+    // records are subsequently classified against those centroids.
+    std::vector<SizeType> pureVIDs;
+    pureVIDs.reserve(pureRecords.size());
+    for (const auto& record : pureRecords) pureVIDs.push_back(record.m_vid);
+    ByteArray pureVectors;
+    ret = m_extraSearcher->ReadTaggedFullVectors(pureVIDs, pureVectors);
+    if (ret != ErrorCode::Success) return ret;
+
+    const SizeType pureCount = static_cast<SizeType>(pureRecords.size());
+    COMMON::Dataset<T> samples(pureCount, m_options.m_dim,
+                               std::max<SizeType>(1, m_index->m_iDataBlockSize),
+                               std::max<SizeType>(pureCount + 1, m_index->m_iDataCapacity),
+                               pureVectors.Data(), true);
+    std::vector<int> localIndices(static_cast<size_t>(pureCount));
+    std::iota(localIndices.begin(), localIndices.end(), 0);
+    SPTAG::COMMON::KmeansArgs<T> args(2, samples.C(), pureCount, 1,
+                                      graph->GetDistCalcMethod(), graph->m_pQuantizer);
+    std::shuffle(localIndices.begin(), localIndices.end(), std::mt19937(std::random_device()()));
+    const int clusters = SPTAG::COMMON::KmeansClustering(
+        samples, localIndices, 0, pureCount, args, 1000, 100.0F, false, nullptr);
+    if (clusters != 2 || args.counts[0] == 0 || args.counts[1] == 0) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] split of posting %d produced %d clusters (%d, %d).\n",
+                     p_headID, clusters, args.counts[0], args.counts[1]);
+        return ErrorCode::Posting_OverFlow;
+    }
+
+    std::vector<int> pureCluster(static_cast<size_t>(pureCount), -1);
+    if (std::max(args.counts[0], args.counts[1]) > pureCapacity) {
+        if (pureCount > static_cast<SizeType>(pureCapacity) * 2) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "[TaggedUpdate] split posting %d has %d live pure records, exceeding "
+                         "the two-posting capacity %d.\n",
+                         p_headID, pureCount, pureCapacity * 2);
+            return ErrorCode::Posting_OverFlow;
+        }
+
+        // The original two-means implementation can isolate a small group of
+        // old records and leave the new cluster above the hard posting limit.
+        // Preserve every update by making the bisection capacity-safe, then
+        // recompute both pure-derived centroids before graph insertion.
+        std::vector<std::pair<float, SizeType>> ordered;
+        ordered.reserve(static_cast<size_t>(pureCount));
+        const T* vectors = reinterpret_cast<const T*>(pureVectors.Data());
+        for (SizeType i = 0; i < pureCount; ++i) {
+            const T* vector = vectors + static_cast<size_t>(i) * m_options.m_dim;
+            ordered.emplace_back(graph->ComputeDistance(vector, args.centers) -
+                                     graph->ComputeDistance(
+                                         vector, args.centers + m_options.m_dim),
+                                 i);
+        }
+        std::sort(ordered.begin(), ordered.end());
+        std::array<std::vector<double>, 2> sums = {
+            std::vector<double>(static_cast<size_t>(m_options.m_dim), 0.0),
+            std::vector<double>(static_cast<size_t>(m_options.m_dim), 0.0)};
+        args.counts[0] = 0;
+        args.counts[1] = 0;
+        for (SizeType rank = 0; rank < pureCount; ++rank) {
+            const int cluster = rank < pureCount / 2 ? 0 : 1;
+            const SizeType pureIndex = ordered[static_cast<size_t>(rank)].second;
+            pureCluster[static_cast<size_t>(pureIndex)] = cluster;
+            ++args.counts[cluster];
+            const T* vector = vectors + static_cast<size_t>(pureIndex) * m_options.m_dim;
+            for (DimensionType dim = 0; dim < m_options.m_dim; ++dim) {
+                sums[static_cast<size_t>(cluster)][static_cast<size_t>(dim)] += vector[dim];
+            }
+        }
+        for (int cluster = 0; cluster < 2; ++cluster) {
+            T* center = args.centers + static_cast<size_t>(cluster) * m_options.m_dim;
+            for (DimensionType dim = 0; dim < m_options.m_dim; ++dim) {
+                center[dim] = static_cast<T>(
+                    sums[static_cast<size_t>(cluster)][static_cast<size_t>(dim)] /
+                    args.counts[cluster]);
+            }
+            if (graph->GetDistCalcMethod() == DistCalcMethod::Cosine) {
+                COMMON::Utils::Normalize(center, m_options.m_dim, COMMON::Utils::GetBase<T>());
+            }
+        }
+    } else {
+        int offset = 0;
+        for (int cluster = 0; cluster < 2; ++cluster) {
+            for (int i = 0; i < args.counts[cluster]; ++i) {
+                pureCluster[static_cast<size_t>(localIndices[static_cast<size_t>(offset + i)])] = cluster;
+            }
+            offset += args.counts[cluster];
+        }
+    }
+
+    const T* oldCenter = reinterpret_cast<const T*>(graph->GetSample(location.m_localHeadID));
+    const float center0Distance = graph->ComputeDistance(args.centers, oldCenter);
+    const float center1Distance =
+        graph->ComputeDistance(args.centers + m_options.m_dim, oldCenter);
+    const int retainedCluster = center0Distance <= center1Distance ? 0 : 1;
+    const bool retainOldHead =
+        std::min(center0Distance, center1Distance) < Epsilon;
+
+    std::array<std::vector<int>, 2> pureByCluster;
+    std::array<std::vector<std::pair<float, int>>, 2> tailByCluster;
+    for (SizeType i = 0; i < pureCount; ++i) {
+        const int cluster = pureCluster[static_cast<size_t>(i)];
+        if (cluster < 0) return ErrorCode::Fail;
+        pureByCluster[static_cast<size_t>(cluster)].push_back(static_cast<int>(i));
+    }
+
+    if (!tailRecords.empty()) {
+        std::vector<SizeType> tailVIDs;
+        tailVIDs.reserve(tailRecords.size());
+        for (const auto& record : tailRecords) tailVIDs.push_back(record.m_vid);
+        ByteArray tailVectors;
+        ret = m_extraSearcher->ReadTaggedFullVectors(tailVIDs, tailVectors);
+        if (ret != ErrorCode::Success) return ret;
+        const T* tailData = reinterpret_cast<const T*>(tailVectors.Data());
+        for (size_t i = 0; i < tailRecords.size(); ++i) {
+            const T* vector = tailData + i * static_cast<size_t>(m_options.m_dim);
+            const float distance0 = graph->ComputeDistance(vector, args.centers);
+            const float distance1 = graph->ComputeDistance(
+                vector, args.centers + m_options.m_dim);
+            const int cluster = distance0 <= distance1 ? 0 : 1;
+            tailByCluster[static_cast<size_t>(cluster)].emplace_back(
+                std::min(distance0, distance1), static_cast<int>(i));
+        }
+    }
+
+    auto isKnownHeadVID = [&](SizeType vid) {
+        if (vid == MaxSize || vid < 0) return true;
+        if (m_globalHeadVIDToLocalHID.find(vid) != m_globalHeadVIDToLocalHID.end()) return true;
+        for (SizeType head = 0; head < m_vectorTranslateMap.R(); ++head) {
+            if (static_cast<SizeType>(*(m_vectorTranslateMap[head])) == vid) return true;
+        }
+        return false;
+    };
+    std::unordered_set<SizeType> reservedAnchors;
+    auto selectAnchor = [&](int cluster, bool preferIncoming) -> SizeType {
+        if (preferIncoming && !isKnownHeadVID(p_preferredVID) &&
+            reservedAnchors.insert(p_preferredVID).second) {
+            return p_preferredVID;
+        }
+        for (int pureIndex : pureByCluster[static_cast<size_t>(cluster)]) {
+            const SizeType candidate = pureRecords[static_cast<size_t>(pureIndex)].m_vid;
+            if (!isKnownHeadVID(candidate) && reservedAnchors.insert(candidate).second) {
+                return candidate;
+            }
+        }
+        return -1;
+    };
+
+    const SizeType firstNewHeadID = m_vectorTranslateMap.R();
+    auto rollbackNewHeads = [&](const TaggedPostingSnapshot* restorePosting) {
+        std::vector<SizeType> newHeads;
+        for (SizeType headID = firstNewHeadID; headID < m_vectorTranslateMap.R(); ++headID) {
+            newHeads.push_back(headID);
+        }
+        TombstoneTaggedHeads(p_workspace, newHeads, restorePosting);
+    };
+
+    std::array<SizeType, 2> heads = {-1, -1};
+    if (retainOldHead) {
+        heads[static_cast<size_t>(retainedCluster)] = p_headID;
+        const int newCluster = 1 - retainedCluster;
+        const SizeType anchor = selectAnchor(newCluster, true);
+        if (anchor < 0) return ErrorCode::Posting_OverFlow;
+        ret = AddTaggedHeadToBundle(location.m_bundleSlot,
+                                    args.centers + static_cast<size_t>(newCluster) * m_options.m_dim,
+                                    anchor, p_headID, heads[static_cast<size_t>(newCluster)]);
+        if (ret != ErrorCode::Success) {
+            rollbackNewHeads(nullptr);
+            return ret;
+        }
+    } else {
+        for (int cluster = 0; cluster < 2; ++cluster) {
+            const SizeType anchor = selectAnchor(cluster, cluster == 0);
+            if (anchor < 0) {
+                rollbackNewHeads(nullptr);
+                return ErrorCode::Posting_OverFlow;
+            }
+            ret = AddTaggedHeadToBundle(location.m_bundleSlot,
+                                        args.centers + static_cast<size_t>(cluster) * m_options.m_dim,
+                                        anchor, p_headID, heads[static_cast<size_t>(cluster)]);
+            if (ret != ErrorCode::Success) {
+                rollbackNewHeads(nullptr);
+                return ret;
+            }
+        }
+    }
+
+    auto makeRewrite = [&](int cluster, SizeType targetHead) {
+        TaggedPostingSnapshot rewrite;
+        rewrite.m_headID = targetHead;
+        std::unordered_set<SizeType> seen;
+        for (int pureIndex : pureByCluster[static_cast<size_t>(cluster)]) {
+            const auto& live = pureRecords[static_cast<size_t>(pureIndex)];
+            if (seen.insert(live.m_vid).second) {
+                rewrite.m_records.append(
+                    source.m_records.data() + static_cast<size_t>(live.m_record) * stride,
+                    static_cast<size_t>(stride));
+                ++rewrite.m_pureCount;
+            }
+        }
+
+        auto& tails = tailByCluster[static_cast<size_t>(cluster)];
+        std::sort(tails.begin(), tails.end(),
+                  [](const std::pair<float, int>& left, const std::pair<float, int>& right) {
+                      return left.first < right.first;
+                  });
+        const size_t purePages =
+            (static_cast<size_t>(rewrite.m_pureCount) * stride + PageSize - 1) / PageSize;
+        const size_t maxRecords =
+            ((purePages + static_cast<size_t>(m_options.m_unfilterTailBufferLength)) * PageSize) /
+            static_cast<size_t>(stride);
+        for (const auto& tail : tails) {
+            if (rewrite.m_records.size() / static_cast<size_t>(stride) >= maxRecords) break;
+            const auto& live = tailRecords[static_cast<size_t>(tail.second)];
+            if (seen.insert(live.m_vid).second) {
+                rewrite.m_records.append(
+                    source.m_records.data() + static_cast<size_t>(live.m_record) * stride,
+                    static_cast<size_t>(stride));
+            }
+        }
+        return rewrite;
+    };
+
+    std::vector<TaggedPostingSnapshot> rewrites;
+    rewrites.reserve(retainOldHead ? 2 : 3);
+    for (int cluster = 0; cluster < 2; ++cluster) {
+        rewrites.emplace_back(makeRewrite(cluster, heads[static_cast<size_t>(cluster)]));
+    }
+    if (!retainOldHead) {
+        TaggedPostingSnapshot deleted;
+        deleted.m_headID = p_headID;
+        rewrites.emplace_back(std::move(deleted));
+    }
+
+    ret = m_extraSearcher->RewriteTaggedPostings(p_workspace, rewrites);
+    if (ret != ErrorCode::Success) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] failed to rewrite split posting %d (error %d).\n",
+                     p_headID, static_cast<int>(ret));
+        for (const auto& rewrite : rewrites) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "[TaggedUpdate] rejected split target %d: pure=%d total=%zu capacity=%d.\n",
+                         rewrite.m_headID, rewrite.m_pureCount,
+                         rewrite.m_records.size() / static_cast<size_t>(stride), pureCapacity);
+        }
+        rollbackNewHeads(&source);
+        return ret;
+    }
+    if (!retainOldHead) {
+        graph->DeleteIndex(location.m_localHeadID);
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::EnsureTaggedPureCapacity(ExtraWorkSpace* p_workspace,
+                                             std::shared_ptr<VectorSet>& p_vectors,
+                                             SizeType p_begin,
+                                             PostingUpdateTargets& p_targets,
+                                             bool& p_topologyChanged)
+{
+    p_topologyChanged = false;
+    if (p_workspace == nullptr || p_vectors == nullptr || m_extraSearcher == nullptr) {
+        return ErrorCode::Fail;
+    }
+    const int pureCapacity = m_extraSearcher->GetTaggedPureCapacity();
+    if (pureCapacity <= 0) return ErrorCode::Posting_OverFlow;
+
+    struct PendingPure
+    {
+        int m_count = 0;
+        SizeType m_firstVectorOffset = -1;
+    };
+    std::unordered_map<SizeType, PendingPure> pending;
+    for (SizeType vectorOffset = 0; vectorOffset < p_vectors->Count(); ++vectorOffset) {
+        for (const PostingUpdateTarget& target : p_targets[static_cast<size_t>(vectorOffset)]) {
+            if (target.m_kind != PostingUpdateKind::Pure) continue;
+            PendingPure& targetPending = pending[target.m_headID];
+            ++targetPending.m_count;
+            if (targetPending.m_firstVectorOffset < 0) {
+                targetPending.m_firstVectorOffset = vectorOffset;
+            }
+        }
+    }
+
+    for (const auto& pendingEntry : pending) {
+        TaggedPostingSnapshot snapshot;
+        ErrorCode ret = m_extraSearcher->GetTaggedPostingSnapshot(
+            p_workspace, pendingEntry.first, snapshot);
+        if (ret != ErrorCode::Success) return ret;
+        if (snapshot.m_pureCount <= pureCapacity) continue;
+
+        const SizeType vectorOffset = pendingEntry.second.m_firstVectorOffset;
+        ret = SplitTaggedPosting(
+            p_workspace, pendingEntry.first,
+            reinterpret_cast<const T*>(p_vectors->GetVector(vectorOffset)),
+            p_begin + vectorOffset);
+        if (ret != ErrorCode::Success) return ret;
+        p_topologyChanged = true;
+        return ErrorCode::Success;
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::MergeTaggedPosting(ExtraWorkSpace* p_workspace, SizeType p_headID)
+{
+    if (p_workspace == nullptr || m_extraSearcher == nullptr) return ErrorCode::Fail;
+
+    TaggedHeadLocation currentLocation;
+    ErrorCode ret = GetTaggedHeadLocation(p_headID, currentLocation);
+    if (ret != ErrorCode::Success) return ret;
+    std::shared_ptr<VectorIndex> graph = currentLocation.m_bundleSlot < 0
+        ? m_index
+        : m_loadedHeadBundleIndexes[static_cast<size_t>(currentLocation.m_bundleSlot)];
+    if (graph == nullptr || !graph->ContainSample(currentLocation.m_localHeadID)) {
+        return ErrorCode::VectorNotFound;
+    }
+
+    TaggedPostingSnapshot current;
+    ret = m_extraSearcher->GetTaggedPostingSnapshot(p_workspace, p_headID, current);
+    if (ret != ErrorCode::Success) return ret;
+    const int stride = m_extraSearcher->GetTaggedRecordSize();
+    const int pureCapacity = m_extraSearcher->GetTaggedPureCapacity();
+    if (stride <= 0 || pureCapacity <= 0) return ErrorCode::Fail;
+
+    struct RecordRef
+    {
+        SizeType m_vid = -1;
+        const char* m_record = nullptr;
+    };
+    auto extractLive = [&](const TaggedPostingSnapshot& snapshot,
+                           std::vector<RecordRef>& pure,
+                           std::vector<RecordRef>& tail) -> ErrorCode {
+        if (snapshot.m_records.size() % static_cast<size_t>(stride) != 0) {
+            return ErrorCode::Posting_SizeError;
+        }
+        const int count = static_cast<int>(snapshot.m_records.size() / static_cast<size_t>(stride));
+        if (snapshot.m_pureCount < 0 || snapshot.m_pureCount > count) {
+            return ErrorCode::Posting_SizeError;
+        }
+        for (int i = 0; i < count; ++i) {
+            const char* record = snapshot.m_records.data() + static_cast<size_t>(i) * stride;
+            SizeType vid = -1;
+            std::uint8_t version = 0;
+            std::memcpy(&vid, record, sizeof(vid));
+            std::memcpy(&version, record + sizeof(vid), sizeof(version));
+            if (vid < 0 || vid >= m_versionMap.Count() || m_versionMap.Deleted(vid) ||
+                m_versionMap.GetVersion(vid) != version) {
+                continue;
+            }
+            (i < snapshot.m_pureCount ? pure : tail).push_back({vid, record});
+        }
+        return ErrorCode::Success;
+    };
+
+    std::vector<RecordRef> currentPure;
+    std::vector<RecordRef> currentTail;
+    ret = extractLive(current, currentPure, currentTail);
+    if (ret != ErrorCode::Success) return ret;
+
+    auto compactCurrent = [&]() -> ErrorCode {
+        TaggedPostingSnapshot compacted;
+        compacted.m_headID = p_headID;
+        std::unordered_set<SizeType> seen;
+        for (const RecordRef& record : currentPure) {
+            if (seen.insert(record.m_vid).second) {
+                compacted.m_records.append(record.m_record, static_cast<size_t>(stride));
+                ++compacted.m_pureCount;
+            }
+        }
+        for (const RecordRef& record : currentTail) {
+            if (seen.insert(record.m_vid).second) {
+                compacted.m_records.append(record.m_record, static_cast<size_t>(stride));
+            }
+        }
+        return m_extraSearcher->RewriteTaggedPostings(p_workspace, {compacted});
+    };
+
+    if (static_cast<int>(currentPure.size()) > m_extraSearcher->GetTaggedMergeThreshold()) {
+        return compactCurrent();
+    }
+
+    COMMON::QueryResultSet<T> nearby(
+        const_cast<T*>(reinterpret_cast<const T*>(graph->GetSample(currentLocation.m_localHeadID))),
+        std::max(2, m_options.m_internalResultNum));
+    std::shared_ptr<std::uint8_t> reconstructed;
+    if (graph->m_pQuantizer) {
+        reconstructed.reset(
+            static_cast<std::uint8_t*>(ALIGN_ALLOC(graph->m_pQuantizer->ReconstructSize())),
+            [](std::uint8_t* ptr) { ALIGN_FREE(ptr); });
+        if (!reconstructed) return ErrorCode::MemoryOverFlow;
+        graph->m_pQuantizer->ReconstructVector(
+            reinterpret_cast<const std::uint8_t*>(nearby.GetTarget()), reconstructed.get());
+        nearby.SetTarget(reinterpret_cast<T*>(reconstructed.get()), graph->m_pQuantizer);
+    }
+    ret = graph->SearchIndex(nearby);
+    if (ret != ErrorCode::Success) return ret;
+
+    SizeType neighborHeadID = -1;
+    SizeType neighborLocalID = -1;
+    TaggedPostingSnapshot neighbor;
+    std::vector<RecordRef> neighborPure;
+    std::vector<RecordRef> neighborTail;
+    for (int result = 0; result < nearby.GetResultNum(); ++result) {
+        const BasicResult* candidate = nearby.GetResult(result);
+        if (candidate == nullptr || candidate->VID < 0 ||
+            candidate->VID == currentLocation.m_localHeadID ||
+            !graph->ContainSample(candidate->VID)) {
+            continue;
+        }
+        SizeType candidateGlobal = candidate->VID;
+        if (currentLocation.m_bundleSlot >= 0) {
+            const auto& localToGlobal =
+                m_headBundleLocalToGlobalHIDs[static_cast<size_t>(currentLocation.m_bundleSlot)];
+            if (static_cast<size_t>(candidate->VID) >= localToGlobal.size()) continue;
+            candidateGlobal = localToGlobal[static_cast<size_t>(candidate->VID)];
+        }
+        if (candidateGlobal == p_headID) continue;
+
+        TaggedPostingSnapshot candidateSnapshot;
+        ret = m_extraSearcher->GetTaggedPostingSnapshot(
+            p_workspace, candidateGlobal, candidateSnapshot);
+        if (ret != ErrorCode::Success) return ret;
+        std::vector<RecordRef> candidatePure;
+        std::vector<RecordRef> candidateTail;
+        ret = extractLive(candidateSnapshot, candidatePure, candidateTail);
+        if (ret != ErrorCode::Success) return ret;
+
+        std::unordered_set<SizeType> distinctPure;
+        for (const RecordRef& record : currentPure) distinctPure.insert(record.m_vid);
+        for (const RecordRef& record : candidatePure) distinctPure.insert(record.m_vid);
+        if (static_cast<int>(distinctPure.size()) > pureCapacity) continue;
+
+        neighborHeadID = candidateGlobal;
+        neighborLocalID = candidate->VID;
+        neighbor = std::move(candidateSnapshot);
+        neighborPure = std::move(candidatePure);
+        neighborTail = std::move(candidateTail);
+        break;
+    }
+    if (neighborHeadID < 0) return compactCurrent();
+
+    const bool currentSurvives = currentPure.size() >= neighborPure.size();
+    const SizeType survivorHeadID = currentSurvives ? p_headID : neighborHeadID;
+    const SizeType loserHeadID = currentSurvives ? neighborHeadID : p_headID;
+    const SizeType survivorLocalID =
+        currentSurvives ? currentLocation.m_localHeadID : neighborLocalID;
+    if (survivorLocalID < 0) return ErrorCode::Fail;
+
+    const std::vector<RecordRef>& firstPure = currentSurvives ? currentPure : neighborPure;
+    const std::vector<RecordRef>& secondPure = currentSurvives ? neighborPure : currentPure;
+    const std::vector<RecordRef>& firstTail = currentSurvives ? currentTail : neighborTail;
+    const std::vector<RecordRef>& secondTail = currentSurvives ? neighborTail : currentTail;
+    TaggedPostingSnapshot merged;
+    merged.m_headID = survivorHeadID;
+    std::unordered_set<SizeType> seen;
+    for (const RecordRef& record : firstPure) {
+        if (seen.insert(record.m_vid).second) {
+            merged.m_records.append(record.m_record, static_cast<size_t>(stride));
+            ++merged.m_pureCount;
+        }
+    }
+    for (const RecordRef& record : secondPure) {
+        if (seen.insert(record.m_vid).second) {
+            merged.m_records.append(record.m_record, static_cast<size_t>(stride));
+            ++merged.m_pureCount;
+        }
+    }
+    if (merged.m_pureCount > pureCapacity) return ErrorCode::Posting_OverFlow;
+
+    std::vector<RecordRef> tailRecords;
+    tailRecords.reserve(firstTail.size() + secondTail.size());
+    for (const RecordRef& record : firstTail) {
+        if (seen.insert(record.m_vid).second) tailRecords.push_back(record);
+    }
+    for (const RecordRef& record : secondTail) {
+        if (seen.insert(record.m_vid).second) tailRecords.push_back(record);
+    }
+    if (!tailRecords.empty()) {
+        std::vector<SizeType> tailVIDs;
+        tailVIDs.reserve(tailRecords.size());
+        for (const RecordRef& record : tailRecords) tailVIDs.push_back(record.m_vid);
+        ByteArray tailVectors;
+        ret = m_extraSearcher->ReadTaggedFullVectors(tailVIDs, tailVectors);
+        if (ret != ErrorCode::Success) return ret;
+        const T* vectors = reinterpret_cast<const T*>(tailVectors.Data());
+        const T* survivorCenter =
+            reinterpret_cast<const T*>(graph->GetSample(survivorLocalID));
+        std::vector<std::pair<float, size_t>> sortedTails;
+        sortedTails.reserve(tailRecords.size());
+        for (size_t i = 0; i < tailRecords.size(); ++i) {
+            sortedTails.emplace_back(
+                graph->ComputeDistance(vectors + i * static_cast<size_t>(m_options.m_dim),
+                                       survivorCenter),
+                i);
+        }
+        std::sort(sortedTails.begin(), sortedTails.end());
+        const size_t purePages =
+            (static_cast<size_t>(merged.m_pureCount) * stride + PageSize - 1) / PageSize;
+        const size_t maxRecords =
+            ((purePages + static_cast<size_t>(m_options.m_unfilterTailBufferLength)) * PageSize) /
+            static_cast<size_t>(stride);
+        for (const auto& tail : sortedTails) {
+            if (merged.m_records.size() / static_cast<size_t>(stride) >= maxRecords) break;
+            merged.m_records.append(tailRecords[tail.second].m_record,
+                                    static_cast<size_t>(stride));
+        }
+    }
+
+    TaggedPostingSnapshot deleted;
+    deleted.m_headID = loserHeadID;
+    ret = MarkCrossEdgesDirty();
+    if (ret != ErrorCode::Success) return ret;
+    ret = m_extraSearcher->RewriteTaggedPostings(p_workspace, {merged, deleted});
+    if (ret != ErrorCode::Success) return ret;
+    const SizeType loserLocalID =
+        currentSurvives ? neighborLocalID : currentLocation.m_localHeadID;
+    ret = graph->DeleteIndex(loserLocalID);
+    if (ret != ErrorCode::Success) return ret;
+
+    // Preserve the local-ID/anchor mapping for the tombstoned graph sample.
+    // As in original SPANN, existing graph/tree/cross-edge references resolve
+    // normally and ContainSample suppresses the deleted head at query time.
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::DrainTaggedMergeMaintenance()
+{
+    if (m_extraSearcher == nullptr) return ErrorCode::Success;
+    std::vector<SizeType> candidates;
+    m_extraSearcher->DrainTaggedMergeCandidates(candidates);
+    if (candidates.empty()) return ErrorCode::Success;
+    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                 "[TaggedUpdate] processing %zu subset-local merge candidates.\n",
+                 candidates.size());
+
+    auto workspace = m_workSpaceFactory->GetWorkSpace();
+    if (!workspace) {
+        workspace.reset(new ExtraWorkSpace());
+        m_extraSearcher->InitWorkSpace(workspace.get(), false);
+    } else {
+        m_extraSearcher->InitWorkSpace(workspace.get(), true);
+    }
+    workspace->m_deduper.clear();
+    workspace->m_postingIDs.clear();
+    std::unique_lock<std::shared_timed_mutex> topologyLock(m_headTopologyLock);
+    for (SizeType headID : candidates) {
+        const ErrorCode ret = MergeTaggedPosting(workspace.get(), headID);
+        if (ret != ErrorCode::Success && ret != ErrorCode::VectorNotFound &&
+            ret != ErrorCode::Key_OverFlow) {
+            return ret;
+        }
+    }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::AddIndexWithTags(const void* p_data, SizeType p_vectorNum,
+                                     DimensionType p_dimension, const uint32_t* p_tags,
+                                     int p_numTagsPerVec, bool p_normalized)
+{
+    if (m_options.m_storage == Storage::STATIC || m_extraSearcher == nullptr) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[TaggedUpdate] only FileIO/KV postings support updates.\n");
+        return ErrorCode::Fail;
+    }
+    if (p_data == nullptr || p_tags == nullptr || p_vectorNum <= 0 ||
+        p_dimension != GetFeatureDim() || p_numTagsPerVec != m_options.m_numTagsPerVec) {
+        return p_dimension != GetFeatureDim() ? ErrorCode::DimensionSizeMismatch : ErrorCode::Fail;
+    }
+    std::shared_lock<std::shared_timed_mutex> checkpointLock(m_checkPointLock);
+    std::unique_lock<std::mutex> addLock(m_dataAddLock);
+    std::unique_lock<std::shared_timed_mutex> topologyLock(m_headTopologyLock);
+
+    std::shared_ptr<VectorSet> vectorSet;
+    if (m_options.m_distCalcMethod == DistCalcMethod::Cosine && !p_normalized) {
+        ByteArray arr = ByteArray::Alloc(sizeof(T) * p_vectorNum * p_dimension);
+        memcpy(arr.Data(), p_data, sizeof(T) * p_vectorNum * p_dimension);
+        vectorSet.reset(new BasicVectorSet(arr, GetEnumValueType<T>(), p_dimension, p_vectorNum));
+        const int base = COMMON::Utils::GetBase<T>();
+        for (SizeType i = 0; i < p_vectorNum; ++i) {
+            COMMON::Utils::Normalize(reinterpret_cast<T*>(vectorSet->GetVector(i)), p_dimension, base);
+        }
+    } else {
+        vectorSet.reset(new BasicVectorSet(
+            ByteArray(reinterpret_cast<std::uint8_t*>(const_cast<void*>(p_data)),
+                      sizeof(T) * p_vectorNum * p_dimension, false),
+            GetEnumValueType<T>(), p_dimension, p_vectorNum));
+    }
+
+    struct HeadCandidate {
+        SizeType global = -1;
+        SizeType local = -1;
+        int bundleSlot = -1;
+        float distance = std::numeric_limits<float>::max();
+    };
+
+    auto findBundleSlot = [&](int nodeId) -> int {
+        for (size_t slot = 0; slot < m_headBundleNodes.size(); ++slot) {
+            if (m_headBundleNodes[slot].nodeId == nodeId) return static_cast<int>(slot);
+        }
+        return -1;
+    };
+    const bool useBundleRuntime = !m_headBundleNodes.empty() &&
+                                  (m_headBundleNodes.size() > 1 || m_metadataOnlyHeadStore);
+
+    int routingPivotLevel = -1;
+    std::unordered_map<std::uint32_t, std::vector<int>> tagToNodes;
+    const std::string routingBaseDir = m_options.m_recovery
+        ? m_options.m_persistentBufferPath
+        : m_options.m_indexDirectory;
+    if (useBundleRuntime && m_headBundleNodes.size() > 1 &&
+        !LoadUpdateRoutingNodes(routingBaseDir, m_options.m_headIndexFolder,
+                                routingPivotLevel, tagToNodes)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "[TaggedUpdate] multi-bundle index is missing a valid tag_node_index.bin routing map.\n");
+        return ErrorCode::Fail;
+    }
+
+    auto collectCandidates = [&](const T* vector, int bundleSlot, int requestCount,
+                                 std::vector<HeadCandidate>& output) -> ErrorCode {
+        std::shared_ptr<VectorIndex> headIndex;
+        const std::vector<SizeType>* localToGlobal = nullptr;
+        if (bundleSlot >= 0) {
+            if (EnsureHeadBundleNodeLoaded(bundleSlot) != ErrorCode::Success) return ErrorCode::Fail;
+            headIndex = m_loadedHeadBundleIndexes[static_cast<size_t>(bundleSlot)];
+            localToGlobal = &m_headBundleLocalToGlobalHIDs[static_cast<size_t>(bundleSlot)];
+        } else {
+            headIndex = m_index;
+        }
+        if (headIndex == nullptr || headIndex->GetNumSamples() == 0) return ErrorCode::Fail;
+
+        COMMON::QueryResultSet<T> results(const_cast<T*>(vector),
+                                          std::min(requestCount, static_cast<int>(headIndex->GetNumSamples())));
+        std::shared_ptr<std::uint8_t> reconstructed;
+        if (headIndex->m_pQuantizer) {
+            reconstructed.reset(static_cast<std::uint8_t*>(ALIGN_ALLOC(headIndex->m_pQuantizer->ReconstructSize())),
+                                [](std::uint8_t* ptr) { ALIGN_FREE(ptr); });
+            headIndex->m_pQuantizer->ReconstructVector(
+                reinterpret_cast<const std::uint8_t*>(results.GetTarget()), reconstructed.get());
+            results.SetTarget(reinterpret_cast<T*>(reconstructed.get()), headIndex->m_pQuantizer);
+        }
+        if (headIndex->SearchIndex(results) != ErrorCode::Success) return ErrorCode::Fail;
+        for (int i = 0; i < results.GetResultNum(); ++i) {
+            const BasicResult* result = results.GetResult(i);
+            if (result == nullptr || result->VID < 0) continue;
+            if (localToGlobal != nullptr &&
+                static_cast<size_t>(result->VID) >= localToGlobal->size()) {
+                return ErrorCode::Fail;
+            }
+            output.push_back({localToGlobal == nullptr ? result->VID
+                                                        : (*localToGlobal)[static_cast<size_t>(result->VID)],
+                              result->VID, bundleSlot, result->Dist});
+        }
+        return ErrorCode::Success;
+    };
+
+    const int pureRequestCount = std::max(m_options.m_internalResultNum,
+                                          std::max(8, m_options.m_replicaCount * 4));
+    const int tailRequestCount = std::max(m_options.m_internalResultNum,
+                                          std::max(8, m_options.m_tailReplicaCount * 4));
+    auto buildPlans = [&](PostingUpdateTargets& p_plans) -> ErrorCode {
+        p_plans.assign(static_cast<size_t>(p_vectorNum), {});
+        for (SizeType vectorOffset = 0; vectorOffset < p_vectorNum; ++vectorOffset) {
+            const std::uint32_t* tags =
+                p_tags + static_cast<size_t>(vectorOffset) * static_cast<size_t>(p_numTagsPerVec);
+            int pureBundleSlot = -1;
+            if (useBundleRuntime) {
+                if (m_headBundleNodes.size() == 1) {
+                    pureBundleSlot = 0;
+                } else {
+                    if (routingPivotLevel < 0 || routingPivotLevel >= p_numTagsPerVec) {
+                        return ErrorCode::Fail;
+                    }
+                    const auto routeIt = tagToNodes.find(tags[routingPivotLevel]);
+                    if (routeIt == tagToNodes.end() || routeIt->second.size() != 1) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "[TaggedUpdate] tag %u does not resolve to one bundle at pivot level %d.\n",
+                                     tags[routingPivotLevel], routingPivotLevel);
+                        return ErrorCode::Fail;
+                    }
+                    pureBundleSlot = findBundleSlot(routeIt->second.front());
+                    if (pureBundleSlot < 0) return ErrorCode::Fail;
+                }
+            }
+
+            std::vector<HeadCandidate> pureCandidates;
+            ErrorCode ret = collectCandidates(
+                reinterpret_cast<const T*>(vectorSet->GetVector(vectorOffset)), pureBundleSlot,
+                pureRequestCount, pureCandidates);
+            if (ret != ErrorCode::Success) return ret;
+            std::sort(pureCandidates.begin(), pureCandidates.end(),
+                      [](const HeadCandidate& left, const HeadCandidate& right) {
+                          return left.distance < right.distance;
+                      });
+
+            std::vector<HeadCandidate> pureHeads;
+            for (const HeadCandidate& candidate : pureCandidates) {
+                if (static_cast<int>(pureHeads.size()) >= m_options.m_replicaCount) break;
+                bool duplicate = false;
+                for (const HeadCandidate& existing : pureHeads) {
+                    if (existing.global == candidate.global) {
+                        duplicate = true;
+                        break;
+                    }
+                    if (candidate.bundleSlot == existing.bundleSlot) {
+                        const std::shared_ptr<VectorIndex>& bundleIndex =
+                            candidate.bundleSlot < 0 ? m_index
+                                                    : m_loadedHeadBundleIndexes[static_cast<size_t>(candidate.bundleSlot)];
+                        const float headDistance = bundleIndex->ComputeDistance(
+                            bundleIndex->GetSample(candidate.local), bundleIndex->GetSample(existing.local));
+                        if (m_options.m_rngFactor * headDistance <= candidate.distance) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                }
+                if (!duplicate) pureHeads.push_back(candidate);
+            }
+            if (pureHeads.empty()) return ErrorCode::Fail;
+            for (const HeadCandidate& head : pureHeads) {
+                p_plans[static_cast<size_t>(vectorOffset)].push_back(
+                    {head.global, PostingUpdateKind::Pure});
+            }
+
+            if (m_options.m_tailReplicaCount <= 0) continue;
+            std::vector<HeadCandidate> tailCandidates;
+            if (!useBundleRuntime) {
+                ret = collectCandidates(reinterpret_cast<const T*>(vectorSet->GetVector(vectorOffset)), -1,
+                                        tailRequestCount, tailCandidates);
+                if (ret != ErrorCode::Success) return ret;
+            } else {
+                for (size_t slot = 0; slot < m_headBundleNodes.size(); ++slot) {
+                    ret = collectCandidates(reinterpret_cast<const T*>(vectorSet->GetVector(vectorOffset)),
+                                           static_cast<int>(slot), tailRequestCount, tailCandidates);
+                    if (ret != ErrorCode::Success) return ret;
+                }
+            }
+            std::sort(tailCandidates.begin(), tailCandidates.end(),
+                      [](const HeadCandidate& left, const HeadCandidate& right) {
+                          return left.distance < right.distance;
+                      });
+            int tailCount = 0;
+            for (const HeadCandidate& candidate : tailCandidates) {
+                if (tailCount >= m_options.m_tailReplicaCount) break;
+                bool alreadyPure = false;
+                for (const HeadCandidate& pure : pureHeads) {
+                    if (pure.global == candidate.global) {
+                        alreadyPure = true;
+                        break;
+                    }
+                }
+                if (alreadyPure) continue;
+                bool duplicateTail = false;
+                for (const PostingUpdateTarget& existing : p_plans[static_cast<size_t>(vectorOffset)]) {
+                    if (existing.m_headID == candidate.global) {
+                        duplicateTail = true;
+                        break;
+                    }
+                }
+                if (duplicateTail) continue;
+                p_plans[static_cast<size_t>(vectorOffset)].push_back(
+                    {candidate.global, PostingUpdateKind::Tail});
+                ++tailCount;
+            }
+        }
+        return ErrorCode::Success;
+    };
+
+    PostingUpdateTargets plans;
+    ErrorCode planningRet = buildPlans(plans);
+    if (planningRet != ErrorCode::Success) return planningRet;
+
+    const SizeType begin = m_versionMap.GetVectorNum();
+    if (begin == 0 || m_versionMap.AddBatch(p_vectorNum) != ErrorCode::Success) {
+        return begin == 0 ? ErrorCode::EmptyIndex : ErrorCode::MemoryOverFlow;
+    }
+    if (m_pMetadata != nullptr) {
+        for (SizeType i = 0; i < p_vectorNum; ++i) m_pMetadata->Add(ByteArray::c_empty);
+    }
+
+    auto workSpace = m_workSpaceFactory->GetWorkSpace();
+    if (!workSpace) {
+        workSpace.reset(new ExtraWorkSpace());
+        m_extraSearcher->InitWorkSpace(workSpace.get(), false);
+    } else {
+        m_extraSearcher->InitWorkSpace(workSpace.get(), true);
+    }
+    workSpace->m_deduper.clear();
+    workSpace->m_postingIDs.clear();
+
+    // Preserve original SPANN ordering: append the selected records first,
+    // then cluster the genuinely overfull posting, including this update.
+    ErrorCode ret = m_extraSearcher->AddIndexWithTargets(
+        workSpace.get(), vectorSet, plans, p_tags, p_numTagsPerVec, begin);
+    if (ret == ErrorCode::Success) {
+        for (int splitRound = 0; splitRound < 64; ++splitRound) {
+            bool topologyChanged = false;
+            ret = EnsureTaggedPureCapacity(
+                workSpace.get(), vectorSet, begin, plans, topologyChanged);
+            if (ret != ErrorCode::Success || !topologyChanged) break;
+            if (splitRound == 63) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "[TaggedUpdate] pure posting split did not converge after 64 rounds.\n");
+                ret = ErrorCode::Posting_OverFlow;
+                break;
+            }
+        }
+        if (ret == ErrorCode::Success) {
+            m_options.m_vectorSize = m_versionMap.GetVectorNum();
+        }
+    }
+    if (ret != ErrorCode::Success) {
+        // A multi-posting write can fail after earlier targets have been rewritten.
+        // Version invalidation makes any partial record unreachable without
+        // leaving a partially searchable update behind.
+        for (SizeType i = 0; i < p_vectorNum; ++i) {
+            m_versionMap.Delete(begin + i);
+        }
+    }
+    return ret;
 }
 
 template <typename T>

@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -248,6 +249,14 @@ int main(int argc, char** argv)
                  opts->m_threads, (int)opts->m_overwrite);
 
     const std::string outPath = JoinPath(opts->m_headIndexDir, Helper::kHeadCrossEdgesFileName);
+    const std::string dirtyPath = JoinPath(opts->m_headIndexDir, Helper::kHeadCrossEdgesDirtyFileName);
+    const auto clearDirtyMarker = [&]() {
+        if (std::remove(dirtyPath.c_str()) != 0 && errno != ENOENT) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                         "Wrote cross edges but could not clear dirty marker %s.\n",
+                         dirtyPath.c_str());
+        }
+    };
     if (!opts->m_overwrite) {
         FILE* probe = fopen(outPath.c_str(), "rb");
         if (probe != nullptr) {
@@ -279,6 +288,7 @@ int main(int argc, char** argv)
         header.searchTopK = opts->m_searchTopK;
         fwrite(&header, sizeof(header), 1, fp);
         fclose(fp);
+        clearDirtyMarker();
         return 0;
     }
 
@@ -481,6 +491,7 @@ int main(int argc, char** argv)
         }
     }
     fclose(fp);
+    clearDirtyMarker();
     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                  "Wrote %s (%zu records).\n", outPath.c_str(), records.size());
     return 0;

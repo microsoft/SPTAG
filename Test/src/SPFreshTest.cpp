@@ -5,6 +5,7 @@
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
 #include "inc/Core/SPANN/Index.h"
+#include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
 #include "inc/Core/VectorIndex.h"
 #include "inc/Core/Common/IQuantizer.h"
@@ -18,7 +19,9 @@
 #include "inc/TestDataGenerator.h"
 
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <memory>
@@ -1205,6 +1208,511 @@ BOOST_AUTO_TEST_CASE(TestInsertAndSearch)
     loadedOnce = nullptr;
 
     std::filesystem::remove_all("insert_test_index");
+}
+
+BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)
+{
+    constexpr SizeType baseCount = 1024;
+    constexpr DimensionType dimension = 100;
+    constexpr int tagCount = 5;
+    constexpr int pqChunks = 2;
+    const std::string indexDirectory = "tagged_pure_tail_update_index";
+    const std::string checkpointDirectory = indexDirectory + "_checkpoint";
+    const std::string pivotsPath = indexDirectory + "/pipepq_pivots.bin";
+    const std::string codesPath = indexDirectory + "/pipepq_codes.bin";
+    const std::string basePath = indexDirectory + "/base.fbin";
+    std::filesystem::remove_all(indexDirectory);
+    std::filesystem::remove_all(checkpointDirectory);
+    std::filesystem::create_directories(indexDirectory);
+    std::filesystem::create_directories(checkpointDirectory);
+
+    auto writeOrFail = [](std::ofstream& out, const void* data, size_t bytes) {
+        out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+        BOOST_REQUIRE(out.good());
+    };
+    auto writeMatrix = [&](std::ofstream& out, std::uint32_t rows, std::uint32_t cols,
+                           const void* data, size_t bytes) {
+        writeOrFail(out, &rows, sizeof(rows));
+        writeOrFail(out, &cols, sizeof(cols));
+        if (bytes > 0) writeOrFail(out, data, bytes);
+    };
+
+    {
+        std::vector<float> table(static_cast<size_t>(256) * dimension);
+        for (int center = 0; center < 256; ++center) {
+            for (int dim = 0; dim < dimension; ++dim) {
+                table[static_cast<size_t>(center) * dimension + dim] = static_cast<float>(center);
+            }
+        }
+        const std::vector<float> centroid(dimension, 0.0f);
+        const std::uint32_t chunkOffsets[] = {0, 50, 100};
+        constexpr std::uint64_t headerBytes = sizeof(std::uint32_t) * 2 + sizeof(std::uint64_t) * 5;
+        const std::uint64_t tableOffset = headerBytes;
+        const std::uint64_t centroidOffset =
+            tableOffset + sizeof(std::uint32_t) * 2 + table.size() * sizeof(float);
+        const std::uint64_t chunkOffset =
+            centroidOffset + sizeof(std::uint32_t) * 2 + centroid.size() * sizeof(float);
+        const std::uint32_t rootRows = 5;
+        const std::uint32_t rootCols = 1;
+        const std::uint64_t offsets[] = {tableOffset, centroidOffset, 0, chunkOffset, 0};
+        std::ofstream out(pivotsPath, std::ios::binary | std::ios::trunc);
+        writeOrFail(out, &rootRows, sizeof(rootRows));
+        writeOrFail(out, &rootCols, sizeof(rootCols));
+        writeOrFail(out, offsets, sizeof(offsets));
+        writeMatrix(out, 256, dimension, table.data(), table.size() * sizeof(float));
+        writeMatrix(out, dimension, 1, centroid.data(), centroid.size() * sizeof(float));
+        writeMatrix(out, pqChunks + 1, 1, chunkOffsets, sizeof(chunkOffsets));
+    }
+    SPANN::PipePQTable pipePQ;
+    BOOST_REQUIRE(pipePQ.Load(pivotsPath, pqChunks));
+    std::array<float, dimension> encodedVector {};
+    encodedVector.fill(250.0f);
+    std::array<std::uint8_t, pqChunks> encodedCode {};
+    pipePQ.Encode(encodedVector.data(), encodedCode.data());
+    BOOST_CHECK_EQUAL(encodedCode[0], 250);
+    BOOST_CHECK_EQUAL(encodedCode[1], 250);
+
+    ByteArray baseBytes = ByteArray::Alloc(sizeof(float) * static_cast<size_t>(baseCount) * dimension);
+    auto* base = reinterpret_cast<float*>(baseBytes.Data());
+    for (SizeType row = 0; row < baseCount; ++row) {
+        for (int dim = 0; dim < dimension; ++dim) {
+            std::uint32_t value = static_cast<std::uint32_t>(row + 1) *
+                                  static_cast<std::uint32_t>(dim * 97 + 41);
+            value ^= value >> 13;
+            value *= 0x85ebca6bU;
+            value ^= value >> 16;
+            base[static_cast<size_t>(row) * dimension + dim] = static_cast<float>(value & 0xffffU);
+        }
+    }
+    {
+        std::ofstream out(basePath, std::ios::binary | std::ios::trunc);
+        writeMatrix(out, baseCount, dimension, base,
+                    sizeof(float) * static_cast<size_t>(baseCount) * dimension);
+    }
+    {
+        std::vector<std::uint8_t> codes(static_cast<size_t>(baseCount) * pqChunks);
+        for (SizeType row = 0; row < baseCount; ++row) {
+            pipePQ.Encode(base + static_cast<size_t>(row) * dimension,
+                          codes.data() + static_cast<size_t>(row) * pqChunks);
+        }
+        std::ofstream out(codesPath, std::ios::binary | std::ios::trunc);
+        writeMatrix(out, baseCount, pqChunks, codes.data(), codes.size());
+    }
+    auto vectors = std::make_shared<BasicVectorSet>(baseBytes, VectorValueType::Float, dimension, baseCount);
+    std::vector<std::uint32_t> baseTags(static_cast<size_t>(baseCount) * tagCount);
+    for (SizeType row = 0; row < baseCount; ++row) {
+        std::uint32_t* tags = baseTags.data() + static_cast<size_t>(row) * tagCount;
+        tags[0] = 1;
+        tags[1] = 2;
+        tags[2] = 3;
+        tags[3] = 4;
+        tags[4] = 5;
+    }
+
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    BOOST_REQUIRE(index != nullptr);
+    const auto set = [&](const char* section, const char* key, const std::string& value) {
+        BOOST_REQUIRE(index->SetParameter(key, value.c_str(), section) == ErrorCode::Success);
+    };
+    set("Base", "DistCalcMethod", "L2");
+    set("Base", "IndexAlgoType", "KDT");
+    set("Base", "ValueType", "Float");
+    set("Base", "Dim", std::to_string(dimension));
+    set("Base", "IndexDirectory", indexDirectory);
+    set("SelectHead", "isExecute", "true");
+    set("SelectHead", "NumberOfThreads", "2");
+    set("SelectHead", "SelectHeadType", "BKT");
+    set("SelectHead", "SelectThreshold", "0");
+    set("SelectHead", "SplitFactor", "0");
+    set("SelectHead", "SplitThreshold", "0");
+    set("SelectHead", "Ratio", "0.25");
+    set("BuildHead", "isExecute", "true");
+    set("BuildHead", "NumberOfThreads", "2");
+    set("BuildSSDIndex", "isExecute", "true");
+    set("BuildSSDIndex", "BuildSsdIndex", "true");
+    set("BuildSSDIndex", "InternalResultNum", "32");
+    set("BuildSSDIndex", "SearchInternalResultNum", "32");
+    set("BuildSSDIndex", "NumberOfThreads", "2");
+    set("BuildSSDIndex", "PostingPageLimit", "1");
+    set("BuildSSDIndex", "SearchPostingPageLimit", "1");
+    set("BuildSSDIndex", "Storage", "FILEIO");
+    set("BuildSSDIndex", "SpdkBatchSize", "16");
+    set("BuildSSDIndex", "CacheSizeGB", "1");
+    set("BuildSSDIndex", "PersistentBufferPath", checkpointDirectory);
+    set("BuildSSDIndex", "ExcludeHead", "true");
+    set("BuildSSDIndex", "ResultNum", "10");
+    set("BuildSSDIndex", "SearchThreadNum", "2");
+    set("BuildSSDIndex", "Update", "false");
+    set("BuildSSDIndex", "BufferLength", "1");
+    set("BuildSSDIndex", "StartFileSizeGB", "1");
+    set("BuildSSDIndex", "ConsistencyCheck", "true");
+    set("BuildSSDIndex", "ChecksumCheck", "true");
+    set("BuildSSDIndex", "ChecksumInRead", "true");
+    set("BuildSSDIndex", "AsyncAppendQueueSize", "0");
+    set("BuildSSDIndex", "ReplicaCount", "2");
+    set("BuildSSDIndex", "TailReplicaCount", "0");
+    set("BuildSSDIndex", "UnfilterTailBufferLength", "1");
+    set("BuildSSDIndex", "NumTagsPerVec", std::to_string(tagCount));
+    set("BuildSSDIndex", "PostingQuantizer", "PipePQ");
+    set("BuildSSDIndex", "PostingQuantM", std::to_string(pqChunks));
+    set("BuildSSDIndex", "PostingQuantizerFile", "pipepq_codes.bin");
+    set("BuildSSDIndex", "PipePQPivotsFile", "pipepq_pivots.bin");
+    set("BuildSSDIndex", "FullVectorFile", basePath);
+    set("BuildSSDIndex", "RerankL", "10");
+
+    auto* spannInterface = dynamic_cast<SPANN::ISPANNIndex*>(index.get());
+    BOOST_REQUIRE(spannInterface != nullptr);
+    spannInterface->SetVectorTags(baseTags.data(), baseCount, tagCount);
+    std::vector<std::vector<SizeType>> nodeAssignments(2);
+    for (SizeType row = 0; row < baseCount; ++row) {
+        nodeAssignments[static_cast<size_t>(row % 2)].push_back(row);
+    }
+    spannInterface->SetNodeVectorAssignments(nodeAssignments);
+    spannInterface->SetPrimaryNodeVectorAssignments(nodeAssignments);
+    BOOST_REQUIRE(index->BuildIndex(vectors, nullptr, true, false, false) == ErrorCode::Success);
+
+    std::array<float, dimension> updateVector {};
+    updateVector.fill(250.0f);
+    const std::array<std::uint32_t, tagCount> updateTags = {17, 18, 19, 20, 21};
+    {
+        struct RoutingHeader {
+            std::int32_t version;
+            std::int32_t pivotLevel;
+            std::int32_t nodeCount;
+            std::int32_t numHeadSamples;
+            std::int32_t numTagMappings;
+        } header = {1, 0, 2, 0, 1};
+        const std::int32_t emptyNodeTagCount = 0;
+        const std::uint32_t updateTag = updateTags.front();
+        const std::int32_t routedNodeCount = 1;
+        const std::int32_t routedNode = 0;
+        std::ofstream routing(indexDirectory + "/HeadIndex/tag_node_index.bin",
+                              std::ios::binary | std::ios::trunc);
+        writeOrFail(routing, &header, sizeof(header));
+        writeOrFail(routing, &emptyNodeTagCount, sizeof(emptyNodeTagCount));
+        writeOrFail(routing, &emptyNodeTagCount, sizeof(emptyNodeTagCount));
+        writeOrFail(routing, &updateTag, sizeof(updateTag));
+        writeOrFail(routing, &routedNodeCount, sizeof(routedNodeCount));
+        writeOrFail(routing, &routedNode, sizeof(routedNode));
+    }
+    auto* spann = dynamic_cast<SPANN::Index<float>*>(index.get());
+    BOOST_REQUIRE(spann != nullptr);
+    spann->GetOptions()->m_tailReplicaCount = 2;
+    BOOST_REQUIRE(spann->AddIndexWithTags(updateVector.data(), 1, dimension, updateTags.data(),
+                                          tagCount, true) == ErrorCode::Success);
+    const SizeType updateVID = baseCount;
+
+    auto inspectCopies = [&](const std::shared_ptr<VectorIndex>& inspected,
+                             SizeType vid, SizeType& pureCopies, SizeType& tailCopies,
+                             SizeType& firstTailPosting,
+                             std::array<std::uint8_t, pqChunks>* firstPureCode) {
+        auto* disk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+            dynamic_cast<SPANN::ISPANNIndex*>(inspected.get())->GetDiskIndex().get());
+        BOOST_REQUIRE(disk != nullptr);
+        SPANN::ExtraWorkSpace workspace;
+        disk->InitWorkSpace(&workspace, false);
+        pureCopies = 0;
+        tailCopies = 0;
+        firstTailPosting = -1;
+        const SizeType postingCount = disk->GetTaggedPostingCount();
+        BOOST_REQUIRE_GT(postingCount, 0);
+        const size_t metadataSize = sizeof(SizeType) + sizeof(std::uint8_t) +
+                                    static_cast<size_t>(tagCount) * sizeof(std::uint32_t);
+        const size_t stride = metadataSize + pqChunks;
+        for (SizeType posting = 0; posting < postingCount; ++posting) {
+            SPANN::TaggedPostingSnapshot postingSnapshot;
+            BOOST_REQUIRE(disk->GetTaggedPostingSnapshot(
+                              &workspace, posting, postingSnapshot) == ErrorCode::Success);
+            if (postingSnapshot.m_records.empty()) continue; // tombstoned split/merge head
+            const std::string& bytes = postingSnapshot.m_records;
+            const int pureCount = disk->GetPureCount(posting);
+            BOOST_REQUIRE_EQUAL(bytes.size() % stride, 0U);
+            for (size_t offset = 0, record = 0; offset < bytes.size(); offset += stride, ++record) {
+                SizeType recordVID = -1;
+                memcpy(&recordVID, bytes.data() + offset, sizeof(recordVID));
+                if (recordVID != vid) continue;
+                if (static_cast<int>(record) < pureCount) {
+                    ++pureCopies;
+                    if (firstPureCode != nullptr) {
+                        memcpy(firstPureCode->data(), bytes.data() + offset + metadataSize,
+                               firstPureCode->size());
+                    }
+                } else {
+                    ++tailCopies;
+                    if (firstTailPosting < 0) firstTailPosting = posting;
+                }
+            }
+        }
+    };
+
+    SizeType pureCopies = 0;
+    SizeType tailCopies = 0;
+    SizeType tailPosting = -1;
+    std::array<std::uint8_t, pqChunks> pureCode {};
+    inspectCopies(index, updateVID, pureCopies, tailCopies, tailPosting, &pureCode);
+    BOOST_REQUIRE(pureCopies > 0);
+    BOOST_REQUIRE(tailCopies > 0);
+    BOOST_REQUIRE(tailPosting >= 0);
+    BOOST_CHECK_EQUAL(pureCode[0], 250);
+    BOOST_CHECK_EQUAL(pureCode[1], 250);
+    BOOST_REQUIRE(std::filesystem::exists(indexDirectory + "/update_vectors.bin"));
+    BOOST_REQUIRE(index->SaveIndex(indexDirectory) == ErrorCode::Success);
+    index.reset();
+
+    std::shared_ptr<VectorIndex> reloaded;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, reloaded) == ErrorCode::Success);
+    SizeType reloadedPureCopies = 0;
+    SizeType reloadedTailCopies = 0;
+    SizeType reloadedTailPosting = -1;
+    inspectCopies(reloaded, updateVID, reloadedPureCopies, reloadedTailCopies, reloadedTailPosting, nullptr);
+    BOOST_CHECK_EQUAL(reloadedPureCopies, pureCopies);
+    BOOST_CHECK_EQUAL(reloadedTailCopies, tailCopies);
+
+    const auto containsVID = [&](const std::vector<SizeType>& postings,
+                                 const std::vector<std::uint32_t>& queryTags) {
+        VectorIndex::ThreadLocalSearchContext context;
+        context.m_active = true;
+        context.m_directPostingIDs = postings;
+        context.m_queryTags = queryTags;
+        VectorIndex::ThreadLocalSearchContextGuard guard(std::move(context));
+        COMMON::QueryResultSet<float> result(updateVector.data(), 10);
+        BOOST_REQUIRE(reloaded->SearchIndex(result) == ErrorCode::Success);
+        for (int i = 0; i < result.GetResultNum(); ++i) {
+            if (result.GetResult(i)->VID == updateVID) return true;
+        }
+        return false;
+    };
+
+    BOOST_CHECK(containsVID({tailPosting}, {}));
+    BOOST_CHECK(!containsVID({tailPosting}, {updateTags[0]}));
+    std::vector<SizeType> allPostings;
+    auto* reloadedDisk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+        dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get())->GetDiskIndex().get());
+    BOOST_REQUIRE(reloadedDisk != nullptr);
+    const SizeType postingCount = reloadedDisk->GetTaggedPostingCount();
+    for (SizeType posting = 0; posting < postingCount; ++posting) allPostings.push_back(posting);
+    BOOST_CHECK(containsVID(allPostings, {updateTags[0]}));
+
+    auto* reloadedSpann = dynamic_cast<SPANN::Index<float>*>(reloaded.get());
+    BOOST_REQUIRE(reloadedSpann != nullptr);
+    BOOST_REQUIRE(reloadedSpann->DeleteIndex(updateVID) == ErrorCode::Success);
+    BOOST_CHECK(!containsVID(allPostings, {updateTags[0]}));
+    BOOST_REQUIRE(reloaded->SaveIndex(indexDirectory) == ErrorCode::Success);
+    reloaded.reset();
+
+    std::shared_ptr<VectorIndex> afterDelete;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, afterDelete) == ErrorCode::Success);
+    reloaded = afterDelete;
+    BOOST_CHECK(!containsVID(allPostings, {updateTags[0]}));
+    reloadedDisk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+        dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get())->GetDiskIndex().get());
+    BOOST_REQUIRE(reloadedDisk != nullptr);
+    const auto readHeadIDCount = [](const std::string& path) {
+        std::ifstream input(path, std::ios::binary);
+        BOOST_REQUIRE(input.good());
+        SizeType count = -1;
+        DimensionType dimension = -1;
+        input.read(reinterpret_cast<char*>(&count), sizeof(count));
+        input.read(reinterpret_cast<char*>(&dimension), sizeof(dimension));
+        BOOST_REQUIRE(input.good());
+        BOOST_REQUIRE_EQUAL(dimension, 1);
+        return count;
+    };
+    const SizeType node0HeadsBeforeSplit =
+        readHeadIDCount(indexDirectory + "/HeadIndex/node_0/SPTAGHeadVectorIDs.bin");
+    const SizeType node1HeadsBeforeSplit =
+        readHeadIDCount(indexDirectory + "/HeadIndex/node_1/SPTAGHeadVectorIDs.bin");
+
+    // Force the tagged path past the pure posting capacity. The scalar sweep
+    // remains in one local region before the split, then supplies two
+    // non-degenerate clusters for the normal SPANN split lifecycle.
+    constexpr SizeType overflowCount = 400;
+    const SizeType headsBeforeSplit = reloadedDisk->GetTaggedPostingCount();
+    std::vector<float> overflowVectors(static_cast<size_t>(overflowCount) * dimension);
+    std::vector<std::uint32_t> overflowTags(static_cast<size_t>(overflowCount) * tagCount);
+    for (SizeType row = 0; row < overflowCount; ++row) {
+        const float value = 250.0f + static_cast<float>(row);
+        std::fill_n(overflowVectors.data() + static_cast<size_t>(row) * dimension, dimension, value);
+        std::copy(updateTags.begin(), updateTags.end(),
+                  overflowTags.begin() + static_cast<size_t>(row) * tagCount);
+    }
+    auto* overflowSpann = dynamic_cast<SPANN::Index<float>*>(reloaded.get());
+    BOOST_REQUIRE(overflowSpann != nullptr);
+    const ErrorCode overflowRet = overflowSpann->AddIndexWithTags(
+        overflowVectors.data(), overflowCount, dimension, overflowTags.data(), tagCount, true);
+    BOOST_REQUIRE_MESSAGE(overflowRet == ErrorCode::Success,
+                          "forced tagged split returned " << static_cast<int>(overflowRet));
+    const SizeType overflowVID = baseCount + 1;
+    auto* overflowDisk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+        dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get())->GetDiskIndex().get());
+    BOOST_REQUIRE(overflowDisk != nullptr);
+    const SizeType headsAfterSplit = overflowDisk->GetTaggedPostingCount();
+    SizeType maxPureCount = 0;
+    for (SizeType posting = 0; posting < headsAfterSplit; ++posting) {
+        maxPureCount = std::max<SizeType>(maxPureCount, overflowDisk->GetPureCount(posting));
+    }
+    BOOST_CHECK_LE(maxPureCount, overflowDisk->GetTaggedPureCapacity());
+    BOOST_CHECK_GT(headsAfterSplit, headsBeforeSplit);
+    SizeType overflowPureCopies = 0;
+    SizeType overflowTailCopies = 0;
+    SizeType overflowTailPosting = -1;
+    inspectCopies(reloaded, overflowVID, overflowPureCopies, overflowTailCopies,
+                  overflowTailPosting, nullptr);
+    BOOST_CHECK_GT(overflowPureCopies, 0);
+
+    // Search-triggered merge maintenance must retain the original lifecycle:
+    // queue a low-live posting during a tagged index search, then perform the
+    // subset-local merge at the next checkpoint/save.
+    auto* reloadedInterface = dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get());
+    BOOST_REQUIRE(reloadedInterface != nullptr);
+    const std::shared_ptr<VectorIndex> reloadedHeadIndex = reloadedInterface->GetMemoryIndex();
+    SPANN::ExtraWorkSpace mergeWorkspace;
+    overflowDisk->InitWorkSpace(&mergeWorkspace, false);
+    SizeType mergePosting = -1;
+    for (SizeType posting = 0; posting < headsAfterSplit; ++posting) {
+        SPANN::TaggedPostingSnapshot snapshot;
+        BOOST_REQUIRE(overflowDisk->GetTaggedPostingSnapshot(
+                          &mergeWorkspace, posting, snapshot) == ErrorCode::Success);
+        if (reloadedHeadIndex->ContainSample(posting) &&
+            snapshot.m_pureCount > 0 &&
+            static_cast<int>(snapshot.m_records.size() /
+                             static_cast<size_t>(overflowDisk->GetTaggedRecordSize())) <=
+                overflowDisk->GetTaggedMergeThreshold()) {
+            mergePosting = posting;
+            break;
+        }
+    }
+    BOOST_REQUIRE(mergePosting >= 0);
+    const auto countEmptyPostings = [](SPANN::ExtraDynamicSearcher<float>* disk,
+                                       SizeType postingCount) {
+        SPANN::ExtraWorkSpace workspace;
+        disk->InitWorkSpace(&workspace, false);
+        SizeType emptyCount = 0;
+        for (SizeType posting = 0; posting < postingCount; ++posting) {
+            SPANN::TaggedPostingSnapshot snapshot;
+            BOOST_REQUIRE(disk->GetTaggedPostingSnapshot(&workspace, posting, snapshot) == ErrorCode::Success);
+            if (snapshot.m_records.empty()) ++emptyCount;
+        }
+        return emptyCount;
+    };
+    const SizeType emptyBeforeMerge = countEmptyPostings(overflowDisk, headsAfterSplit);
+    {
+        VectorIndex::ThreadLocalSearchContext context;
+        context.m_active = true;
+        context.m_directPostingIDs = {mergePosting};
+        VectorIndex::ThreadLocalSearchContextGuard guard(std::move(context));
+        COMMON::QueryResultSet<float> result(overflowVectors.data(), 10);
+        BOOST_REQUIRE(reloaded->SearchIndex(result) == ErrorCode::Success);
+    }
+    BOOST_REQUIRE(reloaded->SaveIndex(indexDirectory) == ErrorCode::Success);
+    BOOST_CHECK_GT(
+        readHeadIDCount(indexDirectory + "/HeadIndex/node_0/SPTAGHeadVectorIDs.bin"),
+        node0HeadsBeforeSplit);
+    BOOST_CHECK_EQUAL(
+        readHeadIDCount(indexDirectory + "/HeadIndex/node_1/SPTAGHeadVectorIDs.bin"),
+        node1HeadsBeforeSplit);
+    reloaded.reset();
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, reloaded) == ErrorCode::Success);
+    auto* afterMergeDisk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+        dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get())->GetDiskIndex().get());
+    BOOST_REQUIRE(afterMergeDisk != nullptr);
+    BOOST_CHECK_EQUAL(afterMergeDisk->GetTaggedPostingCount(), headsAfterSplit);
+    BOOST_CHECK_GT(countEmptyPostings(afterMergeDisk, headsAfterSplit), emptyBeforeMerge);
+    overflowPureCopies = 0;
+    overflowTailCopies = 0;
+    overflowTailPosting = -1;
+    inspectCopies(reloaded, overflowVID, overflowPureCopies, overflowTailCopies,
+                  overflowTailPosting, nullptr);
+    BOOST_CHECK_GT(overflowPureCopies, 0);
+    auto* checkpointSpann = dynamic_cast<SPANN::Index<float>*>(reloaded.get());
+    BOOST_REQUIRE(checkpointSpann != nullptr);
+    BOOST_REQUIRE(checkpointSpann->Checkpoint() == ErrorCode::Success);
+    BOOST_CHECK(std::filesystem::exists(checkpointDirectory + "/SPTAGHeadVectorIDs.bin"));
+    BOOST_CHECK(std::filesystem::exists(checkpointDirectory + "/update_vectors.bin"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/head_bundle_manifest.bin"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/head_metaonly.bin"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/tag_node_index.bin"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/head_cross_edges.dirty"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/node_0/vectors.bin"));
+    BOOST_CHECK(std::filesystem::exists(
+        checkpointDirectory + "/HeadIndex/node_1/vectors.bin"));
+    {
+        std::ifstream checkpointHeadIDs(
+            checkpointDirectory + "/SPTAGHeadVectorIDs.bin", std::ios::binary);
+        SizeType checkpointHeadCount = -1;
+        DimensionType checkpointHeadDimension = -1;
+        checkpointHeadIDs.read(reinterpret_cast<char*>(&checkpointHeadCount),
+                               sizeof(checkpointHeadCount));
+        checkpointHeadIDs.read(reinterpret_cast<char*>(&checkpointHeadDimension),
+                               sizeof(checkpointHeadDimension));
+        BOOST_REQUIRE(checkpointHeadIDs.good());
+        BOOST_CHECK_EQUAL(checkpointHeadCount, headsAfterSplit);
+        BOOST_CHECK_EQUAL(checkpointHeadDimension, 1);
+    }
+    reloaded.reset();
+    {
+        const std::string loaderPath = indexDirectory + "/indexloader.ini";
+        std::ifstream input(loaderPath);
+        BOOST_REQUIRE(input.good());
+        const std::string config((std::istreambuf_iterator<char>(input)),
+                                 std::istreambuf_iterator<char>());
+        const std::string disabled = "Recovery=false";
+        const size_t recoveryOffset = config.find(disabled);
+        BOOST_REQUIRE(recoveryOffset != std::string::npos);
+        std::string recoveryConfig = config;
+        recoveryConfig.replace(recoveryOffset, disabled.size(), "Recovery=true");
+        std::ofstream output(loaderPath, std::ios::trunc);
+        BOOST_REQUIRE(output.good());
+        output << recoveryConfig;
+        BOOST_REQUIRE(output.good());
+    }
+    std::filesystem::rename(indexDirectory + "/posting_pure_counts.bin",
+                            indexDirectory + "/posting_pure_counts.source.bin");
+    std::shared_ptr<VectorIndex> recovered;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, recovered) == ErrorCode::Success);
+    auto* recoveredSpann = dynamic_cast<SPANN::Index<float>*>(recovered.get());
+    BOOST_REQUIRE(recoveredSpann != nullptr);
+    auto* recoveredDisk = dynamic_cast<SPANN::ExtraDynamicSearcher<float>*>(
+        dynamic_cast<SPANN::ISPANNIndex*>(recovered.get())->GetDiskIndex().get());
+    BOOST_REQUIRE(recoveredDisk != nullptr);
+    BOOST_CHECK_EQUAL(recoveredDisk->GetTaggedPostingCount(), headsAfterSplit);
+    BOOST_CHECK_EQUAL(
+        dynamic_cast<SPANN::ISPANNIndex*>(recovered.get())->GetMemoryIndex()->GetNumSamples(),
+        headsAfterSplit);
+    {
+        SPANN::ExtraWorkSpace recoveryWorkspace;
+        recoveredDisk->InitWorkSpace(&recoveryWorkspace, false);
+        bool foundTailBoundary = false;
+        for (SizeType posting = 0; posting < headsAfterSplit; ++posting) {
+            SPANN::TaggedPostingSnapshot snapshot;
+            BOOST_REQUIRE(recoveredDisk->GetTaggedPostingSnapshot(
+                              &recoveryWorkspace, posting, snapshot) == ErrorCode::Success);
+            const int recordCount = static_cast<int>(
+                snapshot.m_records.size() / static_cast<size_t>(recoveredDisk->GetTaggedRecordSize()));
+            if (snapshot.m_pureCount < recordCount) {
+                foundTailBoundary = true;
+                break;
+            }
+        }
+        BOOST_CHECK(foundTailBoundary);
+    }
+    const SizeType recoveredUpdateVID = baseCount + 1 + overflowCount;
+    BOOST_REQUIRE(recoveredSpann->AddIndexWithTags(
+        updateVector.data(), 1, dimension, updateTags.data(), tagCount, true) == ErrorCode::Success);
+    SizeType recoveredPureCopies = 0;
+    SizeType recoveredTailCopies = 0;
+    SizeType recoveredTailPosting = -1;
+    inspectCopies(recovered, recoveredUpdateVID, recoveredPureCopies, recoveredTailCopies,
+                  recoveredTailPosting, nullptr);
+    BOOST_CHECK_GT(recoveredPureCopies, 0);
+    recovered.reset();
+    std::filesystem::remove_all(indexDirectory);
+    std::filesystem::remove_all(checkpointDirectory);
 }
 
 BOOST_AUTO_TEST_CASE(TestClone)

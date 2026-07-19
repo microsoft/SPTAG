@@ -279,20 +279,21 @@ Modes B/C also run `augmentheadgraph` to build cross-subgraph edges. See
 full commands, the asymmetric-edge U_extra design, the slim head store, and the
 complete environment-variable reference.
 
-#### Unfilter enhancement layers (enable together — default OFF)
+#### Unfilter enhancement layers
 
 For good **unfiltered** recall/QPS on a partitioned (PerTagBKT + ACL hierarchy)
-index, **all three** layers below must be built. They are env/tool-gated and are
-**not** produced by a plain `spannbuilder` build, so they are easy to lose —
-without them, unfilter degrades to a bare per-node fan-out across the ACL bundle
-nodes. See **AGENTS.md → "Unfilter Enhancement Pipeline"** and
+index, build the cross-graph stitch plus H1 unfilter-tail replicas. U_extra is
+optional and defaults OFF in canonical SPACEV configs after ablation showed no
+recall gain once H1 tails are enabled. Without cross-graph/tail, unfilter
+degrades to a bare per-node fan-out across the ACL bundle nodes. See
+**AGENTS.md → "Unfilter Enhancement Pipeline"** and
 **[docs/MultiTenant_SIFT1M_UnfilterTail.md](docs/MultiTenant_SIFT1M_UnfilterTail.md)**.
 
 | Layer | Enable (build) | Enable (search) |
 | ----- | -------------- | --------------- |
 | ① cross-graph | post-build: `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m 10 -t N -w true` | (auto) |
-| ② U_extra (~10% extra unfilter-only heads) | `SPTAG_DUAL_POOL_AUGMENT=1` `SPTAG_DUAL_POOL_EXTRA_RATIO=0.1` | (auto) |
-| ③ unfilter-tail (K nearest-head tail copies/vector) | `SPTAG_UNFILTER_TAIL_K_REPLICA=K` `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P` | `SPTAG_UNFILTER_TAIL=1` `SPTAG_UNFILTER_TAIL_BUFFER_PAGES=P` |
+| ② U_extra (~10% extra unfilter-only heads; optional) | `[MultiTenant] DualPoolAugment=1` `DualPoolExtraRatio=0.1` | (auto) |
+| ③ unfilter-tail (K nearest-head tail copies/vector) | `[BuildSSDIndex] TailReplicaCount=K` `UnfilterTailBufferLength=P` (P=max extra physical tail pages beyond pure pages; ini only) | `SPTAG_UNFILTER_TAIL=1` (buffer from persisted ini) |
 
 #### Native `.ini` build config (recommended — single source of truth)
 
@@ -309,7 +310,8 @@ Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher (derives path
 ```
 
 - `[BuildSSDIndex]` (`Storage`, `ReplicaCount`, `PostingQuantizer`/`PostingQuantM`/
-  `PostingQuantizerFile`, `FullVectorFile`, `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`)
+  `PostingQuantizerFile`/`PipePQPivotsFile`, `FullVectorFile`, `RerankL`,
+  `StartFileSizeGB`/`MaxFileSizeGB`)
   flows through the native `SetSSDBuildParam` path.
 - `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` carry the extensions (ACL routing,
   hier widths, numeric cols, and the three unfilter layers above), bridged to their
@@ -331,8 +333,11 @@ Postings can store a compact **RaBitQ/OPQ code** per vector instead of the full
 vector (~4× fewer bytes/scan); the top-`L` survivors are exact-reranked by cold
 O_DIRECT reads from the full-precision base, batched through a **deep-queue libaio**
 reader (one `io_submit` for all `L`, ~12µs/read). Enable at build via
-`[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ` + `PostingQuantM` + `FullVectorFile`
-+ `RerankL`; at search via `SPTAG_INPOST_RBQ=1` + `SPTAG_INPOST_LIBAIO_RERANK=1`
+`[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ|PipePQ` + `PostingQuantM` +
+`FullVectorFile` + `RerankL`. PipePQ additionally uses a native PipeANN
+`PostingQuantizerFile=*_pq_compressed.bin` and
+`PipePQPivotsFile=*_pq_pivots.bin`; at search via `SPTAG_INPOST_RBQ=1` +
+`SPTAG_INPOST_LIBAIO_RERANK=1`
 (do **not** combine the RaBitQ async path with `SPTAG_OPQ_PREFILTER`). See
 **AGENTS.md → "In-posting Quantization + Deep-queue Rerank"**.
 

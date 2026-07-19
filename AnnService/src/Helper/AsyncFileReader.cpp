@@ -93,6 +93,17 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
 
     std::vector<struct io_event> events(totalToSubmit);
     int totalDone = 0, totalSubmitted = 0, totalQueued = 0;
+    std::unique_lock<std::mutex> sharedContextLock;
+    for (const auto& diskHandler : handlers)
+    {
+        auto* handler = static_cast<AsyncFileIO*>(diskHandler.get());
+        if (handler->UsesSharedAIOPool())
+        {
+            sharedContextLock = std::unique_lock<std::mutex>(
+                SharedAIOPool::Instance().GetContextMutex(iocp));
+            break;
+        }
+    }
     while (totalDone < totalToSubmit)
     {
         if (totalSubmitted < totalToSubmit)

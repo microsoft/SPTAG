@@ -85,6 +85,11 @@ public:
 
     bool AddWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
+    // SPANN tag-aware update. `p_tags` is packed uint32 rows with
+    // `p_numTagsPerVec` values per inserted vector.
+    bool AddWithTags(ByteArray p_data, ByteArray p_tags, SizeType p_num,
+                     int p_numTagsPerVec, bool p_normalized);
+
     bool Delete(ByteArray p_data, SizeType p_num);
 
     bool DeleteByMetaData(ByteArray p_meta);
@@ -267,6 +272,7 @@ public:
     uint64_t GetLastPostingPrePS() const;
     uint64_t GetLastScannedVectors() const;
     uint64_t GetLastMatchedVectors() const;
+    uint64_t GetLastPrimaryHeadCandidateCount() const;
 
     // Enable/disable dropping OS page cache on HeadIndex eviction (for benchmarking)
     void SetDropPageCacheOnEvict(bool enable) { m_dropPageCacheOnEvict = enable; }
@@ -280,8 +286,13 @@ public:
     // Each vector can have multiple tags (e.g. org, dept, team, project).
     bool BuildSignatures(int p_tenantId, ByteArray p_tags, int p_numVectors, int p_numTagsPerVec);
 
-    // Build index with per-vector tags integrated.
-    // Same as BuildFromData but also generates PS/NS signatures per tenant.
+    // Recompute each vector's nearest persisted head and write primary_head_csr.bin
+    // without touching the posting store. Intended for an existing SPANN index.
+    bool BackfillPrimaryHeadCSR(int p_tenantId, ByteArray p_vectors, int p_numVectors,
+                                ByteArray p_tags, int p_numTagsPerVec);
+
+    // Build index with per-vector tags integrated. Call BuildSignatures
+    // explicitly after the index build to generate PS/NS sidecars.
     // p_tags: ByteArray of uint32_t, layout [p_vectorNum × p_numTagsPerVec].
     bool BuildFromDataWithTags(ByteArray p_vectors, ByteArray p_metadata, SizeType p_vectorNum,
                                ByteArray p_tags, int p_numTagsPerVec,

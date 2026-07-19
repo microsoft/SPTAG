@@ -313,14 +313,11 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
         NodeDistPair gnode = p_space.m_NGQueue.pop();
         SizeType tmpNode = gnode.node;
         const SizeType *node = m_pGraph[tmpNode];
-        _mm_prefetch((const char *)node, _MM_HINT_T0);
-        for (DimensionType i = 0; i <= checkPos; i++)
-        {
-            auto futureNode = node[i];
-            if (futureNode < 0)
-                break;
-            _mm_prefetch((const char *)(m_pSamples)[futureNode], _MM_HINT_T0);
-        }
+        COMMON::PrefetchGraphNeighbors(
+            node, m_pGraph.m_iNeighborhoodSize,
+            [this](SizeType neighbor) -> const void* {
+                return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
+            });
 
         if (gnode.distance <= p_query.worstDist())
         {
@@ -413,14 +410,11 @@ int Index<T>::SearchIterative(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSp
         NodeDistPair gnode = p_space.m_NGQueue.pop();
         SizeType tmpNode = gnode.node;
         const SizeType *node = m_pGraph[tmpNode];
-        _mm_prefetch((const char *)node, _MM_HINT_T0);
-        for (DimensionType i = 0; i <= checkPos; i++)
-        {
-            auto futureNode = node[i];
-            if (futureNode < 0)
-                break;
-            _mm_prefetch((const char *)(m_pSamples)[futureNode], _MM_HINT_T0);
-        }
+        COMMON::PrefetchGraphNeighbors(
+            node, m_pGraph.m_iNeighborhoodSize,
+            [this](SizeType neighbor) -> const void* {
+                return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
+            });
         if (notDeleted(m_deletedID, tmpNode)) 
         {
             if (checkFilter(m_pMetadata, tmpNode, p_space.m_filterFunc))

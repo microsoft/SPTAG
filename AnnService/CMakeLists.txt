@@ -167,6 +167,13 @@ add_executable(spannbuilder ${PROJECT_SOURCE_DIR}/Wrappers/src/SpannAttrBuilder.
 target_include_directories(spannbuilder PRIVATE ${PROJECT_SOURCE_DIR}/Wrappers)
 target_link_libraries(spannbuilder SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
 
+# Native concurrent benchmark for the TenantIndexManager ACL/unfilter path.
+# It bypasses the SWIG layer so client thread concurrency is not serialized by
+# Python's GIL.
+add_executable(spannconcurrencybench ${PROJECT_SOURCE_DIR}/Tools/benchmarks/SpannConcurrentBench.cpp ${PROJECT_SOURCE_DIR}/Wrappers/src/CoreInterface.cpp)
+target_include_directories(spannconcurrencybench PRIVATE ${PROJECT_SOURCE_DIR}/Wrappers)
+target_link_libraries(spannconcurrencybench SPTAGLibStatic ${Boost_LIBRARIES} ${RocksDB_LIBRARIES} ${uring_LIBRARIES} ${TBB_LIBRARIES} ${SPDK_LIBRARIES})
+
 # Offline RaBitQ2 in-posting code-sidecar encoders. rabitq2_encode loads the full
 # float matrix into RAM (small/legacy); rabitq2_encode_stream streams the base file
 # in chunks and is value-type-aware (Int8/UInt8/Float) so it scales to 1B vectors.

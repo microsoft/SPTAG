@@ -88,13 +88,13 @@ namespace SPTAG
             std::unique_ptr<SizeType[]> m_hashTable;
 
 
-            inline unsigned hash_func2(unsigned idx, int poolSize, int loop)
+            inline unsigned hash_func2(unsigned idx, int poolSize, int loop) const
             {
                 return (idx + loop) & poolSize;
             }
 
 
-            inline unsigned hash_func(unsigned idx, int poolSize)
+            inline unsigned hash_func(unsigned idx, int poolSize) const
             {
                 return ((unsigned)(idx * 99991) + _rotl(idx, 2) + 101) & poolSize;
             }
@@ -144,6 +144,16 @@ namespace SPTAG
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx + 1) == 0;
             }
 
+            inline bool Contains(SizeType idx) const
+            {
+                if (!m_hashTable) return false;
+
+                const SizeType key = idx + 1;
+                if (_Contains(m_hashTable.get(), m_poolSize, key)) return true;
+                return m_secondHash &&
+                    _Contains(m_hashTable.get() + m_poolSize + 1, m_poolSize, key);
+            }
+
             inline void DoubleSize()
             {
                 int new_poolSize = ((m_poolSize + 1) << 1) - 1; 
@@ -189,6 +199,18 @@ namespace SPTAG
                 DoubleSize();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Hash table is full! Set HashTableExponent to larger value (default is 2). NewHashTableExponent=%d NewPoolSize=%d\n", m_exp, m_poolSize);
                 return _CheckAndSet(m_hashTable.get(), m_poolSize, true, idx);
+            }
+
+            inline bool _Contains(const SizeType* hashTable, int poolSize, SizeType idx) const
+            {
+                unsigned index = hash_func((unsigned)idx, poolSize);
+                for (int loop = 0; loop < m_maxLoop; ++loop)
+                {
+                    if (!hashTable[index]) return false;
+                    if (hashTable[index] == idx) return true;
+                    index = hash_func2(index, poolSize, loop);
+                }
+                return false;
             }
         };
 
@@ -318,6 +340,11 @@ namespace SPTAG
             inline bool CheckAndSet(SizeType idx)
             {
                 return nodeCheckStatus.CheckAndSet(idx);
+            }
+
+            inline bool Contains(SizeType idx) const
+            {
+                return nodeCheckStatus.Contains(idx);
             }
 
             inline int HashTableExponent() const 

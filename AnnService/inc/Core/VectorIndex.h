@@ -294,6 +294,15 @@ public:
             uint64_t m_prePSPostings = 0;
             uint64_t m_scannedVectors = 0;
             uint64_t m_matchedVectors = 0;
+            uint64_t m_primaryHeadCandidates = 0;
+            uint64_t m_postingPageReads = 0;
+            uint64_t m_postingLogicalBytes = 0;
+            uint64_t m_postingPhysicalBytes = 0;
+            uint64_t m_adcScannedVectors = 0;
+            uint64_t m_adcSurvivors = 0;
+            uint64_t m_rerankCandidates = 0;
+            uint64_t m_rerankReadRequests = 0;
+            uint64_t m_rerankPhysicalBytes = 0;
 
             uint64_t FalsePositivePostings() const
             {
@@ -364,7 +373,16 @@ public:
         static void SetThreadLocalPostingScanStats(uint64_t p_readPostings, uint64_t p_matchedPostings,
                                                    uint64_t p_prePSPostings = 0,
                                                    uint64_t p_scannedVectors = 0,
-                                                   uint64_t p_matchedVectors = 0);
+                                                   uint64_t p_matchedVectors = 0,
+                                                   uint64_t p_primaryHeadCandidates = 0,
+                                                   uint64_t p_postingPageReads = 0,
+                                                   uint64_t p_postingLogicalBytes = 0,
+                                                   uint64_t p_postingPhysicalBytes = 0,
+                                                   uint64_t p_adcScannedVectors = 0,
+                                                   uint64_t p_adcSurvivors = 0,
+                                                   uint64_t p_rerankCandidates = 0,
+                                                   uint64_t p_rerankReadRequests = 0,
+                                                   uint64_t p_rerankPhysicalBytes = 0);
 
         static PostingScanStats GetThreadLocalPostingScanStats();
 

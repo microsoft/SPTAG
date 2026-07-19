@@ -10,6 +10,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <thread>
@@ -579,15 +581,25 @@ namespace SPTAG
             }
 
             bool Initialize(int numContexts, int maxEventsPerContext) {
+                std::lock_guard<std::mutex> initLock(m_initializeMutex);
                 if (m_initialized) return true;
+                if (numContexts <= 0 || maxEventsPerContext <= 0) {
+                    SPTAGLIB_LOG(LogLevel::LL_Error,
+                                 "SharedAIOPool: invalid configuration (%d contexts, %d events)\n",
+                                 numContexts, maxEventsPerContext);
+                    return false;
+                }
                 m_contexts.resize(numContexts);
+                m_contextLocks.reserve(numContexts);
                 memset(m_contexts.data(), 0, sizeof(aio_context_t) * numContexts);
                 for (int i = 0; i < numContexts; i++) {
+                    m_contextLocks.emplace_back(std::make_unique<std::mutex>());
                     auto ret = syscall(__NR_io_setup, maxEventsPerContext, &(m_contexts[i]));
                     if (ret < 0) {
                         SPTAGLIB_LOG(LogLevel::LL_Error, "SharedAIOPool: io_setup failed: %s\n", strerror(errno));
                         for (int j = 0; j < i; j++) syscall(__NR_io_destroy, m_contexts[j]);
                         m_contexts.clear();
+                        m_contextLocks.clear();
                         return false;
                     }
                 }
@@ -598,7 +610,13 @@ namespace SPTAG
             }
 
             bool IsInitialized() const { return m_initialized; }
+            bool IsUsable() const
+            {
+                return m_initialized && !m_contexts.empty() &&
+                       m_contexts.size() == m_contextLocks.size();
+            }
             aio_context_t GetContext(int i) const { return m_contexts[i % m_contexts.size()]; }
+            std::mutex& GetContextMutex(int i) { return *m_contextLocks[i % m_contextLocks.size()]; }
             int NumContexts() const { return (int)m_contexts.size(); }
 
             ~SharedAIOPool() {
@@ -612,6 +630,8 @@ namespace SPTAG
             SharedAIOPool(const SharedAIOPool&) = delete;
             SharedAIOPool& operator=(const SharedAIOPool&) = delete;
             std::vector<aio_context_t> m_contexts;
+            std::vector<std::unique_ptr<std::mutex>> m_contextLocks;
+            std::mutex m_initializeMutex;
             bool m_initialized = false;
         };
 
@@ -701,7 +721,7 @@ namespace SPTAG
                 // unsized -> out-of-bounds segfault. Bypass the shared pool entirely when
                 // built with io_uring so both m_iocps and m_uring are initialized together.
 #ifndef URING
-                if (SharedAIOPool::Instance().IsInitialized()) {
+                if (SharedAIOPool::Instance().IsUsable()) {
                     m_useSharedPool = true;
                     int poolSize = SharedAIOPool::Instance().NumContexts();
                     m_iocps.resize(poolSize);
@@ -717,6 +737,8 @@ namespace SPTAG
 #ifdef URING
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileIO::InitializeFileIo: using io uring for read!\n");
                     m_uring.resize(threadPoolSize);
+                    m_uringLocks.clear();
+                    m_uringLocks.reserve(threadPoolSize);
 #endif
                     memset(m_iocps.data(), 0, sizeof(aio_context_t) * threadPoolSize);
                     for (int i = 0; i < threadPoolSize; i++) {
@@ -726,10 +748,14 @@ namespace SPTAG
                             return false;
                         }
 #ifdef URING
+                        m_uringLocks.emplace_back(std::make_unique<std::mutex>());
                         ret = io_uring_queue_init((int)maxNumBlocks, &m_uring[i], 0);
                         if (ret < 0)
                         {
                             SPTAGLIB_LOG(LogLevel::LL_Error, "Cannot setup io_uring: %s\n", strerror(-ret));
+                            for (int j = 0; j < i; ++j) io_uring_queue_exit(&m_uring[j]);
+                            m_uring.clear();
+                            m_uringLocks.clear();
                             return false;
                         }
 #endif
@@ -780,6 +806,23 @@ namespace SPTAG
                     return 0;
                 }
                 int iocp = readRequests[0].m_status % m_iocps.size();
+                std::unique_lock<std::mutex> sharedContextLock;
+                if (m_useSharedPool) {
+                    sharedContextLock = std::unique_lock<std::mutex>(
+                        SharedAIOPool::Instance().GetContextMutex(iocp));
+                }
+#ifdef URING
+                if (iocp < 0 || static_cast<size_t>(iocp) >= m_uringLocks.size() ||
+                    !m_uringLocks[static_cast<size_t>(iocp)]) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "AsyncFileReader::ReadBlocks: invalid io_uring context %d\n", iocp);
+                    return 0;
+                }
+                // A ring's SQ/CQ is not safe for concurrent submit-and-reap sequences.
+                // Keep one request batch paired with its own completions.
+                std::unique_lock<std::mutex> uringContextLock(
+                    *m_uringLocks[static_cast<size_t>(iocp)]);
+#endif
 		        //struct timespec timeout_ts {0, 0};
 		        //while (syscall(__NR_io_getevents, m_iocps[iocp], batchSize, batchSize, events.data(), &timeout_ts) > 0);
  
@@ -803,7 +846,10 @@ namespace SPTAG
                 for (int currSubIoStartId = 0; currSubIoStartId < realCount; currSubIoStartId += batchSize) {
                     int currSubIoEndId = (currSubIoStartId + batchSize) > realCount ? realCount : currSubIoStartId + batchSize;
                     int totalToSubmit = currSubIoEndId - currSubIoStartId;
-                    int totalSubmitted = 0, totalDone = 0;
+                    int totalDone = 0;
+#ifndef URING
+                    int totalSubmitted = 0;
+#endif
                     for (int i = 0; i < totalToSubmit; i++) {
                         while (reqidx < requestCount && readRequests[reqidx].m_readSize == 0) reqidx++;
 			            if (reqidx >= requestCount) SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "AsyncFileReader::ReadBlocks: error reqidx(%d) >= requestCount(%d)\n", reqidx, requestCount);
@@ -904,6 +950,11 @@ namespace SPTAG
                     return 0;
                 }
                 int iocp = readRequests[0].m_status % m_iocps.size();
+                std::unique_lock<std::mutex> sharedContextLock;
+                if (m_useSharedPool) {
+                    sharedContextLock = std::unique_lock<std::mutex>(
+                        SharedAIOPool::Instance().GetContextMutex(iocp));
+                }
 	         	//struct timespec timeout_ts {0, 0};
 		        //while (syscall(__NR_io_getevents, m_iocps[iocp], batchSize, batchSize, events.data(), &timeout_ts) > 0);
 		
@@ -999,6 +1050,7 @@ namespace SPTAG
                     for (int i = 0; i < m_iocps.size(); i++) syscall(__NR_io_destroy, m_iocps[i]);
 #ifdef URING
                     for (int i = 0; i < m_uring.size(); i++) io_uring_queue_exit(&m_uring[i]);
+                    m_uringLocks.clear();
 #endif
                 }
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "AsyncFileReader: Destroying fd=%d!%s\n",
@@ -1016,6 +1068,7 @@ namespace SPTAG
             }
 
             aio_context_t& GetIOCP(int i) { return m_iocps[i % m_iocps.size()]; }
+            bool UsesSharedAIOPool() const { return m_useSharedPool; }
 
             int GetFileHandler() { return m_fileHandle; }
 
@@ -1052,6 +1105,7 @@ namespace SPTAG
 
 #ifdef URING
             std::vector<struct io_uring> m_uring;
+            std::vector<std::unique_ptr<std::mutex>> m_uringLocks;
 #endif
         };
 #endif

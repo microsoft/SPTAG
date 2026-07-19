@@ -259,9 +259,10 @@ int main(int argc, char** argv) {
     // --- PipeANN fixed-chunk PQ code generation mode ---
     // Uses the PipeANN pq_pivots.bin format and writes a raw, header-less N*M
     // uint8 sidecar consumed by PostingQuantizer=PipePQ. Existing PipeANN
-    // compressed.bin files ([uint32 N][uint32 M] + codes) are also accepted
-    // directly by the SPANN build/search transform path, so this mode is mainly
-    // for same-algorithm/same-code-length experiments such as PQ25.
+    // compressed.bin files ([uint32 N][uint32 M] + codes) are accepted directly
+    // by the SPANN build/search path and are the authoritative choice for
+    // byte-identical PipeANN code assignment; this helper is for same-algorithm
+    // experiments where rare BLAS rounding ties need not match byte-for-byte.
     if (ArgFlag(argc, argv, "--gen-pipepq-codes")) {
         const char* vectors = ArgVal(argc, argv, "--vectors", nullptr);
         const char* pivots = ArgVal(argc, argv, "--pivots", nullptr);
@@ -461,7 +462,8 @@ int main(int argc, char** argv) {
             "[--posting-quantizer None|RaBitQ|OPQ|PipePQ] [--posting-quant-m <B>] "
             "[--posting-quant-bits <b>] [--posting-quant-file <f>] "
             "[--full-vector-file <f>] [--rerank-l <L>] [--quantize-head] [--quant-adc-only] "
-            "[--ssd-start-file-gb <GB>] [--ssd-max-file-gb <GB>] [--ssd-growth-file-gb <GB>]\n");
+            "[--ssd-start-file-gb <GB>] [--ssd-max-file-gb <GB>] [--ssd-growth-file-gb <GB>] "
+            "[--backfill-primary-head-csr]\n");
         return 2;
     }
 
@@ -578,6 +580,32 @@ int main(int argc, char** argv) {
     }
 
     fprintf(stderr, "[spannbuilder] BuildFromDataWithTags ...\n");
+    if (ArgFlag(argc, argv, "--backfill-primary-head-csr")) {
+        fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR: LoadAll(%s) ...\n", indexDir);
+        if (!mgr.LoadAll(indexDir)) {
+            fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR LoadAll FAILED\n");
+            return 1;
+        }
+        fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR: assigning nearest heads for %lld vectors ...\n", n);
+        if (!mgr.BackfillPrimaryHeadCSR(tenant, vectors, static_cast<int>(n), tags, numTagsPerVec)) {
+            fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR backfill FAILED\n");
+            return 1;
+        }
+        fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR done.\n");
+        return 0;
+    }
+    if (ArgFlag(argc, argv, "--build-signatures-only")) {
+        if (!mgr.LoadAll(indexDir)) {
+            fprintf(stderr, "[spannbuilder] BUILD-SIGNATURES-ONLY LoadAll FAILED\n");
+            return 1;
+        }
+        if (!mgr.BuildSignatures(tenant, tags, static_cast<int>(n), numTagsPerVec)) {
+            fprintf(stderr, "[spannbuilder] BUILD-SIGNATURES-ONLY BuildSignatures FAILED\n");
+            return 1;
+        }
+        fprintf(stderr, "[spannbuilder] BUILD-SIGNATURES-ONLY done.\n");
+        return 0;
+    }
     const bool routingOnly = ArgFlag(argc, argv, "--routing-only") ||
                              (std::getenv("SPTAG_ROUTING_ONLY") != nullptr);
     if (routingOnly) {

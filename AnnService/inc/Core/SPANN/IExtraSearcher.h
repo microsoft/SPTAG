@@ -14,6 +14,7 @@
 #include "inc/Helper/ConcurrentSet.h"
 #include <memory>
 #include <vector>
+#include <string>
 #include <chrono>
 #include <atomic>
 #include <cstdint>
@@ -167,6 +168,15 @@ namespace SPTAG {
                 std::uint64_t m_prePSPostings = 0;
                 std::uint64_t m_scannedVectors = 0;
                 std::uint64_t m_matchedVectors = 0;
+                std::uint64_t m_primaryHeadCandidates = 0;
+                std::uint64_t m_postingPageReads = 0;
+                std::uint64_t m_postingLogicalBytes = 0;
+                std::uint64_t m_postingPhysicalBytes = 0;
+                std::uint64_t m_adcScannedVectors = 0;
+                std::uint64_t m_adcSurvivors = 0;
+                std::uint64_t m_rerankCandidates = 0;
+                std::uint64_t m_rerankReadRequests = 0;
+                std::uint64_t m_rerankPhysicalBytes = 0;
 
                 void Reset()
                 {
@@ -175,6 +185,15 @@ namespace SPTAG {
                     m_prePSPostings = 0;
                     m_scannedVectors = 0;
                     m_matchedVectors = 0;
+                    m_primaryHeadCandidates = 0;
+                    m_postingPageReads = 0;
+                    m_postingLogicalBytes = 0;
+                    m_postingPhysicalBytes = 0;
+                    m_adcScannedVectors = 0;
+                    m_adcSurvivors = 0;
+                    m_rerankCandidates = 0;
+                    m_rerankReadRequests = 0;
+                    m_rerankPhysicalBytes = 0;
                 }
             };
 
@@ -313,6 +332,27 @@ namespace SPTAG {
             std::function<void()> m_callback;
         };
 
+        enum class PostingUpdateKind : std::uint8_t
+        {
+            Pure,
+            Tail,
+        };
+
+        struct PostingUpdateTarget
+        {
+            SizeType m_headID = -1;
+            PostingUpdateKind m_kind = PostingUpdateKind::Pure;
+        };
+
+        using PostingUpdateTargets = std::vector<std::vector<PostingUpdateTarget>>;
+
+        struct TaggedPostingSnapshot
+        {
+            SizeType m_headID = -1;
+            int m_pureCount = 0;
+            std::string m_records;
+        };
+
         class IExtraSearcher
         {
         public:
@@ -351,6 +391,17 @@ namespace SPTAG {
             virtual std::int64_t GetOPQTotalVectors() { return -1; }
             virtual bool GetRaBitQEnabled() { return false; }
 
+            virtual bool HasPrimaryHeadCSR() const { return false; }
+
+            // Expands in-memory primary owner lists for graph-selected heads and
+            // exact-reranks matching sparse-filter candidates without posting IO.
+            virtual ErrorCode SearchPrimaryHeadCandidates(ExtraWorkSpace* /*p_exWorkSpace*/,
+                                                           QueryResult& /*p_queryResults*/,
+                                                           std::shared_ptr<VectorIndex> /*p_index*/)
+            {
+                return ErrorCode::Fail;
+            }
+
             virtual ErrorCode SearchNextInPosting(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_headResults,
                 QueryResult& p_queryResults,
                 std::shared_ptr<VectorIndex>& p_index, const VectorIndex* p_spann) = 0;
@@ -371,6 +422,43 @@ namespace SPTAG {
             }
             virtual ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
                 std::shared_ptr<VectorIndex> p_index, SizeType p_begin) { return ErrorCode::Undefined; }
+            virtual ErrorCode AddIndexWithTargets(ExtraWorkSpace* /*p_exWorkSpace*/,
+                                                   std::shared_ptr<VectorSet>& /*p_vectorSet*/,
+                                                   const PostingUpdateTargets& /*p_targets*/,
+                                                   const std::uint32_t* /*p_tags*/,
+                                                   int /*p_numTagsPerVec*/,
+                                                   SizeType /*p_begin*/)
+            {
+                return ErrorCode::Undefined;
+            }
+
+            // Tagged maintenance keeps the physical [pure | tail] layout while the
+            // owning SPANN index performs subset-local head-graph maintenance.
+            virtual ErrorCode GetTaggedPostingSnapshot(ExtraWorkSpace* /*p_exWorkSpace*/,
+                                                        SizeType /*p_headID*/,
+                                                        TaggedPostingSnapshot& /*p_snapshot*/)
+            {
+                return ErrorCode::Undefined;
+            }
+            virtual ErrorCode ReserveTaggedPosting(SizeType /*p_expectedHeadID*/)
+            {
+                return ErrorCode::Undefined;
+            }
+            virtual ErrorCode RewriteTaggedPostings(ExtraWorkSpace* /*p_exWorkSpace*/,
+                                                     const std::vector<TaggedPostingSnapshot>& /*p_rewrites*/)
+            {
+                return ErrorCode::Undefined;
+            }
+            virtual ErrorCode ReadTaggedFullVectors(const std::vector<SizeType>& /*p_vids*/,
+                                                     ByteArray& /*p_vectors*/)
+            {
+                return ErrorCode::Undefined;
+            }
+            virtual void DrainTaggedMergeCandidates(std::vector<SizeType>& /*p_candidates*/) {}
+            virtual SizeType GetTaggedPostingCount() { return -1; }
+            virtual int GetTaggedRecordSize() const { return -1; }
+            virtual int GetTaggedPureCapacity() const { return -1; }
+            virtual int GetTaggedMergeThreshold() const { return -1; }
             virtual ErrorCode DeleteIndex(SizeType p_id) { return ErrorCode::Undefined; }
 
             virtual bool AllFinished() { return false; }

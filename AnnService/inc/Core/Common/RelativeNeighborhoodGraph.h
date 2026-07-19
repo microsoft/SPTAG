@@ -10,6 +10,25 @@ namespace SPTAG
 {
     namespace COMMON
     {
+        template <typename SampleAccessor>
+        inline void PrefetchGraphNeighbors(const SizeType* p_neighbors,
+                                           DimensionType p_neighborCount,
+                                           SampleAccessor p_getSample)
+        {
+            if (p_neighbors == nullptr) return;
+
+            _mm_prefetch((const char*)p_neighbors, _MM_HINT_T0);
+            for (DimensionType i = 0; i < p_neighborCount; ++i) {
+                const SizeType neighbor = p_neighbors[i];
+                if (neighbor < 0) break;
+
+                const void* sample = p_getSample(neighbor);
+                if (sample != nullptr) {
+                    _mm_prefetch((const char*)sample, _MM_HINT_T0);
+                }
+            }
+        }
+
         class RelativeNeighborhoodGraph: public NeighborhoodGraph
         {
         public:
