@@ -8216,14 +8216,13 @@ namespace SPTAG::SPANN {
             }
             auto& aioPool = Helper::SharedAIOPool::Instance();
             if (!aioPool.IsUsable()) {
-                static std::atomic<bool> s_reportedUnavailablePool{false};
-                bool expected = false;
-                if (s_reportedUnavailablePool.compare_exchange_strong(expected, true)) {
+                const int aioContexts = std::max(1, m_opt->m_ioThreads);
+                if (!aioPool.Initialize(aioContexts, 1024) || !aioPool.IsUsable()) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                                 "RerankBaseDirectBatch: shared AIO pool is not usable; "
+                                 "RerankBaseDirectBatch: shared AIO pool initialization failed; "
                                  "falling back to the configured rerank path\n");
+                    return false;
                 }
-                return false;
             }
             const size_t ALIGN = 4096;
             const size_t recBytes = (size_t)dim * sizeof(ValueType);
