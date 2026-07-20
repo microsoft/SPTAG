@@ -176,6 +176,13 @@ namespace SPTAG
             // regression).
             mutable std::vector<const void*> m_metaOnlyHeadVectorPtrs;
             std::unordered_map<std::string, std::string> m_headParameters;
+            // Construction values must survive a subsequent runtime overlay when
+            // serializing the distinct [BuildSSDIndex] section.
+            std::vector<std::pair<std::string, std::string>> m_buildSSDParameters;
+            // Explicit runtime settings supplied through [SearchSSDIndex]. Keep
+            // them separate from the construction options so SaveConfig preserves
+            // the native build/search section boundary.
+            std::vector<std::pair<std::string, std::string>> m_searchSSDParameters;
 
             COMMON::VersionLabel m_versionMap;
             std::shared_ptr<IExtraSearcher> m_extraSearcher;

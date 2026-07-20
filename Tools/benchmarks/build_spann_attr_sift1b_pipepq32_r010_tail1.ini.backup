@@ -1,6 +1,6 @@
 ; =============================================================================
 ; Canonical SIFT1B/SpaceV1B comparison build: PipePQ32, no U_extra,
-; official SIFT1B SPANN construction settings, and one unfilter-tail page.
+; PerTagBKT Ratio=0.1, and one extra unfilter-tail page beyond each pure prefix.
 ; =============================================================================
 
 [Base]
@@ -10,7 +10,6 @@ VectorCount=1000000000
 Dim=128
 VectorType=UInt8
 DistCalcMethod=L2
-IndexAlgoType=BKT
 Normalized=false
 IndexDirectory=/mnt/nvme/baotonglu/mocheng/datasets/sift1b/sift1b_spann_pipepq32_r010_tail1
 
@@ -25,32 +24,19 @@ BuildSignatures=true
 WithMetaIndex=false
 
 [SelectHead]
-SelectHeadType=PerTagBKT
-Ratio=0.12
-BKTLambdaFactor=1.0
+SelectType=PerTagBKT
+Ratio=0.1
+BKTLambdaFactor=100
 ParallelBKTBuild=true
-NumberOfThreads=45
-SelectThreshold=10
-SplitFactor=6
-SplitThreshold=25
+NumberOfThreads=64
 
 [BuildHead]
-NumberOfThreads=45
-NeighborhoodSize=32
-TPTNumber=32
-TPTLeafSize=2000
-MaxCheck=16324
-MaxCheckForRefineGraph=16324
-RefineIterations=3
+NumberOfThreads=64
 
 [BuildSSDIndex]
 Storage=FILEIO
-NumberOfThreads=45
-InternalResultNum=64
+NumberOfThreads=64
 ReplicaCount=8
-PostingPageLimit=3
-MaxCheck=16324
-TmpDir=/tmp/
 TailReplicaCount=8
 UnfilterTailBufferLength=1
 PostingQuantizer=PipePQ
@@ -62,36 +48,6 @@ RerankL=500
 StartFileSizeGB=800
 MaxFileSizeGB=1200
 GrowthFileSizeGB=50
-
-[SearchSSDIndex]
-isExecute=true
-BuildSsdIndex=false
-InternalResultNum=96
-NumberOfThreads=1
-HashTableExponent=4
-ResultNum=10
-MaxCheck=1024
-MaxDistRatio=8.0
-SearchPostingPageLimit=3
-UnifiedNprobeBudget=true
-MultiNodeBudgetKeepRatio=0.60
-CrossSingleSeed=-1
-DisableCrossEdges=false
-FilterKeepCross=false
-CrossExpandLimit=0
-DisableCrossSubgraph=false
-TagAwareHeadExpansion=1
-LogUExtra=false
-LogCrossStats=false
-LogPathStats=false
-DumpHeads=0
-FilterKeepUExtra=false
-EnableUnfilterTail=true
-AblateUExtra=false
-AblateTail=false
-UnfilterPurePages=false
-UnfilterExtraTailPages=0
-EnableHierPostingFilter=false
 
 [MultiTenant]
 ACLCols=0,1,2,3

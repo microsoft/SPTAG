@@ -873,8 +873,9 @@ namespace SPTAG::SPANN {
                     }
                 }
             }
-            p_opt.m_searchPostingPageLimit = p_opt.m_postingPageLimit;
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting index with posting page limit:%d\n", p_opt.m_postingPageLimit);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "Loading index with build posting page limit:%d and search page limit:%d\n",
+                p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit);
             m_postingSizeLimit = p_opt.m_postingPageLimit * PageSize / m_vectorInfoSize;
             m_bufferSizeLimit = p_opt.m_bufferLength * PageSize / m_vectorInfoSize;
             // ini is the single source of truth: unfilter-tail extra buffer pages come
@@ -2846,8 +2847,12 @@ namespace SPTAG::SPANN {
                     const char* pbuild = std::getenv("SPTAG_PIPEPQ_INPOST_DB_BUILD");
                     if (pbuild && pbuild[0] == '1') TransformInPostingsPipePQ();
                 } else {
-                    const char* obuild = std::getenv("SPTAG_OPQ_INPOST_DB_BUILD");
-                    if (obuild && obuild[0] == '1') TransformInPostingsOpq();
+                    if (m_opt->m_requantizeFromPipePQ) {
+                        RequantizeInPostingsOpqFromPipePQ();
+                    } else {
+                        const char* obuild = std::getenv("SPTAG_OPQ_INPOST_DB_BUILD");
+                        if (obuild && obuild[0] == '1') TransformInPostingsOpq();
+                    }
                 }
             }
             {
@@ -2919,7 +2924,7 @@ namespace SPTAG::SPANN {
         }
         bool ValidatePostings(
             std::vector<SizeType> &pids, std::vector<Helper::PageBuffer<std::uint8_t>> &postings,
-            bool allowPurePrefix = false)
+            bool allowTruncatedRead = false)
         {
             if (!m_opt->m_checksumInRead) return true;
 
@@ -2928,20 +2933,10 @@ namespace SPTAG::SPANN {
                 const size_t fullBytes = static_cast<size_t>(m_postingSizes.GetSize(pids[i])) *
                                          static_cast<size_t>(m_vectorInfoSize);
                 const size_t readBytes = postings[i].GetAvailableSize();
-                if (allowPurePrefix && readBytes < fullBytes && m_hasPostingPureCounts) {
-                    const int pureCount = m_postingPureCounts.GetSize(pids[i]);
-                    const size_t expectedPrefix = IsUnfilterOnlyHead(pids[i])
-                        ? (std::min)(fullBytes, static_cast<size_t>(m_vectorInfoSize))
-                        : (pureCount > 0
-                            ? (std::min)(fullBytes, static_cast<size_t>(pureCount) *
-                                                         static_cast<size_t>(m_vectorInfoSize))
-                            : fullBytes);
-                    // A full-posting checksum cannot validate an intentionally truncated
-                    // pure-prefix read. Only accept the exact prefix requested by the
-                    // filtered IO path; other short reads remain errors.
-                    if (readBytes == expectedPrefix) {
-                        continue;
-                    }
+                if (allowTruncatedRead && readBytes < fullBytes) {
+                    // The persisted checksum covers the full posting, so it cannot
+                    // validate a deliberate pure-prefix or page-limited read.
+                    continue;
                 }
                 if (!m_checkSum.ValidateChecksum((const char *)(postings[i].GetBuffer()),
                                                  readBytes, *m_checkSums[pids[i]]))
@@ -3363,27 +3358,18 @@ namespace SPTAG::SPANN {
             const bool trackPostingStats = hasInlineTagFilter || hasDNF || s_trackAllStats;
 
             // U_extra (unfilter-only) heads are infrastructure for unfiltered
-            // recall only. Filtered queries must behave identically to a build
-            // without U_extra, so drop role==1 heads from the candidate posting
-            // list entirely. Disable for A/B via SPTAG_FILTER_KEEP_UEXTRA=1.
-            static const bool s_filterKeepUextra = []() {
-                const char* env = std::getenv("SPTAG_FILTER_KEEP_UEXTRA");
-                return env && env[0] == '1';
-            }();
-            if (hasInlineTagFilter && HasHeadRoles() && !s_filterKeepUextra) {
+            // recall only. Filtered queries drop role==1 heads unless the native
+            // FilterKeepUExtra A/B option is enabled.
+            if (hasInlineTagFilter && HasHeadRoles() && !m_opt->m_filterKeepUExtra) {
                 auto& ids = p_exWorkSpace->m_postingIDs;
                 ids.erase(std::remove_if(ids.begin(), ids.end(),
                     [&](int pid) { return IsUnfilterOnlyHead(pid); }), ids.end());
             }
             // Pure/tail split for filtered queries is ON by default whenever the
             // pure-count sidecar exists: filtered queries must never scan the
-            // unfilter-only tail. Set SPTAG_UNFILTER_TAIL=0 to force-disable.
-            static const bool s_unfilterTailEnabled = []() {
-                const char* env = std::getenv("SPTAG_UNFILTER_TAIL");
-                return !(env && env[0] == '0');
-            }();
+            // unfilter-only tail. EnableUnfilterTail=false force-disables it.
             const bool useUnfilterTail =
-                s_unfilterTailEnabled && m_hasPostingPureCounts && hasInlineTagFilter;
+                m_opt->m_enableUnfilterTail && m_hasPostingPureCounts && hasInlineTagFilter;
 
             // Page-selective IO (env SPTAG_PAGE_SELECT=1): for filtered queries,
             // read only the posting pages whose per-page signature may contain a
@@ -3396,6 +3382,15 @@ namespace SPTAG::SPANN {
             }();
             bool usePageSelect = s_pageSelect && hasInlineTagFilter && m_numTagsPerVec > 0;
             if (usePageSelect && !EnsurePagePS(p_exWorkSpace)) usePageSelect = false;
+            const std::uint32_t searchPostingByteCap =
+                (m_opt->m_searchPostingPageLimit > 0)
+                    ? static_cast<std::uint32_t>(static_cast<std::uint64_t>(
+                          m_opt->m_searchPostingPageLimit) * PageSize)
+                    : 0;
+            auto combineReadCap = [searchPostingByteCap](std::uint32_t cap) {
+                if (searchPostingByteCap == 0) return cap;
+                return cap == 0 ? searchPostingByteCap : (std::min)(cap, searchPostingByteCap);
+            };
 
             // Diagnostic: full read, but measure the page-floor (pages that truly
             // contain a matching vector) vs the signature-selected pages, to
@@ -3430,6 +3425,9 @@ namespace SPTAG::SPANN {
                             pEnd = (int)((std::min)((size_t)numPages,
                                 (size_t)(((size_t)pure * m_vectorInfoSize + PageSize - 1) >> PageSizeEx)));
                     }
+                    if (m_opt->m_searchPostingPageLimit > 0) {
+                        pEnd = (std::min)(pEnd, m_opt->m_searchPostingPageLimit);
+                    }
                     sel.assign(numPages, 0);
                     for (int p = pStart; p < pEnd; ++p) {
                         bool keep = hasDNF ? p_exWorkSpace->m_dnf->MayMatchPage(pages[p])
@@ -3455,7 +3453,7 @@ namespace SPTAG::SPANN {
                     if (IsUnfilterOnlyHead((int)hid)) {
                         // Tail-only (U_extra) head: filtered queries scan nothing
                         // from it, so cap the read to a single vector (minimal IO).
-                        maxBytes[i] = static_cast<std::uint32_t>(m_vectorInfoSize);
+                        maxBytes[i] = combineReadCap(static_cast<std::uint32_t>(m_vectorInfoSize));
                         continue;
                     }
                     int pure = m_postingPureCounts.GetSize(hid);
@@ -3463,7 +3461,16 @@ namespace SPTAG::SPANN {
                         maxBytes[i] = static_cast<std::uint32_t>(pure) *
                                       static_cast<std::uint32_t>(m_vectorInfoSize);
                     }
+                    maxBytes[i] = combineReadCap(maxBytes[i]);
                 }
+                mgErr = db->MultiGet(p_exWorkSpace->m_postingIDs,
+                                     p_exWorkSpace->m_pageBuffers,
+                                     maxBytes,
+                                     remainLimit,
+                                     &(p_exWorkSpace->m_diskRequests));
+            } else if (searchPostingByteCap > 0) {
+                std::vector<std::uint32_t> maxBytes(
+                    p_exWorkSpace->m_postingIDs.size(), searchPostingByteCap);
                 mgErr = db->MultiGet(p_exWorkSpace->m_postingIDs,
                                      p_exWorkSpace->m_pageBuffers,
                                      maxBytes,
@@ -3478,7 +3485,7 @@ namespace SPTAG::SPANN {
             if (mgErr != ErrorCode::Success ||
                 (!usePageSelect &&
                  !ValidatePostings(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers,
-                                   useUnfilterTail)))
+                                   useUnfilterTail || searchPostingByteCap > 0)))
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "[SearchIndex] read postings fail!\n");
                 return ErrorCode::DiskIOFail;
@@ -6304,6 +6311,199 @@ namespace SPTAG::SPANN {
                 slimHeads, totalRecs, fullStride, slimStride, (double)fullStride / slimStride);
         }
 
+        // Requantize a cloned PipePQ index to OPQ without rebuilding its head graph,
+        // postings, or pure/tail placement. Both codecs must use the same code width,
+        // so each record is rewritten in its existing FileIO allocation.
+        void RequantizeInPostingsOpqFromPipePQ() {
+            if (!m_opqInpostDb || m_pipePQ || m_opqInpostDbM <= 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] requires PostingQuantizer=OPQ with a positive PostingQuantM\n");
+                return;
+            }
+
+            const int M = m_opqInpostDbM;
+            const std::string dir = m_opt->m_indexDirectory + FolderSep;
+            const std::string sourceMarker = dir + "inpost_pipepq.bin";
+            const std::string targetMarker = dir + "inpost_opq.bin";
+            const int dstStride = m_vectorInfoSize;
+            const size_t expectedAdcTableBytes =
+                sizeof(float) * static_cast<size_t>(M) * 256;
+            if (!m_opqQ ||
+                m_opqQ->GetQuantizerType() != QuantizerType::OPQQuantizer ||
+                m_opqQ->GetNumSubvectors() != M ||
+                m_opqQ->ReconstructDim() != m_opt->m_dim ||
+                m_opqQ->QuantizeSize() != expectedAdcTableBytes) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] OPQ quantizer does not match M=%d dim=%d K=256\n",
+                    M, m_opt->m_dim);
+                return;
+            }
+
+            {
+                std::ifstream marker(targetMarker, std::ios::binary);
+                int header[2] = { 0, 0 };
+                if (marker.good()) {
+                    marker.read(reinterpret_cast<char*>(header), sizeof(header));
+                    if (marker && header[0] == M && header[1] == dstStride) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                            "[InpostOPQ-Requantize] target marker present, skip rewrite\n");
+                        return;
+                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] incompatible target marker M=%d stride=%d (expected M=%d stride=%d)\n",
+                        header[0], header[1], M, dstStride);
+                    return;
+                }
+            }
+
+            int sourceHeader[2] = { 0, 0 };
+            {
+                std::ifstream marker(sourceMarker, std::ios::binary);
+                marker.read(reinterpret_cast<char*>(sourceHeader), sizeof(sourceHeader));
+                if (!marker) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] missing PipePQ source marker %s\n",
+                        sourceMarker.c_str());
+                    return;
+                }
+            }
+            const int srcM = sourceHeader[0];
+            const int srcStride = sourceHeader[1];
+            if (srcM != M || srcStride != dstStride || dstStride != m_metaDataSize + M) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] same-stride rewrite required: source M=%d stride=%d, target M=%d stride=%d, meta=%d\n",
+                    srcM, srcStride, M, dstStride, m_metaDataSize);
+                return;
+            }
+
+            const int codeFd = open(m_opqCodesPathResolved.c_str(), O_RDONLY);
+            if (codeFd < 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] open OPQ codes %s failed\n",
+                    m_opqCodesPathResolved.c_str());
+                return;
+            }
+            const off_t codeSize = lseek(codeFd, 0, SEEK_END);
+            const size_t expectedCodeSize = static_cast<size_t>(m_opt->m_vectorSize) * M;
+            if (codeSize != static_cast<off_t>(expectedCodeSize)) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] OPQ code size %lld does not equal expected %zu\n",
+                    static_cast<long long>(codeSize), expectedCodeSize);
+                close(codeFd);
+                return;
+            }
+            void* codeMap = mmap(nullptr, expectedCodeSize, PROT_READ, MAP_SHARED, codeFd, 0);
+            close(codeFd);
+            if (codeMap == MAP_FAILED) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] mmap OPQ codes failed\n");
+                return;
+            }
+            const auto* codes = reinterpret_cast<const std::uint8_t*>(codeMap);
+
+            auto fileDb = std::dynamic_pointer_cast<FileIO>(db);
+            if (!fileDb) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] FileIO is required for an in-place rewrite\n");
+                munmap(codeMap, expectedCodeSize);
+                return;
+            }
+
+            ExtraWorkSpace ws;
+            InitWorkSpace(&ws);
+            std::string blob;
+            std::string out;
+            size_t rewrittenHeads = 0;
+            size_t rewrittenRecords = 0;
+            const SizeType postingNum = m_postingSizes.GetPostingNum();
+            for (SizeType hh = 0; hh < postingNum; ++hh) {
+                int recordCount = m_postingSizes.GetSize(hh);
+                if (recordCount <= 0) continue;
+                if (db->Get(hh, &blob, MaxTimeout, &(ws.m_diskRequests)) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] read posting %d failed\n", static_cast<int>(hh));
+                    munmap(codeMap, expectedCodeSize);
+                    return;
+                }
+                const int availableRecords = static_cast<int>(blob.size() / srcStride);
+                if (availableRecords < recordCount) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] posting %d has %d records, expected %d\n",
+                        static_cast<int>(hh), availableRecords, recordCount);
+                    munmap(codeMap, expectedCodeSize);
+                    return;
+                }
+
+                out.assign(static_cast<size_t>(dstStride) * recordCount, '\0');
+                for (int i = 0; i < recordCount; ++i) {
+                    const char* source = blob.data() + static_cast<size_t>(i) * srcStride;
+                    char* destination = out.data() + static_cast<size_t>(i) * dstStride;
+                    std::memcpy(destination, source, m_metaDataSize);
+                    const int vid = *reinterpret_cast<const int*>(source);
+                    if (vid < 0 || vid >= m_opt->m_vectorSize) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                            "[InpostOPQ-Requantize] posting %d contains invalid vector ID %d\n",
+                            static_cast<int>(hh), vid);
+                        munmap(codeMap, expectedCodeSize);
+                        return;
+                    }
+                    std::memcpy(destination + m_metaDataSize,
+                                codes + static_cast<size_t>(vid) * M, M);
+                }
+
+                const ErrorCode writeCode =
+                    fileDb->RewriteInPlace(hh, out, MaxTimeout, &(ws.m_diskRequests));
+                if (writeCode != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] write posting %d failed code=%d\n",
+                        static_cast<int>(hh), static_cast<int>(writeCode));
+                    munmap(codeMap, expectedCodeSize);
+                    return;
+                }
+                m_postingSizes.UpdateSize(hh, out.size() / m_vectorInfoSize);
+                *m_checkSums[hh] = m_checkSum.CalcChecksum(out.c_str(), static_cast<int>(out.size()));
+                rewrittenRecords += recordCount;
+                ++rewrittenHeads;
+                if (rewrittenHeads % 100000 == 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                        "[InpostOPQ-Requantize] rewritten %zu postings\n", rewrittenHeads);
+                }
+            }
+
+            const ErrorCode checkpointCode = Checkpoint(m_opt->m_indexDirectory);
+            if (checkpointCode != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] checkpoint failed code=%d; source marker remains for retry\n",
+                    static_cast<int>(checkpointCode));
+                munmap(codeMap, expectedCodeSize);
+                return;
+            }
+            {
+                std::ofstream marker(targetMarker, std::ios::binary);
+                const int header[2] = { M, dstStride };
+                marker.write(reinterpret_cast<const char*>(header), sizeof(header));
+                if (!marker) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "[InpostOPQ-Requantize] failed to write target marker %s\n",
+                        targetMarker.c_str());
+                    munmap(codeMap, expectedCodeSize);
+                    return;
+                }
+            }
+            if (std::remove(sourceMarker.c_str()) != 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                    "[InpostOPQ-Requantize] failed to remove source marker %s\n",
+                    sourceMarker.c_str());
+                munmap(codeMap, expectedCodeSize);
+                return;
+            }
+            munmap(codeMap, expectedCodeSize);
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                "[InpostOPQ-Requantize] DONE postings=%zu records=%zu stride=%d "
+                "(head graph, membership, order, and pure-tail placement unchanged)\n",
+                rewrittenHeads, rewrittenRecords, dstStride);
+        }
+
         // One-time offline rewrite for PipeANN-style PQ over an existing posting layout.
         // It preserves posting membership, ordering, and pure/tail split, but can change
         // record stride (e.g. OPQ25 [meta25|code25] -> PipePQ32 [meta25|code32]).
@@ -7093,6 +7293,10 @@ namespace SPTAG::SPANN {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                 "[OPQ prefilter] rerank survivors L=%d (RerankL from index config)\n",
                 m_opqL);
+            if (m_opt->m_quantADCOnly) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                    "[OPQ prefilter] QuantADCOnly=true: returning ADC-ranked results without full-vector rerank\n");
+            }
             m_opqPF = true;
             // Optional: dump vid-ordered raw vectors (for offline RaBitQ encoding), then
             // optionally load a RaBitQ sidecar to replace the PQ ADC scan at search time.
@@ -7442,11 +7646,7 @@ namespace SPTAG::SPANN {
             }
             const bool hasInlineTagFilter =
                 m_tagBytesPerVec > 0 && p_exWorkSpace->m_queryTags != nullptr && p_exWorkSpace->m_numQueryTags > 0;
-            static const bool s_filterKeepUextra = []() {
-                const char* env = std::getenv("SPTAG_FILTER_KEEP_UEXTRA");
-                return env && env[0] == '1';
-            }();
-            if (hasInlineTagFilter && HasHeadRoles() && !s_filterKeepUextra) {
+            if (hasInlineTagFilter && HasHeadRoles() && !m_opt->m_filterKeepUExtra) {
                 auto& ids = p_exWorkSpace->m_postingIDs;
                 ids.erase(std::remove_if(ids.begin(), ids.end(),
                     [&](int pid) { return IsUnfilterOnlyHead(pid); }), ids.end());
@@ -7460,48 +7660,38 @@ namespace SPTAG::SPANN {
             // buys, and mostly unavoidable. The read-length cap is applied per key in
             // a single MultiGet (maxBytesPerKey), so each posting reads its own scale.
             //
-            // Diagnostic ablation toggles (DEFAULT OFF -> unfilter keeps tail+U_extra):
-            //   SPTAG_ABLATE_UEXTRA=1 -> drop role==1 (U_extra, tail-only) heads from
-            //     the unfilter candidate list (no IO, no compute for them).
-            //   SPTAG_ABLATE_TAIL=1   -> cap unfilter reads+scan to the pure prefix
-            //     (skip tail pages), matching the filter read scale.
-            static const bool s_ablateUextra = []() {
-                const char* env = std::getenv("SPTAG_ABLATE_UEXTRA");
-                return env && env[0] == '1';   // default OFF: keep U_extra for unfilter
-            }();
-            static const bool s_ablateTail = []() {
-                const char* env = std::getenv("SPTAG_ABLATE_TAIL");
-                return env && env[0] == '1';   // default OFF: unfilter reads full posting
-            }();
-            static const bool s_unfilterPurePages = []() {
-                const char* env = std::getenv("SPTAG_UNFILTER_PURE_PAGES");
-                return env && env[0] == '1';
-            }();
-            static const int s_unfilterExtraTailPages = []() {
-                const char* env = std::getenv("SPTAG_UNFILTER_EXTRA_TAIL_PAGES");
-                return env ? std::max(0, std::atoi(env)) : 0;
-            }();
-            if (s_ablateUextra && HasHeadRoles() && !hasInlineTagFilter) {
+            // Diagnostic ablations default off, so unfiltered queries retain
+            // both tail pages and U_extra heads.
+            if (m_opt->m_ablateUExtra && HasHeadRoles() && !hasInlineTagFilter) {
                 auto& ids = p_exWorkSpace->m_postingIDs;
                 ids.erase(std::remove_if(ids.begin(), ids.end(),
                     [&](int pid) { return IsUnfilterOnlyHead(pid); }), ids.end());
             }
-            static const bool s_unfilterTailEnabled = []() {
-                const char* env = std::getenv("SPTAG_UNFILTER_TAIL");
-                return !(env && env[0] == '0');
-            }();
             // Filter: read+scan only the pure prefix (skip tail pages). Unfilter
             // reads the full posting unless the tail-ablation diagnostic is on.
-            const bool useUnfilterTail = s_unfilterTailEnabled && m_hasPostingPureCounts && hasInlineTagFilter;
-            const bool capScanToPure = useUnfilterTail || (s_ablateTail && m_hasPostingPureCounts && !hasInlineTagFilter);
+            const bool useUnfilterTail =
+                m_opt->m_enableUnfilterTail && m_hasPostingPureCounts && hasInlineTagFilter;
+            const bool capScanToPure =
+                useUnfilterTail ||
+                (m_opt->m_ablateTail && m_hasPostingPureCounts && !hasInlineTagFilter);
             // Experimental unfilter mode: read only the pages that cover the pure
             // prefix, but scan all records present in those pages. This keeps tail
             // records that fit in already-paid pure pages and avoids extra tail-page IO.
+            const int unfilterExtraTailPages = std::max(0, m_opt->m_unfilterExtraTailPages);
             const bool capUnfilterToPurePages =
-                (s_unfilterPurePages || s_unfilterExtraTailPages > 0) &&
+                (m_opt->m_unfilterPurePages || unfilterExtraTailPages > 0) &&
                 m_hasPostingPureCounts && !hasInlineTagFilter;
             static const bool s_trackAllStatsOPQ = (std::getenv("SPTAG_TRACK_ALL_STATS") != nullptr);
             const bool trackStatsOPQ = hasInlineTagFilter || s_trackAllStatsOPQ;
+            const std::uint32_t searchPostingByteCap =
+                (m_opt->m_searchPostingPageLimit > 0)
+                    ? static_cast<std::uint32_t>(static_cast<std::uint64_t>(
+                          m_opt->m_searchPostingPageLimit) * PageSize)
+                    : 0;
+            auto combineReadCap = [searchPostingByteCap](std::uint32_t cap) {
+                if (searchPostingByteCap == 0) return cap;
+                return cap == 0 ? searchPostingByteCap : (std::min)(cap, searchPostingByteCap);
+            };
 
             // ---- query ADC LUT (normalized query copy to match training space) ----
             const ValueType* rawQuery = queryResults.GetTarget();
@@ -7590,7 +7780,8 @@ namespace SPTAG::SPANN {
             if (asyncScan) {
                 const auto postingIoStart = logPhaseTime ? std::chrono::high_resolution_clock::now()
                                                          : std::chrono::high_resolution_clock::time_point{};
-                if ((capScanToPure || capUnfilterToPurePages) && m_hasPostingPureCounts) {
+                if (((capScanToPure || capUnfilterToPurePages) && m_hasPostingPureCounts) ||
+                    searchPostingByteCap > 0) {
                     // Cap each posting's READ to its pure prefix so tail-replica
                     // records are never fetched from SSD (saves IO, not just the
                     // scan compute). The block layer rounds each cap up to whole
@@ -7601,23 +7792,25 @@ namespace SPTAG::SPANN {
                     for (size_t i = 0; i < maxBytes.size(); ++i) {
                         SizeType hid = p_exWorkSpace->m_postingIDs[i];
                         if (IsUnfilterOnlyHead((int)hid) && !capUnfilterToPurePages) {
-                            maxBytes[i] = (std::uint32_t)m_vectorInfoSize;
+                            maxBytes[i] = combineReadCap((std::uint32_t)m_vectorInfoSize);
                             continue;
                         }
-                        int pure = m_postingPureCounts.GetSize(hid);
-                        if (pure > 0 || capUnfilterToPurePages) {
+                        int pure = m_hasPostingPureCounts ? m_postingPureCounts.GetSize(hid) : 0;
+                        if ((capScanToPure || capUnfilterToPurePages) &&
+                            (pure > 0 || capUnfilterToPurePages)) {
                             std::uint32_t bytes = (pure > 0)
                                 ? (std::uint32_t)pure * (std::uint32_t)m_vectorInfoSize
                                 : 0;
                             if (capUnfilterToPurePages) {
                                 bytes = ((bytes + (std::uint32_t)PageSize - 1) / (std::uint32_t)PageSize
-                                    + (std::uint32_t)s_unfilterExtraTailPages) * (std::uint32_t)PageSize;
+                                    + (std::uint32_t)unfilterExtraTailPages) * (std::uint32_t)PageSize;
                                 if (bytes == 0) bytes = (std::uint32_t)m_vectorInfoSize;
                             } else if (IsUnfilterOnlyHead((int)hid)) {
                                 bytes = (std::uint32_t)m_vectorInfoSize;
                             }
                             maxBytes[i] = bytes;
                         }
+                        maxBytes[i] = combineReadCap(maxBytes[i]);
                     }
                     db->MultiGet(p_exWorkSpace->m_postingIDs, p_exWorkSpace->m_pageBuffers,
                                  maxBytes, HardLatencyLimit(), &(p_exWorkSpace->m_diskRequests));
@@ -7702,6 +7895,11 @@ namespace SPTAG::SPANN {
                     if (IsUnfilterOnlyHead((int)h)) scanLimit = 0;
                     else { int pure = m_postingPureCounts.GetSize(h); if (pure > 0 && pure < scanLimit) scanLimit = pure; }
                 }
+                if (searchPostingByteCap > 0) {
+                    scanLimit = (std::min)(
+                        scanLimit,
+                        static_cast<int>(searchPostingByteCap / m_slimRec));
+                }
                 slimBytesRead += (size_t)scanLimit * m_slimRec;
                 int liveCount = n;
                 const std::uint8_t* base;
@@ -7776,10 +7974,9 @@ namespace SPTAG::SPANN {
 
             // ---- exact rerank of the L survivors: fetch vectors from the RocksDB
             //      vid->vector store (single shared copy, vector-level fine-grained IO) ----
-            // SPTAG_OPQ_ADC_ONLY=1: skip the full-vector rerank entirely and return the
-            // top-k by ADC (quantized) distance. Zero survivor device IO; recall drops to
-            // the OPQ quantization ceiling but QPS becomes purely in-RAM.
-            static const bool s_adcOnly = []() { const char* e = std::getenv("SPTAG_OPQ_ADC_ONLY"); return e && e[0] == '1'; }();
+            // QuantADCOnly is a native INI diagnostic: skip full-vector reranking and
+            // return top-k by ADC distance to isolate the pre-rerank data path.
+            const bool adcOnly = m_opt->m_quantADCOnly;
             // Diagnostic: RaBitQ does the ADC screen (identical candidate set to no-rerank),
             // but the L survivors get an EXACT rerank from the vector store. This isolates
             // whether the no-rerank plateau is a COVERAGE problem (true NN absent from the
@@ -7806,7 +8003,7 @@ namespace SPTAG::SPANN {
             }
             const auto rerankStart = logPhaseTime ? std::chrono::high_resolution_clock::now()
                                                   : std::chrono::high_resolution_clock::time_point{};
-            if ((m_rbq && s_rbqScreenRerank) || (m_rbq2on && !s_adcOnly)) {
+            if ((m_rbq && s_rbqScreenRerank) || (m_rbq2on && !adcOnly)) {
                 // Mirror the PQ path: the head-search seeds already carry EXACT cosine
                 // distances (head nav scores them with full-float head vectors), and
                 // RerankFromVecDB produces exact cosine for the screen survivors -- the
@@ -7822,7 +8019,7 @@ namespace SPTAG::SPANN {
                 RerankFromVecDB(survivors, rawQuery, dim, queryResults);
                 // No SortResult here: the caller sorts once (see note in the exhaustive
                 // branch). AddPoint inside RerankFromVecDB leaves a valid max-heap.
-            } else if (s_adcOnly || m_rbq) {
+            } else if (adcOnly || m_rbq) {
                 // No-rerank output: results come solely from the approximate (PQ-ADC or
                 // RaBitQ) screen, on a different distance scale than the head-seeded
                 // candidates, so start from a clean result set.
@@ -8404,7 +8601,7 @@ namespace SPTAG::SPANN {
             // tag's vids -> best-L survivors -> exact rerank from the canonical vector
             // store. Half the SQ memory, recall restored to ~1.0 via the rerank.
             if (m_rbq2on) {
-                static const bool s_rbq2AdcOnly = []() { const char* e = std::getenv("SPTAG_OPQ_ADC_ONLY"); return e && e[0] == '1'; }();
+                const bool adcOnly = m_opt->m_quantADCOnly;
                 void* qctx = m_rbq2->AllocQuery();
                 // Widen uint8 query to float before PrepareQuery (see WidenQuery).
                 std::vector<float> rbq2qf = WidenQuery(rawQuery, dim);
@@ -8419,7 +8616,7 @@ namespace SPTAG::SPANN {
                 }
                 m_rbq2->FreeQuery(qctx);
                 if (needLock) rlock.unlock();
-                if (s_rbq2AdcOnly) {
+                if (adcOnly) {
                     // True no-rerank: emit the top-L by the RaBitQ estimator directly,
                     // zero survivor IO. Recall is the estimator's coverage*ranking ceiling.
                     while (!heap.empty()) { queryResults.AddPoint(heap.top().second, heap.top().first); heap.pop(); }
@@ -8480,8 +8677,8 @@ namespace SPTAG::SPANN {
 
             int fetched = (int)heap.size();
             int listElements = fetched;
-            static const bool s_adcOnly = []() { const char* e = std::getenv("SPTAG_OPQ_ADC_ONLY"); return e && e[0] == '1'; }();
-            if (s_adcOnly) {
+            const bool adcOnly = m_opt->m_quantADCOnly;
+            if (adcOnly) {
                 while (!heap.empty()) { queryResults.AddPoint(heap.top().second, heap.top().first); heap.pop(); }
             } else {
                 std::vector<int> survivors;

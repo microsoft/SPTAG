@@ -63,6 +63,10 @@ DefineSelectHeadParameter(m_headVectorCount, int, 0, "Count")
 DefineSelectHeadParameter(m_recursiveCheckSmallCluster, bool, true, "RecursiveCheckSmallCluster")
 DefineSelectHeadParameter(m_printSizeCount, bool, true, "PrintSizeCount")
 DefineSelectHeadParameter(m_selectType, std::string, "BKT", "SelectHeadType")
+DefineSelectHeadParameter(m_perVectorTagsFile, std::string, std::string(), "PerVectorTagsFile")
+DefineSelectHeadParameter(m_dualPoolAugment, bool, false, "DualPoolAugment")
+DefineSelectHeadParameter(m_dualPoolExtraRatio, double, 0.1, "DualPoolExtraRatio")
+DefineSelectHeadParameter(m_uExtraIDFile, std::string, std::string(), "UExtraIDFile")
 #endif
 
 #ifdef DefineBuildHeadParameter
@@ -135,17 +139,36 @@ DefineSSDParameter(m_queryCountLimit, int, (std::numeric_limits<int>::max)(), "Q
 DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler") // Mutable
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum") // Mutable
-DefineSSDParameter(m_fixedNprobe, int, 0, "FixedNprobe") // Mutable; 0 uses adaptive budget
-DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 uses adaptive seed budget
+DefineSSDParameter(m_fixedNprobe, int, 0, "FixedNprobe") // Mutable; 0 uses SearchInternalResultNum
+DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 follows MaxCheck
 DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
 DefineSSDParameter(m_forceDenseTagSearch, bool, false, "ForceDenseTagSearch") // Mutable
-DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Mutable
+DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Sparse-tag sidecar threshold
 DefineSSDParameter(m_filteredSearchNprobeSafety, float, 1.0f, "FilteredSearchNprobeSafety") // Mutable
 DefineSSDParameter(m_filteredSearchTargetRecall, float, 1.0f, "FilteredSearchTargetRecall") // Mutable
 DefineSSDParameter(m_filteredSearchCoverageExponent, float, 0.0f, "FilteredSearchCoverageExponent") // Mutable; 0 disables coverage-driven over-probing
-DefineSSDParameter(m_enableAdaptiveFilteredNprobe, bool, true, "EnableAdaptiveFilteredNprobe") // Mutable
+DefineSSDParameter(m_enableAdaptiveFilteredNprobe, bool, false, "EnableAdaptiveFilteredNprobe") // Mutable; opt-in override of SearchInternalResultNum
 DefineSSDParameter(m_logAdaptiveNprobe, bool, false, "LogAdaptiveNprobe") // Mutable; per-query observability
 DefineSSDParameter(m_logPhaseTime, bool, false, "LogPhaseTime") // Mutable; diagnostic timing only
+DefineSSDParameter(m_unifiedNprobeBudget, bool, true, "UnifiedNprobeBudget") // Mutable
+DefineSSDParameter(m_multiNodeBudgetKeepRatio, double, 0.60, "MultiNodeBudgetKeepRatio") // Mutable
+DefineSSDParameter(m_crossSingleSeed, int, -1, "CrossSingleSeed") // Mutable; -1 auto, 0 off, 1 on
+DefineSSDParameter(m_disableCrossEdges, bool, false, "DisableCrossEdges") // Mutable
+DefineSSDParameter(m_filterKeepCross, bool, false, "FilterKeepCross") // Mutable
+DefineSSDParameter(m_crossExpandLimit, int, 0, "CrossExpandLimit") // Mutable; 0 is unlimited
+DefineSSDParameter(m_disableCrossSubgraph, bool, false, "DisableCrossSubgraph") // Mutable
+DefineSSDParameter(m_tagAwareHeadExpansion, int, 1, "TagAwareHeadExpansion") // Mutable
+DefineSSDParameter(m_logUExtra, bool, false, "LogUExtra") // Mutable
+DefineSSDParameter(m_logCrossStats, bool, false, "LogCrossStats") // Mutable
+DefineSSDParameter(m_logPathStats, bool, false, "LogPathStats") // Mutable
+DefineSSDParameter(m_dumpHeads, int, 0, "DumpHeads") // Mutable; number of queries to dump
+DefineSSDParameter(m_filterKeepUExtra, bool, false, "FilterKeepUExtra") // Mutable
+DefineSSDParameter(m_enableUnfilterTail, bool, true, "EnableUnfilterTail") // Mutable
+DefineSSDParameter(m_ablateUExtra, bool, false, "AblateUExtra") // Mutable
+DefineSSDParameter(m_ablateTail, bool, false, "AblateTail") // Mutable
+DefineSSDParameter(m_unfilterPurePages, bool, false, "UnfilterPurePages") // Mutable
+DefineSSDParameter(m_unfilterExtraTailPages, int, 0, "UnfilterExtraTailPages") // Mutable
+DefineSSDParameter(m_enableHierPostingFilter, bool, false, "EnableHierPostingFilter") // Mutable
 DefineSSDParameter(m_rerank, int, 0, "Rerank")
 DefineSSDParameter(m_enableADC, bool, false, "EnableADC")
 DefineSSDParameter(m_recall_analysis, bool, false, "RecallAnalysis")
@@ -255,6 +278,7 @@ DefineSSDParameter(m_primaryHeadBypassRerankL, int, 0, "PrimaryHeadBypassRerankL
 DefineSSDParameter(m_postingQuantizer, std::string, std::string("None"), "PostingQuantizer") // None|RaBitQ|OPQ|PipePQ
 DefineSSDParameter(m_postingQuantBits, int, 2, "PostingQuantBits")          // RaBitQ bits per dim (1 or 2)
 DefineSSDParameter(m_postingQuantM, int, 0, "PostingQuantM")                // OPQ/PipePQ code bytes per vector (subvector/chunk count)
+DefineSSDParameter(m_requantizeFromPipePQ, bool, false, "RequantizeFromPipePQ") // one-time same-stride PipePQ->OPQ posting rewrite
 DefineSSDParameter(m_quantizeHead, bool, false, "QuantizeHead")             // build the head index on quantized vectors
 DefineSSDParameter(m_postingQuantFile, std::string, std::string(""), "PostingQuantizerFile") // code sidecar (abs or rel to index dir)
 DefineSSDParameter(m_pipePQPivotsFile, std::string, std::string(""), "PipePQPivotsFile")     // PipeANN pivot sidecar (abs or rel to index dir)

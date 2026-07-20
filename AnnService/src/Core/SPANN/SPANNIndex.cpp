@@ -178,58 +178,6 @@ static inline int TagLevelFromId(uint32_t tag) {
     return 3;
 }
 
-double GetMultiNodeBudgetKeepRatio()
-{
-    static const double kDefaultKeepRatio = 0.60;
-    static const double ratio = []() {
-        const char* value = std::getenv("SPTAG_MULTI_NODE_BUDGET_KEEP_RATIO");
-        if (value == nullptr || *value == '\0') {
-            return kDefaultKeepRatio;
-        }
-
-        char* end = nullptr;
-        double parsed = std::strtod(value, &end);
-        if (end == value || !std::isfinite(parsed) || parsed <= 0.0 || parsed > 1.0) {
-            return kDefaultKeepRatio;
-        }
-        return parsed;
-    }();
-    return ratio;
-}
-
-// SPTAG_UNIFIED_NPROBE_BUDGET (default 1): use a single aggregate budget for
-// all tag queries (including multi-subindex routed queries) instead of
-// summing per-subindex budgets. Set to 0 to fall back to the legacy
-// summed-child-budget × keepRatio formula.
-bool UseUnifiedNprobeBudget()
-{
-    static const bool enabled = []() {
-        const char* value = std::getenv("SPTAG_UNIFIED_NPROBE_BUDGET");
-        if (value == nullptr || *value == '\0') return true;
-        return !(value[0] == '0' && value[1] == '\0');
-    }();
-    return enabled;
-}
-
-// SPTAG_MAX_NPROBE: a CEILING on postingTarget (unlike FixedNprobe which
-// forces a fixed value). Filtered queries that already pick a small nprobe are
-// unaffected; only large scans (notably unfilter, which otherwise scans nearly
-// all postings) are clamped. This bounds the search workspace page-buffer
-// high-water mark, which scales ~linearly with the number of postings scanned
-// (~12.7KB resident per posting). 0 (default) = no cap.
-int GetMaxNprobeCap()
-{
-    static const int v = []() {
-        const char* value = std::getenv("SPTAG_MAX_NPROBE");
-        if (value == nullptr || *value == '\0') return 0;
-        char* end = nullptr;
-        long parsed = std::strtol(value, &end, 10);
-        if (end == value || parsed <= 0 || parsed > 1000000) return 0;
-        return static_cast<int>(parsed);
-    }();
-    return v;
-}
-
 struct HeadBundleManifestHeader
 {
     std::uint32_t magic;
@@ -917,6 +865,7 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
 
         nodeIndex->SetParameter("NumberOfThreads", std::to_string(m_options.m_iSSDNumberOfThreads));
         nodeIndex->SetParameter("MaxCheck", std::to_string(m_options.m_maxCheck));
+        nodeIndex->SetParameter("HashTableExponent", std::to_string(m_options.m_hashExp));
         if (nodeIndex->UpdateIndex() != ErrorCode::Success)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
@@ -1335,12 +1284,15 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // Reuse BKT's per-thread compact deduper while preserving the prior
     // std::priority_queue tie behavior for this finite-budget traversal. Unlike
     // BKT's result-gated traversal, nonmatching heads remain valid bridges.
-    const int maxChecks = std::max(m_options.m_maxCheck, p_graphResultNum * 4);
+    // Keep the allocation large enough to retain the requested result set, but
+    // never turn that allocation requirement into a larger traversal budget.
+    const int maxChecks = std::max(1, m_options.m_maxCheck);
+    const int workspaceCapacity = std::max(maxChecks, p_graphResultNum * 4);
     auto crossGraphWorkspace = m_crossGraphWorkSpaceFactory->GetWorkSpace();
     if (!crossGraphWorkspace) {
         crossGraphWorkspace.reset(new CrossGraphWorkSpace());
     }
-    crossGraphWorkspace->Prepare(maxChecks, p_graphResultNum, m_options.m_hashExp);
+    crossGraphWorkspace->Prepare(workspaceCapacity, p_graphResultNum, m_options.m_hashExp);
 
     size_t visitedCount = 0;
     auto pushKnownCandidate = [&](SizeType headB, float dist) -> bool {
@@ -1364,25 +1316,19 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     // We split the seed budget across all routed nodes and let each node's
     // BKT contribute its local nearest heads to the priority queue.
     //
-    // Critical: per-node head indexes are configured with MaxCheck=4096 (the
-    // global SPANN maxCheck). Calling their default SearchIndex() therefore
-    // burns 4096 distance ops *per routed node* just to seed K~16 heads —
-    // for a 4-node org query that's 16k ops before the unified PQ even
-    // starts. We override with a tight budget here; the unified RNG +
-    // cross-edge expansion below does the heavy lifting.
+    // The native MaxCheck budget also governs the seed search unless an
+    // explicit SeedMaxCheck override is supplied.
     // Unfilter behaves like one logical graph search, so seed from the entry
     // bundle only and let dense cross edges carry the traversal. Filtered queries
-    // seed every routed bundle to preserve per-filter coverage. Keep an explicit
-    // diagnostic override to isolate single-entry coverage from head quality.
-    static const int s_crossSingleSeedOverride = []() {
-        const char* e = std::getenv("SPTAG_CROSS_SINGLE_SEED");
-        if (!e || e[0] == '\0') return -1;
-        return (e[0] == '1' || e[0] == 't' || e[0] == 'T' ||
-                e[0] == 'y' || e[0] == 'Y') ? 1 : 0;
-    }();
+    // seed every routed bundle to preserve per-filter coverage. CrossSingleSeed
+    // keeps an explicit diagnostic override: -1 auto, 0 off, 1 on.
+    const int crossSingleSeedOverride =
+        (m_options.m_crossSingleSeed == 0 || m_options.m_crossSingleSeed == 1)
+            ? m_options.m_crossSingleSeed
+            : -1;
     const bool defaultSingleSeed = (p_queryTags == nullptr || p_numQueryTags == 0);
-    const bool useSingleSeed = (s_crossSingleSeedOverride >= 0)
-        ? (s_crossSingleSeedOverride == 1)
+    const bool useSingleSeed = (crossSingleSeedOverride >= 0)
+        ? (crossSingleSeedOverride == 1)
         : defaultSingleSeed;
     std::vector<int> seedNodes;
     if (useSingleSeed) {
@@ -1392,10 +1338,9 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     }
     int totalSeedK = std::max(16, std::min(p_graphResultNum, 64));
     int perNodeSeed = std::max(4, totalSeedK / static_cast<int>(seedNodes.size()));
-    const int adaptiveSeedMaxCheck = std::max(64, perNodeSeed * 8);
     const int seedMaxCheck = (m_options.m_seedMaxCheck > 0)
         ? m_options.m_seedMaxCheck
-        : adaptiveSeedMaxCheck;
+        : std::max(1, m_options.m_maxCheck);
     int scanned = 0;
     int totalSeeded = 0;
     int seedDroppedByTag = 0;
@@ -1452,9 +1397,9 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     int crossHopCount = 0;
     int crossEdgesSeen = 0;
     int crossDroppedByTag = 0;
-    // Dual-pool U_extra diagnostics (SPTAG_LOG_UEXTRA): count how often the
-    // unfilter traversal actually reaches role==1 (U_extra) heads.
-    static const bool s_logUExtra = (std::getenv("SPTAG_LOG_UEXTRA") != nullptr);
+    // Dual-pool U_extra diagnostics: count how often the unfilter traversal
+    // reaches role==1 (U_extra) heads.
+    const bool logUExtra = m_options.m_logUExtra;
     const bool s_hasRoles = HasHeadRoles();
     int uextraCrossTargets = 0;  // cross-edges pointing at a U_extra head
     int uextraChecked = 0;       // U_extra heads popped/visited in the PQ
@@ -1472,7 +1417,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         // Nodes are deduped at push time, so every popped candidate is unique and
         // expanded exactly once (no stale-duplicate skip needed here).
         ++checks;
-        const bool curIsUExtra = s_logUExtra && s_hasRoles && m_extraSearcher &&
+        const bool curIsUExtra = logUExtra && s_hasRoles && m_extraSearcher &&
             m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(curHeadB));
         if (curIsUExtra) ++uextraChecked;
 
@@ -1546,23 +1491,20 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         //   - Removing the cross-edge branch cuts a hot lookup + hier-mask check
         //     per candidate, and reduces visited-set / PQ churn under heavy
         //     fan-out subgraphs.
-        // SPTAG_FILTER_KEEP_CROSS=1 restores the previous behavior (filter walks
-        // cross edges, gated by routedNodeMask + signature) for A/B comparison.
-        // SPTAG_DISABLE_CROSS_EDGES=1 still disables cross edges globally.
-        static const bool s_disableCross = (std::getenv("SPTAG_DISABLE_CROSS_EDGES") != nullptr);
-        static const bool s_filterKeepCross = (std::getenv("SPTAG_FILTER_KEEP_CROSS") != nullptr);
+        // FilterKeepCross restores the previous behavior (filter walks cross
+        // edges, gated by routedNodeMask + signature) for A/B comparison.
+        // DisableCrossEdges still disables cross edges globally.
+        const bool disableCross = m_options.m_disableCrossEdges;
+        const bool filterKeepCross = m_options.m_filterKeepCross;
         // Cross-edge expansion is memory-scattered and dominates the walk cost.
         // Cross-edges emanating from the far (late-popped) candidates rarely
         // introduce new top-graphResultNum heads. Gate expansion to the nearest
         // N popped candidates (candidates pop nearest-first from the min-heap).
-        // SPTAG_CROSS_EXPAND_LIMIT=N (default 0 = unlimited = legacy behavior).
-        static const int s_crossExpandLimit = []() {
-            const char* e = std::getenv("SPTAG_CROSS_EXPAND_LIMIT");
-            return e ? std::atoi(e) : 0;
-        }();
+        // CrossExpandLimit=0 retains unlimited legacy behavior.
+        const int crossExpandLimit = std::max(0, m_options.m_crossExpandLimit);
         const bool filterMode = (p_queryTags != nullptr && p_numQueryTags > 0);
-        const bool withinCrossBudget = (s_crossExpandLimit <= 0) || (checks <= s_crossExpandLimit);
-        const bool useCrossHere = !s_disableCross && (!filterMode || s_filterKeepCross) && withinCrossBudget;
+        const bool withinCrossBudget = (crossExpandLimit <= 0) || (checks <= crossExpandLimit);
+        const bool useCrossHere = !disableCross && (!filterMode || filterKeepCross) && withinCrossBudget;
         if (useCrossHere && curHeadB >= 0 &&
             static_cast<size_t>(curHeadB) < m_headCrossEdgeOffsetByB.size()) {
             std::uint32_t off = m_headCrossEdgeOffsetByB[static_cast<size_t>(curHeadB)];
@@ -1590,7 +1532,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
                     const SizeType nbrB = crossNeighbors[ei];
                     if (nbrB < 0) continue;
                     ++crossEdgesSeen;
-                    if (s_logUExtra && s_hasRoles && m_extraSearcher &&
+                    if (logUExtra && s_hasRoles && m_extraSearcher &&
                         m_extraSearcher->IsUnfilterOnlyHead(static_cast<int>(nbrB))) {
                         ++uextraCrossTargets;
                     }
@@ -1631,7 +1573,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
     p_queryResults->SortResult();
     p_scannedOut = scanned + checks;
 
-    if (s_logUExtra) {
+    if (logUExtra) {
         int uextraInFinal = 0;
         int finalCount = p_queryResults->GetResultNum();
         for (int i = 0; i < finalCount; ++i) {
@@ -1660,8 +1602,7 @@ ErrorCode Index<T>::CrossSubgraphGraphSearch(
         auto _pqT1 = std::chrono::high_resolution_clock::now();
         g_pqGraphMs = std::chrono::duration<double, std::milli>(_pqT1 - _bktT1).count();
     }
-    static const bool s_logCS = (std::getenv("SPTAG_LOG_CROSS_STATS") != nullptr);
-    if (m_options.m_logPhaseTime || s_logCS) {
+    if (m_options.m_logPhaseTime || m_options.m_logCrossStats) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "CSStats: nodes=%zu seedNodes=%zu seeded=%d seedScanned=%d seedBudget=%d "
             "seedConfiguredMaxC=%d seedIndexMaxC=%d seedDropTag=%d checks=%d cross=%d "
@@ -1726,6 +1667,13 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
         {
             SetParameter(iter->first.c_str(), iter->second.c_str(), sections[i].c_str());
         }
+    }
+
+    // Preserve and apply the documented runtime section after construction
+    // settings. SetParameter maps its aliases to mutable SSD options.
+    for (const auto& entry : p_reader.GetParameters("SearchSSDIndex"))
+    {
+        SetParameter(entry.first.c_str(), entry.second.c_str(), "SearchSSDIndex");
     }
 
     if (m_pQuantizer)
@@ -2107,15 +2055,36 @@ template <typename T> ErrorCode Index<T>::SaveConfig(std::shared_ptr<Helper::Dis
     m_index->SaveConfig(p_configOut);
 
     Helper::Convert::ConvertStringTo<int>(m_index->GetParameter("HashTableExponent").c_str(), m_options.m_hashExp);
+    auto buildSSDParameterValue = [this](const char* p_name, const std::string& p_fallback) {
+        for (const auto& parameter : m_buildSSDParameters)
+        {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_name))
+            {
+                return parameter.second;
+            }
+        }
+        return p_fallback;
+    };
     IOSTRING(p_configOut, WriteString, "[BuildSSDIndex]\n");
 #define DefineSSDParameter(VarName, VarType, DefaultValue, RepresentStr)                                               \
     IOSTRING(p_configOut, WriteString,                                                                                 \
-             (RepresentStr + std::string("=") + SPTAG::Helper::Convert::ConvertToString(m_options.VarName) +           \
+             (std::string(RepresentStr) + std::string("=") +                                                          \
+              buildSSDParameterValue(RepresentStr, SPTAG::Helper::Convert::ConvertToString(m_options.VarName)) +       \
               std::string("\n"))                                                                                       \
                  .c_str());
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
+
+    if (!m_searchSSDParameters.empty())
+    {
+        IOSTRING(p_configOut, WriteString, "\n[SearchSSDIndex]\n");
+        for (const auto& parameter : m_searchSSDParameters)
+        {
+            const std::string line = parameter.first + "=" + parameter.second + "\n";
+            IOSTRING(p_configOut, WriteString, line.c_str());
+        }
+    }
 
     IOSTRING(p_configOut, WriteString, "\n");
     return ErrorCode::Success;
@@ -2304,6 +2273,13 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         return ret;
     }
 
+    const int dumpHeadsLimit = std::max(0, m_options.m_dumpHeads);
+    static std::atomic<int> s_dumpHeadsQueryCount{0};
+    const int dumpHeadsQueryId =
+        dumpHeadsLimit > 0 ? s_dumpHeadsQueryCount.fetch_add(1) : -1;
+    const bool dumpHeads =
+        dumpHeadsQueryId >= 0 && dumpHeadsQueryId < dumpHeadsLimit;
+
     // ═══ Normal path: graph search + post-graph PS + inline filter ═══
     // Adaptive nprobe: when tag filter is active, choose enough postings to
     // satisfy both (1) expected filtered top-k coverage and (2) graph-routing
@@ -2355,7 +2331,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             candidateNodes.push_back(static_cast<int>(bn.nodeId));
         }
     }
-
     if (adaptiveFilteredNprobeEnabled && filterSelectivity < 1.0f) {
         const SizeType totalHeads = TotalHeadSampleCount();
         const double globalTenantSize = static_cast<double>(m_options.m_vectorSize > 0 ? m_options.m_vectorSize : totalHeads);
@@ -2447,12 +2422,18 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         // total budget from the sum of child-node budgets instead of relying
         // only on one aggregate local-selectivity estimate, then keep a
         // configurable fraction after merge by trimming the tail budget.
-        // Disabled by default: SPTAG_UNIFIED_NPROBE_BUDGET=1 makes all routed
+        // UnifiedNprobeBudget makes all routed
         // queries (including multi-subindex) trust the single aggregate budget,
         // which matches the unified cross-subgraph PQ search and avoids
         // amplifying nprobe by the number of routed subindexes.
-        if (candidateNodes.size() > 1 && !UseUnifiedNprobeBudget()) {
-            const double multiNodeBudgetKeepRatio = GetMultiNodeBudgetKeepRatio();
+        if (candidateNodes.size() > 1 && !m_options.m_unifiedNprobeBudget) {
+            const double configuredKeepRatio = m_options.m_multiNodeBudgetKeepRatio;
+            const double multiNodeBudgetKeepRatio =
+                (std::isfinite(configuredKeepRatio) &&
+                 configuredKeepRatio > 0.0 &&
+                 configuredKeepRatio <= 1.0)
+                    ? configuredKeepRatio
+                    : 0.60;
             long long summedChildPostingTarget = 0;
             for (int nodeId : candidateNodes)
             {
@@ -2499,16 +2480,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 if (candidateCap > 0) cap = candidateCap;
             }
             postingTarget = std::min(fixedNprobe, static_cast<int>(cap));
-        }
-    }
-
-    // SPTAG_MAX_NPROBE ceiling: clamp postingTarget to bound the search
-    // workspace memory high-water mark. Applied after all estimation so it
-    // never raises postingTarget, only lowers it.
-    {
-        int maxNprobe = GetMaxNprobeCap();
-        if (maxNprobe > 0 && postingTarget > maxNprobe) {
-            postingTarget = maxNprobe;
         }
     }
 
@@ -2574,18 +2545,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // run a single best-first search across all bundle nodes' BKTs
             // joined by cross-edges instead of the serial per-node fanout.
             // The tag-aware in-filter inside CrossSubgraphGraphSearch is
-            // self-guarded (no-op when numQueryTags==0), so unfilter queries
-            // engaged via SPTAG_CROSSEDGE_UNFILTER also flow through here.
+            // self-guarded (no-op when numQueryTags==0), so unfiltered queries
+            // can flow through the same path.
             bool useCrossSubgraph = !m_headCrossEdgesDirty.load(std::memory_order_acquire)
                 && (candidateNodes.size() > 1)
                 && (LoadHeadCrossEdges() == ErrorCode::Success)
-                && (!m_headCrossEdgeTargetsB.empty());
-            static const bool s_disableCrossSubgraph =
-                (std::getenv("SPTAG_DISABLE_CROSSSUBGRAPH") != nullptr);
-            if (s_disableCrossSubgraph) useCrossSubgraph = false;
+                && (!m_headCrossEdgeTargetsB.empty())
+                && !m_options.m_disableCrossSubgraph;
 
-            static const bool s_logPathStats = (std::getenv("SPTAG_LOG_PATH_STATS") != nullptr);
-            if (s_logPathStats) {
+            if (m_options.m_logPathStats) {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "PathStats: nodes=%d cross=%d\n",
                     static_cast<int>(candidateNodes.size()), useCrossSubgraph ? 1 : 0);
@@ -2612,17 +2580,12 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 // distance-first head traversal followed by exact inline posting
                 // filtering preserves replica/bridge coverage better than
                 // spending the finite head-result budget on mask-matching heads.
-                static const int s_tagAwareExpansion = []() {
-                    const char* e = std::getenv("SPTAG_TAG_AWARE_HEAD_EXPANSION");
-                    int v = (e != nullptr) ? std::atoi(e) : 1;
-                    if (v < 1) v = 1;
-                    if (v > 32) v = 32;
-                    return v;
-                }();
+                const int tagAwareExpansion =
+                    std::max(1, std::min(32, m_options.m_tagAwareHeadExpansion));
                 const bool hasTagFilterLocal = (queryTags != nullptr && numQueryTags > 0);
                 SPTAG::Cache::HierarchicalPostingMask tagAwareQueryMask;
                 const bool tagAwareEnabled = !primaryHeadBypassRequested &&
-                    hasTagFilterLocal && s_tagAwareExpansion > 1
+                    hasTagFilterLocal && tagAwareExpansion > 1
                     && m_index != nullptr && m_index->HasHeadNodeMeta();
                 if (tagAwareEnabled) {
                     tagAwareQueryMask.Clear();
@@ -2648,7 +2611,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 }
 
                 const int searchNum = tagAwareEnabled
-                    ? std::min<int>(nodeGraphResultNum * s_tagAwareExpansion,
+                    ? std::min<int>(nodeGraphResultNum * tagAwareExpansion,
                                     static_cast<int>(localToGlobalHIDs.size()))
                     : nodeGraphResultNum;
 
@@ -2714,34 +2677,64 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     }
 
     // Diagnostic: dump the selected head set (m_index-local hid + dist) for the
-    // first SPTAG_DUMP_HEADS queries so cross-subgraph vs fallback head selection
-    // can be diffed in the SAME id space. Set SPTAG_DUMP_HEADS=N.
-    {
-        static const int s_dumpHeads = []() {
-            const char* e = std::getenv("SPTAG_DUMP_HEADS");
-            return e ? std::atoi(e) : 0;
-        }();
-        if (s_dumpHeads > 0) {
-            static std::atomic<int> s_dumpQ{0};
-            int qi = s_dumpQ.fetch_add(1);
-            if (qi < s_dumpHeads) {
-                int n = p_queryResults->GetResultNum();
-                std::string line = "DUMPHEADS q=" + std::to_string(qi) +
-                    " cross=" + std::to_string(usedHeadBundleGraphSearch ? 1 : 0) +
-                    " n=" + std::to_string(n) + " :";
-                for (int di = 0; di < n; ++di) {
-                    auto* r = p_queryResults->GetResult(di);
-                    if (r == nullptr || r->VID < 0) continue;
-                    line += " " + std::to_string(r->VID) + ":" +
-                            std::to_string(r->Dist);
-                }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", line.c_str());
-            }
+    // first DumpHeads queries so cross-subgraph vs fallback head selection can
+    // be diffed in the same id space.
+    if (dumpHeads) {
+        int n = p_queryResults->GetResultNum();
+        std::string line = "DUMPHEADS q=" + std::to_string(dumpHeadsQueryId) +
+            " cross=" + std::to_string(usedHeadBundleGraphSearch ? 1 : 0) +
+            " n=" + std::to_string(n) + " :";
+        for (int di = 0; di < n; ++di) {
+            auto* r = p_queryResults->GetResult(di);
+            if (r == nullptr || r->VID < 0) continue;
+            line += " " + std::to_string(r->VID) + ":" +
+                    std::to_string(r->Dist);
         }
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "%s\n", line.c_str());
     }
 
     auto _phT1 = s_phaseTime ? std::chrono::high_resolution_clock::now()
                              : std::chrono::high_resolution_clock::time_point{};
+
+    int phaseHeadCandidates = 0;
+    int phaseHeadsAt110 = 0;
+    int phaseHeadsAt125 = 0;
+    int phaseHeadsAt150 = 0;
+    int phaseHeadsAt200 = 0;
+    int phaseHeadsAt400 = 0;
+    int phaseHeadsAt800 = 0;
+    float phaseHeadRatioP50 = 0.0f;
+    float phaseHeadRatioP90 = 0.0f;
+    float phaseHeadRatioMax = 0.0f;
+    if (s_phaseTime && graphResultNum > 0) {
+        const auto* nearestHead = p_queryResults->GetResult(0);
+        const float nearestHeadDist = nearestHead != nullptr ? nearestHead->Dist : 0.0f;
+        if (nearestHead != nullptr && nearestHead->VID != -1 && nearestHeadDist > 0.0f) {
+            // Distances are squared L2 values. Record their ratios before pruning
+            // so a native-INI cutoff can be calibrated from one loaded index.
+            for (; phaseHeadCandidates < graphResultNum; ++phaseHeadCandidates) {
+                const auto* head = p_queryResults->GetResult(phaseHeadCandidates);
+                if (head == nullptr || head->VID == -1) break;
+
+                const float ratio = head->Dist / nearestHeadDist;
+                if (ratio <= 1.10f) ++phaseHeadsAt110;
+                if (ratio <= 1.25f) ++phaseHeadsAt125;
+                if (ratio <= 1.50f) ++phaseHeadsAt150;
+                if (ratio <= 2.00f) ++phaseHeadsAt200;
+                if (ratio <= 4.00f) ++phaseHeadsAt400;
+                if (ratio <= 8.00f) ++phaseHeadsAt800;
+            }
+
+            if (phaseHeadCandidates > 0) {
+                phaseHeadRatioP50 = p_queryResults->GetResult(
+                    (phaseHeadCandidates - 1) / 2)->Dist / nearestHeadDist;
+                phaseHeadRatioP90 = p_queryResults->GetResult(
+                    (phaseHeadCandidates - 1) * 9 / 10)->Dist / nearestHeadDist;
+                phaseHeadRatioMax = p_queryResults->GetResult(
+                    phaseHeadCandidates - 1)->Dist / nearestHeadDist;
+            }
+        }
+    }
 
     SearchStats _phExtraStats;
     SearchStats* _phExtraStatsPtr = s_phaseTime ? &_phExtraStats : nullptr;
@@ -2911,18 +2904,15 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
 
         p_queryResults->Reverse();
-        {
-            static const bool s_dumpHeads = (std::getenv("SPTAG_DUMP_HEADS") != nullptr);
-            if (s_dumpHeads) {
-                std::string s = "HEADDUMP:";
-                s.reserve(workSpace->m_postingIDs.size() * 8 + 16);
-                for (auto h : workSpace->m_postingIDs) {
-                    s.push_back(' ');
-                    s += std::to_string(static_cast<long long>(h));
-                }
-                fprintf(stderr, "%s\n", s.c_str());
-                fflush(stderr);
+        if (dumpHeadsLimit > 0) {
+            std::string s = "HEADDUMP:";
+            s.reserve(workSpace->m_postingIDs.size() * 8 + 16);
+            for (auto h : workSpace->m_postingIDs) {
+                s.push_back(' ');
+                s += std::to_string(static_cast<long long>(h));
             }
+            fprintf(stderr, "%s\n", s.c_str());
+            fflush(stderr);
         }
         ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, _phExtraStatsPtr);
         SPTAG::VectorIndex::SetThreadLocalPostingScanStats(
@@ -2952,8 +2942,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         double postMs  = std::chrono::duration<double, std::milli>(_phT2 - _phT1).count();
         uint32_t firstTag = (queryTags != nullptr && numQueryTags > 0) ? queryTags[0] : 0u;
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-            "PhaseTime: tag=%u nprobe=%d bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f io=%.3f scan=%.3f postOther=%.3f total=%.3f\n",
-            firstTag, postingTarget, g_bktSeedMs, g_pqGraphMs,
+            "PhaseTime: tag=%u nprobe=%d heads=%d headR50=%.3f headR90=%.3f headRMax=%.3f "
+            "headAt110=%d headAt125=%d headAt150=%d headAt200=%d headAt400=%d headAt800=%d "
+            "bkt=%.3f pq=%.3f graphOther=%.3f post=%.3f io=%.3f scan=%.3f postOther=%.3f total=%.3f\n",
+            firstTag, postingTarget,
+            phaseHeadCandidates, phaseHeadRatioP50, phaseHeadRatioP90, phaseHeadRatioMax,
+            phaseHeadsAt110, phaseHeadsAt125, phaseHeadsAt150, phaseHeadsAt200,
+            phaseHeadsAt400, phaseHeadsAt800,
+            g_bktSeedMs, g_pqGraphMs,
             graphTotalMs - g_bktSeedMs - g_pqGraphMs, postMs,
             _phExtraStats.m_diskReadLatency, _phExtraStats.m_compLatency,
             postMs - _phExtraStats.m_diskReadLatency - _phExtraStats.m_compLatency,
@@ -3565,57 +3561,6 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
     COMMON::Dataset<InternalDataType> data(vectorset->Count(), vectorset->Dimension(), vectorset->Count(),
                                            vectorset->Count() + 1, (InternalDataType *)vectorset->GetData());
 
-    // Allow runtime override of m_selectType via env var (used by experimental
-    // selectType variants like PerTagBKT that aren't surfaced in config yet).
-    if (const char* selOverride = std::getenv("SPTAG_SELECT_TYPE_OVERRIDE"))
-    {
-        if (selOverride[0] != '\0' &&
-            !Helper::StrUtils::StrEqualIgnoreCase(m_options.m_selectType.c_str(), selOverride))
-        {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                         "SPTAG_SELECT_TYPE_OVERRIDE: overriding selectType '%s' -> '%s'\n",
-                         m_options.m_selectType.c_str(), selOverride);
-            m_options.m_selectType = selOverride;
-        }
-    }
-
-    if (const char* ratioOverride = std::getenv("SPTAG_RATIO_OVERRIDE"))
-    {
-        if (ratioOverride[0] != '\0')
-        {
-            try {
-                double r = std::stod(ratioOverride);
-                if (r > 0.0 && r < 1.0) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                                 "SPTAG_RATIO_OVERRIDE: overriding m_ratio %.6f -> %.6f\n",
-                                 m_options.m_ratio, r);
-                    m_options.m_ratio = r;
-                }
-            } catch (...) {}
-        }
-    }
-
-    // Allow pinning the BKT balance factor (m_fBalanceFactor) via env so a build can
-    // skip DynamicFactorSelect's ~14 full-scan per-group auto-search (the SelectHead
-    // I/O bottleneck at billion scale). 100 = SPTAG's canonical default (used by all
-    // SIFT/SPACEV SPANN reference configs); any value >= 0 disables the auto-search.
-    if (const char* lambdaOverride = std::getenv("SPTAG_BKT_LAMBDA_FACTOR"))
-    {
-        if (lambdaOverride[0] != '\0')
-        {
-            try {
-                float lf = std::stof(lambdaOverride);
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                             "SPTAG_BKT_LAMBDA_FACTOR: setting m_fBalanceFactor %.6f -> %.6f "
-                             "(%s)\n",
-                             m_options.m_fBalanceFactor, lf,
-                             lf < 0 ? "auto: DynamicFactorSelect searches balance factor"
-                                    : "pinned: skips DynamicFactorSelect auto-search");
-                m_options.m_fBalanceFactor = lf;
-            } catch (...) {}
-        }
-    }
-
     auto t1 = std::chrono::high_resolution_clock::now();
     SelectHeadAdjustOptions(data.R());
     std::vector<int> selected;
@@ -3653,11 +3598,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             bkt->m_iBKTKmeansK, bkt->m_iBKTLeafSize, bkt->m_iSamples, bkt->m_fBalanceFactor, bkt->m_iTreeNumber,
             m_options.m_iSelectHeadNumberOfThreads);
 
-        // Parallel BKT build is opt-in via [SelectHead] ParallelBKTBuild=true,
-        // with an env override SPTAG_PARALLEL_BKT (1/true/yes) for ad-hoc runs.
-        bool useParallelBKT = m_options.m_parallelBKTBuild;
-        if (const char* e = std::getenv("SPTAG_PARALLEL_BKT")) useParallelBKT = (e[0]=='1'||e[0]=='t'||e[0]=='T'||e[0]=='y'||e[0]=='Y');
-        if (useParallelBKT)
+        if (m_options.m_parallelBKTBuild)
             bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod, m_options.m_iSelectHeadNumberOfThreads,
                                               nullptr, nullptr, true);
         else
@@ -3696,29 +3637,20 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         //   e.g. SIFT project / YFCC country). For each group build a BKTree on
         //   that subset and run SelectHeadDynamically at the target head ratio.
         //   The union of all per-tag heads is the final head set. No merge.
-        // Inputs:
-        //   env SPTAG_PER_VECTOR_TAGS_FILE : text file, one int per line
-        //                                    (length must equal data.R())
-        //   env SPTAG_PERTAG_HEAD_RATIO    : target final head ratio (default 0.016)
-        const char* tagsFile = std::getenv("SPTAG_PER_VECTOR_TAGS_FILE");
-        if (tagsFile == nullptr)
+        // PerVectorTagsFile contains one grouping tag per vector and is supplied
+        // through native [SelectHead] configuration.
+        if (m_options.m_perVectorTagsFile.empty())
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                         "PerTagBKT requires env SPTAG_PER_VECTOR_TAGS_FILE\n");
+                         "PerTagBKT requires [SelectHead] PerVectorTagsFile\n");
             return false;
         }
-        // Target final head ratio. Defaults to 0.016 ≈ SIFT-1M tenant-0
-        // baseline. Override per dataset via SPTAG_PERTAG_HEAD_RATIO.
-        double finalRatio = 0.016;
-        if (const char* e = std::getenv("SPTAG_PERTAG_HEAD_RATIO"))
-            finalRatio = std::max(1e-5, std::atof(e));
-
-        // Parallel per-tag BKT build (level-order sibling-node parallelism within
-        // each tag's tree). Opt-in via [SelectHead] ParallelBKTBuild=true, with an
-        // env override SPTAG_PARALLEL_BKT (1/true/yes). Especially beneficial when grouping
-        // by a low-cardinality column yields a few very large per-tag trees.
-        bool perTagParallelBKT = m_options.m_parallelBKTBuild;
-        if (const char* e = std::getenv("SPTAG_PARALLEL_BKT")) perTagParallelBKT = (e[0]=='1'||e[0]=='t'||e[0]=='T'||e[0]=='y'||e[0]=='Y');
+        const std::string& tagsFile = m_options.m_perVectorTagsFile;
+        // PerTagBKT historically used a 1.6% fallback, unlike vanilla BKT's
+        // 20% default. Preserve that behavior unless native Ratio was supplied.
+        const double configuredRatio =
+            m_options.m_ratioExplicitlySet ? m_options.m_ratio : 0.016;
+        const double finalRatio = std::clamp(configuredRatio, 1e-5, 0.9);
 
         // ---- Read per-vector tag column (one int per line) ----
         std::vector<int> perVecTag(data.R(), -1);
@@ -3727,7 +3659,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             if (!fin.good())
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                             "PerTagBKT failed to open %s\n", tagsFile);
+                             "PerTagBKT failed to open %s\n", tagsFile.c_str());
                 return false;
             }
             int v; int idx = 0;
@@ -3753,7 +3685,6 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         // ---- Per-tag BKT + SelectHeadDynamically ----
         // Target ratio for SelectHeadDynamically per tag = finalRatio directly.
         const double perTagTarget = std::min(0.9, finalRatio);
-        const auto savedRatio    = m_options.m_ratio;
         const auto savedSelTh    = m_options.m_selectThreshold;
         const auto savedSplTh    = m_options.m_splitThreshold;
         const auto savedSplFa    = m_options.m_splitFactor;
@@ -3791,7 +3722,7 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
             bkt->m_fBalanceFactor = m_options.m_fBalanceFactor;
             // Native clustering on raw vectors (OPQ is posting-only, see BKT branch).
             bkt->m_pQuantizer    = nullptr;
-            if (perTagParallelBKT)
+            if (m_options.m_parallelBKTBuild)
                 bkt->BuildTreesParallel<InternalDataType>(data, m_options.m_distCalcMethod,
                                                   m_options.m_iSelectHeadNumberOfThreads,
                                                   &subIdx, nullptr, true);
@@ -3809,8 +3740,9 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                 initialHeads.push_back(h);
         }
 
-        // restore options for downstream Build phases
-        m_options.m_ratio = savedRatio;
+        // Restore temporary selection knobs but retain the effective target for
+        // the persisted indexloader.ini.
+        m_options.m_ratio = perTagTarget;
         m_options.m_selectThreshold = savedSelTh;
         m_options.m_splitThreshold = savedSplTh;
         m_options.m_splitFactor = savedSplFa;
@@ -3906,15 +3838,12 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         }
     }
 
-    // --- Dual-pool v3 augmentation (env-gated) --------------------------------
-    // SPTAG_DUAL_POOL_AUGMENT=1: append SPTAG_DUAL_POOL_EXTRA_RATIO * |H1| extra
-    // non-head VIDs as "unfilter-only" heads (role==1). Search-side gates them
-    // out of filter queries; only unfilter pays the visit. Writes head_role.bin.
-    if (const char* augFlag = std::getenv("SPTAG_DUAL_POOL_AUGMENT")) {
-        if (std::atoi(augFlag) != 0 && !selected.empty()) {
-            const char* ratioEnv = std::getenv("SPTAG_DUAL_POOL_EXTRA_RATIO");
-            double extraRatio = ratioEnv ? std::atof(ratioEnv) : 0.10;
-            if (extraRatio > 0.0) {
+    // --- Dual-pool v3 augmentation ---------------------------------------------
+    // [SelectHead] DualPoolAugment appends DualPoolExtraRatio * |H1| non-head
+    // VIDs as unfilter-only heads (role==1). Filter queries gate them out.
+    if (m_options.m_dualPoolAugment && !selected.empty()) {
+        const double extraRatio = m_options.m_dualPoolExtraRatio;
+        if (extraRatio > 0.0) {
                 size_t n_h1 = selected.size();
                 std::unordered_set<int> h1set(selected.begin(), selected.end());
                 std::vector<int> nonHeads;
@@ -3926,42 +3855,39 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                     std::round(extraRatio * static_cast<double>(n_h1)));
                 if (n_extras > nonHeads.size()) n_extras = nonHeads.size();
 
-                // Extra step (env-gated): if SPTAG_UEXTRA_ID_FILE points to a binary
-                // file (int32 count, then int32[count] tenant-local VIDs, produced by
-                // Tools/benchmarks/select_uextra_rng.py via RNG dominate-count), use
-                // that explicit U_extra set. Otherwise keep the original random pick.
-                // This does not alter the default build flow.
+                // If UExtraIDFile points to a binary file (int32 count, then
+                // int32[count] tenant-local VIDs), use that explicit U_extra set.
+                // Otherwise retain deterministic random selection.
                 bool uxLoaded = false;
-                if (const char* uxFile = std::getenv("SPTAG_UEXTRA_ID_FILE")) {
-                    if (*uxFile) {
-                        std::ifstream uf(uxFile, std::ios::binary);
-                        if (uf) {
-                            std::int32_t cnt = 0;
-                            uf.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
-                            std::vector<std::int32_t> tmp;
-                            if (cnt > 0) {
-                                tmp.resize(static_cast<size_t>(cnt));
-                                uf.read(reinterpret_cast<char*>(tmp.data()),
-                                        static_cast<std::streamsize>(cnt) * sizeof(std::int32_t));
-                            }
-                            std::vector<int> picked;
-                            picked.reserve(tmp.size());
-                            for (std::int32_t v : tmp)
-                                if (v >= 0 && v < data.R() && !h1set.count(v))
-                                    picked.push_back(static_cast<int>(v));
-                            std::sort(picked.begin(), picked.end());
-                            picked.erase(std::unique(picked.begin(), picked.end()), picked.end());
-                            nonHeads.swap(picked);
-                            n_extras = nonHeads.size();
-                            uxLoaded = true;
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                                "DualPoolAugment: loaded %zu U_extra VIDs from %s (RNG-selected)\n",
-                                n_extras, uxFile);
-                        } else {
-                            SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                "DualPoolAugment: cannot open SPTAG_UEXTRA_ID_FILE=%s; "
-                                "falling back to random selection\n", uxFile);
+                if (!m_options.m_uExtraIDFile.empty()) {
+                    std::ifstream uf(m_options.m_uExtraIDFile, std::ios::binary);
+                    if (uf) {
+                        std::int32_t cnt = 0;
+                        uf.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
+                        std::vector<std::int32_t> tmp;
+                        if (cnt > 0) {
+                            tmp.resize(static_cast<size_t>(cnt));
+                            uf.read(reinterpret_cast<char*>(tmp.data()),
+                                    static_cast<std::streamsize>(cnt) * sizeof(std::int32_t));
                         }
+                        std::vector<int> picked;
+                        picked.reserve(tmp.size());
+                        for (std::int32_t v : tmp)
+                            if (v >= 0 && v < data.R() && !h1set.count(v))
+                                picked.push_back(static_cast<int>(v));
+                        std::sort(picked.begin(), picked.end());
+                        picked.erase(std::unique(picked.begin(), picked.end()), picked.end());
+                        nonHeads.swap(picked);
+                        n_extras = nonHeads.size();
+                        uxLoaded = true;
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+                            "DualPoolAugment: loaded %zu U_extra VIDs from %s (RNG-selected)\n",
+                            n_extras, m_options.m_uExtraIDFile.c_str());
+                    } else {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                            "DualPoolAugment: cannot open UExtraIDFile=%s; "
+                            "falling back to random selection\n",
+                            m_options.m_uExtraIDFile.c_str());
                     }
                 }
 
@@ -4000,7 +3926,6 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
                     "DualPoolAugment v3: H1=%zu, U_extra=%zu, final=%zu\n",
                     n_h1, n_extras, selected.size());
-            }
         }
     }
     // --------------------------------------------------------------------------
@@ -4800,17 +4725,90 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
 
 template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, const char *p_value, const char *p_section)
 {
+    auto storeParameter = [](std::vector<std::pair<std::string, std::string>>& p_parameters,
+                             const char* p_name,
+                             const char* p_newValue) {
+        for (auto& parameter : p_parameters)
+        {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_name))
+            {
+                parameter.second = p_newValue;
+                return;
+            }
+        }
+        p_parameters.emplace_back(p_name, p_newValue);
+    };
+
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SearchSSDIndex"))
+    {
+        storeParameter(m_searchSSDParameters, p_param, p_value);
+
+        // These are SSDServing control flags, not mutable runtime options.
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "isExecute") ||
+            SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "BuildSsdIndex"))
+        {
+            return ErrorCode::Success;
+        }
+
+        const char* runtimeParam = p_param;
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "PostingPageLimit"))
+        {
+            runtimeParam = "SearchPostingPageLimit";
+        }
+        else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "InternalResultNum"))
+        {
+            runtimeParam = "SearchInternalResultNum";
+        }
+        // m_options is shared by construction and runtime. Capture the effective
+        // construction value before the runtime overlay changes it so SaveConfig
+        // can write the two sections independently.
+        bool hasBuildValue = false;
+        for (const auto& parameter : m_buildSSDParameters)
+        {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), runtimeParam))
+            {
+                hasBuildValue = true;
+                break;
+            }
+        }
+        if (!hasBuildValue)
+        {
+            const std::string buildValue =
+                m_options.GetParameter("BuildSSDIndex", runtimeParam);
+            storeParameter(m_buildSSDParameters, runtimeParam, buildValue.c_str());
+        }
+        m_options.SetParameter("BuildSSDIndex", runtimeParam, p_value);
+        return ErrorCode::Success;
+    }
+
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildSSDIndex"))
+    {
+        storeParameter(m_buildSSDParameters, p_param, p_value);
+    }
+
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildHead") &&
         !SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "isExecute"))
     {
         if (m_index != nullptr)
             return m_index->SetParameter(p_param, p_value);
-        else
-            m_headParameters[p_param] = p_value;
+        for (auto& parameter : m_headParameters) {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_param)) {
+                parameter.second = p_value;
+                return ErrorCode::Success;
+            }
+        }
+        m_headParameters[p_param] = p_value;
     }
     else
     {
         m_options.SetParameter(p_section, p_param, p_value);
+        double configuredRatio = 0.0;
+        if (p_section != nullptr && p_param != nullptr && p_value != nullptr
+            && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SelectHead")
+            && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "Ratio")
+            && SPTAG::Helper::Convert::ConvertStringTo<double>(p_value, configuredRatio)) {
+            m_options.m_ratioExplicitlySet = true;
+        }
     }
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "DistCalcMethod"))
     {
@@ -4834,18 +4832,38 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
 
 template <typename T> std::string Index<T>::GetParameter(const char *p_param, const char *p_section) const
 {
-    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildHead") &&
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SearchSSDIndex"))
+    {
+        for (const auto& parameter : m_searchSSDParameters)
+        {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_param))
+            {
+                return parameter.second;
+            }
+        }
+
+        const char* runtimeParam = p_param;
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "PostingPageLimit"))
+        {
+            runtimeParam = "SearchPostingPageLimit";
+        }
+        else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "InternalResultNum"))
+        {
+            runtimeParam = "SearchInternalResultNum";
+        }
+        return m_options.GetParameter("BuildSSDIndex", runtimeParam);
+    }
+    else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "BuildHead") &&
         !SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "isExecute"))
     {
         if (m_index != nullptr)
             return m_index->GetParameter(p_param);
-        else
-        {
-            auto iter = m_headParameters.find(p_param);
-            if (iter != m_headParameters.end())
-                return iter->second;
-            return "Undefined!";
+        for (const auto& parameter : m_headParameters) {
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_param)) {
+                return parameter.second;
+            }
         }
+        return "Undefined!";
     }
     else
     {

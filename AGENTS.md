@@ -115,7 +115,7 @@ configs after SPACEV-1B ablation showed no recall gain once H1 tails are enabled
 
 **SelectHead resume checkpoint** (avoid re-running the expensive BKT head selection when a later BuildHead/BuildSSDIndex fails): ini `[MultiTenant] PersistSelectHead=1` makes `SelectHeadInternal` write `head_select_state.bin` (the PerTagBKT-derived state: node head selections, per-bundle U_extra, node/primary vector assignments, head-vector owners, head roles) into the SPANN **work dir** and keep the per-node head vector files (normally deleted in BuildHead). To resume, re-run the launcher with `[MultiTenant] ResumeBuild=1` (→ env `SPTAG_RESUME_BUILD=1`): CoreInterface keeps the work dir (`CoreInterface.cpp` ~2342, guards `RemovePathRecursive`) and `BuildIndexInternal` (`SPANNIndex.cpp` ~3450) loads the checkpoint and reports `select head time: 0.00s`, going straight to BuildHead. The checkpoint lives in `$SPTAG_SPANN_WORK_DIR/sptag_spann_tenant_<id>` (default `/tmp`); **set `SPTAG_SPANN_WORK_DIR` to a persistent disk** so the checkpoint survives across runs (`/tmp` is wiped on reboot). Impl: `SaveHeadSelectState`/`LoadHeadSelectState` in `SPANNIndex.cpp`; magic `'HSST'`.
 
-**Pin BKT balance factor (skip DynamicFactorSelect)** (the SelectHead I/O bottleneck at billion scale): SPANN SelectHead defaults `BalanceFactor=-1`, which makes `BKTree::BuildTrees` run `DynamicFactorSelect` — an auto-search that does ~14 full `KmeansAssign` scans **per tag group** to pick the most-balanced lambda. On a ~250M-vector group over a slow disk this dominates SelectHead. ini `[SelectHead] BKTLambdaFactor=100` (→ `SpannAttrBuilder` exports env `SPTAG_BKT_LAMBDA_FACTOR`, consumed in `SelectHeadInternal`, `SPANNIndex.cpp` ~2986: overrides `m_options.m_fBalanceFactor`) pins the balance factor so `m_fBalanceFactor >= 0` skips the auto-search entirely (log: `pinning m_fBalanceFactor -1 -> 100 (skips DynamicFactorSelect auto-search)`, then `Start to build BKTree` with no `Best Lambda Factor` lines). **100 is SPTAG's canonical default** (BKT `ParameterDefinitionList.h`; all SIFT/SPACEV SPANN reference configs use it), so it is the low-risk standard value. Independent of BKTLambdaFactor, keep the SelectHead vector file on fast storage (NVMe) — the BKT tree recursion still scans the group vectors repeatedly.
+**Pin BKT balance factor (skip DynamicFactorSelect)** (the SelectHead I/O bottleneck at billion scale): SPANN SelectHead defaults `BalanceFactor=-1`, which makes `BKTree::BuildTrees` run `DynamicFactorSelect` — an auto-search that does ~14 full `KmeansAssign` scans **per tag group** to pick the most-balanced lambda. On a ~250M-vector group over a slow disk this dominates SelectHead. Set `[SelectHead] BKTLambdaFactor` explicitly; it is staged directly into `m_options.m_fBalanceFactor`, so `m_fBalanceFactor >= 0` skips the auto-search. The official SIFT1B GettingStart configuration uses `1.0`; legacy comparison configs used `100`. The INI is authoritative—do not substitute either through an environment override. Independent of BKTLambdaFactor, keep the SelectHead vector file on fast storage (NVMe) — the BKT tree recursion still scans the group vectors repeatedly.
 
 **In-place build (no final copy)** (avoid the transient 2× disk footprint + copy time at billion scale): by default the SPANN index is staged in a per-tenant **work dir** (`$SPTAG_SPANN_WORK_DIR/sptag_spann_tenant_<id>`, default `/tmp`) and `SaveAll` copies it to `IndexDirectory/tenant_<id>` at the end — which needs room for the postings *twice* (work + final) and re-writes the whole block pool. ini `[MultiTenant] InPlaceBuild=1` (→ launcher exports `SPTAG_SPANN_INPLACE_DIR=$IndexDirectory`) makes the build write the head index + SSD block pool **directly** into `IndexDirectory/tenant_<id>`. `SaveAll`/`SaveUnifiedStorage` then hit the `srcDir == dstDir` branch (`CoreInterface.cpp` ~3405, logs "already saved in place") and skip the copy. Note: the `StartFileSizeGB` block pool is pre-allocated in `IndexDirectory`'s filesystem, so that disk must hold it (for SPACEV-1B: `/datadisk`, 420–560GB). The SSD postings are already flushed incrementally to the FILEIO block pool during BuildSSDIndex, so in-place gives true streaming-to-final with no extra disk. Impl: work-dir computation in `CoreInterface.cpp` (~2334, honors `SPTAG_SPANN_INPLACE_DIR`).
 
@@ -145,15 +145,23 @@ How the `.ini` maps to the engine (`Wrappers/src/SpannAttrBuilder.cpp` `-c` read
   section with a native pre-build hook): `Storage`, `ReplicaCount`,
   `PostingQuantizer`/`PostingQuantM`/`PostingQuantizerFile`/`PipePQPivotsFile`,
   `FullVectorFile`, `RerankL`, `StartFileSizeGB`/`MaxFileSizeGB`.
-- `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` → bridged to the existing
-  `getenv` consumers via `setenv` (these extensions have no native SPANN param):
-  `Ratio`→`SPTAG_PERTAG_HEAD_RATIO`, `SelectType`→`SPTAG_SELECT_TYPE_OVERRIDE`,
-  `DistCalcMethod`→`SPTAG_DIST_METHOD`, `NumberOfThreads`→`SPTAG_BUILD_HEAD_THREADS`,
-  `ACLCols`/`HierLevelWidths`/`NumericCols`/`PerVectorTagsFile`, and the U_extra
-  layer (`DualPoolAugment`/`DualPoolExtraRatio`, default `0` in canonical configs).
-  The unfilter-tail K/buffer are
-  native SSD params (`[BuildSSDIndex] TailReplicaCount`/`UnfilterTailBufferLength`),
-  read straight from the ini — no env bridge/override.
+- `[SelectHead]` and `[BuildHead]` → staged directly into the native SPANN
+  parameter system after wrapper defaults, so explicit values override
+  tenant-size heuristics. Use the native `SelectHeadType` key; the legacy
+  `SelectType` alias is accepted only when the native key is absent.
+  `Ratio`, `BKTLambdaFactor`, BKT threads, thresholds, and every BuildHead graph
+  option (including `RefineIterations`, `MaxCheckForRefineGraph`, and
+  `TPTBalanceFactor`) are direct INI settings. Historical `[MultiTenant]`
+  `PerVectorTagsFile` and U_extra settings are staged into native SelectHead
+  options. `ACLCols`/`HierLevelWidths`/`NumericCols` remain wrapper-only routing
+  extensions. The unfilter-tail K/buffer are native SSD params
+  (`[BuildSSDIndex] TailReplicaCount`/`UnfilterTailBufferLength`), read straight
+  from the ini — no environment override.
+- `[SearchSSDIndex]` → applied only after BuildHead/BuildSSDIndex complete, then
+  retained as a separate native section in the generated `indexloader.ini`.
+  This keeps runtime values such as `InternalResultNum`, `MaxCheck`, and
+  `NumberOfThreads` from changing construction behavior while making the
+  documented search overlay the source of truth on subsequent loads.
 
 Gotchas (`Helper/SimpleIniReader.cpp`): comments MUST start with `;` (lines
 starting with `#` are parsed as params → `ReadIni_FailedParseParam`); inline

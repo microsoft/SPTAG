@@ -2124,14 +2124,16 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
     std::string algoTypeStr = SPTAG::Helper::Convert::ConvertToString(m_algoType);
     std::string valueTypeStr = SPTAG::Helper::Convert::ConvertToString(m_valueType);
 
-    // Distance metric for tenant index builds. Default "Cosine" preserves the
-    // historical SIFT behavior; SPTAG_DIST_METHOD=L2 selects Euclidean (e.g. for
-    // the YFCC-10M / big-ann datasets, whose ground truth is L2). The query side
-    // uses the metric persisted in the index, so this single knob keeps build and
-    // search consistent. Validated values: "Cosine", "L2".
+    // Distance metric for tenant index builds. The native [Base]
+    // DistCalcMethod parameter is staged before tenant indexes exist, so read it
+    // here as well for routing/planning performed before the core index is built.
     std::string distMethod = "Cosine";
-    if (const char* e = std::getenv("SPTAG_DIST_METHOD")) {
-        if (e[0] != '\0') distMethod = e;
+    for (const auto& param : m_pendingBuildParams) {
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<2>(param).c_str(), "Base")
+            && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<0>(param).c_str(), "DistCalcMethod")
+            && !std::get<1>(param).empty()) {
+            distMethod = std::get<1>(param);
+        }
     }
 
     for (auto& tenantEntry : tenantVectorRanges)
@@ -2425,22 +2427,12 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             tenantIndex->SetBuildParam("isExecute", "true", "BuildHead");
             tenantIndex->SetBuildParam("isExecute", "true", "BuildSSDIndex");
             tenantIndex->SetBuildParam("BuildSsdIndex", "true", "BuildSSDIndex");
-            // SelectHead BKT thread count: the [SelectHead] NumberOfThreads default
-            // (4) serializes head selection (BKT k-means / per-tag trees). Parallelize
-            // it to the machine width; override via SPTAG_SELECT_HEAD_THREADS. Also
-            // forward the parallel-BKT toggle so [SelectHead] ParallelBKTBuild=true
-            // (bridged to SPTAG_PARALLEL_BKT) drives BuildTreesParallel.
+            // SelectHead defaults to the machine width. Explicit native
+            // [SelectHead] values are staged below and take precedence.
             {
                 int selThreads = (int)std::thread::hardware_concurrency();
                 if (selThreads <= 0) selThreads = 16;
-                if (const char* e = std::getenv("SPTAG_SELECT_HEAD_THREADS")) {
-                    int v = atoi(e);
-                    if (v > 0) selThreads = v;
-                }
                 tenantIndex->SetBuildParam("NumberOfThreads", std::to_string(selThreads).c_str(), "SelectHead");
-                if (const char* e = std::getenv("SPTAG_PARALLEL_BKT"))
-                    tenantIndex->SetBuildParam("ParallelBKTBuild",
-                        (e[0]=='1'||e[0]=='t'||e[0]=='T'||e[0]=='y'||e[0]=='Y') ? "true" : "false", "SelectHead");
             }
             tenantIndex->SetBuildParam("Storage", m_storageBackend.c_str(), "BuildSSDIndex");
 
@@ -2450,18 +2442,6 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                 tenantIndex->SetBuildParam(kv.first.c_str(), kv.second.c_str(), "BuildSSDIndex");
                 fprintf(stderr, "[INFO] Tenant %d: SSD build param %s = %s\n",
                         tenantId, kv.first.c_str(), kv.second.c_str());
-            }
-
-            // Replica fan-out: each base vector is inserted into its top-N nearest
-            // heads' postings. Default 8 (SPANN historical). Lowering it shrinks the
-            // posting store and the per-query bytes read (less IO amplification) at
-            // some boundary-recall cost. Env SPTAG_REPLICA_COUNT overrides the default.
-            if (const char* e = std::getenv("SPTAG_REPLICA_COUNT")) {
-                int rc = atoi(e);
-                if (rc > 0) {
-                    tenantIndex->SetBuildParam("ReplicaCount", std::to_string(rc).c_str(), "BuildSSDIndex");
-                    fprintf(stderr, "[INFO] Tenant %d: ReplicaCount override = %d\n", tenantId, rc);
-                }
             }
 
             // Scale DataCapacity and SSD file size to tenant size
@@ -2538,9 +2518,9 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
                     explicitMax ? "<explicit>" : std::to_string(maxFileSizeGB).c_str(),
                     dataCapacity);
 
-            // Scale graph build parameters by tenant size to avoid fixed overhead on small tenants
-            // TPTNumber: controls how many random partition trees for initial KNN graph
-            // RefineIterations: controls graph refinement passes
+            // Scale graph build defaults by tenant size to avoid fixed overhead on
+            // small tenants. Explicit native [BuildHead] values are applied below
+            // and therefore override these defaults.
             int tptNumber = 32;
             int refineIter = 2;
             if (tenantVecCount < 10000) {
@@ -2558,18 +2538,35 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
             }
             tenantIndex->SetBuildParam("TPTNumber", std::to_string(tptNumber).c_str(), "BuildHead");
             tenantIndex->SetBuildParam("RefineIterations", std::to_string(refineIter).c_str(), "BuildHead");
-            // Head index (BKT) NumberOfThreads defaults to 1, which serializes the
-            // KNN-graph build + refine over the head set (very slow for large head
-            // counts, e.g. YFCC's ~1.1M PerTagBKT heads). Parallelize it; override
-            // with SPTAG_BUILD_HEAD_THREADS.
+            // Head index (BKT) defaults to the machine width. Explicit native
+            // [BuildHead] NumberOfThreads overrides this below.
             {
                 int headThreads = (int)std::thread::hardware_concurrency();
                 if (headThreads <= 0) headThreads = 16;
-                if (const char* e = std::getenv("SPTAG_BUILD_HEAD_THREADS")) {
-                    int v = atoi(e);
-                    if (v > 0) headThreads = v;
-                }
                 tenantIndex->SetBuildParam("NumberOfThreads", std::to_string(headThreads).c_str(), "BuildHead");
+            }
+
+            // Native [Base] head-algorithm, [SelectHead], and [BuildHead]
+            // settings are authoritative. Apply them after automatic defaults so
+            // explicit INI values such as IndexAlgoType=BKT,
+            // RefineIterations=3, and MaxCheckForRefineGraph=16324 are not
+            // silently replaced by wrapper heuristics.
+            for (const auto& param : m_pendingBuildParams) {
+                const std::string& name = std::get<0>(param);
+                const std::string& value = std::get<1>(param);
+                const std::string& section = std::get<2>(param);
+                const bool isHeadSection =
+                    SPTAG::Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), "SelectHead")
+                    || SPTAG::Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), "BuildHead");
+                const bool isHeadAlgorithm =
+                    SPTAG::Helper::StrUtils::StrEqualIgnoreCase(section.c_str(), "Base")
+                    && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(name.c_str(), "IndexAlgoType");
+                if (!isHeadSection && !isHeadAlgorithm) {
+                    continue;
+                }
+                tenantIndex->SetBuildParam(name.c_str(), value.c_str(), section.c_str());
+                fprintf(stderr, "[INFO] Tenant %d: native [%s] %s = %s\n",
+                        tenantId, section.c_str(), name.c_str(), value.c_str());
             }
 
             // Set per-vector tags to embed in posting metadata (if available from BuildFromDataWithTags)
@@ -2621,6 +2618,21 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         if (!buildOk)
         {
             return false;
+        }
+
+        // A native runtime overlay must not influence construction, but it must
+        // be applied before this SPANN tenant is saved-and-released below.
+        if (indexType == TenantIndexType::SPANN)
+        {
+            for (const auto& pendingParam : m_pendingSearchParams)
+            {
+                const std::string& name = std::get<0>(pendingParam);
+                const std::string& value = std::get<1>(pendingParam);
+                const std::string& section = std::get<2>(pendingParam);
+                tenantIndex->SetSearchParam(name.c_str(), value.c_str(), section.c_str());
+                fprintf(stderr, "[INFO] Tenant %d: native [%s] %s = %s\n",
+                        tenantId, section.c_str(), name.c_str(), value.c_str());
+            }
         }
 
         m_tenantVectorCounts[tenantId] = static_cast<int>(vectorRanges.size());
@@ -3516,6 +3528,25 @@ bool TenantIndexManager::LoadUnifiedStorage(const char* p_baseDir)
 
 void TenantIndexManager::SetBuildParam(const char* p_name, const char* p_value, const char* p_section)
 {
+    if (p_name == nullptr || p_value == nullptr || p_section == nullptr) {
+        return;
+    }
+
+    bool updated = false;
+    for (auto& pendingParam : m_pendingBuildParams)
+    {
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<0>(pendingParam).c_str(), p_name)
+            && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<2>(pendingParam).c_str(), p_section))
+        {
+            std::get<1>(pendingParam) = p_value;
+            updated = true;
+            break;
+        }
+    }
+    if (!updated) {
+        m_pendingBuildParams.emplace_back(p_name, p_value, p_section);
+    }
+
     for (auto& tenantEntry : m_tenantIndices)
     {
         tenantEntry.second->SetBuildParam(p_name, p_value, p_section);
@@ -3532,7 +3563,8 @@ void TenantIndexManager::SetSearchParam(const char* p_name, const char* p_value,
     bool updated = false;
     for (auto& pendingParam : m_pendingSearchParams)
     {
-        if (std::get<0>(pendingParam) == p_name && std::get<2>(pendingParam) == p_section)
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<0>(pendingParam).c_str(), p_name)
+            && SPTAG::Helper::StrUtils::StrEqualIgnoreCase(std::get<2>(pendingParam).c_str(), p_section))
         {
             std::get<1>(pendingParam) = p_value;
             updated = true;
@@ -3946,6 +3978,33 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     auto wdIt = m_tenantSpannWorkDirs.find(p_tenantId);
     if (wdIt == m_tenantSpannWorkDirs.end()) return false;
     std::string workDir = wdIt->second;
+
+    // DirectSparseMaxPostings is a native [BuildSSDIndex] parameter. The
+    // sparse-tag sidecar is built after the SPANN store, so retrieve the
+    // persisted option from the just-built (or reloaded) index instead of
+    // consulting a process environment override.
+    int directSparseMaxPostings = 320;
+    if (!EnsureTenantLoaded(p_tenantId)) return false;
+    {
+        std::shared_lock<std::shared_mutex> rlock(m_tenantIndicesMutex);
+        auto it = m_tenantIndices.find(p_tenantId);
+        if (it != m_tenantIndices.end()) {
+            auto internalIdx = it->second->GetInternalIndex();
+            if (internalIdx != nullptr) {
+                const std::string configured =
+                    internalIdx->GetParameter("DirectSparseMaxPostings", "BuildSSDIndex");
+                int parsed = 0;
+                if (SPTAG::Helper::Convert::ConvertStringTo<int>(configured.c_str(), parsed)
+                    && parsed > 0) {
+                    directSparseMaxPostings = parsed;
+                } else if (!configured.empty()) {
+                    fprintf(stderr,
+                            "[WARN] Tenant %d: invalid DirectSparseMaxPostings=%s; using %d\n",
+                            p_tenantId, configured.c_str(), directSparseMaxPostings);
+                }
+            }
+        }
+    }
 
     // ── Idempotent fast path ─────────────────────────────────────────────
     // If all three persisted artifacts (PS bitmask, sparse tags, tag-pure
@@ -4598,20 +4657,13 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         routeStats[tag] = TagRoutingStats{vectorCount, tagPostingCounts[tag]};
     }
 
-    // Sparse-path single knob:
-    //   SPTAG_SPARSE_MAX_POSTINGS = N (default 1024)
-    // A tag is materialized into sparse_tags.bin iff it appears in ≤ N postings.
+    // Sparse-path single native knob: [BuildSSDIndex]
+    // DirectSparseMaxPostings=N. A tag is materialized into sparse_tags.bin iff
+    // it appears in <= N postings.
     // At query time, materialized tags ALWAYS route through the sparse path
     // (no second-stage union-size gate) - this is the single fixed threshold.
-    int kSparseIndexBuildMaxPostings = 1024;
-    if (const char* env = std::getenv("SPTAG_SPARSE_MAX_POSTINGS")) {
-        int parsed = 0;
-        if (SPTAG::Helper::Convert::ConvertStringTo<int>(env, parsed) && parsed > 0) {
-            kSparseIndexBuildMaxPostings = parsed;
-        }
-    }
     auto sparseIdx = std::make_shared<SPTAG::Cache::SparseTagIndex>();
-    sparseIdx->Build(numHeads, posting_tags, tagPostingCounts, kSparseIndexBuildMaxPostings);
+    sparseIdx->Build(numHeads, posting_tags, tagPostingCounts, directSparseMaxPostings);
 
     std::string sparsePath = workDir + "/sparse_tags.bin";
     sparseIdx->Save(sparsePath);
@@ -5022,7 +5074,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
     fprintf(stderr, "[INFO] Tenant %d: built PS + sparse index + %d head tags (%d postings, %llu assignments, sparse_max_postings=%d)\n",
             p_tenantId, headTagCount, numHeads,
             static_cast<unsigned long long>(totalAssignments),
-            kSparseIndexBuildMaxPostings);
+    directSparseMaxPostings);
     return true;
 }
 
@@ -5547,12 +5599,11 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
                 // Physical posting signatures are an optional I/O hint, not a
                 // default candidate gate: exact inline filtering after
                 // distance-first head selection retains replica coverage.
-                static const bool s_enableHierFilter = []() {
-                    if (std::getenv("SPTAG_DISABLE_HIER_POSTING_FILTER") != nullptr) return false;
-                    const char* value = std::getenv("SPTAG_ENABLE_HIER_POSTING_FILTER");
-                    return value != nullptr && (value[0] == '1' || value[0] == 't' || value[0] == 'T');
-                }();
-                if (s_enableHierFilter) {
+                auto* spannInternalIdx =
+                    dynamic_cast<SPTAG::SPANN::ISPANNIndex*>(internalIdx.get());
+                auto* searchOptions =
+                    spannInternalIdx != nullptr ? spannInternalIdx->GetOptions() : nullptr;
+                if (searchOptions != nullptr && searchOptions->m_enableHierPostingFilter) {
                 const int quantCols = memoryIndex->GetHeadNodeNumQuantCols();
                 const SPTAG::Cache::NumQuantParam* qp =
                     (numMeta != nullptr && !numMeta->params.empty()) ? numMeta->params.data() : nullptr;

@@ -68,10 +68,15 @@ namespace SPTAG {
             int m_splitThreshold;
             int m_maxRandomTryCount;
             double m_ratio;
+            bool m_ratioExplicitlySet;
             int m_headVectorCount;
             bool m_recursiveCheckSmallCluster;
             bool m_printSizeCount;
             std::string m_selectType;
+            std::string m_perVectorTagsFile;
+            bool m_dualPoolAugment;
+            double m_dualPoolExtraRatio;
+            std::string m_uExtraIDFile;
             bool m_parallelBKTBuild;
 
             // Section 3: for build head
@@ -146,6 +151,25 @@ namespace SPTAG {
             bool m_enableAdaptiveFilteredNprobe;
             bool m_logAdaptiveNprobe;
             bool m_logPhaseTime;
+            bool m_unifiedNprobeBudget;
+            double m_multiNodeBudgetKeepRatio;
+            int m_crossSingleSeed;
+            bool m_disableCrossEdges;
+            bool m_filterKeepCross;
+            int m_crossExpandLimit;
+            bool m_disableCrossSubgraph;
+            int m_tagAwareHeadExpansion;
+            bool m_logUExtra;
+            bool m_logCrossStats;
+            bool m_logPathStats;
+            int m_dumpHeads;
+            bool m_filterKeepUExtra;
+            bool m_enableUnfilterTail;
+            bool m_ablateUExtra;
+            bool m_ablateTail;
+            bool m_unfilterPurePages;
+            int m_unfilterExtraTailPages;
+            bool m_enableHierPostingFilter;
             int m_rerank;
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;
@@ -238,6 +262,7 @@ namespace SPTAG {
             std::string m_postingQuantizer;   // None|RaBitQ|OPQ|PipePQ
             int m_postingQuantBits;           // RaBitQ bits per dim
             int m_postingQuantM;              // OPQ/PipePQ code bytes per vector
+            bool m_requantizeFromPipePQ;      // one-time same-stride PipePQ->OPQ posting rewrite
             bool m_quantizeHead;              // quantize the head index too
             std::string m_postingQuantFile;   // code sidecar path
             std::string m_pipePQPivotsFile;   // PipeANN PQ pivot sidecar path
@@ -269,6 +294,7 @@ namespace SPTAG {
 
 #include "inc/Core/SPANN/ParameterDefinitionList.h"
 #undef DefineSSDParameter
+                m_ratioExplicitlySet = false;
             }
 
             ~Options() {}

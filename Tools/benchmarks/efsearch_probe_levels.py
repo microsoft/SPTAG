@@ -23,12 +23,40 @@ import SPTAG
 LEVEL_COL = {"org": 0, "dept": 1, "team": 2, "project": 3}
 
 
-def read_ini_value(index_dir: str, tenant: int, key: str) -> str:
+def read_effective_ssd_ini_values(index_dir: str, tenant: int) -> dict[str, str]:
     config_path = Path(index_dir) / f"tenant_{tenant}" / "indexloader.ini"
-    for line in config_path.read_text(encoding="utf-8").splitlines():
-        if line.startswith(f"{key}="):
-            return line.split("=", 1)[1].strip()
-    raise ValueError(f"Missing {key} in {config_path}")
+    values: dict[str, str] = {}
+    section = ""
+    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if section == "BuildSSDIndex":
+            values[key] = value
+        elif section == "SearchSSDIndex":
+            if key in {"isExecute", "BuildSsdIndex"}:
+                continue
+            if key == "InternalResultNum":
+                key = "SearchInternalResultNum"
+            elif key == "PostingPageLimit":
+                key = "SearchPostingPageLimit"
+            values[key] = value
+    return values
+
+
+def read_ini_value(index_dir: str, tenant: int, key: str) -> str:
+    values = read_effective_ssd_ini_values(index_dir, tenant)
+    if key in values:
+        return values[key]
+    raise ValueError(
+        f"Missing {key} in {Path(index_dir) / f'tenant_{tenant}' / 'indexloader.ini'}"
+    )
 
 
 def read_ini_value_or_default(
@@ -52,13 +80,17 @@ def main() -> None:
     index_dir = os.environ["INDEX_DIR"]
     query_dir = os.environ["QUERY_DIR"]
     tenant = int(os.environ.get("TENANT", "0"))
-    topk = int(os.environ.get("TOPK", "100"))
     maxcheck = int(os.environ.get("TEST_MAXCHECK", "0"))
     warmup = int(os.environ.get("WARMUP", "200"))
     num_q = int(os.environ.get("NUM_QUERIES", "2000"))
     measure_offset = int(os.environ.get("MEASURE_OFFSET", "0"))
     levels = [s.strip() for s in os.environ.get("LEVELS", "unfilter,org").split(",") if s.strip()]
     value_type = os.environ.get("SPTAG_VALUE_TYPE", "Int8")
+    topk = int(
+        os.environ.get(
+            "TOPK", read_ini_value(index_dir, tenant, "ResultNum")
+        )
+    )
     rerank_l = int(read_ini_value(index_dir, tenant, "RerankL"))
     configured_search_internal_result_num = int(
         read_ini_value(index_dir, tenant, "SearchInternalResultNum")
@@ -74,6 +106,7 @@ def main() -> None:
         "ForceDenseTagSearch",
     )
     force_dense_tag_search = configured_force_dense_tag_search
+    effective_nprobe = fixed_nprobe or configured_search_internal_result_num
 
     qdir = Path(query_dir)
     qf = np.load(qdir / "query_vectors.npy")
@@ -121,6 +154,8 @@ def main() -> None:
         scanned_vectors = 0
         matched_vectors = 0
         primary_head_candidates = 0
+        failed_searches = 0
+        empty_results = 0
         t0 = time.perf_counter()
         for measured_index in range(nq):
             i = measure_offset + measured_index
@@ -130,7 +165,7 @@ def main() -> None:
             matched_vectors += int(mgr.GetLastMatchedVectors())
             primary_head_candidates += int(mgr.GetLastPrimaryHeadCandidateCount())
             if result is None:
-                denom += topk
+                failed_searches += 1
                 continue
             ids = np.asarray(result[0], dtype=np.int64)
             dists = np.asarray(result[1], dtype=np.float32)
@@ -139,14 +174,22 @@ def main() -> None:
             gt_valid = gt_row[gt_row >= 0]
             k = min(topk, gt_valid.size)
             if k > 0:
+                if valid.size == 0:
+                    empty_results += 1
+                    continue
                 hit += np.intersect1d(valid, gt_valid[:k]).size
                 denom += k
         elapsed = time.perf_counter() - t0
+        if failed_searches or empty_results:
+            raise RuntimeError(
+                f"{level}: SearchWithACL produced {failed_searches} missing and "
+                f"{empty_results} empty results across {nq} measured queries"
+            )
 
         out = {
             "maxcheck": maxcheck,
             "level": level,
-            "nprobe": fixed_nprobe,
+            "nprobe": effective_nprobe,
             "rerank_l": rerank_l,
             "fixed_nprobe": fixed_nprobe,
             "seed_max_check": seed_max_check,

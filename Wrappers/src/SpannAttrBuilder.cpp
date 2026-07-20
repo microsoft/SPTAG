@@ -11,13 +11,10 @@
 // tag files so a billion-scale build streams from disk (zero extra copies, no
 // 400GB float blow-up).
 //
-// Attribute/routing configuration is taken from the SAME SPTAG_* environment
-// variables the Python demo sets from build_tag_config.json
-// (SPTAG_ACL_COLS, SPTAG_HIER_LEVEL_WIDTHS, SPTAG_NUMERIC_COLS,
-//  SPTAG_PER_VECTOR_TAGS_FILE, SPTAG_PERTAG_HEAD_RATIO, SPTAG_SELECT_TYPE_OVERRIDE,
-//  SPTAG_DIST_METHOD, SPTAG_STORAGE_BACKEND, ...). This tool only needs the
-// file layout (paths/offsets/dims) on the command line; it invents no new
-// config format.
+// Attribute/routing configuration comes from the native sectioned INI. Standard
+// SPANN sections are staged directly into the core parameter system; a small
+// set of wrapper-only routing extensions retains an internal INI-to-wrapper
+// bridge until those extensions gain native option fields.
 //
 // Usage:
 //   spannbuilder \
@@ -31,7 +28,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <atomic>
+#include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 #include <algorithm>
 
@@ -120,10 +120,9 @@ bool ResolveFlag(int argc, char** argv, const char* cliKey,
     }
     return false;
 }
-// Bridge a config value to the SPTAG_* environment knob its consumer reads via
-// getenv (routing / ratio / dist / unfilter-enhancement extensions have no
-// native SPANN [BuildSSDIndex] param, so the ini section is delivered through
-// the existing getenv sites). Config is authoritative (overwrite=1).
+// Bridge a wrapper-only routing setting to its existing consumer. Native
+// SPANN SelectHead/BuildHead/BuildSSDIndex settings must be staged directly
+// instead of passing through the process environment.
 void IniEnv(const Helper::IniReader* ini, const char* section, const char* key, const char* env) {
     if (!ini || !ini->DoesParameterExist(section, key)) return;
     std::string v = ini->GetParameter<std::string>(section, key, std::string());
@@ -136,6 +135,71 @@ void IniEnv(const Helper::IniReader* ini, const char* section, const char* key, 
 } // namespace
 
 int main(int argc, char** argv) {
+    // --- Same-stride PipePQ -> OPQ posting rewrite for a cloned index ---
+    // The clone's native indexloader.ini must set PostingQuantizer=OPQ,
+    // PostingQuantM to the source PipePQ width, RequantizeFromPipePQ=true, and
+    // point PostingQuantizerFile at an M-byte-per-vector OPQ code sidecar.
+    if (ArgFlag(argc, argv, "--inpost-opq-requantize")) {
+        const char* indexDir = ArgVal(argc, argv, "--index-dir", nullptr);
+        const int dim = (int)std::strtol(ArgVal(argc, argv, "--dim", "0"), nullptr, 10);
+        const std::string valueType = ArgVal(argc, argv, "--value-type", "UInt8");
+        const int tenant = (int)std::strtol(ArgVal(argc, argv, "--tenant", "0"), nullptr, 10);
+        if (!indexDir || dim <= 0) {
+            fprintf(stderr, "usage: spannbuilder --inpost-opq-requantize --index-dir <d> "
+                            "--dim <D> [--value-type UInt8] [--tenant 0]\n");
+            return 2;
+        }
+        const size_t valSize = ValueTypeSize(valueType);
+        if (valSize == 0) { fprintf(stderr, "[spannbuilder] bad value-type\n"); return 2; }
+        fprintf(stderr, "[spannbuilder] inpost-opq-requantize: load %s ...\n", indexDir);
+        {
+            TenantIndexManager mgr(dim, "SPANN", valueType.c_str());
+            if (!mgr.LoadAll(indexDir)) {
+                fprintf(stderr, "[spannbuilder] LoadAll FAILED\n");
+                return 1;
+            }
+            // Lazy tenant construction executes the native-INI requantization before
+            // this query reaches the normal search path.
+            std::vector<std::uint8_t> q((size_t)dim * valSize, 0);
+            ByteArray query(q.data(), q.size(), false);
+            ByteArray noTags(nullptr, 0, false);
+            if (!mgr.SearchWithACL(query, tenant, 10, noTags, 0)) {
+                fprintf(stderr, "[spannbuilder] requantization query FAILED\n");
+                return 1;
+            }
+        }
+
+        const std::string markerPath = std::string(indexDir) + "/tenant_" +
+            std::to_string(tenant) + "/inpost_opq.bin";
+        int marker[2] = { 0, 0 };
+        std::ifstream markerIn(markerPath, std::ios::binary);
+        markerIn.read(reinterpret_cast<char*>(marker), sizeof(marker));
+        if (!markerIn || marker[0] <= 0 || marker[1] <= 0) {
+            fprintf(stderr, "[spannbuilder] requantization marker missing or invalid: %s\n",
+                    markerPath.c_str());
+            return 1;
+        }
+
+        // Reload after the first manager is destroyed so success proves that the
+        // checkpointed mapping, posting store, checksums, and OPQ marker are coherent.
+        {
+            TenantIndexManager verifier(dim, "SPANN", valueType.c_str());
+            if (!verifier.LoadAll(indexDir)) {
+                fprintf(stderr, "[spannbuilder] post-requantization reload FAILED\n");
+                return 1;
+            }
+            std::vector<std::uint8_t> q((size_t)dim * valSize, 0);
+            ByteArray query(q.data(), q.size(), false);
+            ByteArray noTags(nullptr, 0, false);
+            if (!verifier.SearchWithACL(query, tenant, 10, noTags, 0)) {
+                fprintf(stderr, "[spannbuilder] post-requantization query FAILED\n");
+                return 1;
+            }
+        }
+        fprintf(stderr, "[spannbuilder] inpost-opq-requantize complete.\n");
+        return 0;
+    }
+
     // --- Post-build slim transform mode (C++ analog of build_inpost_rbq2_contig.py) ---
     // Rewrites an existing index's full postings to slim [meta | RaBitQ2-code] stored
     // contiguously, driven by the same SPTAG_INPOST_RBQ* env the Python demo sets, then
@@ -189,11 +253,13 @@ int main(int argc, char** argv) {
         const int   dim      = (int)std::strtol(ArgVal(argc, argv, "--dim", "0"), nullptr, 10);
         const long  vecOff   = std::strtol(ArgVal(argc, argv, "--vec-offset", "8"), nullptr, 10);
         const long  nArg     = std::strtol(ArgVal(argc, argv, "--n", "-1"), nullptr, 10);
+        const int   threads  = (int)std::strtol(ArgVal(argc, argv, "--threads", "1"), nullptr, 10);
         const std::string valueType = ArgVal(argc, argv, "--value-type", "Int8");
-        if (!vectors || !quantF || !outF || dim <= 0) {
+        if (!vectors || !quantF || !outF || dim <= 0 || threads <= 0) {
             fprintf(stderr, "usage: spannbuilder --gen-opq-codes --vectors <base.i8bin> "
                             "--quantizer <opq_quantizer.bin> --out <opq_codes_m<M>.bin> "
-                            "--dim <D> [--vec-offset 8] [--n <count>] [--value-type Int8]\n");
+                            "--dim <D> [--vec-offset 8] [--n <count>] [--threads 1] "
+                            "[--value-type Int8]\n");
             return 2;
         }
         const size_t valSize = ValueTypeSize(valueType);
@@ -208,11 +274,21 @@ int main(int argc, char** argv) {
         if (!quantizer) { fprintf(stderr, "[spannbuilder] failed to load quantizer\n"); return 1; }
         quantizer->SetEnableADC(false);
         const int M = quantizer->GetNumSubvectors();
+        if (quantizer->ReconstructDim() != dim) {
+            fprintf(stderr, "[spannbuilder] OPQ quantizer dimension %d does not match requested dimension %d\n",
+                    quantizer->ReconstructDim(), dim);
+            return 1;
+        }
         fprintf(stderr, "[spannbuilder][gen-opq-codes] M=%d dim=%d valueType=%s vec-offset=%ld\n",
                 M, dim, valueType.c_str(), vecOff);
 
         MappedFile mf;
         if (!mf.Map(vectors)) return 1;
+#ifndef _MSC_VER
+        // Code generation walks the base sequentially; override MappedFile's
+        // build-oriented random-access hint so the kernel can readahead.
+        ::madvise(mf.base, mf.length, MADV_SEQUENTIAL);
+#endif
         const size_t recBytes = (size_t)dim * valSize;
         const size_t avail = (mf.length > (size_t)vecOff) ? (mf.length - (size_t)vecOff) : 0;
         long N = (long)(avail / recBytes);
@@ -220,38 +296,67 @@ int main(int argc, char** argv) {
         if (N <= 0) { fprintf(stderr, "[spannbuilder] no vectors (avail=%zu rec=%zu)\n", avail, recBytes); return 1; }
         const char* basePtr = static_cast<const char*>(mf.base) + vecOff;
 
-        FILE* out = std::fopen(outF, "wb");
-        if (!out) { fprintf(stderr, "[spannbuilder] cannot open out: %s\n", outF); return 1; }
-        fprintf(stderr, "[spannbuilder][gen-opq-codes] encoding %ld vectors -> %s (%ld bytes)\n",
-                N, outF, (long)N * M);
-
-        const size_t CHUNK = 1u << 16;  // 65536 vectors per write batch
-        std::vector<std::uint8_t> codes(CHUNK * (size_t)M);
-        std::vector<float> vf((size_t)dim);
-        for (long s = 0; s < N; s += (long)CHUNK) {
-            const long e = std::min<long>(s + (long)CHUNK, N);
-            for (long i = s; i < e; ++i) {
-                const char* rec = basePtr + (size_t)i * recBytes;
-                // Widen to float WITHOUT normalization (matches the build's self-encode path).
-                if (valueType == "Float" || valueType == "float") {
-                    const float* v = reinterpret_cast<const float*>(rec);
-                    for (int d = 0; d < dim; ++d) vf[d] = v[d];
-                } else if (valSize == 2) {
-                    const std::int16_t* v = reinterpret_cast<const std::int16_t*>(rec);
-                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
-                } else if (valueType == "UInt8" || valueType == "uint8") {
-                    const std::uint8_t* v = reinterpret_cast<const std::uint8_t*>(rec);
-                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
-                } else {
-                    const std::int8_t* v = reinterpret_cast<const std::int8_t*>(rec);
-                    for (int d = 0; d < dim; ++d) vf[d] = (float)v[d];
-                }
-                quantizer->QuantizeVector(vf.data(), &codes[(size_t)(i - s) * M], /*ADC=*/false);
-            }
-            std::fwrite(codes.data(), 1, (size_t)(e - s) * M, out);
-            fprintf(stderr, "\r[spannbuilder][gen-opq-codes] %ld/%ld", e, N);
+        const size_t outputBytes = static_cast<size_t>(N) * M;
+        const int outFd = open(outF, O_RDWR | O_CREAT | O_TRUNC, 0644);
+        if (outFd < 0) { fprintf(stderr, "[spannbuilder] cannot open out: %s\n", outF); return 1; }
+        if (ftruncate(outFd, static_cast<off_t>(outputBytes)) != 0) {
+            fprintf(stderr, "[spannbuilder] cannot size out: %s\n", outF);
+            close(outFd);
+            return 1;
         }
-        std::fclose(out);
+        void* outputMap = mmap(nullptr, outputBytes, PROT_READ | PROT_WRITE, MAP_SHARED, outFd, 0);
+        if (outputMap == MAP_FAILED) {
+            fprintf(stderr, "[spannbuilder] cannot mmap out: %s\n", outF);
+            close(outFd);
+            return 1;
+        }
+        auto* codes = reinterpret_cast<std::uint8_t*>(outputMap);
+        fprintf(stderr,
+                "[spannbuilder][gen-opq-codes] encoding %ld vectors -> %s (%zu bytes) with %d threads\n",
+                N, outF, outputBytes, threads);
+
+        const long chunkSize = 1L << 14;
+        std::atomic<long> nextVector(0);
+        auto encodeChunk = [&]() {
+            std::vector<float> vf(static_cast<size_t>(dim));
+            while (true) {
+                const long start = nextVector.fetch_add(chunkSize);
+                if (start >= N) break;
+                const long end = std::min<long>(start + chunkSize, N);
+                for (long i = start; i < end; ++i) {
+                    const char* rec = basePtr + static_cast<size_t>(i) * recBytes;
+                    // Widen raw values without normalization; this is the same
+                    // convention used by the in-posting OPQ build path.
+                    if (valueType == "Float" || valueType == "float") {
+                        const auto* v = reinterpret_cast<const float*>(rec);
+                        for (int d = 0; d < dim; ++d) vf[d] = v[d];
+                    } else if (valSize == 2) {
+                        const auto* v = reinterpret_cast<const std::int16_t*>(rec);
+                        for (int d = 0; d < dim; ++d) vf[d] = static_cast<float>(v[d]);
+                    } else if (valueType == "UInt8" || valueType == "uint8") {
+                        const auto* v = reinterpret_cast<const std::uint8_t*>(rec);
+                        for (int d = 0; d < dim; ++d) vf[d] = static_cast<float>(v[d]);
+                    } else {
+                        const auto* v = reinterpret_cast<const std::int8_t*>(rec);
+                        for (int d = 0; d < dim; ++d) vf[d] = static_cast<float>(v[d]);
+                    }
+                    quantizer->QuantizeVector(vf.data(), codes + static_cast<size_t>(i) * M,
+                                               /*ADC=*/false);
+                }
+            }
+        };
+        std::vector<std::thread> workers;
+        workers.reserve(static_cast<size_t>(threads));
+        for (int worker = 0; worker < threads; ++worker) workers.emplace_back(encodeChunk);
+        for (auto& worker : workers) worker.join();
+        if (msync(outputMap, outputBytes, MS_SYNC) != 0) {
+            fprintf(stderr, "[spannbuilder] failed to flush out: %s\n", outF);
+            munmap(outputMap, outputBytes);
+            close(outFd);
+            return 1;
+        }
+        munmap(outputMap, outputBytes);
+        close(outFd);
         fprintf(stderr, "\n[spannbuilder][gen-opq-codes] done.\n");
         return 0;
     }
@@ -405,11 +510,10 @@ int main(int argc, char** argv) {
 
     // --- Native SPANN .ini config (single source of truth, classic-builder style) ---
     // -c/--config <file.ini> loads all build parameters from a sectioned ini via
-    // the same Helper::IniReader the classic IndexBuilder uses. Standard SPANN
-    // [BuildSSDIndex] params are applied through the native SetSSDBuildParam path;
-    // the multi-tenant / unfilter-enhancement extensions live in a [MultiTenant]
-    // section and the routing/ratio/dist knobs in [Base]/[SelectHead]/[BuildHead],
-    // bridged to their getenv consumers. Explicit CLI flags still override the ini.
+    // the same Helper::IniReader the classic IndexBuilder uses. Native
+    // [SelectHead], [BuildHead], and [BuildSSDIndex] values are staged directly
+    // into the index options. Wrapper-only routing extensions stay in
+    // [MultiTenant]. Explicit CLI flags still override the INI where supported.
     Helper::IniReader iniStore;
     const Helper::IniReader* ini = nullptr;
     {
@@ -423,25 +527,11 @@ int main(int argc, char** argv) {
             ini = &iniStore;
             fprintf(stderr, "[spannbuilder] config = %s\n", cfg);
 
-            // (a) Routing / metric / head-selection knobs consumed via getenv.
-            IniEnv(ini, "Base",        "DistCalcMethod",          "SPTAG_DIST_METHOD");
-            IniEnv(ini, "SelectHead",  "Ratio",                   "SPTAG_PERTAG_HEAD_RATIO");
-            IniEnv(ini, "SelectHead",  "SelectType",              "SPTAG_SELECT_TYPE_OVERRIDE");
-            IniEnv(ini, "SelectHead",  "BKTLambdaFactor",         "SPTAG_BKT_LAMBDA_FACTOR");
-            IniEnv(ini, "SelectHead",  "NumberOfThreads",         "SPTAG_SELECT_HEAD_THREADS");
-            IniEnv(ini, "SelectHead",  "ParallelBKTBuild",        "SPTAG_PARALLEL_BKT");
-            IniEnv(ini, "BuildHead",   "NumberOfThreads",         "SPTAG_BUILD_HEAD_THREADS");
-            // (b) Multi-tenant ACL routing + numeric attribute layout.
+            // Wrapper-only multi-tenant ACL routing + numeric attribute layout.
             IniEnv(ini, "MultiTenant", "ACLCols",                 "SPTAG_ACL_COLS");
             IniEnv(ini, "MultiTenant", "HierLevelWidths",         "SPTAG_HIER_LEVEL_WIDTHS");
             IniEnv(ini, "MultiTenant", "NumericCols",             "SPTAG_NUMERIC_COLS");
-            IniEnv(ini, "MultiTenant", "PerVectorTagsFile",       "SPTAG_PER_VECTOR_TAGS_FILE");
             IniEnv(ini, "MultiTenant", "PivotForceNodeCount",     "SPTAG_PIVOT_FORCE_NODE_COUNT");
-            // (c) Unfilter-enhancement layers (U_extra heads + unfilter tail).
-            IniEnv(ini, "MultiTenant", "DualPoolAugment",         "SPTAG_DUAL_POOL_AUGMENT");
-            IniEnv(ini, "MultiTenant", "DualPoolExtraRatio",      "SPTAG_DUAL_POOL_EXTRA_RATIO");
-            // Unfilter-tail K/buffer are native SSD params (TailReplicaCount /
-            // UnfilterTailBufferLength) set via [BuildSSDIndex]; no env bridge.
         }
     }
 
@@ -534,6 +624,64 @@ int main(int argc, char** argv) {
     TenantIndexManager mgr(dim, "SPANN", valueType.c_str());
     if (storageBackend != "FILEIO") mgr.SetStorageBackend(storageBackend.c_str());
 
+    // Native build sections are staged before BuildFromDataWithTags creates the
+    // tenant index. TenantIndexManager applies them after its automatic defaults,
+    // so an explicit INI value always wins over a size-based heuristic.
+    if (ini) {
+        for (const char* name : {"DistCalcMethod", "IndexAlgoType"}) {
+            if (!ini->DoesParameterExist("Base", name)) continue;
+            const std::string value = ini->GetParameter<std::string>(
+                "Base", name, std::string());
+            mgr.SetBuildParam(name, value.c_str(), "Base");
+            fprintf(stderr, "[spannbuilder][cfg] [Base] %s = %s\n", name, value.c_str());
+        }
+
+        const bool hasNativeSelectType =
+            ini->DoesParameterExist("SelectHead", "SelectHeadType");
+        for (const auto& kv : ini->GetParameters("SelectHead")) {
+            std::string name = kv.first;
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(name.c_str(), "SelectType")) {
+                if (hasNativeSelectType) {
+                    fprintf(stderr,
+                            "[spannbuilder][cfg] ignoring deprecated [SelectHead] SelectType; "
+                            "SelectHeadType is also set\n");
+                    continue;
+                }
+                name = "SelectHeadType";
+            }
+            mgr.SetBuildParam(name.c_str(), kv.second.c_str(), "SelectHead");
+            fprintf(stderr, "[spannbuilder][cfg] [SelectHead] %s = %s\n",
+                    name.c_str(), kv.second.c_str());
+        }
+        for (const auto& kv : ini->GetParameters("BuildHead")) {
+            mgr.SetBuildParam(kv.first.c_str(), kv.second.c_str(), "BuildHead");
+            fprintf(stderr, "[spannbuilder][cfg] [BuildHead] %s = %s\n",
+                    kv.first.c_str(), kv.second.c_str());
+        }
+
+        // These historical [MultiTenant] names are now staged into native
+        // SelectHead options, so PerTagBKT and U_extra no longer depend on env.
+        auto stageMultiTenantSelectHead = [&](const char* source, const char* target) {
+            if (!ini->DoesParameterExist("MultiTenant", source)) return;
+            if (ini->DoesParameterExist("SelectHead", target)) {
+                fprintf(stderr,
+                        "[spannbuilder][cfg] ignoring legacy [MultiTenant] %s; "
+                        "[SelectHead] %s is authoritative\n",
+                        source, target);
+                return;
+            }
+            const std::string value = ini->GetParameter<std::string>(
+                "MultiTenant", source, std::string());
+            mgr.SetBuildParam(target, value.c_str(), "SelectHead");
+            fprintf(stderr, "[spannbuilder][cfg] [MultiTenant] %s = %s -> [SelectHead] %s\n",
+                    source, value.c_str(), target);
+        };
+        stageMultiTenantSelectHead("PerVectorTagsFile", "PerVectorTagsFile");
+        stageMultiTenantSelectHead("DualPoolAugment", "DualPoolAugment");
+        stageMultiTenantSelectHead("DualPoolExtraRatio", "DualPoolExtraRatio");
+        stageMultiTenantSelectHead("UExtraIDFile", "UExtraIDFile");
+    }
+
     // Native [BuildSSDIndex] section: apply every param through the SPANN parameter
     // system (SetSSDBuildParam -> staged m_extraSSDBuildParams -> SetBuildParam at
     // build, CoreInterface.cpp). This is the same mechanism the classic IndexBuilder
@@ -546,6 +694,15 @@ int main(int argc, char** argv) {
             if (kv.first == "storage") continue;
             mgr.SetSSDBuildParam(kv.first.c_str(), kv.second.c_str());
             fprintf(stderr, "[spannbuilder][cfg] [BuildSSDIndex] %s = %s\n",
+                    kv.first.c_str(), kv.second.c_str());
+        }
+
+        // Queue native runtime parameters before tenant construction. The manager
+        // applies them only after each SPANN tenant finishes building and before
+        // its first Save, so they cannot change construction behavior.
+        for (const auto& kv : ini->GetParameters("SearchSSDIndex")) {
+            mgr.SetSearchParam(kv.first.c_str(), kv.second.c_str(), "SearchSSDIndex");
+            fprintf(stderr, "[spannbuilder][cfg] queued [SearchSSDIndex] %s = %s\n",
                     kv.first.c_str(), kv.second.c_str());
         }
     }

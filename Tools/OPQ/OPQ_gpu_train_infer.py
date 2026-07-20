@@ -46,7 +46,7 @@ def get_config():
 class DataReader:
     def __init__(self, filename, featuredim, batchsize, normalize, datatype, targettype='float32'):
         self.mytype = targettype
-        if filename.find('.bin') >= 0:
+        if filename.endswith(('.bin', '.u8bin', '.i8bin', '.fbin')):
             self.fin = open(filename, 'rb')
             R = unpack('i', self.fin.read(4))[0]
             self.featuredim = unpack('i', self.fin.read(4))[0]
@@ -330,7 +330,8 @@ def train_pq(args):
         f.write(codebooks.tobytes())
 
     if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
-        os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
+        if os.path.exists(args.output_truth):
+            os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
         return
 
     if len(args.output_quan_vector_file) > 0:
@@ -457,7 +458,8 @@ def train_opq(args):
             f.write(rotate_matrix.tobytes())
 
     if args.quan_test == 0 and len(args.output_quan_vector_file) == 0 and len(args.output_rec_vector_file) == 0:
-        os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
+        if os.path.exists(args.output_truth):
+            os.rename(args.output_truth, os.path.join(output_dir, 'truth.txt' + '.' + str(args.task)))
         return
 
     if len(args.output_quan_vector_file) > 0:

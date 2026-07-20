@@ -243,7 +243,9 @@ public:
                                      float p_estimatedRecall,
                                      ByteArray p_levelWeightsCsv) const;
 
-    // Set build/search parameters for all tenant indices
+    // Set build/search parameters for all tenant indices. Build parameters are
+    // retained so values supplied before tenant indexes are created are applied
+    // during the subsequent build.
     void SetBuildParam(const char* p_name, const char* p_value, const char* p_section);
     void SetSearchParam(const char* p_name, const char* p_value, const char* p_section);
 
@@ -415,6 +417,10 @@ private:
 
     // Search params to apply to both currently loaded and future lazy-loaded tenants.
     std::vector<std::tuple<std::string, std::string, std::string>> m_pendingSearchParams;
+
+    // Build params to apply after TenantIndexManager's automatic defaults. This
+    // gives explicit native INI values precedence over tenant-size heuristics.
+    std::vector<std::tuple<std::string, std::string, std::string>> m_pendingBuildParams;
 
     // tenant_id -> SPANN build work directory (IndexDirectory)
     std::map<int, std::string> m_tenantSpannWorkDirs;
