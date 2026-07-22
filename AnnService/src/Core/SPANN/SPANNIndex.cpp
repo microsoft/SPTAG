@@ -2468,12 +2468,14 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
     }
 
-    // FixedNprobe is a native index parameter. When positive, it overrides
-    // adaptive estimation while remaining clamped to available postings.
+    // PinnedPostingTarget is a benchmark-only native override. When positive,
+    // it pins the physical posting I/O target while remaining clamped to
+    // available postings.
     {
-        int fixedNprobe = m_options.m_fixedNprobe;
-        if (fixedNprobe > 0) {
-            SizeType cap = HasHeadBundleNodes() ? TotalHeadSampleCount() : (m_index ? m_index->GetNumSamples() : fixedNprobe);
+        int pinnedPostingTarget = m_options.m_pinnedPostingTarget;
+        if (pinnedPostingTarget > 0) {
+            SizeType cap = HasHeadBundleNodes() ? TotalHeadSampleCount() :
+                (m_index ? m_index->GetNumSamples() : pinnedPostingTarget);
             if (!candidateNodes.empty()) {
                 SizeType candidateCap = 0;
                 for (int nodeId : candidateNodes) {
@@ -2481,7 +2483,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 }
                 if (candidateCap > 0) cap = candidateCap;
             }
-            postingTarget = std::min(fixedNprobe, static_cast<int>(cap));
+            postingTarget = std::min(pinnedPostingTarget, static_cast<int>(cap));
         }
     }
 
@@ -2578,18 +2580,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             }
             else
             {
-                // Tag-aware head in-filtering is opt-in. For sparse filters,
-                // distance-first head traversal followed by exact inline posting
-                // filtering preserves replica/bridge coverage better than
-                // spending the finite head-result budget on mask-matching heads.
-                const int tagAwareExpansion =
-                    std::max(1, std::min(32, m_options.m_tagAwareHeadExpansion));
+                // Keep graph expansion and physical posting I/O as separate
+                // budgets. BKT/KDT retain their native MaxCheck-adaptive
+                // frontier; postingTarget remains the number of matching
+                // postings ultimately admitted for I/O.
                 const bool hasTagFilterLocal = (queryTags != nullptr && numQueryTags > 0);
                 SPTAG::Cache::HierarchicalPostingMask tagAwareQueryMask;
-                const bool tagAwareEnabled = !primaryHeadBypassRequested &&
-                    hasTagFilterLocal && tagAwareExpansion > 1
+                const bool usePostingMaskResultQueue = !primaryHeadBypassRequested &&
+                    hasTagFilterLocal && m_options.m_enableHierPostingFilter
                     && m_index != nullptr && m_index->HasHeadNodeMeta();
-                if (tagAwareEnabled) {
+                if (usePostingMaskResultQueue) {
                     tagAwareQueryMask.Clear();
                     for (int qi = 0; qi < numQueryTags; ++qi) {
                         tagAwareQueryMask.Insert(TagLevelFromId(queryTags[qi]), queryTags[qi]);
@@ -2612,13 +2612,31 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                     continue;
                 }
 
-                const int searchNum = tagAwareEnabled
-                    ? std::min<int>(nodeGraphResultNum * tagAwareExpansion,
-                                    static_cast<int>(localToGlobalHIDs.size()))
-                    : nodeGraphResultNum;
-
-                COMMON::QueryResultSet<T> nodeResults((const T*)p_query.GetTarget(), searchNum);
-                if ((ret = nodeIndex->SearchIndex(nodeResults)) != ErrorCode::Success)
+                COMMON::QueryResultSet<T> nodeResults((const T*)p_query.GetTarget(), nodeGraphResultNum);
+                ErrorCode nodeSearchStatus = ErrorCode::Fail;
+                if (usePostingMaskResultQueue)
+                {
+                    const auto resultFilter = [this, &localToGlobalHIDs, &tagAwareQueryMask](SizeType localHid) {
+                        if (localHid < 0 || static_cast<size_t>(localHid) >= localToGlobalHIDs.size()) {
+                            return false;
+                        }
+                        return m_index->HeadPostingHierMaskMayIntersect(
+                            localToGlobalHIDs[static_cast<size_t>(localHid)], tagAwareQueryMask);
+                    };
+                    if (auto* bkt = dynamic_cast<BKT::Index<T>*>(nodeIndex.get()))
+                    {
+                        nodeSearchStatus = bkt->SearchIndexWithResultFilter(nodeResults, resultFilter);
+                    }
+                    else if (auto* kdt = dynamic_cast<KDT::Index<T>*>(nodeIndex.get()))
+                    {
+                        nodeSearchStatus = kdt->SearchIndexWithResultFilter(nodeResults, resultFilter);
+                    }
+                }
+                else
+                {
+                    nodeSearchStatus = nodeIndex->SearchIndex(nodeResults);
+                }
+                if (nodeSearchStatus != ErrorCode::Success)
                 {
                     canUseHeadBundle = false;
                     break;
@@ -2640,7 +2658,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
                     SizeType globalHID = localToGlobalHIDs[static_cast<size_t>(nodeResult->VID)];
 
-                    if (tagAwareEnabled
+                    if (usePostingMaskResultQueue
                         && !m_index->HeadPostingHierMaskMayIntersect(globalHID, tagAwareQueryMask)) {
                         continue;
                     }
@@ -4732,6 +4750,13 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
 
 template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, const char *p_value, const char *p_section)
 {
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                     "FixedNprobe is deprecated; use PinnedPostingTarget for benchmark pins.\n");
+        return SetParameter("PinnedPostingTarget", p_value, "SearchSSDIndex");
+    }
+
     auto storeParameter = [](std::vector<std::pair<std::string, std::string>>& p_parameters,
                              const char* p_name,
                              const char* p_newValue) {
@@ -4843,22 +4868,28 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
 
 template <typename T> std::string Index<T>::GetParameter(const char *p_param, const char *p_section) const
 {
+    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
+    {
+        return GetParameter("PinnedPostingTarget", "SearchSSDIndex");
+    }
+
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SearchSSDIndex"))
     {
+        const char* canonicalParam = p_param;
         for (const auto& parameter : m_searchSSDParameters)
         {
-            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), p_param))
+            if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(parameter.first.c_str(), canonicalParam))
             {
                 return parameter.second;
             }
         }
 
-        const char* runtimeParam = p_param;
-        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "PostingPageLimit"))
+        const char* runtimeParam = canonicalParam;
+        if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(canonicalParam, "PostingPageLimit"))
         {
             runtimeParam = "SearchPostingPageLimit";
         }
-        else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "InternalResultNum"))
+        else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(canonicalParam, "InternalResultNum"))
         {
             runtimeParam = "SearchInternalResultNum";
         }

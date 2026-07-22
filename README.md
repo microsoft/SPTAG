@@ -324,7 +324,8 @@ Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher derives paths
   flows through the native `SetSSDBuildParam` path.
 - `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` carry ACL routing, hierarchy
   widths, numeric columns, and the three unfilter layers. `[SearchSSDIndex]`
-  carries persisted query behavior such as `FixedNprobe`,
+  carries persisted query behavior such as `InternalResultNum`
+  (internally `SearchInternalResultNum`),
   `EnableUnfilterTail`, and `EnableHierPostingFilter`.
 - Comments MUST start with `;`; an explicit CLI flag overrides any ini value.
 

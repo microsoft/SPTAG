@@ -95,9 +95,12 @@ def main() -> None:
     configured_search_internal_result_num = int(
         read_ini_value(index_dir, tenant, "SearchInternalResultNum")
     )
-    fixed_nprobe = int(
-        read_ini_value_or_default(index_dir, tenant, "FixedNprobe", "0")
-    )
+    pinned_posting_target = int(read_ini_value_or_default(
+        index_dir,
+        tenant,
+        "PinnedPostingTarget",
+        read_ini_value_or_default(index_dir, tenant, "FixedNprobe", "0"),
+    ))
     seed_max_check = int(
         read_ini_value_or_default(index_dir, tenant, "SeedMaxCheck", "0")
     )
@@ -106,7 +109,7 @@ def main() -> None:
         "ForceDenseTagSearch",
     )
     force_dense_tag_search = configured_force_dense_tag_search
-    effective_nprobe = fixed_nprobe or configured_search_internal_result_num
+    effective_nprobe = pinned_posting_target or configured_search_internal_result_num
 
     qdir = Path(query_dir)
     qf = np.load(qdir / "query_vectors.npy")
@@ -191,7 +194,7 @@ def main() -> None:
             "level": level,
             "nprobe": effective_nprobe,
             "rerank_l": rerank_l,
-            "fixed_nprobe": fixed_nprobe,
+            "pinned_posting_target": pinned_posting_target,
             "seed_max_check": seed_max_check,
             "configured_search_internal_result_num": configured_search_internal_result_num,
             "num_queries": int(nq),

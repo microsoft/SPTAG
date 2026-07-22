@@ -391,6 +391,89 @@ void Index<T>::Search(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_s
 }
 
 template <typename T>
+void Index<T>::SearchWithResultFilter(COMMON::QueryResultSet<T>& p_query,
+                                      COMMON::WorkSpace& p_space,
+                                      bool p_searchDeleted,
+                                      const std::function<bool(SizeType)>& resultFilter) const
+{
+    std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock));
+    m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space);
+    m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space,
+                         m_iNumberOfInitialDynamicPivots);
+    const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1;
+
+    while (!p_space.m_NGQueue.empty())
+    {
+        NodeDistPair gnode = p_space.m_NGQueue.pop();
+        SizeType tmpNode = gnode.node;
+        const SizeType* node = m_pGraph[tmpNode];
+        COMMON::PrefetchGraphNeighbors(
+            node, m_pGraph.m_iNeighborhoodSize,
+            [this](SizeType neighbor) -> const void* {
+                return neighbor >= 0 && neighbor < m_pSamples.R() ? m_pSamples[neighbor] : nullptr;
+            });
+
+        // Result admission is filter-aware, but the traversal control heap must
+        // remain unfiltered. Otherwise a sparse predicate leaves p_query empty,
+        // disables the native adaptive MaxCheck stopping condition, and can walk
+        // the entire bundle graph.
+        if (p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck &&
+            gnode.distance > p_space.m_Results.worst())
+        {
+            p_query.SortResult();
+            return;
+        }
+
+        if (gnode.distance <= p_query.worstDist())
+        {
+            const SizeType checkNode = node[checkPos];
+            if (checkNode < -1)
+            {
+                const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode];
+                SizeType i = -tnode.childStart;
+                do
+                {
+                    if ((p_searchDeleted || !m_deletedID.Contains(tmpNode)) &&
+                        (!resultFilter || resultFilter(tmpNode)))
+                    {
+                        if (!p_query.AddPoint(tmpNode, gnode.distance))
+                        {
+                            break;
+                        }
+                    }
+                    if (i <= 0) break;
+                    tmpNode = m_pTrees[i].centerid;
+                } while (i++ < tnode.childEnd);
+            }
+            else if ((p_searchDeleted || !m_deletedID.Contains(tmpNode)) &&
+                     (!resultFilter || resultFilter(tmpNode)))
+            {
+                p_query.AddPoint(tmpNode, gnode.distance);
+            }
+        }
+        for (DimensionType i = 0; i <= checkPos; ++i)
+        {
+            const SizeType neighbor = node[i];
+            if (neighbor < 0) break;
+            if (p_space.CheckAndSet(neighbor)) continue;
+            const float distance =
+                m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[neighbor], GetFeatureDim());
+            ++p_space.m_iNumberOfCheckedLeaves;
+            if (p_space.m_Results.insert(distance))
+            {
+                p_space.m_NGQueue.insert(NodeDistPair(neighbor, distance));
+            }
+        }
+        if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance)
+        {
+            m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space,
+                                 m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves);
+        }
+    }
+    p_query.SortResult();
+}
+
+template <typename T>
 template <bool (*notDeleted)(const COMMON::LabelSet &, SizeType),
           bool (*isDup)(COMMON::QueryResultSet<T> &, SizeType, float),
           bool (*checkFilter)(const std::shared_ptr<MetadataSet> &, SizeType, std::function<bool(const ByteArray &)>)>
@@ -726,6 +809,27 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
             p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
         }
     }
+    return ErrorCode::Success;
+}
+
+template <typename T>
+ErrorCode Index<T>::SearchIndexWithResultFilter(QueryResult& p_query,
+                                                 std::function<bool(SizeType)> resultFilter,
+                                                 int maxCheck,
+                                                 bool p_searchDeleted) const
+{
+    if (!m_bReady)
+        return ErrorCode::EmptyIndex;
+
+    auto workSpace = RentWorkSpace(p_query.GetResultNum(), nullptr, maxCheck);
+    auto& queryResults = *((COMMON::QueryResultSet<T>*)&p_query);
+    if (m_pQuantizer && !queryResults.HasQuantizedTarget())
+    {
+        queryResults.SetTarget(queryResults.GetTarget(), m_pQuantizer);
+    }
+    SearchWithResultFilter(queryResults, *workSpace, p_searchDeleted, resultFilter);
+    queryResults.SetScanned(workSpace->m_iNumberOfCheckedLeaves);
+    m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
     return ErrorCode::Success;
 }
 

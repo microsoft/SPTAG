@@ -65,8 +65,8 @@ own-tag mask:
 * `SPANNIndex.cpp::CrossSubgraphGraphSearch` — "in-filter" gate on which
   heads commit to the result heap (and thus drive posting I/O).
 * `SPANNIndex.cpp` cross-edge expansion in the cross-subgraph walk.
-* `SPANNIndex.cpp` routed head-bundle per-node fanout (the
-  `tagAwareEnabled` filter on the `tagAwareQueryMask`).
+* `SPANNIndex.cpp` routed head-bundle per-node fanout (the posting-mask
+  result-queue admission gate).
 
 Because real (non-ghost) heads in PerTagBKTMerge carry only **one**
 own-tag, this silently turned the joint "is this head's posting

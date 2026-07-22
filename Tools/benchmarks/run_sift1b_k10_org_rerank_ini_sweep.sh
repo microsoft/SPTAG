@@ -47,12 +47,12 @@ make_overlay() {
         -e "s/^RerankL=.*/RerankL=${rerank_l}/" \
         -e 's/^ForceDenseTagSearch=.*/ForceDenseTagSearch=true/' \
         -e 's/^SearchInternalResultNum=.*/SearchInternalResultNum=64/' \
-        -e '/^SearchInternalResultNum=/a FixedNprobe=64' \
+        -e '/^SearchInternalResultNum=/a PinnedPostingTarget=64' \
         "$tenant_dir/indexloader.ini"
     grep -qx "RerankL=${rerank_l}" "$tenant_dir/indexloader.ini"
     grep -qx 'ForceDenseTagSearch=true' "$tenant_dir/indexloader.ini"
     grep -qx 'SearchInternalResultNum=64' "$tenant_dir/indexloader.ini"
-    grep -qx 'FixedNprobe=64' "$tenant_dir/indexloader.ini"
+    grep -qx 'PinnedPostingTarget=64' "$tenant_dir/indexloader.ini"
     printf '%s\n' "$overlay"
 }
 

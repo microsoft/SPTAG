@@ -132,7 +132,7 @@ The 3M-scale sibling config is `Script_AE/iniFile/build_spann_attr_spacev_opq25.
 ## (5) Query / benchmark  —  native persisted search config
 
 Build and search parameters are persisted in the same native `.ini`:
-`[SearchSSDIndex] FixedNprobe` (or `InternalResultNum`), `EnableUnfilterTail`,
+`[SearchSSDIndex] InternalResultNum`, `MaxCheck`, `EnableUnfilterTail`,
 and `EnableHierPostingFilter`. Do **not** override them through
 `SPTAG_FIXED_NPROBE` or other `SPTAG_*` environment variables.
 
@@ -160,10 +160,11 @@ Release/spannaclbench \
 ```
 
 The command emits one JSON object with recall/QPS plus posting-efficiency
-metrics. For an nprobe curve, create one native INI/`indexloader.ini` overlay
-per point; set both `InternalResultNum` and `FixedNprobe` in
-`[SearchSSDIndex]`. Keep the index files immutable and use local overlays, as
-done by the benchmark artifacts under `Tools/benchmarks/`.
+metrics. For a curve, create one native INI/`indexloader.ini` overlay per
+point; set `InternalResultNum` and tune `MaxCheck` as the graph
+candidate/check budget. Keep the index files immutable and use local overlays,
+as done by the benchmark artifacts under `Tools/benchmarks/`. Use
+`PinnedPostingTarget` only for an explicitly pinned benchmark control.
 
 ---
 

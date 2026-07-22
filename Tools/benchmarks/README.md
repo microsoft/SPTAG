@@ -25,11 +25,12 @@ Release/spannaclbench \
 ```
 
 `[SearchSSDIndex]` in the INI controls the persisted search behavior:
-`InternalResultNum`/`FixedNprobe`, `EnableUnfilterTail`, and
+`InternalResultNum`, `MaxCheck`, `EnableUnfilterTail`, and
 `EnableHierPostingFilter`. Do not override these with `SPTAG_*` environment
 variables. The JSON output includes recall/QPS and loaded-posting contribution
 metrics when `CollectPostingContributionStats=true` is enabled in a diagnostic
-search overlay.
+search overlay. `PinnedPostingTarget` is available only when a benchmark must
+pin the physical posting target; it is not the normal nprobe setting.
 
 ## Multi-Tenant Tag Cache Stress
 

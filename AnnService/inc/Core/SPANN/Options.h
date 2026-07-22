@@ -141,7 +141,7 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
-            int m_fixedNprobe;
+            int m_pinnedPostingTarget;
             int m_seedMaxCheck;
             bool m_collectPostingContributionStats;
             bool m_forceDenseTagSearch;
@@ -159,7 +159,6 @@ namespace SPTAG {
             bool m_filterKeepCross;
             int m_crossExpandLimit;
             bool m_disableCrossSubgraph;
-            int m_tagAwareHeadExpansion;
             bool m_logUExtra;
             bool m_logCrossStats;
             bool m_logPathStats;
