@@ -84,6 +84,8 @@ int BootProgram(bool forANNIndexTestTool, std::map<std::string, std::map<std::st
                 param = "SearchPostingPageLimit";
             if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "InternalResultNum"))
                 param = "SearchInternalResultNum";
+            if (Helper::StrUtils::StrEqualIgnoreCase(param.c_str(), "NumberOfThreads"))
+                param = "SearchThreadNum";
             (*config_map)[SEC_BUILD_SSD_INDEX][param] = value;
         }
     }

@@ -536,6 +536,7 @@ namespace SPTAG::SPANN {
             m_mappingPath = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdMappingFile;
             m_blockLimit = max(p_opt.m_postingPageLimit, p_opt.m_searchPostingPageLimit) + p_opt.m_bufferLength + p_opt.m_unfilterTailBufferLength + 1;
             m_bufferLimit = 1024;
+            m_disableCheckpoint = p_opt.m_disableCheckpoint;
             m_shutdownCalled = true;
 
             m_pShardedLRUCache = nullptr;

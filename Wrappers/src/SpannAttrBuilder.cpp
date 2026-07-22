@@ -7,9 +7,8 @@
 // build_5col.py: it drives the EXACT same attribute pipeline
 // (TenantIndexManager::BuildFromDataWithTags -> SetVectorTags posting
 // embedding + PerTagBKT head selection + ACL pivot routing + numeric quant
-// signatures) but without the Python/SWIG layer, and it mmaps the vector and
-// tag files so a billion-scale build streams from disk (zero extra copies, no
-// 400GB float blow-up).
+// signatures) but without the Python/SWIG layer. It mmaps the vector and tag
+// files, with optional zero-copy borrowing for inputs that are safe to borrow.
 //
 // Attribute/routing configuration comes from the native sectioned INI. Standard
 // SPANN sections are staged directly into the core parameter system; a small
@@ -23,6 +22,7 @@
 //     --tags <file> --tags-offset <bytes> --num-tags-per-vec <K> \
 //     --index-dir <out> [--tenant 0] [--storage-backend FILEIO|ROCKSDBIO] \
 //     [--build-signatures] [--with-meta-index] [--normalized]
+//     [--share-build-ownership]
 
 #include <cstdio>
 #include <cstdlib>
@@ -548,7 +548,7 @@ int main(int argc, char** argv) {
             "--value-type Int8|UInt8|Float --tags <f> --tags-offset <b> "
             "--num-tags-per-vec <K> --index-dir <out> [--tenant 0] "
             "[--storage-backend FILEIO|ROCKSDBIO] [--build-signatures] "
-            "[--with-meta-index] [--normalized] "
+            "[--with-meta-index] [--normalized] [--share-build-ownership] "
             "[--posting-quantizer None|RaBitQ|OPQ|PipePQ] [--posting-quant-m <B>] "
             "[--posting-quant-bits <b>] [--posting-quant-file <f>] "
             "[--full-vector-file <f>] [--rerank-l <L>] [--quantize-head] [--quant-adc-only] "
@@ -568,10 +568,21 @@ int main(int argc, char** argv) {
     const bool buildSignatures = ResolveFlag(argc, argv, "--build-signatures", ini, "Build", "BuildSignatures");
     const bool withMetaIndex   = ResolveFlag(argc, argv, "--with-meta-index",  ini, "Build", "WithMetaIndex");
     const bool normalized      = ResolveFlag(argc, argv, "--normalized",       ini, "Base",  "Normalized");
+    const bool shareBuildOwnership =
+        ResolveFlag(argc, argv, "--share-build-ownership", ini, "Build", "ShareBuildOwnership");
+    const std::string distCalcMethod =
+        Resolve(argc, argv, "--dist-calc-method", ini, "Base", "DistCalcMethod", "Cosine");
 
     const size_t valSize = ValueTypeSize(valueType);
     if (valSize == 0 || dim <= 0 || numTagsPerVec <= 0) {
         fprintf(stderr, "[spannbuilder] invalid value-type/dim/num-tags-per-vec\n");
+        return 2;
+    }
+    if (shareBuildOwnership && !normalized &&
+        (distCalcMethod == "Cosine" || distCalcMethod == "cosine")) {
+        fprintf(stderr,
+                "[spannbuilder] ShareBuildOwnership requires Base.Normalized=true for Cosine input; "
+                "the build normalizes unnormalized vectors in place.\n");
         return 2;
     }
 
@@ -618,8 +629,8 @@ int main(int argc, char** argv) {
     ByteArray metadata(reinterpret_cast<std::uint8_t*>(const_cast<char*>(meta.data())),
                        meta.size(), false);
 
-    // The zero-copy borrow fast path in BuildFromData honors this env knob.
-    setenv("SPTAG_BUILD_SHARE_OWNERSHIP", "1", 0 /* don't override caller */);
+    // Cosine normalization mutates input vectors, while these mappings are read-only.
+    setenv("SPTAG_BUILD_SHARE_OWNERSHIP", shareBuildOwnership ? "1" : "0", 1);
 
     TenantIndexManager mgr(dim, "SPANN", valueType.c_str());
     if (storageBackend != "FILEIO") mgr.SetStorageBackend(storageBackend.c_str());

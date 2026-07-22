@@ -224,10 +224,16 @@ This fork adds production-grade multi-tenant support on top of SPANN:
 - **Lazy-load**: tenants loaded on first query, evicted under memory pressure
 
 ### ACL/Tag Filtered Search
-- **Posting Signature (PS)**: per-posting Bloom128 filter, hard-rejects postings before SSD read
-- **Hierarchical tags**: supports multi-level ACL (org/dept/team/project), all levels in one Bloom
-- **Mid-filtering**: filters between graph search output and SSD IO — graph traversal unchanged
-- **22-120× speedup** at 0.39-25% selectivity, Recall@10 = 1.0
+- **STM1 static metadata**: static records store `[VID | tags[N] | vector]`;
+  flat ACL checks are exact and scan only each posting's pure prefix.
+- **Optional exact posting prefilter**: `[SearchSSDIndex] EnableHierPostingFilter=true`
+  uses a member-OR hierarchical mask built from STM1 pure records. It is an I/O
+  hint only; per-vector ACL checking remains authoritative.
+- **Hierarchical routing**: org/dept/team/project tags route head-bundle search;
+  sparse predicates retain the normal fallback path when a direct sparse sidecar
+  is unavailable.
+- **No unsupported predicate fallback**: static STM1 rejects arbitrary metadata
+  callbacks and DNF predicates rather than returning approximate filter results.
 
 ### API
 ```python
@@ -249,17 +255,19 @@ result = mgr.SearchWithACL(query, tenant_id, topk, query_tags, num_tags) # filte
 mgr.SetHeadIndexCacheLimit(64 * 1024 * 1024)  # 64MB HeadIndex budget
 ```
 
-### Performance (SIFT-1M, 100 tenants, AMD EPYC 24 vCPU)
+### Historical performance note
 
-| Metric | Value |
-|--------|-------|
-| Recall@10 (all tenant sizes) | ≥ 0.996 |
-| Warm query latency | 2.8-4.3 ms |
-| Eviction latency | 2-4 ms |
-| Cold load (page cache warm) | 16-60 ms |
-| Filtered search (1.56% sel.) | 10-22 ms (60-120× vs unfiltered) |
+The older multi-tenant numbers previously listed here used a different
+workload and storage path. They are not a performance contract for the current
+native-INI STM1/static or in-posting-quantized configurations. Reproduce
+current numbers with the committed INI and native benchmark commands above.
 
 ### Dual-Pool Head Index — Usage Modes
+
+> The environment-variable commands below are retained for historical ablations.
+> The supported build/demo path is the native `.ini` workflow in
+> [docs/Experiment_Workflow.md](docs/Experiment_Workflow.md); do not use
+> `SPTAG_*` environment variables to override build or search parameters.
 
 The per-tag **dual-pool** head index (bundle subgraphs + cross-edges + optional
 U_extra augmentation) shares a **single binary** with the vanilla build; all modes
@@ -293,7 +301,7 @@ degrades to a bare per-node fan-out across the ACL bundle nodes. See
 | ----- | -------------- | --------------- |
 | ① cross-graph | post-build: `Release/augmentheadgraph -d <index>/tenant_0/HeadIndex -k 15 -m 10 -t N -w true` | (auto) |
 | ② U_extra (~10% extra unfilter-only heads; optional) | `[MultiTenant] DualPoolAugment=1` `DualPoolExtraRatio=0.1` | (auto) |
-| ③ unfilter-tail (K nearest-head tail copies/vector) | `[BuildSSDIndex] TailReplicaCount=K` `UnfilterTailBufferLength=P` (P=max extra physical tail pages beyond pure pages; ini only) | `SPTAG_UNFILTER_TAIL=1` (buffer from persisted ini) |
+| ③ unfilter-tail (K nearest-head tail copies/vector) | `[BuildSSDIndex] TailReplicaCount=K` `UnfilterTailBufferLength=P` (P=max extra physical tail pages beyond pure pages) | `[SearchSSDIndex] EnableUnfilterTail=true` |
 
 #### Native `.ini` build config (recommended — single source of truth)
 
@@ -304,8 +312,9 @@ posting knobs *and* the multi-tenant/unfilter extensions — live in one committ
 file, so nothing is lost when `/tmp` is wiped:
 
 ```bash
-# config = Script_AE/iniFile/build_spann_attr_spacev_opq25.ini
-Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher (derives paths from the ini)
+# 3M config = Script_AE/iniFile/build_spann_attr_spacev_opq25.ini
+# 1B config = Tools/benchmarks/build_spann_attr_spacev1b_opq25.ini
+Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher derives paths from the ini
 #   internally: Release/spannbuilder -c <config.ini>  +  post-build augmentheadgraph
 ```
 
@@ -313,9 +322,10 @@ Tools/benchmarks/run_spann_attr_build.sh [config.ini]   # launcher (derives path
   `PostingQuantizerFile`/`PipePQPivotsFile`, `FullVectorFile`, `RerankL`,
   `StartFileSizeGB`/`MaxFileSizeGB`)
   flows through the native `SetSSDBuildParam` path.
-- `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` carry the extensions (ACL routing,
-  hier widths, numeric cols, and the three unfilter layers above), bridged to their
-  existing `getenv` consumers.
+- `[SelectHead]`/`[BuildHead]`/`[MultiTenant]` carry ACL routing, hierarchy
+  widths, numeric columns, and the three unfilter layers. `[SearchSSDIndex]`
+  carries persisted query behavior such as `FixedNprobe`,
+  `EnableUnfilterTail`, and `EnableHierPostingFilter`.
 - Comments MUST start with `;`; an explicit CLI flag overrides any ini value.
 
 See **AGENTS.md → "Build Config — Native `.ini`"** for the full key→engine mapping.
@@ -336,9 +346,9 @@ reader (one `io_submit` for all `L`, ~12µs/read). Enable at build via
 `[BuildSSDIndex] PostingQuantizer=OPQ|RaBitQ|PipePQ` + `PostingQuantM` +
 `FullVectorFile` + `RerankL`. PipePQ additionally uses a native PipeANN
 `PostingQuantizerFile=*_pq_compressed.bin` and
-`PipePQPivotsFile=*_pq_pivots.bin`; at search via `SPTAG_INPOST_RBQ=1` +
-`SPTAG_INPOST_LIBAIO_RERANK=1`
-(do **not** combine the RaBitQ async path with `SPTAG_OPQ_PREFILTER`). See
+`PipePQPivotsFile=*_pq_pivots.bin`. Keep benchmark build/search parameters in
+the native `.ini`; legacy `SPTAG_*` experiment toggles are not part of the
+reproducible demo contract. See
 **AGENTS.md → "In-posting Quantization + Deep-queue Rerank"**.
 
 ### Build

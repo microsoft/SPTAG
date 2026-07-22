@@ -369,21 +369,21 @@ namespace SPTAG::SPANN {
         PrimaryHeadCSR m_primaryHeadCSR;
 
     public:
-        void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) {
+        void SetVectorTags(const uint32_t* tags, int numVecs, int numTagsPerVec) override {
             m_numTagsPerVec = numTagsPerVec;
             m_tagBytesPerVec = numTagsPerVec * sizeof(uint32_t);
             m_vectorTags.assign(tags, tags + (size_t)numVecs * numTagsPerVec);
         }
 
-        void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments) {
+        void SetNodeVectorAssignments(const std::vector<std::vector<SizeType>>& nodeVectorAssignments) override {
             m_plannedNodeVectorAssignments = nodeVectorAssignments;
         }
 
-        void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments) {
+        void SetPrimaryNodeVectorAssignments(const std::vector<std::vector<SizeType>>& primaryNodeVectorAssignments) override {
             m_primaryNodeVectorAssignments = primaryNodeVectorAssignments;
         }
 
-        void SetHeadVectorOwners(const std::unordered_map<SizeType, int>& headVectorOwners) {
+        void SetHeadVectorOwners(const std::unordered_map<SizeType, int>& headVectorOwners) override {
             m_headVectorOwners = headVectorOwners;
         }
 
@@ -780,7 +780,7 @@ namespace SPTAG::SPANN {
             // ValueType stride is only a transient local in TransformInPostingsOpq().
             // Enabled by env SPTAG_OPQ_INPOST_DB=<M> (M = OPQ subvector/code-byte count).
             {
-                if (Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "OPQ") && sizeof(ValueType) == 1) {
+                if (Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "OPQ")) {
                     int M = p_opt.m_postingQuantM;
                     if (M > 0) {
                         m_opqInpostDb = true;
@@ -8102,9 +8102,14 @@ namespace SPTAG::SPANN {
                     std::chrono::high_resolution_clock::now() - opqStart).count();
                 const double otherMs = std::max(0.0, totalMs - lutMs - postingIoMs - adcMs - rerankMs);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                    "OPQPhaseTime: async=%d postings=%u survivors=%d lut=%.3f postingIO=%.3f adc=%.3f rerank=%.3f other=%.3f total=%.3f\n",
+                    "OPQPhaseTime: async=%d postings=%u survivors=%d lut=%.3f postingIO=%.3f adc=%.3f rerank=%.3f other=%.3f total=%.3f"
+                    " postingPages=%llu postingPhysicalBytes=%llu rerankReads=%llu rerankPhysicalBytes=%llu\n",
                     asyncScan ? 1 : 0, postingListCount, fetched, lutMs, postingIoMs, adcMs,
-                    rerankMs, otherMs, totalMs);
+                    rerankMs, otherMs, totalMs,
+                    static_cast<unsigned long long>(p_exWorkSpace->m_postingProbeStats.m_postingPageReads),
+                    static_cast<unsigned long long>(p_exWorkSpace->m_postingProbeStats.m_postingPhysicalBytes),
+                    static_cast<unsigned long long>(p_exWorkSpace->m_postingProbeStats.m_rerankReadRequests),
+                    static_cast<unsigned long long>(p_exWorkSpace->m_postingProbeStats.m_rerankPhysicalBytes));
             }
             return ErrorCode::Success;
         }
@@ -8423,7 +8428,8 @@ namespace SPTAG::SPANN {
             }
             const size_t ALIGN = 4096;
             const size_t recBytes = (size_t)dim * sizeof(ValueType);
-            // Per-thread reusable aligned buffer (max 2 pages per survivor) + iocb arrays.
+            // Per-thread reusable aligned buffer sized for each survivor's worst
+            // aligned read, plus iocb arrays.
             static thread_local std::uint8_t* t_buf = nullptr;
             static thread_local size_t t_cap = 0;
             static thread_local int t_ctxId = -1;
@@ -8431,7 +8437,10 @@ namespace SPTAG::SPANN {
                 static std::atomic<int> s_next{0};
                 t_ctxId = s_next.fetch_add(1);
             }
-            size_t needCap = (size_t)L * (2 * ALIGN);
+            const size_t slotBytes = std::max(
+                2 * ALIGN,
+                ((recBytes + 2 * ALIGN - 2) / ALIGN) * ALIGN);
+            size_t needCap = (size_t)L * slotBytes;
             if (needCap > t_cap) {
                 if (t_buf) free(t_buf);
                 if (posix_memalign((void**)&t_buf, ALIGN, needCap) != 0) { t_buf = nullptr; t_cap = 0; return false; }
@@ -8453,7 +8462,7 @@ namespace SPTAG::SPANN {
                 std::uint64_t aStart = recOff & ~(std::uint64_t)(ALIGN - 1);
                 std::uint64_t aEnd = (recEnd + ALIGN - 1) & ~(std::uint64_t)(ALIGN - 1);
                 size_t aLen = (size_t)(aEnd - aStart);
-                std::uint8_t* buf = t_buf + (size_t)n * (2 * ALIGN);
+                std::uint8_t* buf = t_buf + (size_t)n * slotBytes;
                 struct iocb* cb = &cbs[n];
                 memset(cb, 0, sizeof(struct iocb));
                 cb->aio_lio_opcode = IOCB_CMD_PREAD;
@@ -8508,7 +8517,7 @@ namespace SPTAG::SPANN {
                 struct iocb* cb = reinterpret_cast<struct iocb*>(evs[e].obj);
                 int slot = (int)(cb - cbs.data());
                 if (slot < 0 || slot >= n) continue;
-                std::uint8_t* buf = t_buf + (size_t)slot * (2 * ALIGN);
+                std::uint8_t* buf = t_buf + (size_t)slot * slotBytes;
                 std::uint64_t recOff = 8 + (std::uint64_t)vids[i] * recBytes;
                 const ValueType* v = reinterpret_cast<const ValueType*>(buf + (recOff - aStartOf[slot]));
                 queryResults.AddPoint(vids[i], rawDist(rawQuery, v, dim));

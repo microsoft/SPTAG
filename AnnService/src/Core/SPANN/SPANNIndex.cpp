@@ -2215,7 +2215,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             workSpace->m_postingProbeStats.m_adcSurvivors,
             workSpace->m_postingProbeStats.m_rerankCandidates,
             workSpace->m_postingProbeStats.m_rerankReadRequests,
-            workSpace->m_postingProbeStats.m_rerankPhysicalBytes);
+            workSpace->m_postingProbeStats.m_rerankPhysicalBytes,
+            workSpace->m_postingProbeStats.m_uniqueMatchedPostings,
+            workSpace->m_postingProbeStats.m_uniqueMatchedVectors);
 
         if (ret == ErrorCode::Success &&
             queryTags != nullptr &&
@@ -2929,7 +2931,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             workSpace->m_postingProbeStats.m_adcSurvivors,
             workSpace->m_postingProbeStats.m_rerankCandidates,
             workSpace->m_postingProbeStats.m_rerankReadRequests,
-            workSpace->m_postingProbeStats.m_rerankPhysicalBytes);
+            workSpace->m_postingProbeStats.m_rerankPhysicalBytes,
+            workSpace->m_postingProbeStats.m_uniqueMatchedPostings,
+            workSpace->m_postingProbeStats.m_uniqueMatchedVectors);
         if (ret != ErrorCode::Success)
             return ret;
         m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
@@ -4350,21 +4354,24 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_extraSearcher.reset(new ExtraDynamicSearcher<T>(m_options));
         }
 
-        // Pass pending vector tags to ExtraDynamicSearcher for embedding in postings
+        // Pass pending vector tags to every immutable posting backend. Dynamic
+        // backends additionally consume node assignments and head roles.
         if (!m_pendingVectorTags.empty() && m_pendingNumTagsPerVec > 0) {
+            int numVecs = (int)(m_pendingVectorTags.size() / m_pendingNumTagsPerVec);
+            m_extraSearcher->SetVectorTags(
+                m_pendingVectorTags.data(), numVecs, m_pendingNumTagsPerVec);
+            if (!m_pendingNodeVectorAssignments.empty()) {
+                m_extraSearcher->SetNodeVectorAssignments(m_pendingNodeVectorAssignments);
+            }
+            if (!m_pendingPrimaryNodeVectorAssignments.empty()) {
+                m_extraSearcher->SetPrimaryNodeVectorAssignments(
+                    m_pendingPrimaryNodeVectorAssignments);
+            }
+            if (!m_pendingHeadVectorOwners.empty()) {
+                m_extraSearcher->SetHeadVectorOwners(m_pendingHeadVectorOwners);
+            }
             auto* eds = dynamic_cast<ExtraDynamicSearcher<T>*>(m_extraSearcher.get());
             if (eds) {
-                int numVecs = (int)(m_pendingVectorTags.size() / m_pendingNumTagsPerVec);
-                eds->SetVectorTags(m_pendingVectorTags.data(), numVecs, m_pendingNumTagsPerVec);
-                if (!m_pendingNodeVectorAssignments.empty()) {
-                    eds->SetNodeVectorAssignments(m_pendingNodeVectorAssignments);
-                }
-                if (!m_pendingPrimaryNodeVectorAssignments.empty()) {
-                    eds->SetPrimaryNodeVectorAssignments(m_pendingPrimaryNodeVectorAssignments);
-                }
-                if (!m_pendingHeadVectorOwners.empty()) {
-                    eds->SetHeadVectorOwners(m_pendingHeadVectorOwners);
-                }
                 // Dual-pool v3: pass head roles so SSD build can route U_extra
                 // through the k-NN posting path (ExtraDynamicSearcher.h:2493+,2630+).
                 if (!m_pendingHeadRoles.empty()) {
@@ -4758,6 +4765,10 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
         else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "InternalResultNum"))
         {
             runtimeParam = "SearchInternalResultNum";
+        }
+        else if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "NumberOfThreads"))
+        {
+            runtimeParam = "SearchThreadNum";
         }
         // m_options is shared by construction and runtime. Capture the effective
         // construction value before the runtime overlay changes it so SaveConfig

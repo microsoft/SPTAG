@@ -294,6 +294,8 @@ public:
             uint64_t m_prePSPostings = 0;
             uint64_t m_scannedVectors = 0;
             uint64_t m_matchedVectors = 0;
+            uint64_t m_uniqueMatchedPostings = 0;
+            uint64_t m_uniqueMatchedVectors = 0;
             uint64_t m_primaryHeadCandidates = 0;
             uint64_t m_postingPageReads = 0;
             uint64_t m_postingLogicalBytes = 0;
@@ -382,7 +384,9 @@ public:
                                                    uint64_t p_adcSurvivors = 0,
                                                    uint64_t p_rerankCandidates = 0,
                                                    uint64_t p_rerankReadRequests = 0,
-                                                   uint64_t p_rerankPhysicalBytes = 0);
+                                                   uint64_t p_rerankPhysicalBytes = 0,
+                                                   uint64_t p_uniqueMatchedPostings = 0,
+                                                   uint64_t p_uniqueMatchedVectors = 0);
 
         static PostingScanStats GetThreadLocalPostingScanStats();
 

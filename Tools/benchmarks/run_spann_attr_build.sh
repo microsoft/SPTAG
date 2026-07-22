@@ -34,6 +34,7 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=2000000
 # --- derive paths from the ini (single source of truth) ---
 ini() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^#]*\).*/\1/p" "$CFG" | head -1 | sed 's/[[:space:]]*$//'; }
 OUT=$(ini IndexDirectory)
+STORAGE=$(ini Storage); [ -z "$STORAGE" ] && STORAGE=FILEIO
 QFILE=$(ini PostingQuantizerFile)        # optional; e.g. .../opq_codes_m25.bin
 SID=""
 if [ -n "$QFILE" ]; then
@@ -99,6 +100,12 @@ fi
 validate_runtime_config() {
   local runtime_ini="$OUT/tenant_0/indexloader.ini"
   [ -f "$runtime_ini" ] || { echo "[launcher] missing runtime config: $runtime_ini"; exit 1; }
+  if [ "${STORAGE^^}" = "STATIC" ]; then
+    [ -s "$OUT/tenant_0/SPTAGFullList.bin" ] ||
+      { echo "[launcher] missing static posting snapshot"; exit 1; }
+    echo "[launcher] verified static posting snapshot"
+    return
+  fi
   python3 - "$CFG" "$runtime_ini" "$OUT/tenant_0/head_role.bin" <<'PY'
 import math
 import sys
@@ -198,8 +205,10 @@ fi
 if is_true "$BUILD_SIGNATURES"; then
   echo "[launcher] BuildSignatures in a fresh process"
   /usr/bin/time -v "$ROOT/Release/spannbuilder" -c "$CFG" --build-signatures-only 2>&1
-  [ -s "$OUT/tenant_0/signatures_bitmask.bin" ] ||
-    { echo "[launcher] missing signatures_bitmask.bin after BuildSignatures"; exit 1; }
+  if [ "${STORAGE^^}" != "STATIC" ]; then
+    [ -s "$OUT/tenant_0/signatures_bitmask.bin" ] ||
+      { echo "[launcher] missing signatures_bitmask.bin after BuildSignatures"; exit 1; }
+  fi
   [ -s "$OUT/tenant_0/HeadIndex/head_node_meta.bin" ] ||
     { echo "[launcher] missing head_node_meta.bin after BuildSignatures"; exit 1; }
   # The full signature pass can lack the categorical-only routing projection
@@ -245,4 +254,6 @@ if [ -n "$PIPEPQ_PIVOTS" ] && [ -f "$PIPEPQ_PIVOTS" ]; then
     { echo "[launcher] failed to repoint PipePQ pivots to tenant_0"; exit 1; }
   echo "[launcher] copied pipepq_pivots.bin into tenant_0"
 fi
-echo "[launcher] done. SEARCH-time unfilter tail read: SPTAG_UNFILTER_TAIL=1"
+RUNTIME_TAIL=$(sed -n 's/^[[:space:]]*EnableUnfilterTail[[:space:]]*=[[:space:]]*//Ip' \
+  "$OUT/tenant_0/indexloader.ini" | head -1)
+echo "[launcher] done. SEARCH-time unfilter tail: EnableUnfilterTail=${RUNTIME_TAIL:-true} (persisted INI)"

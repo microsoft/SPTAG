@@ -129,32 +129,41 @@ The 3M-scale sibling config is `Script_AE/iniFile/build_spann_attr_spacev_opq25.
 
 ---
 
-## (5) Query / benchmark  —  `compare_uextra_unfilter.py` / `compare_uextra_filtered.py`
+## (5) Query / benchmark  —  native persisted search config
 
-Load the tenant-0 index through the Python binding and measure **recall@k + QPS**
-against the stage-(3) groundtruth. `nprobe` is fixed per process via the
-`SPTAG_FIXED_NPROBE` env var (the SPANN core reads it once), so sweep it by
-re-invoking. Each run prints one `RESULT {…}` JSON line.
+Build and search parameters are persisted in the same native `.ini`:
+`[SearchSSDIndex] FixedNprobe` (or `InternalResultNum`), `EnableUnfilterTail`,
+and `EnableHierPostingFilter`. Do **not** override them through
+`SPTAG_FIXED_NPROBE` or other `SPTAG_*` environment variables.
+
+For the committed Float STM1 SIFT-1M fixture, build the native benchmark target
+and run it directly against `.npy` queries and local-ID groundtruth:
 
 ```bash
-export PYTHONPATH=$REL        # exposes SPTAG.py
-QDIR=$DS/multitenant/query
+cmake --build build --target spannaclbench -j
 
-# unfilter (zero-tag SearchWithACL), recall@10 vs groundtruth_unfilter:
-SPTAG_FIXED_NPROBE=80 python3 Tools/benchmarks/compare_uextra_unfilter.py \
-  --index-dir $IDX/tenant_0 --query-dir $QDIR --topk 10 --warmup 200
+CFG=Tools/benchmarks/build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded_prefilter.ini
+Tools/benchmarks/run_spann_attr_build.sh "$CFG"
 
-# filtered (per-query tag at one ACL level) vs groundtruth_<level>:
-SPTAG_FIXED_NPROBE=180 python3 Tools/benchmarks/compare_uextra_filtered.py \
-  --index-dir $IDX/tenant_0 --query-dir $QDIR --level org --topk 10
-#   --level unfilter|org|dept|team|project
+IDX=/datadisk/yfcc_fast/sptag_sift1m_tagged_vs_upstream/index_tagged_4node_static_fullfloat_tail_unbounded_prefilter
+QDIR=/home/v-mochengli/datasets/sift1m/multitenant/query
+
+# Exact project ACL check. nprobe and the STM1 posting-mask prefilter come from
+# the persisted [SearchSSDIndex] values in $IDX/tenant_0/indexloader.ini.
+Release/spannaclbench \
+  --index "$IDX" \
+  --queries "$QDIR/query_vectors.npy" \
+  --truth "$QDIR/groundtruth_project_local_ids.npy" \
+  --query-tags "$QDIR/query_tags.npy" \
+  --tag-column 3 \
+  --warmup 200 --max-queries 1000
 ```
 
-Search-time feature toggles (in-posting RaBitQ/OPQ + deep-queue libaio rerank,
-unfilter-tail, cross-edge switches) are env-gated — see **AGENTS.md →
-"In-posting Quantization + Deep-queue Rerank"** and the env reference there.
-A typical nprobe sweep at iso-recall (e.g. recall@10 = 0.95) is the standard
-operating point for QPS comparisons.
+The command emits one JSON object with recall/QPS plus posting-efficiency
+metrics. For an nprobe curve, create one native INI/`indexloader.ini` overlay
+per point; set both `InternalResultNum` and `FixedNprobe` in
+`[SearchSSDIndex]`. Keep the index files immutable and use local overlays, as
+done by the benchmark artifacts under `Tools/benchmarks/`.
 
 ---
 
@@ -166,4 +175,4 @@ operating point for QPS comparisons.
 | 2. builder inputs | `prep_spacev1b_inputs.sh` | `*_tags5.u32`, `*_group_tags.txt`, `opq_codes_m25.bin` |
 | 3. groundtruth | `generate_query_tenant_tag_groundtruth.py` | `groundtruth_{unfilter,org,dept,team,project}_local_ids.npy` |
 | 4. build | `run_spann_attr_build.sh <ini>` | `$IDX/tenant_0/` (HeadIndex + SSD postings + cross-edges) |
-| 5. query | `compare_uextra_{unfilter,filtered}.py` | `RESULT {recall@k, qps, latency}` |
+| 5. query | `spannaclbench` | JSON `{recall, qps, latency, posting metrics}` |

@@ -143,6 +143,7 @@ namespace SPTAG {
             int m_searchInternalResultNum;
             int m_fixedNprobe;
             int m_seedMaxCheck;
+            bool m_collectPostingContributionStats;
             bool m_forceDenseTagSearch;
             int m_directSparseMaxPostings;
             float m_filteredSearchNprobeSafety;

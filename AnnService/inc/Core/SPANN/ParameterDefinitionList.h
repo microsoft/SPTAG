@@ -142,6 +142,7 @@ DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum"
 DefineSSDParameter(m_fixedNprobe, int, 0, "FixedNprobe") // Mutable; 0 uses SearchInternalResultNum
 DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 follows MaxCheck
 DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
+DefineSSDParameter(m_collectPostingContributionStats, bool, false, "CollectPostingContributionStats") // Mutable; diagnostic only
 DefineSSDParameter(m_forceDenseTagSearch, bool, false, "ForceDenseTagSearch") // Mutable
 DefineSSDParameter(m_directSparseMaxPostings, int, 320, "DirectSparseMaxPostings") // Sparse-tag sidecar threshold
 DefineSSDParameter(m_filteredSearchNprobeSafety, float, 1.0f, "FilteredSearchNprobeSafety") // Mutable

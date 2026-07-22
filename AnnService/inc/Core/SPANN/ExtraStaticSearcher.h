@@ -9,12 +9,27 @@
 #include "IExtraSearcher.h"
 #include "inc/Core/Common/TruthSet.h"
 #include "Compressor.h"
+#include "PipePQ.h"
 
 #include <map>
+#include <algorithm>
 #include <cmath>
 #include <climits>
+#include <cstdint>
 #include <future>
+#include <limits>
+#include <mutex>
 #include <numeric>
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+
+#ifndef _MSC_VER
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace SPTAG
 {
@@ -118,22 +133,40 @@ namespace SPTAG
 }\
 
 #define ProcessPosting() \
-        for (int i = 0; i < listInfo->listEleCount; i++) { \
+        { \
+        bool postingMatched = false; \
+        bool postingContributedUnique = false; \
+        for (int i = 0; i < this->StaticScanLimit(p_exWorkSpace, listInfo); i++) { \
             uint64_t offsetVectorID, offsetVector;\
             (this->*m_parsePosting)(offsetVectorID, offsetVector, i, listInfo->listEleCount);\
-            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
+            const char* record = p_postingListFullData + offsetVectorID;\
+            int vectorID;\
+            std::memcpy(&vectorID, record, sizeof(vectorID));\
+            if (!this->StaticRecordMatchesFilter(p_exWorkSpace, record)) { listElements--; continue; } \
+            postingMatched = true; \
+            ++p_exWorkSpace->m_postingProbeStats.m_matchedVectors; \
+            if (collectPostingContributionStats && uniqueMatchedVIDs.insert(vectorID).second) { \
+                postingContributedUnique = true; \
+                ++p_exWorkSpace->m_postingProbeStats.m_uniqueMatchedVectors; \
+            } \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) { listElements--; continue; } \
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
         } \
+        if (postingMatched) ++p_exWorkSpace->m_postingProbeStats.m_matchedPostings; \
+        if (postingContributedUnique) ++p_exWorkSpace->m_postingProbeStats.m_uniqueMatchedPostings; \
+        } \
 
 #define ProcessPostingOffset() \
-        while (p_exWorkSpace->m_offset < listInfo->listEleCount) { \
+        while (p_exWorkSpace->m_offset < this->StaticScanLimit(p_exWorkSpace, listInfo)) { \
             uint64_t offsetVectorID, offsetVector;\
             (this->*m_parsePosting)(offsetVectorID, offsetVector, p_exWorkSpace->m_offset, listInfo->listEleCount);\
             p_exWorkSpace->m_offset++;\
-            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID));\
+            const char* record = p_postingListFullData + offsetVectorID;\
+            int vectorID;\
+            std::memcpy(&vectorID, record, sizeof(vectorID));\
+            if (!this->StaticRecordMatchesFilter(p_exWorkSpace, record)) continue; \
             if (p_exWorkSpace->m_deduper.CheckAndSet(vectorID)) continue; \
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
@@ -141,7 +174,7 @@ namespace SPTAG
             foundResult = true;\
             break;\
         } \
-        if (p_exWorkSpace->m_offset == listInfo->listEleCount) { \
+        if (p_exWorkSpace->m_offset == this->StaticScanLimit(p_exWorkSpace, listInfo)) { \
             p_exWorkSpace->m_pi++; \
             p_exWorkSpace->m_offset = 0; \
         } \
@@ -160,11 +193,43 @@ namespace SPTAG
 
             virtual ~ExtraStaticSearcher()
             {
+                CloseStaticPipePQCodes();
             }
 
             virtual bool Available() override
             {
                 return m_available;
+            }
+
+            void SetVectorTags(const uint32_t* p_tags, int p_numVectors,
+                               int p_numTagsPerVec) override
+            {
+                m_staticBuildTags.clear();
+                m_staticBuildNumTagsPerVec = 0;
+                if (p_tags == nullptr || p_numVectors <= 0 || p_numTagsPerVec <= 0) return;
+
+                m_staticBuildTags.assign(
+                    p_tags,
+                    p_tags + static_cast<size_t>(p_numVectors) * static_cast<size_t>(p_numTagsPerVec));
+                m_staticBuildNumTagsPerVec = p_numTagsPerVec;
+            }
+
+            void SetNodeVectorAssignments(
+                const std::vector<std::vector<SizeType>>& p_assignments) override
+            {
+                m_staticNodeVectorAssignments = p_assignments;
+            }
+
+            void SetPrimaryNodeVectorAssignments(
+                const std::vector<std::vector<SizeType>>& p_assignments) override
+            {
+                m_staticPrimaryNodeVectorAssignments = p_assignments;
+            }
+
+            void SetHeadVectorOwners(
+                const std::unordered_map<SizeType, int>& p_owners) override
+            {
+                m_staticHeadVectorOwners = p_owners;
             }
 
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
@@ -192,8 +257,37 @@ namespace SPTAG
 
             virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
+                if (!ConfigureStaticPipePQ(p_opt, 0, false)) {
+                    return false;
+                }
+                m_staticHasMetadata = false;
+                m_staticNumTagsPerVec = 0;
+                m_staticMetadataBytes = sizeof(int);
+                m_staticMaxListPageCount = 0;
                 std::string curFile = m_extraFullGraphFile;
-                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
+                const size_t configuredTagBytes =
+                    (!m_staticPipePQ && p_opt.m_numTagsPerVec > 0)
+                        ? static_cast<size_t>(p_opt.m_numTagsPerVec) * sizeof(uint32_t)
+                        : 0;
+                if (configuredTagBytes > 0 &&
+                    (p_opt.m_enableDeltaEncoding || p_opt.m_enablePostingListRearrange ||
+                     p_opt.m_enableDataCompression)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static metadata snapshots require raw postings without delta encoding, "
+                        "rearrangement, or compression.\n");
+                    return false;
+                }
+                const size_t recordBytes = m_staticPipePQ
+                    ? sizeof(int) + static_cast<size_t>(m_staticPipePQCodeBytes)
+                    : p_opt.m_dim * sizeof(ValueType) + sizeof(int) + configuredTagBytes;
+                const int tailPageBudget = p_opt.m_tailReplicaCount > 0
+                    ? p_opt.m_unfilterTailBufferLength
+                    : 0;
+                p_opt.m_searchPostingPageLimit = max(
+                    p_opt.m_searchPostingPageLimit,
+                    static_cast<int>((p_opt.m_postingVectorLimit * recordBytes + PageSize - 1) / PageSize) +
+                        (std::max)(0, tailPageBudget));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
@@ -224,9 +318,25 @@ namespace SPTAG
 
                     curFile = m_extraFullGraphFile + "_" + std::to_string(m_indexFiles.size());
                 } while (fileexists(curFile.c_str()));
+                if (m_staticTailPageBudget < 0 && m_staticMaxListPageCount > 0) {
+                    p_opt.m_searchPostingPageLimit = (std::max)(
+                        p_opt.m_searchPostingPageLimit, m_staticMaxListPageCount);
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Static unbounded tail: expanded search posting page limit to %d.\n",
+                        p_opt.m_searchPostingPageLimit);
+                }
                 m_oneContext = (m_indexFiles.size() == 1);
 
                 m_opt = &p_opt;
+                if (m_staticHasMetadata && p_opt.m_numTagsPerVec > 0 &&
+                    p_opt.m_numTagsPerVec != m_staticNumTagsPerVec) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static metadata tag-column mismatch: index=%d runtime=%d\n",
+                        m_staticNumTagsPerVec, p_opt.m_numTagsPerVec);
+                    return false;
+                }
                 m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
                 m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
                 m_enableDataCompression = p_opt.m_enableDataCompression;
@@ -241,6 +351,9 @@ namespace SPTAG
 
                 p_versionMap.Load(p_opt.m_indexDirectory + FolderSep + p_opt.m_deleteIDFile, p_opt.m_datasetRowsInBlock, p_opt.m_datasetCapacity);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %d.\n", p_versionMap.Count());
+                if (m_staticPipePQ && !OpenStaticRerankFile(p_opt, p_versionMap.Count())) {
+                    return false;
+                }
 
 #ifndef _MSC_VER
                 Helper::AIOTimeout.tv_nsec = p_opt.m_iotimeout * 1000;
@@ -262,6 +375,21 @@ namespace SPTAG
                 SearchStats* p_stats,
                 std::set<int>* truth, std::map<int, std::set<int>>* found)
             {
+                if (RejectUnsupportedStaticFilter(p_exWorkSpace)) return ErrorCode::Fail;
+                if (m_staticPipePQ) {
+                    return SearchIndexPipePQ(p_exWorkSpace, p_queryResults, p_index, p_stats, truth, found);
+                }
+                if (HasStaticFlatTagFilter(p_exWorkSpace)) {
+                    auto& postingIDs = p_exWorkSpace->m_postingIDs;
+                    postingIDs.erase(
+                        std::remove_if(
+                            postingIDs.begin(), postingIDs.end(),
+                            [this, p_exWorkSpace](SizeType p_postingID) {
+                                return p_postingID < 0 || p_postingID >= m_totalListCount ||
+                                    StaticScanLimit(p_exWorkSpace, &m_listInfos[p_postingID]) == 0;
+                            }),
+                        postingIDs.end());
+                }
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
@@ -269,6 +397,10 @@ namespace SPTAG
                 int diskRead = 0;
                 int diskIO = 0;
                 int listElements = 0;
+                int scannedListElements = 0;
+                const bool collectPostingContributionStats =
+                    m_opt != nullptr && m_opt->m_collectPostingContributionStats;
+                std::unordered_set<SizeType> uniqueMatchedVIDs;
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -284,11 +416,14 @@ namespace SPTAG
                     Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
 #endif
 
-                    diskRead += listInfo->listPageCount;
+                    const int readPageCount = StaticReadPageCount(p_exWorkSpace, listInfo);
+                    diskRead += readPageCount;
                     diskIO += 1;
-                    listElements += listInfo->listEleCount;
+                    const int scanLimit = StaticScanLimit(p_exWorkSpace, listInfo);
+                    listElements += scanLimit;
+                    scannedListElements += scanLimit;
 
-                    size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                    size_t totalBytes = static_cast<size_t>(readPageCount) << PageSizeEx;
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
@@ -299,8 +434,10 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, &listElements, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &p_index, &request, &listElements,
+                                          &collectPostingContributionStats, &uniqueMatchedVIDs, this](bool success)
                     {
+                        if (!success) return;
                         char* buffer = request.m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request.m_payload);
 
@@ -344,9 +481,15 @@ namespace SPTAG
 #endif
                 }
 
+                if (collectPostingContributionStats) {
+                    uniqueMatchedVIDs.reserve(static_cast<size_t>((std::max)(scannedListElements, 0)));
+                }
+
 #ifdef ASYNC_READ
 #ifdef BATCH_READ
-                BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount);
+                if (!BatchReadFileAsync(m_indexFiles, (p_exWorkSpace->m_diskRequests).data(), postingListCount)) {
+                    return ErrorCode::DiskIOFail;
+                }
 #else
                 while (unprocessed > 0)
                 {
@@ -391,9 +534,13 @@ namespace SPTAG
                             }
                         }
 
-                        for (size_t i = 0; i < listInfo->listEleCount; ++i) {
-                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i; \
-                            int vectorID = *(reinterpret_cast<int*>(p_postingListFullData + offsetVectorID)); \
+                        const int scanLimit = StaticScanLimit(p_exWorkSpace, listInfo);
+                        for (int i = 0; i < scanLimit; ++i) {
+                            uint64_t offsetVectorID = m_enablePostingListRearrange ? (m_vectorInfoSize - sizeof(int)) * listInfo->listEleCount + sizeof(int) * i : m_vectorInfoSize * i;
+                            const char* record = p_postingListFullData + offsetVectorID;
+                            int vectorID;
+                            std::memcpy(&vectorID, record, sizeof(vectorID));
+                            if (!StaticRecordMatchesFilter(p_exWorkSpace, record)) continue;
                             if (truth && truth->count(vectorID)) (*found)[curPostingID].insert(vectorID);
                         }
                     }
@@ -405,12 +552,34 @@ namespace SPTAG
                     p_stats->m_diskIOCount = diskIO;
                     p_stats->m_diskAccessCount = diskRead;
                 }
+                p_exWorkSpace->m_postingProbeStats.m_readPostings += postingListCount;
+                p_exWorkSpace->m_postingProbeStats.m_scannedVectors +=
+                    static_cast<std::uint64_t>((std::max)(scannedListElements, 0));
+                p_exWorkSpace->m_postingProbeStats.m_postingPageReads +=
+                    static_cast<std::uint64_t>((std::max)(diskRead, 0));
+                p_exWorkSpace->m_postingProbeStats.m_postingLogicalBytes +=
+                    static_cast<std::uint64_t>((std::max)(scannedListElements, 0)) *
+                    static_cast<std::uint64_t>(m_vectorInfoSize);
+                p_exWorkSpace->m_postingProbeStats.m_postingPhysicalBytes +=
+                    static_cast<std::uint64_t>((std::max)(diskRead, 0)) * PageSize;
                 queryResults.SetScanned(listElements);
                 return ErrorCode::Success;
             }
 
             virtual ErrorCode SearchIndexWithoutParsing(ExtraWorkSpace *p_exWorkSpace) override
             {
+                if (RejectUnsupportedStaticFilter(p_exWorkSpace)) return ErrorCode::Fail;
+                if (HasStaticFlatTagFilter(p_exWorkSpace)) {
+                    auto& postingIDs = p_exWorkSpace->m_postingIDs;
+                    postingIDs.erase(
+                        std::remove_if(
+                            postingIDs.begin(), postingIDs.end(),
+                            [this, p_exWorkSpace](SizeType p_postingID) {
+                                return p_postingID < 0 || p_postingID >= m_totalListCount ||
+                                    StaticScanLimit(p_exWorkSpace, &m_listInfos[p_postingID]) == 0;
+                            }),
+                        postingIDs.end());
+                }
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
                 int diskRead = 0;
@@ -431,11 +600,12 @@ namespace SPTAG
                     Helper::DiskIO* indexFile = m_indexFiles[fileid].get();
 #endif
 
-                    diskRead += listInfo->listPageCount;
+                    const int readPageCount = StaticReadPageCount(p_exWorkSpace, listInfo);
+                    diskRead += readPageCount;
                     diskIO += 1;
-                    listElements += listInfo->listEleCount;
+                    listElements += StaticScanLimit(p_exWorkSpace, listInfo);
 
-                    size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                    size_t totalBytes = static_cast<size_t>(readPageCount) << PageSizeEx;
                     
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
@@ -533,6 +703,7 @@ namespace SPTAG
                 QueryResult& p_queryResults,
 		        std::shared_ptr<VectorIndex>& p_index, const VectorIndex* p_spann) override
             {
+                if (RejectUnsupportedStaticFilter(p_exWorkSpace)) return ErrorCode::Fail;
                 COMMON::QueryResultSet<ValueType>& headResults = *((COMMON::QueryResultSet<ValueType>*) & p_headResults);
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
                 bool foundResult = false;
@@ -567,6 +738,7 @@ namespace SPTAG
                 QueryResult& p_query,
 		        std::shared_ptr<VectorIndex> p_index, const VectorIndex* p_spann) override
             {
+                if (RejectUnsupportedStaticFilter(p_exWorkSpace)) return ErrorCode::Fail;
                 if (p_exWorkSpace->m_loadPosting) {
                     ErrorCode ret = SearchIndexWithoutParsing(p_exWorkSpace);
                     if (ret != ErrorCode::Success) return ret;
@@ -605,10 +777,40 @@ namespace SPTAG
 
                     int vid = p_selections[selectIdx++].tonode;
                     vectorID.append(reinterpret_cast<char *>(&vid), sizeof(int));
+                    if (m_staticHasMetadata) {
+                        if (vid < 0) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Static metadata tag VID out of range: %d\n", vid);
+                            throw std::runtime_error("Static metadata tag VID out of range");
+                        }
+                        const size_t tagOffset =
+                            static_cast<size_t>(vid) * static_cast<size_t>(m_staticNumTagsPerVec);
+                        if (tagOffset + static_cast<size_t>(m_staticNumTagsPerVec) >
+                                           m_staticBuildTags.size()) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Static metadata tag VID out of range: %d\n", vid);
+                            throw std::runtime_error("Static metadata tag VID out of range");
+                        }
+                        vectorID.append(
+                            reinterpret_cast<const char*>(m_staticBuildTags.data() + tagOffset),
+                            static_cast<size_t>(m_staticNumTagsPerVec) * sizeof(uint32_t));
+                    }
 
-                    ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
-                    if (p_enableDeltaEncoding)
+                    if (m_staticPipePQ)
                     {
+                        if (vid < 0 || static_cast<size_t>(vid) >= m_staticPipePQN) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Static PipePQ code VID out of range: %d (N=%zu)\n",
+                                         vid, m_staticPipePQN);
+                            throw std::runtime_error("Static PipePQ code VID out of range");
+                        }
+                        vector.append(reinterpret_cast<const char*>(
+                                          m_staticPipePQCodes + static_cast<size_t>(vid) * m_staticPipePQCodeBytes),
+                                      static_cast<size_t>(m_staticPipePQCodeBytes));
+                    }
+                    else if (p_enableDeltaEncoding)
+                    {
+                        ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
                         DimensionType n = p_fullVectors->Dimension();
                         std::vector<ValueType> p_vector_delta(n);
                         for (auto j = 0; j < n; j++)
@@ -619,6 +821,7 @@ namespace SPTAG
                     }
                     else
                     {
+                        ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
                         vector.append(reinterpret_cast<char *>(p_vector), p_fullVectors->PerVectorDataSize());
                     }
 
@@ -639,6 +842,445 @@ namespace SPTAG
                 return postingListFullData;
             }
 
+            bool AppendUnfilterTail(
+                Selection& p_selections,
+                std::vector<std::atomic_int>& p_postingListSize,
+                const std::unordered_map<SizeType, SizeType>& p_headVectorIDs,
+                std::shared_ptr<VectorSet> p_fullVectors,
+                std::shared_ptr<VectorIndex> p_headIndex,
+                SizeType p_fullCount,
+                Options& p_opt,
+                std::vector<int>& p_pureCountPerHead)
+            {
+                const int requestedReplicaCount = p_opt.m_tailReplicaCount;
+                if (requestedReplicaCount <= 0) return true;
+                if (m_staticPipePQ) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ does not support unfilter tails.\n");
+                    return false;
+                }
+                if (p_fullVectors == nullptr || p_headIndex == nullptr ||
+                    p_headIndex->GetNumSamples() != p_postingListSize.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static unfilter-tail head/posting cardinality mismatch.\n");
+                    return false;
+                }
+
+                const SizeType headCount = p_headIndex->GetNumSamples();
+                const int replicaCount = (std::min)(requestedReplicaCount, static_cast<int>(headCount));
+                p_pureCountPerHead.resize(static_cast<size_t>(headCount));
+                for (SizeType h = 0; h < headCount; ++h) {
+                    p_pureCountPerHead[static_cast<size_t>(h)] =
+                        p_postingListSize[static_cast<size_t>(h)].load();
+                }
+
+                // The post-cut selection array still includes dropped pure candidates.
+                // Compact it before appending tails so only persisted pure records consume
+                // tail capacity and the resulting prefixes remain contiguous.
+                std::vector<Edge> pureSelections;
+                pureSelections.reserve(p_selections.m_selections.size());
+                size_t read = 0;
+                while (read < p_selections.m_selections.size()) {
+                    const int head = p_selections.m_selections[read].node;
+                    size_t end = read + 1;
+                    while (end < p_selections.m_selections.size() &&
+                           p_selections.m_selections[end].node == head) {
+                        ++end;
+                    }
+                    if (head >= 0 && static_cast<SizeType>(head) < headCount) {
+                        const int pureCount = (std::max)(
+                            0,
+                            (std::min)(
+                                p_pureCountPerHead[static_cast<size_t>(head)],
+                                static_cast<int>(end - read)));
+                        pureSelections.insert(
+                            pureSelections.end(),
+                            p_selections.m_selections.begin() + read,
+                            p_selections.m_selections.begin() + read + pureCount);
+                        p_postingListSize[static_cast<size_t>(head)] = pureCount;
+                    }
+                    read = end;
+                }
+                p_selections.m_selections.swap(pureSelections);
+                p_selections.m_start = 0;
+                p_selections.m_end = p_selections.m_selections.size();
+                p_selections.m_totalsize = p_selections.m_end;
+                const size_t pureSelectionCount = p_selections.m_selections.size();
+
+                const int recordBytes = m_vectorInfoSize;
+                const bool unboundedTail = p_opt.m_unfilterTailBufferLength < 0;
+                const int extraTailPages = unboundedTail
+                    ? -1
+                    : (std::max)(0, p_opt.m_unfilterTailBufferLength);
+                auto recordsForPages = [recordBytes](int p_pages) {
+                    return (std::max)(0, (p_pages * PageSize) / (std::max)(1, recordBytes));
+                };
+                auto pagesForRecords = [recordBytes](int p_records) {
+                    return p_records <= 0 ? 0 : (p_records * recordBytes + PageSize - 1) / PageSize;
+                };
+                auto tailHardCapForHead = [&](SizeType p_head) {
+                    const int pure = p_pureCountPerHead[static_cast<size_t>(p_head)];
+                    if (unboundedTail) return (std::numeric_limits<int>::max)();
+                    return (std::max)(pure, recordsForPages(pagesForRecords(pure) + extraTailPages));
+                };
+                auto sparseTailLastPageKeep = [recordBytes](int p_pure, int p_keep) {
+                    if (p_keep <= p_pure) return p_pure;
+                    const int totalBytes = p_keep * recordBytes;
+                    const int totalPages = (totalBytes + PageSize - 1) / PageSize;
+                    if (totalPages <= 1) return p_keep;
+                    const int lastPageStart = (totalPages - 1) * PageSize;
+                    const int pureBytes = p_pure * recordBytes;
+                    if (pureBytes > lastPageStart) return p_keep;
+                    const int lastPageBytes = totalBytes - lastPageStart;
+                    if (lastPageBytes >= (PageSize + 9) / 10) return p_keep;
+                    return (std::max)(p_pure, lastPageStart / recordBytes);
+                };
+
+                const std::vector<Edge>& pure = p_selections.m_selections;
+                const bool useCrossBundleRNGTail =
+                    m_staticBuildVectorOwners.size() == static_cast<size_t>(p_fullCount) &&
+                    m_staticBuildHeadOwners.size() == static_cast<size_t>(headCount);
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Static Phase 4 (unfilter-tail): K_replica=%d, source=%s, recordBytes=%d, "
+                    "extraTailPages=%d, scanning %d base vectors against %d heads\n",
+                    replicaCount,
+                    useCrossBundleRNGTail ? "global-RNG-cross-bundle" : "nearest-head",
+                    recordBytes, extraTailPages, p_fullCount, headCount);
+                std::atomic_size_t nextVector(0);
+                std::atomic_size_t skippedDuplicate(0);
+                std::atomic_size_t skippedCapacity(0);
+                constexpr size_t kTailLockShards = 256;
+                std::vector<std::vector<Edge>> tailCandidatesByHead(static_cast<size_t>(headCount));
+                std::vector<std::mutex> tailCandidateLocks(kTailLockShards);
+                const int threadCount = (std::max)(1, p_opt.m_iSSDNumberOfThreads);
+                auto tailCandidateLess = [](const Edge& p_left, const Edge& p_right) {
+                    if (p_left.distance != p_right.distance) {
+                        return p_left.distance < p_right.distance;
+                    }
+                    return p_left.tonode < p_right.tonode;
+                };
+                auto offerTailCandidate = [&](SizeType p_vectorID, SizeType p_head, float p_distance) {
+                    if (p_head < 0 || p_head >= headCount) return;
+
+                    const size_t pureBegin = std::lower_bound(
+                        pure.begin(), pure.end(), p_head, Selection::g_edgeComparer) - pure.begin();
+                    const size_t pureEnd = (std::min)(
+                        pure.size(),
+                        pureBegin + static_cast<size_t>(
+                            p_pureCountPerHead[static_cast<size_t>(p_head)]));
+                    for (size_t i = pureBegin; i < pureEnd && pure[i].node == p_head; ++i) {
+                        if (pure[i].tonode == p_vectorID) {
+                            ++skippedDuplicate;
+                            return;
+                        }
+                    }
+
+                    Edge edge;
+                    edge.node = p_head;
+                    edge.tonode = p_vectorID;
+                    edge.distance = p_distance;
+                    const int capacity = (std::max)(
+                        0,
+                        tailHardCapForHead(p_head) -
+                            p_pureCountPerHead[static_cast<size_t>(p_head)]);
+                    if (capacity == 0) {
+                        ++skippedCapacity;
+                        return;
+                    }
+
+                    std::lock_guard<std::mutex> lock(
+                        tailCandidateLocks[static_cast<size_t>(p_head) % kTailLockShards]);
+                    auto& candidates = tailCandidatesByHead[static_cast<size_t>(p_head)];
+                    auto existing = std::find_if(
+                        candidates.begin(), candidates.end(),
+                        [p_vectorID](const Edge& p_candidate) {
+                            return p_candidate.tonode == p_vectorID;
+                        });
+                    if (existing != candidates.end()) {
+                        if (tailCandidateLess(edge, *existing)) *existing = edge;
+                        return;
+                    }
+                    if (static_cast<int>(candidates.size()) < capacity) {
+                        candidates.push_back(edge);
+                        return;
+                    }
+
+                    auto worst = std::max_element(
+                        candidates.begin(), candidates.end(), tailCandidateLess);
+                    if (worst != candidates.end() && tailCandidateLess(edge, *worst)) {
+                        *worst = edge;
+                    }
+                    else {
+                        ++skippedCapacity;
+                    }
+                };
+                auto collectTailCandidates = [&]() {
+                    COMMON::QueryResultSet<ValueType> nearbyHeads(nullptr, replicaCount);
+                    std::vector<Edge> globalSelections(static_cast<size_t>(
+                        (std::max)(replicaCount, m_opt->m_replicaCount)));
+                    while (true) {
+                        const SizeType vectorID = nextVector.fetch_add(1);
+                        if (vectorID >= p_fullCount) break;
+                        if (p_headVectorIDs.count(vectorID) != 0) continue;
+
+                        const ValueType* vector = static_cast<const ValueType*>(
+                            p_fullVectors->GetVector(vectorID));
+                        if (vector == nullptr) continue;
+                        if (useCrossBundleRNGTail) {
+                            int globalCount = 0;
+                            if (!StaticGlobalRNGSelection(
+                                    globalSelections,
+                                    vector,
+                                    p_headIndex.get(),
+                                    vectorID,
+                                    globalCount)) {
+                                continue;
+                            }
+                            const int vectorOwner =
+                                m_staticBuildVectorOwners[static_cast<size_t>(vectorID)];
+                            for (int rank = 0;
+                                 rank < globalCount && rank < replicaCount;
+                                 ++rank) {
+                                const Edge& candidate =
+                                    globalSelections[static_cast<size_t>(rank)];
+                                if (candidate.node < 0 || candidate.node >= headCount ||
+                                    m_staticBuildHeadOwners[static_cast<size_t>(candidate.node)] ==
+                                        vectorOwner) {
+                                    continue;
+                                }
+                                offerTailCandidate(vectorID, candidate.node, candidate.distance);
+                            }
+                            continue;
+                        }
+
+                        nearbyHeads.SetTarget(vector, p_headIndex->m_pQuantizer);
+                        nearbyHeads.Reset();
+                        if (p_headIndex->SearchIndex(nearbyHeads) != ErrorCode::Success) continue;
+
+                        BasicResult* results = nearbyHeads.GetResults();
+                        for (int rank = 0; rank < replicaCount; ++rank) {
+                            offerTailCandidate(
+                                vectorID, results[rank].VID, results[rank].Dist);
+                        }
+                    }
+                };
+
+                std::vector<std::thread> workers;
+                workers.reserve(threadCount);
+                for (int t = 0; t < threadCount; ++t) workers.emplace_back(collectTailCandidates);
+                for (auto& worker : workers) worker.join();
+
+                std::vector<Edge> admittedTails;
+                for (SizeType head = 0; head < headCount; ++head) {
+                    auto& candidates = tailCandidatesByHead[static_cast<size_t>(head)];
+                    std::sort(candidates.begin(), candidates.end(), tailCandidateLess);
+                    admittedTails.insert(admittedTails.end(), candidates.begin(), candidates.end());
+                }
+                std::vector<std::vector<Edge>>().swap(tailCandidatesByHead);
+
+                std::vector<Edge> mergedSelections;
+                mergedSelections.reserve(pureSelectionCount + admittedTails.size());
+                size_t pureRead = 0;
+                size_t tailRead = 0;
+                while (pureRead < pure.size() || tailRead < admittedTails.size()) {
+                    const SizeType pureHead = pureRead < pure.size() ? pure[pureRead].node : MaxSize;
+                    const SizeType tailHead =
+                        tailRead < admittedTails.size() ? admittedTails[tailRead].node : MaxSize;
+                    const SizeType head = (std::min)(pureHead, tailHead);
+
+                    size_t pureEnd = pureRead;
+                    while (pureEnd < pure.size() && pure[pureEnd].node == head) ++pureEnd;
+                    size_t tailEnd = tailRead;
+                    while (tailEnd < admittedTails.size() && admittedTails[tailEnd].node == head) ++tailEnd;
+
+                    mergedSelections.insert(
+                        mergedSelections.end(), pure.begin() + pureRead, pure.begin() + pureEnd);
+                    for (size_t i = tailRead; i < tailEnd; ++i) {
+                        Edge tail = admittedTails[i];
+                        tail.distance = (std::numeric_limits<float>::max)();
+                        mergedSelections.push_back(tail);
+                    }
+                    p_postingListSize[static_cast<size_t>(head)] =
+                        static_cast<int>((pureEnd - pureRead) + (tailEnd - tailRead));
+                    pureRead = pureEnd;
+                    tailRead = tailEnd;
+                }
+                std::vector<Edge>().swap(admittedTails);
+
+                std::vector<Edge> trimmedSelections;
+                trimmedSelections.reserve(mergedSelections.size());
+                size_t trimRead = 0;
+                size_t tailRecordsTrimmed = 0;
+                while (trimRead < mergedSelections.size()) {
+                    const SizeType head = mergedSelections[trimRead].node;
+                    size_t trimEnd = trimRead + 1;
+                    while (trimEnd < mergedSelections.size() &&
+                           mergedSelections[trimEnd].node == head) {
+                        ++trimEnd;
+                    }
+                    const int pureCount = p_pureCountPerHead[static_cast<size_t>(head)];
+                    const int totalCount = static_cast<int>(trimEnd - trimRead);
+                    int keepCount = unboundedTail
+                        ? totalCount
+                        : (std::min)(totalCount, tailHardCapForHead(head));
+                    if (!unboundedTail) {
+                        keepCount = sparseTailLastPageKeep(pureCount, keepCount);
+                    }
+                    keepCount = (std::max)(pureCount, (std::min)(keepCount, totalCount));
+                    trimmedSelections.insert(
+                        trimmedSelections.end(),
+                        mergedSelections.begin() + trimRead,
+                        mergedSelections.begin() + trimRead + keepCount);
+                    tailRecordsTrimmed += static_cast<size_t>(totalCount - keepCount);
+                    p_postingListSize[static_cast<size_t>(head)] = keepCount;
+                    trimRead = trimEnd;
+                }
+
+                for (SizeType head = 0; head < headCount; ++head) {
+                    const int pureCount = p_pureCountPerHead[static_cast<size_t>(head)];
+                    const int totalCount = p_postingListSize[static_cast<size_t>(head)].load();
+                    const int maxPages = unboundedTail
+                        ? (std::numeric_limits<int>::max)()
+                        : pagesForRecords(pureCount) + extraTailPages;
+                    if (totalCount < pureCount ||
+                        (!unboundedTail && pagesForRecords(totalCount) > maxPages)) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Static tail page-budget violation: head=%d pure=%d total=%d maxPages=%d\n",
+                            head, pureCount, totalCount, maxPages);
+                        return false;
+                    }
+                }
+
+                p_selections.m_selections.swap(trimmedSelections);
+                p_selections.m_start = 0;
+                p_selections.m_end = p_selections.m_selections.size();
+                p_selections.m_totalsize = p_selections.m_end;
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Info,
+                    "Static Phase 4 done: pure=%zu tail=%zu skippedDuplicate=%zu "
+                    "skippedCapacity=%zu trimmed=%zu final=%zu cap=%s\n",
+                    pureSelectionCount,
+                    p_selections.m_selections.size() - pureSelectionCount,
+                    skippedDuplicate.load(),
+                    skippedCapacity.load(),
+                    tailRecordsTrimmed,
+                    p_selections.m_selections.size(),
+                    unboundedTail ? "unbounded" :
+                        ("purePages+" + std::to_string(extraTailPages)).c_str());
+                return true;
+            }
+
+            bool StaticRNGSelection(std::vector<Edge>& p_selections,
+                                    const ValueType* p_queryVector,
+                                    VectorIndex* p_index,
+                                    SizeType p_fullID,
+                                    int& p_replicaCount,
+                                    const std::vector<uint8_t>& p_allowedHeads,
+                                    SizeType p_allowedHeadCount)
+            {
+                if (p_queryVector == nullptr || p_index == nullptr || p_index->m_pQuantizer != nullptr) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Node-aware static placement requires unquantized full-float head vectors.\n");
+                    return false;
+                }
+
+                std::vector<std::pair<float, SizeType>> candidates;
+                candidates.reserve(static_cast<size_t>((std::max)(1, p_allowedHeadCount)));
+                for (SizeType head = 0; head < static_cast<SizeType>(p_allowedHeads.size()); ++head) {
+                    if (p_allowedHeads[static_cast<size_t>(head)] == 0) continue;
+                    const void* headVector = p_index->GetSample(head);
+                    if (headVector == nullptr) continue;
+                    candidates.emplace_back(p_index->ComputeDistance(p_queryVector, headVector), head);
+                }
+                if (candidates.empty()) {
+                    p_replicaCount = 0;
+                    return true;
+                }
+
+                const auto byDistance = [](const std::pair<float, SizeType>& p_left,
+                                           const std::pair<float, SizeType>& p_right) {
+                    return p_left.first == p_right.first
+                        ? p_left.second < p_right.second
+                        : p_left.first < p_right.first;
+                };
+                const size_t keepCount = (std::min)(
+                    candidates.size(),
+                    static_cast<size_t>((std::max)(1, m_opt->m_internalResultNum)));
+                if (candidates.size() > keepCount) {
+                    std::nth_element(
+                        candidates.begin(), candidates.begin() + keepCount, candidates.end(), byDistance);
+                    candidates.resize(keepCount);
+                }
+                std::sort(candidates.begin(), candidates.end(), byDistance);
+
+                p_replicaCount = 0;
+                for (const auto& candidate : candidates) {
+                    if (p_replicaCount >= m_opt->m_replicaCount) break;
+                    bool accepted = true;
+                    for (int i = 0; i < p_replicaCount; ++i) {
+                        const float headDistance = p_index->ComputeDistance(
+                            p_index->GetSample(candidate.second),
+                            p_index->GetSample(p_selections[static_cast<size_t>(i)].node));
+                        if (m_opt->m_rngFactor * headDistance <= candidate.first) {
+                            accepted = false;
+                            break;
+                        }
+                    }
+                    if (!accepted) continue;
+                    Edge& selection = p_selections[static_cast<size_t>(p_replicaCount)];
+                    selection.node = candidate.second;
+                    selection.tonode = p_fullID;
+                    selection.distance = candidate.first;
+                    ++p_replicaCount;
+                }
+                return true;
+            }
+
+            bool StaticGlobalRNGSelection(std::vector<Edge>& p_selections,
+                                          const ValueType* p_queryVector,
+                                          VectorIndex* p_index,
+                                          SizeType p_fullID,
+                                          int& p_replicaCount)
+            {
+                if (p_queryVector == nullptr || p_index == nullptr || p_index->m_pQuantizer != nullptr) {
+                    return false;
+                }
+
+                COMMON::QueryResultSet<ValueType> queryResults(
+                    p_queryVector, (std::max)(1, m_opt->m_internalResultNum));
+                if (p_index->SearchIndex(queryResults) != ErrorCode::Success) {
+                    return false;
+                }
+
+                p_replicaCount = 0;
+                for (int i = 0; i < queryResults.GetResultNum() &&
+                                p_replicaCount < m_opt->m_replicaCount; ++i) {
+                    BasicResult* result = queryResults.GetResult(i);
+                    if (result->VID == -1) break;
+
+                    bool accepted = true;
+                    for (int j = 0; j < p_replicaCount; ++j) {
+                        const float headDistance = p_index->ComputeDistance(
+                            p_index->GetSample(result->VID),
+                            p_index->GetSample(p_selections[static_cast<size_t>(j)].node));
+                        if (m_opt->m_rngFactor * headDistance <= result->Dist) {
+                            accepted = false;
+                            break;
+                        }
+                    }
+                    if (!accepted) continue;
+                    Edge& selection = p_selections[static_cast<size_t>(p_replicaCount)];
+                    selection.node = result->VID;
+                    selection.tonode = p_fullID;
+                    selection.distance = result->Dist;
+                    ++p_replicaCount;
+                }
+                return true;
+            }
+
             bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap, SizeType upperBound = -1) {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
@@ -648,6 +1290,8 @@ namespace SPTAG
                 }
 
                 m_opt = &p_opt;
+                m_staticBuildVectorOwners.clear();
+                m_staticBuildHeadOwners.clear();
                 int numThreads = p_opt.m_iSSDNumberOfThreads;
                 int candidateNum = p_opt.m_internalResultNum;
                 std::unordered_map<SizeType, SizeType> headVectorIDS;
@@ -664,32 +1308,219 @@ namespace SPTAG
 
                 SizeType fullCount = 0;
                 size_t vectorInfoSize = 0;
+                size_t fullVectorDataSize = 0;
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
-                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
+                    fullVectorDataSize = fullVectors->PerVectorDataSize();
+                    vectorInfoSize = fullVectorDataSize + sizeof(int);
                 }
                 if (upperBound > 0) fullCount = upperBound;
+                if (!ConfigureStaticPipePQ(p_opt, fullCount, true)) {
+                    return false;
+                }
+                if (!ConfigureStaticMetadataForBuild(p_opt, fullCount)) {
+                    return false;
+                }
+                if (m_staticHasMetadata) {
+                    vectorInfoSize = fullVectorDataSize + static_cast<size_t>(m_staticMetadataBytes);
+                }
+                else if (m_staticPipePQ) {
+                    vectorInfoSize = sizeof(int) + static_cast<size_t>(m_staticPipePQCodeBytes);
+                }
+                m_vectorInfoSize = static_cast<int>(vectorInfoSize);
 
                 p_versionMap.Initialize(fullCount, p_headIndex->m_iDataBlockSize, p_headIndex->m_iDataCapacity);
 
-                Selection selections(static_cast<size_t>(fullCount) * p_opt.m_replicaCount, p_opt.m_tmpdir);
+                const std::vector<std::vector<SizeType>>& placementSource =
+                    !m_staticPrimaryNodeVectorAssignments.empty()
+                        ? m_staticPrimaryNodeVectorAssignments
+                        : m_staticNodeVectorAssignments;
+                bool useNodeAwareBuild = !placementSource.empty();
+                std::vector<std::vector<SizeType>> plannedNodeVectors;
+                std::vector<int> vectorOwner(static_cast<size_t>(fullCount), -1);
+                size_t plannedAssignmentCount = static_cast<size_t>(fullCount);
+                if (useNodeAwareBuild) {
+                    if (p_opt.m_batches > 1 || p_headIndex->m_pQuantizer != nullptr) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Node-aware static placement requires Batches=1 and unquantized heads.\n");
+                        return false;
+                    }
+                    plannedNodeVectors.resize(placementSource.size());
+                    std::vector<uint8_t> claimed(static_cast<size_t>(fullCount), 0);
+                    plannedAssignmentCount = 0;
+                    for (size_t nodeId = 0; nodeId < placementSource.size(); ++nodeId) {
+                        for (SizeType vectorId : placementSource[nodeId]) {
+                            if (vectorId < 0 || vectorId >= fullCount ||
+                                claimed[static_cast<size_t>(vectorId)] != 0) {
+                                continue;
+                            }
+                            claimed[static_cast<size_t>(vectorId)] = 1;
+                            vectorOwner[static_cast<size_t>(vectorId)] = static_cast<int>(nodeId);
+                            plannedNodeVectors[nodeId].push_back(vectorId);
+                            ++plannedAssignmentCount;
+                        }
+                    }
+                    if (plannedAssignmentCount != static_cast<size_t>(fullCount)) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Node-aware static placement covers %zu/%d vectors.\n",
+                            plannedAssignmentCount, fullCount);
+                        return false;
+                    }
+                }
+
+                Selection selections(
+                    (useNodeAwareBuild ? plannedAssignmentCount : static_cast<size_t>(fullCount)) *
+                        p_opt.m_replicaCount,
+                    p_opt.m_tmpdir);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Full vector count:%d Edge bytes:%llu selection size:%zu, capacity size:%zu\n", fullCount, sizeof(Edge), selections.m_selections.size(), selections.m_selections.capacity());
                 std::vector<std::atomic_int> replicaCount(fullCount);
                 std::vector<std::atomic_int> postingListSize(p_headIndex->GetNumSamples());
+                for (auto& rc : replicaCount) rc = 0;
                 for (auto& pls : postingListSize) pls = 0;
                 std::unordered_set<SizeType> emptySet;
                 SizeType batchSize = (fullCount + p_opt.m_batches - 1) / p_opt.m_batches;
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                if (p_opt.m_batches > 1)
-                {
-                    if (selections.SaveBatch() != ErrorCode::Success)
-                    {
-                        return false;
+                if (useNodeAwareBuild) {
+                    auto fullVectors = p_reader->GetVectorSet();
+                    if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized()) {
+                        fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
                     }
-                }
-                {
+
+                    std::vector<int> headToNode(p_headIndex->GetNumSamples(), -1);
+                    for (const auto& pair : headVectorIDS) {
+                        if (pair.first < 0 || pair.first >= fullCount) continue;
+                        int owner = -1;
+                        auto ownerIt = m_staticHeadVectorOwners.find(pair.first);
+                        if (ownerIt != m_staticHeadVectorOwners.end()) {
+                            owner = ownerIt->second;
+                        } else {
+                            owner = vectorOwner[static_cast<size_t>(pair.first)];
+                        }
+                        if (owner < 0 || owner >= static_cast<int>(plannedNodeVectors.size())) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Node-aware static placement cannot resolve owner for head vector %d.\n",
+                                pair.first);
+                            return false;
+                        }
+                        headToNode[static_cast<size_t>(pair.second)] = owner;
+                    }
+                    m_staticBuildVectorOwners = vectorOwner;
+                    m_staticBuildHeadOwners = headToNode;
+
+                    std::vector<std::vector<uint8_t>> allowedHeadMasks(
+                        plannedNodeVectors.size(),
+                        std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
+                    std::vector<SizeType> allowedHeadCounts(plannedNodeVectors.size(), 0);
+                    for (SizeType head = 0; head < p_headIndex->GetNumSamples(); ++head) {
+                        const int owner = headToNode[static_cast<size_t>(head)];
+                        if (owner >= 0 && owner < static_cast<int>(allowedHeadMasks.size())) {
+                            allowedHeadMasks[static_cast<size_t>(owner)][static_cast<size_t>(head)] = 1;
+                            ++allowedHeadCounts[static_cast<size_t>(owner)];
+                        }
+                    }
+                    for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId) {
+                        if (!plannedNodeVectors[nodeId].empty() && allowedHeadCounts[nodeId] == 0) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Node-aware static placement node %zu has vectors but no heads.\n",
+                                nodeId);
+                            return false;
+                        }
+                    }
+
+                    std::vector<std::pair<int, SizeType>> assignments;
+                    assignments.reserve(plannedAssignmentCount);
+                    for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId) {
+                        for (SizeType vectorId : plannedNodeVectors[nodeId]) {
+                            assignments.emplace_back(static_cast<int>(nodeId), vectorId);
+                        }
+                    }
+
+                    std::atomic_size_t sent(0);
+                    std::vector<std::thread> threads;
+                    threads.reserve(numThreads);
+                    for (int tid = 0; tid < numThreads; ++tid) {
+                        threads.emplace_back([&]() {
+                            std::vector<Edge> localSelections(
+                                static_cast<size_t>(p_opt.m_replicaCount));
+                            while (true) {
+                                const size_t assignmentIndex = sent.fetch_add(1);
+                                if (assignmentIndex >= assignments.size()) return;
+
+                                const int nodeId = assignments[assignmentIndex].first;
+                                const SizeType vectorId = assignments[assignmentIndex].second;
+                                const size_t selectionOffset =
+                                    assignmentIndex * static_cast<size_t>(p_opt.m_replicaCount);
+                                replicaCount[static_cast<size_t>(vectorId)] = 0;
+                                int assignedCount = 0;
+
+                                const auto headIt = headVectorIDS.find(vectorId);
+                                if (headIt != headVectorIDS.end() && p_opt.m_excludehead) {
+                                    continue;
+                                }
+                                if (!p_opt.m_excludehead && headIt != headVectorIDS.end() &&
+                                    headToNode[static_cast<size_t>(headIt->second)] == nodeId) {
+                                    Edge& self = selections.m_selections[selectionOffset];
+                                    self.node = headIt->second;
+                                    self.tonode = vectorId;
+                                    self.distance = 0.0f;
+                                    ++postingListSize[static_cast<size_t>(self.node)];
+                                    ++replicaCount[static_cast<size_t>(vectorId)];
+                                    assignedCount = 1;
+                                }
+
+                                std::fill(localSelections.begin(), localSelections.end(), Edge());
+                                int localCount = 0;
+                                if (!StaticRNGSelection(
+                                        localSelections,
+                                        static_cast<const ValueType*>(fullVectors->GetVector(vectorId)),
+                                        p_headIndex.get(),
+                                        vectorId,
+                                        localCount,
+                                        allowedHeadMasks[static_cast<size_t>(nodeId)],
+                                        allowedHeadCounts[static_cast<size_t>(nodeId)])) {
+                                    continue;
+                                }
+                                for (int i = 0; i < localCount &&
+                                                assignedCount < p_opt.m_replicaCount; ++i) {
+                                    const Edge& candidate = localSelections[static_cast<size_t>(i)];
+                                    bool duplicate = false;
+                                    for (int j = 0; j < assignedCount; ++j) {
+                                        if (selections.m_selections[
+                                                selectionOffset + static_cast<size_t>(j)].node ==
+                                            candidate.node) {
+                                            duplicate = true;
+                                            break;
+                                        }
+                                    }
+                                    if (duplicate) continue;
+                                    selections.m_selections[
+                                        selectionOffset + static_cast<size_t>(assignedCount)] = candidate;
+                                    ++postingListSize[static_cast<size_t>(candidate.node)];
+                                    ++replicaCount[static_cast<size_t>(vectorId)];
+                                    ++assignedCount;
+                                }
+                            }
+                        });
+                    }
+                    for (auto& thread : threads) thread.join();
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Node-aware static candidate search finished with %zu assignments across %zu nodes.\n",
+                        assignments.size(), plannedNodeVectors.size());
+                } else {
+                    if (p_opt.m_batches > 1)
+                    {
+                        if (selections.SaveBatch() != ErrorCode::Success)
+                        {
+                            return false;
+                        }
+                    }
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Preparation done, start candidate searching.\n");
                     SizeType sampleSize = p_opt.m_samples;
                     std::vector<SizeType> samples(sampleSize, 0);
@@ -761,7 +1592,7 @@ namespace SPTAG
                 auto t2 = std::chrono::high_resolution_clock::now();
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching replicas ended. Search Time: %.2lf mins\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count()) / 60.0);
 
-                if (p_opt.m_batches > 1)
+                if (!useNodeAwareBuild && p_opt.m_batches > 1)
                 {
                     if (selections.LoadBatch(0, static_cast<size_t>(fullCount) * p_opt.m_replicaCount) != ErrorCode::Success)
                     {
@@ -875,6 +1706,30 @@ namespace SPTAG
                 auto t4 = std::chrono::high_resolution_clock::now();
                 SPTAGLIB_LOG(SPTAG::Helper::LogLevel::LL_Info, "Time to perform posting cut:%.2lf sec.\n", ((double)std::chrono::duration_cast<std::chrono::seconds>(t4 - t3).count()) + ((double)std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count()) / 1000);
 
+                auto fullVectors = p_reader->GetVectorSet();
+                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine &&
+                    !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) {
+                    fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
+                }
+                std::vector<int> pureCountPerHead;
+                if (!AppendUnfilterTail(
+                        selections,
+                        postingListSize,
+                        headVectorIDS,
+                        fullVectors,
+                        p_headIndex,
+                        fullCount,
+                        p_opt,
+                        pureCountPerHead)) {
+                    return false;
+                }
+                if (m_staticHasMetadata && pureCountPerHead.empty()) {
+                    pureCountPerHead.resize(postingListSize.size());
+                    for (size_t h = 0; h < postingListSize.size(); ++h) {
+                        pureCountPerHead[h] = postingListSize[h].load();
+                    }
+                }
+
                 // number of posting lists per file
                 size_t postingFileSize = (postingListSize.size() + p_opt.m_ssdIndexFileNum - 1) / p_opt.m_ssdIndexFileNum;
                 std::vector<size_t> selectionsBatchOffset(p_opt.m_ssdIndexFileNum + 1, 0);
@@ -891,9 +1746,6 @@ namespace SPTAG
                     }
                 }
 
-                auto fullVectors = p_reader->GetVectorSet();
-                if (p_opt.m_distCalcMethod == DistCalcMethod::Cosine && !p_reader->IsNormalized() && !p_headIndex->m_pQuantizer) fullVectors->Normalize(p_opt.m_iSSDNumberOfThreads);
-
                 // iterate over files
                 for (int i = 0; i < p_opt.m_ssdIndexFileNum; i++) {
                     size_t curPostingListOffSet = i * postingFileSize;
@@ -902,6 +1754,14 @@ namespace SPTAG
                     std::vector<int> curPostingListSizes(
                         postingListSize.begin() + curPostingListOffSet,
                         postingListSize.begin() + curPostingListEnd);
+                    std::vector<int> curPureCounts;
+                    const std::vector<int>* curPureCountsPtr = nullptr;
+                    if (!pureCountPerHead.empty()) {
+                        curPureCounts.assign(
+                            pureCountPerHead.begin() + curPostingListOffSet,
+                            pureCountPerHead.begin() + curPostingListEnd);
+                        curPureCountsPtr = &curPureCounts;
+                    }
 
                     std::vector<size_t> curPostingListBytes(curPostingListSizes.size());
                     
@@ -1037,7 +1897,9 @@ namespace SPTAG
                         postPageOffset,
                         postingOrderInIndex,
                         fullVectors,
-                        curPostingListOffSet);
+                        curPostingListOffSet,
+                        curPureCountsPtr,
+                        p_opt.m_unfilterTailBufferLength);
                 }
 
                 p_versionMap.Save(p_opt.m_indexDirectory + FolderSep + p_opt.m_deleteIDFile);
@@ -1166,8 +2028,10 @@ namespace SPTAG
             struct ListInfo
             {
                 std::size_t listTotalBytes = 0;
-                
+
                 int listEleCount = 0;
+
+                int pureEleCount = 0;
 
                 std::uint16_t listPageCount = 0;
 
@@ -1175,6 +2039,546 @@ namespace SPTAG
 
                 std::uint16_t pageOffset = 0;
             };
+
+            bool HasStaticFlatTagFilter(const ExtraWorkSpace* p_exWorkSpace) const
+            {
+                return p_exWorkSpace != nullptr && p_exWorkSpace->m_queryTags != nullptr &&
+                    p_exWorkSpace->m_numQueryTags > 0;
+            }
+
+            bool HasStaticDNFFilter(const ExtraWorkSpace* p_exWorkSpace) const
+            {
+                return p_exWorkSpace != nullptr && p_exWorkSpace->m_dnf != nullptr &&
+                    !p_exWorkSpace->m_dnf->Empty();
+            }
+
+            bool RejectUnsupportedStaticFilter(const ExtraWorkSpace* p_exWorkSpace) const
+            {
+                if (p_exWorkSpace == nullptr) return false;
+                if (p_exWorkSpace->m_filterFunc) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static snapshots do not support arbitrary metadata callbacks.\n");
+                    return true;
+                }
+                if (HasStaticDNFFilter(p_exWorkSpace)) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static metadata snapshots currently support flat ACL tag filters only; "
+                        "DNF predicates require the FileIO posting format.\n");
+                    return true;
+                }
+                if (!HasStaticFlatTagFilter(p_exWorkSpace) || m_staticHasMetadata) return false;
+
+                SPTAGLIB_LOG(
+                    Helper::LogLevel::LL_Error,
+                    "Static raw/STT1 snapshots do not contain per-vector tags; "
+                    "use an STM1 metadata snapshot for ACL filtering.\n");
+                return true;
+            }
+
+            int StaticScanLimit(const ExtraWorkSpace* p_exWorkSpace, const ListInfo* p_listInfo) const
+            {
+                if (p_listInfo == nullptr) return 0;
+                if (!HasStaticFlatTagFilter(p_exWorkSpace)) {
+                    return p_listInfo->listEleCount;
+                }
+                return (std::max)(0, (std::min)(p_listInfo->pureEleCount, p_listInfo->listEleCount));
+            }
+
+            int StaticReadPageCount(const ExtraWorkSpace* p_exWorkSpace,
+                                    const ListInfo* p_listInfo) const
+            {
+                const int scanCount = StaticScanLimit(p_exWorkSpace, p_listInfo);
+                if (scanCount <= 0) return 0;
+                if (scanCount >= p_listInfo->listEleCount) return p_listInfo->listPageCount;
+                const size_t bytes = static_cast<size_t>(p_listInfo->pageOffset) +
+                    static_cast<size_t>(scanCount) * static_cast<size_t>(m_vectorInfoSize);
+                return static_cast<int>((bytes + PageSize - 1) >> PageSizeEx);
+            }
+
+            bool StaticRecordMatchesFilter(const ExtraWorkSpace* p_exWorkSpace,
+                                           const char* p_record) const
+            {
+                if (!HasStaticFlatTagFilter(p_exWorkSpace)) return true;
+                if (!m_staticHasMetadata || p_record == nullptr) return false;
+
+                const char* tags = p_record + sizeof(int);
+                for (int ti = 0; ti < m_staticNumTagsPerVec; ++ti) {
+                    std::uint32_t vectorTag = 0;
+                    std::memcpy(&vectorTag, tags + static_cast<size_t>(ti) * sizeof(vectorTag),
+                                sizeof(vectorTag));
+                    for (int qi = 0; qi < p_exWorkSpace->m_numQueryTags; ++qi) {
+                        if (vectorTag == p_exWorkSpace->m_queryTags[qi]) return true;
+                    }
+                }
+                return false;
+            }
+
+            static constexpr std::uint32_t kStaticPipePQMagic = 0x31515053U; // "SPQ1"
+            static constexpr int kStaticPipePQVersion = 1;
+            static constexpr int kStaticPipePQHeaderInts = 8;
+            static constexpr std::uint32_t kStaticTailMagic = 0x31545453U; // "STT1"
+            static constexpr int kStaticTailVersion = 1;
+            static constexpr int kStaticTailHeaderInts = 8;
+            static constexpr std::uint32_t kStaticMetadataMagic = 0x314D5453U; // "STM1"
+            static constexpr int kStaticMetadataVersion = 1;
+            static constexpr int kStaticMetadataHeaderInts = 9;
+
+            std::string ResolveStaticPath(const std::string& p_path, const Options& p_opt) const
+            {
+                if (p_path.empty() || p_path[0] == '/') return p_path;
+                return p_opt.m_indexDirectory + FolderSep + p_path;
+            }
+
+            void CloseStaticPipePQCodes()
+            {
+#ifndef _MSC_VER
+                if (m_staticPipePQCodeMap != nullptr) {
+                    munmap(m_staticPipePQCodeMap, m_staticPipePQCodeMapBytes);
+                    m_staticPipePQCodeMap = nullptr;
+                }
+                if (m_staticPipePQCodeFd >= 0) {
+                    close(m_staticPipePQCodeFd);
+                    m_staticPipePQCodeFd = -1;
+                }
+#endif
+                m_staticPipePQCodes = nullptr;
+                m_staticPipePQN = 0;
+                m_staticPipePQCodeMapBytes = 0;
+            }
+
+            bool OpenStaticPipePQCodes(const std::string& p_path, int p_codeBytes, size_t p_expectedCount)
+            {
+#ifdef _MSC_VER
+                (void)p_path;
+                (void)p_codeBytes;
+                (void)p_expectedCount;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Static PipePQ code mmap is currently supported on Linux only.\n");
+                return false;
+#else
+                CloseStaticPipePQCodes();
+                m_staticPipePQCodeFd = open(p_path.c_str(), O_RDONLY);
+                if (m_staticPipePQCodeFd < 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Cannot open static PipePQ code sidecar: %s\n", p_path.c_str());
+                    return false;
+                }
+                struct stat st {};
+                if (fstat(m_staticPipePQCodeFd, &st) != 0 || st.st_size <= 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Cannot stat static PipePQ code sidecar: %s\n", p_path.c_str());
+                    CloseStaticPipePQCodes();
+                    return false;
+                }
+                m_staticPipePQCodeMapBytes = static_cast<size_t>(st.st_size);
+                m_staticPipePQCodeMap = mmap(nullptr, m_staticPipePQCodeMapBytes, PROT_READ, MAP_SHARED,
+                                              m_staticPipePQCodeFd, 0);
+                if (m_staticPipePQCodeMap == MAP_FAILED) {
+                    m_staticPipePQCodeMap = nullptr;
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Cannot mmap static PipePQ code sidecar: %s\n", p_path.c_str());
+                    CloseStaticPipePQCodes();
+                    return false;
+                }
+
+                const size_t rawBytes = p_expectedCount * static_cast<size_t>(p_codeBytes);
+                size_t dataOffset = 0;
+                if (m_staticPipePQCodeMapBytes == rawBytes) {
+                    dataOffset = 0;
+                }
+                else if (m_staticPipePQCodeMapBytes == rawBytes + 2 * sizeof(std::uint32_t)) {
+                    std::uint32_t header[2] = {0, 0};
+                    std::memcpy(header, m_staticPipePQCodeMap, sizeof(header));
+                    if (header[0] != p_expectedCount || header[1] != static_cast<std::uint32_t>(p_codeBytes)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static PipePQ sidecar header mismatch: N=%u M=%u, expected N=%zu M=%d\n",
+                                     header[0], header[1], p_expectedCount, p_codeBytes);
+                        CloseStaticPipePQCodes();
+                        return false;
+                    }
+                    dataOffset = sizeof(header);
+                }
+                else {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ sidecar size mismatch: %zu, expected %zu or %zu bytes\n",
+                                 m_staticPipePQCodeMapBytes, rawBytes, rawBytes + 2 * sizeof(std::uint32_t));
+                    CloseStaticPipePQCodes();
+                    return false;
+                }
+
+                m_staticPipePQCodes = static_cast<const std::uint8_t*>(m_staticPipePQCodeMap) + dataOffset;
+                m_staticPipePQN = p_expectedCount;
+                return true;
+#endif
+            }
+
+            bool ConfigureStaticPipePQ(Options& p_opt, size_t p_expectedCount, bool p_needCodes)
+            {
+                m_staticPipePQ = false;
+                m_staticPipePQCodeBytes = 0;
+                m_staticPipePQDimension = p_opt.m_dim;
+                const bool noQuantizer =
+                    p_opt.m_postingQuantizer.empty() ||
+                    Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "None");
+                if (noQuantizer) return true;
+
+                if (!Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "PipePQ") &&
+                    !Helper::StrUtils::StrEqualIgnoreCase(p_opt.m_postingQuantizer.c_str(), "PQ")) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Storage=STATIC currently supports PipePQ only; got PostingQuantizer=%s\n",
+                                 p_opt.m_postingQuantizer.c_str());
+                    return false;
+                }
+                if (p_opt.m_postingQuantM <= 0 || p_opt.m_pipePQPivotsFile.empty() ||
+                    p_opt.m_fullVectorFile.empty() || p_opt.m_quantADCOnly || p_opt.m_rerankL <= 0 ||
+                    p_opt.m_enableDeltaEncoding || p_opt.m_enablePostingListRearrange ||
+                    p_opt.m_enableDataCompression) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ requires M, pivots, FullVectorFile, positive RerankL, "
+                                 "and disables delta/rearrange/compression.\n");
+                    return false;
+                }
+                if (p_opt.m_tailReplicaCount > 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ does not yet support unfilter tails.\n");
+                    return false;
+                }
+                if (!p_opt.m_quantizerFilePath.empty()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ does not support a global quantizer because exact rerank "
+                                 "requires the original vector scalar type.\n");
+                    return false;
+                }
+
+                const std::string pivots = ResolveStaticPath(p_opt.m_pipePQPivotsFile, p_opt);
+                m_staticPipePQTable.reset(new PipePQTable());
+                if (!m_staticPipePQTable->Load(pivots, p_opt.m_postingQuantM) ||
+                    m_staticPipePQTable->Dim() != p_opt.m_dim) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Cannot load static PipePQ pivots: %s\n", pivots.c_str());
+                    return false;
+                }
+
+                m_staticPipePQ = true;
+                m_staticPipePQCodeBytes = p_opt.m_postingQuantM;
+                if (p_needCodes) {
+                    const std::string codes = ResolveStaticPath(p_opt.m_postingQuantFile, p_opt);
+                    if (codes.empty() || !OpenStaticPipePQCodes(codes, m_staticPipePQCodeBytes, p_expectedCount)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            bool ConfigureStaticMetadataForBuild(const Options& p_opt, size_t p_expectedCount)
+            {
+                m_staticHasMetadata = false;
+                m_staticNumTagsPerVec = 0;
+                m_staticMetadataBytes = sizeof(int);
+                if (p_opt.m_numTagsPerVec <= 0) return true;
+
+                const size_t expectedTagCount =
+                    p_expectedCount * static_cast<size_t>(p_opt.m_numTagsPerVec);
+                if (m_staticBuildNumTagsPerVec != p_opt.m_numTagsPerVec ||
+                    m_staticBuildTags.size() != expectedTagCount) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static metadata build requires %zu tags across %d columns; got %zu across %d.\n",
+                        expectedTagCount,
+                        p_opt.m_numTagsPerVec,
+                        m_staticBuildTags.size(),
+                        m_staticBuildNumTagsPerVec);
+                    return false;
+                }
+                if (m_staticPipePQ || p_opt.m_enableDeltaEncoding ||
+                    p_opt.m_enablePostingListRearrange || p_opt.m_enableDataCompression) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Static metadata currently requires raw full-float postings without "
+                        "PipePQ, delta encoding, rearrangement, or compression.\n");
+                    return false;
+                }
+
+                m_staticHasMetadata = true;
+                m_staticNumTagsPerVec = p_opt.m_numTagsPerVec;
+                m_staticMetadataBytes = static_cast<int>(
+                    sizeof(int) + static_cast<size_t>(m_staticNumTagsPerVec) * sizeof(uint32_t));
+                return true;
+            }
+
+            bool OpenStaticRerankFile(Options& p_opt, size_t p_expectedCount)
+            {
+#ifdef _MSC_VER
+                (void)p_opt;
+                (void)p_expectedCount;
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Static PipePQ exact rerank is currently supported on Linux only.\n");
+                return false;
+#else
+                const std::string fullPath = ResolveStaticPath(p_opt.m_fullVectorFile, p_opt);
+                auto header = f_createIO();
+                int32_t dimensions[2] = {0, 0};
+                if (header == nullptr ||
+                    !header->Initialize(fullPath.c_str(), std::ios::binary | std::ios::in) ||
+                    header->ReadBinary(sizeof(dimensions), reinterpret_cast<char*>(dimensions), 0) != sizeof(dimensions) ||
+                    dimensions[0] <= 0 || dimensions[1] != p_opt.m_dim ||
+                    (p_expectedCount > 0 && static_cast<size_t>(dimensions[0]) != p_expectedCount)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ FullVectorFile mismatch: %s\n", fullPath.c_str());
+                    return false;
+                }
+                const std::uint64_t recordBytes = static_cast<std::uint64_t>(p_opt.m_dim) * sizeof(ValueType);
+                const std::uint64_t vectorCount = static_cast<std::uint64_t>(dimensions[0]);
+                if (recordBytes == 0 ||
+                    vectorCount > (std::numeric_limits<std::uint64_t>::max() - sizeof(dimensions)) / recordBytes) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ FullVectorFile size overflows: %s\n", fullPath.c_str());
+                    return false;
+                }
+                struct stat fileStatus {};
+                const std::uint64_t requiredBytes = sizeof(dimensions) + vectorCount * recordBytes;
+                if (stat(fullPath.c_str(), &fileStatus) != 0 || fileStatus.st_size < 0 ||
+                    static_cast<std::uint64_t>(fileStatus.st_size) < requiredBytes) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ FullVectorFile is truncated: %s\n", fullPath.c_str());
+                    return false;
+                }
+
+                m_staticRerankFile = f_createAsyncIO();
+                const int rerankContexts = max(
+                    max(1, p_opt.m_ioThreads),
+                    max(p_opt.m_searchThreadNum, p_opt.m_iSSDNumberOfThreads));
+                if (m_staticRerankFile == nullptr ||
+                    !m_staticRerankFile->Initialize(fullPath.c_str(), O_RDONLY | O_DIRECT,
+                                                     std::max(64, p_opt.m_rerankL), 2, 2,
+                                                     static_cast<std::uint16_t>(rerankContexts))) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Cannot open static PipePQ FullVectorFile: %s\n", fullPath.c_str());
+                    return false;
+                }
+                m_staticRerankHandlers.clear();
+                m_staticRerankHandlers.emplace_back(m_staticRerankFile);
+                m_staticRerankCount = static_cast<size_t>(dimensions[0]);
+                return true;
+#endif
+            }
+
+            bool RerankStaticPipePQ(const std::vector<int>& p_vids, const ValueType* p_query,
+                                    std::shared_ptr<VectorIndex> p_index,
+                                    COMMON::QueryResultSet<ValueType>& p_queryResults,
+                                    ExtraWorkSpace::PostingProbeStats* p_probeStats,
+                                    int p_ioContext)
+            {
+#ifdef _MSC_VER
+                (void)p_vids;
+                (void)p_query;
+                (void)p_index;
+                (void)p_queryResults;
+                (void)p_probeStats;
+                return false;
+#else
+                if (p_vids.empty() || m_staticRerankFile == nullptr || m_staticRerankHandlers.empty()) {
+                    return p_vids.empty();
+                }
+
+                const size_t recordBytes = static_cast<size_t>(m_iDataDimension) * sizeof(ValueType);
+                std::vector<std::uint64_t> pages;
+                pages.reserve(p_vids.size() * 2);
+                for (int vid : p_vids) {
+                    if (vid < 0 || static_cast<size_t>(vid) >= m_staticRerankCount) continue;
+                    const std::uint64_t begin = sizeof(std::int32_t) * 2 +
+                                                static_cast<std::uint64_t>(vid) * recordBytes;
+                    const std::uint64_t end = begin + recordBytes;
+                    const std::uint64_t firstPage = begin >> PageSizeEx;
+                    const std::uint64_t lastPage = (end - 1) >> PageSizeEx;
+                    for (std::uint64_t page = firstPage; page <= lastPage; ++page) {
+                        pages.push_back(page);
+                    }
+                }
+
+                std::sort(pages.begin(), pages.end());
+                pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+                struct PageRange
+                {
+                    std::uint64_t firstPage;
+                    size_t pageCount;
+                };
+                std::vector<PageRange> ranges;
+                ranges.reserve(pages.size());
+                std::unordered_map<std::uint64_t, size_t> pageRanges;
+                for (size_t begin = 0; begin < pages.size();) {
+                    size_t end = begin + 1;
+                    while (end < pages.size() && pages[end] == pages[end - 1] + 1) ++end;
+                    const size_t rangeIndex = ranges.size();
+                    ranges.push_back({ pages[begin], end - begin });
+                    for (size_t i = begin; i < end; ++i) pageRanges.emplace(pages[i], rangeIndex);
+                    begin = end;
+                }
+
+                std::vector<Helper::PageBuffer<std::uint8_t>> pageBuffers(ranges.size());
+                std::vector<Helper::AsyncReadRequest> requests(ranges.size());
+                for (size_t i = 0; i < ranges.size(); ++i) {
+                    const size_t readBytes = ranges[i].pageCount * static_cast<size_t>(PageSize);
+                    pageBuffers[i].ReservePageBuffer(readBytes);
+                    pageBuffers[i].SetAvailableSize(readBytes);
+                    auto& request = requests[i];
+                    request.m_buffer = reinterpret_cast<char*>(pageBuffers[i].GetBuffer());
+                    request.m_offset = ranges[i].firstPage << PageSizeEx;
+                    request.m_readSize = readBytes;
+                    request.m_status = p_ioContext;
+                    request.m_callback = [](bool) {};
+                }
+                if (!Helper::BatchReadFileAsync(m_staticRerankHandlers, requests.data(),
+                                                static_cast<int>(requests.size()))) {
+                    return false;
+                }
+
+                std::vector<ValueType> rerankVector(static_cast<size_t>(m_iDataDimension));
+                for (int vid : p_vids) {
+                    if (vid < 0 || static_cast<size_t>(vid) >= m_staticRerankCount) continue;
+                    std::uint8_t* destination = reinterpret_cast<std::uint8_t*>(rerankVector.data());
+                    size_t remaining = recordBytes;
+                    std::uint64_t cursor = sizeof(std::int32_t) * 2 +
+                                           static_cast<std::uint64_t>(vid) * recordBytes;
+                    while (remaining > 0) {
+                        const std::uint64_t page = cursor >> PageSizeEx;
+                        const size_t pageOffset = static_cast<size_t>(cursor & (PageSize - 1));
+                        const size_t copyBytes = (std::min)(remaining, static_cast<size_t>(PageSize) - pageOffset);
+                        auto found = pageRanges.find(page);
+                        if (found == pageRanges.end()) return false;
+                        const auto& range = ranges[found->second];
+                        const size_t rangeOffset =
+                            static_cast<size_t>(page - range.firstPage) * PageSize + pageOffset;
+                        std::memcpy(destination, pageBuffers[found->second].GetBuffer() + rangeOffset, copyBytes);
+                        destination += copyBytes;
+                        cursor += copyBytes;
+                        remaining -= copyBytes;
+                    }
+                    p_queryResults.AddPoint(vid, p_index->ComputeDistance(p_query, rerankVector.data()));
+                }
+
+                if (p_probeStats != nullptr) {
+                    p_probeStats->m_rerankCandidates += p_vids.size();
+                    p_probeStats->m_rerankReadRequests += ranges.size();
+                    p_probeStats->m_rerankPhysicalBytes += pages.size() * PageSize;
+                }
+                return true;
+#endif
+            }
+
+            ErrorCode SearchIndexPipePQ(ExtraWorkSpace* p_exWorkSpace, QueryResult& p_queryResults,
+                                        std::shared_ptr<VectorIndex> p_index, SearchStats* p_stats,
+                                        std::set<int>* truth, std::map<int, std::set<int>>* found)
+            {
+                (void)truth;
+                (void)found;
+                COMMON::QueryResultSet<ValueType>& queryResults =
+                    *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
+                if (m_staticPipePQTable == nullptr || m_staticRerankFile == nullptr ||
+                    m_opt->m_rerankL < m_opt->m_resultNum) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static PipePQ search is not initialized or RerankL is smaller than result count.\n");
+                    return ErrorCode::Fail;
+                }
+                p_exWorkSpace->m_postingProbeStats.Reset();
+
+                std::vector<float> query(static_cast<size_t>(m_iDataDimension));
+                const ValueType* rawQuery = queryResults.GetTarget();
+                for (int d = 0; d < m_iDataDimension; ++d) query[d] = static_cast<float>(rawQuery[d]);
+                if (m_opt->m_distCalcMethod == DistCalcMethod::Cosine) {
+                    COMMON::Utils::Normalize<float>(query.data(), m_iDataDimension, COMMON::Utils::GetBase<float>());
+                }
+                std::vector<float> lut(static_cast<size_t>(m_staticPipePQCodeBytes) * 256);
+                m_staticPipePQTable->PopulateDistances(query.data(), lut.data(), m_opt->m_distCalcMethod);
+
+                std::priority_queue<std::pair<float, int>> survivors;
+                int listElements = 0;
+                int diskPages = 0;
+                const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+                auto scanPosting = [&](ListInfo* listInfo, char* buffer) {
+                    const std::uint8_t* records = reinterpret_cast<const std::uint8_t*>(buffer + listInfo->pageOffset);
+                    for (int i = 0; i < listInfo->listEleCount; ++i) {
+                        const std::uint8_t* record = records + static_cast<size_t>(i) * m_vectorInfoSize;
+                        int vid = -1;
+                        std::memcpy(&vid, record, sizeof(vid));
+                        if (vid < 0 || p_exWorkSpace->m_deduper.CheckAndSet(vid)) {
+                            --listElements;
+                            continue;
+                        }
+                        const std::uint8_t* code = record + sizeof(int);
+                        float distance = 0.0f;
+                        for (int m = 0; m < m_staticPipePQCodeBytes; ++m) {
+                            distance += lut[static_cast<size_t>(m) * 256 + code[m]];
+                        }
+                        if (static_cast<int>(survivors.size()) < m_opt->m_rerankL) {
+                            survivors.emplace(distance, vid);
+                        }
+                        else if (distance < survivors.top().first) {
+                            survivors.pop();
+                            survivors.emplace(distance, vid);
+                        }
+                    }
+                };
+
+                for (uint32_t pi = 0; pi < postingListCount; ++pi) {
+                    const SizeType postingId = p_exWorkSpace->m_postingIDs[pi];
+                    if (postingId < 0 || postingId >= m_totalListCount) continue;
+                    ListInfo* listInfo = &m_listInfos[postingId];
+                    const int fileid = m_oneContext ? 0 : postingId / m_listPerFile;
+                    diskPages += listInfo->listPageCount;
+                    listElements += listInfo->listEleCount;
+                    auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_offset = listInfo->listOffset;
+                    request.m_readSize = static_cast<size_t>(listInfo->listPageCount) << PageSizeEx;
+                    request.m_status = (fileid << 16) | (request.m_status & 0xffff);
+                    request.m_payload = listInfo;
+                    request.m_success = false;
+                    request.m_callback = [&scanPosting, &request, listInfo](bool success) {
+                        if (success) scanPosting(listInfo, request.m_buffer);
+                    };
+                }
+                if (!Helper::BatchReadFileAsync(m_indexFiles, p_exWorkSpace->m_diskRequests.data(),
+                                                static_cast<int>(postingListCount))) {
+                    return ErrorCode::DiskIOFail;
+                }
+
+                std::vector<int> rerankVIDs;
+                rerankVIDs.reserve(survivors.size());
+                while (!survivors.empty()) {
+                    rerankVIDs.push_back(survivors.top().second);
+                    survivors.pop();
+                }
+                const int rerankIOContext = p_exWorkSpace->m_diskRequests.empty()
+                    ? 0
+                    : (p_exWorkSpace->m_diskRequests.front().m_status & 0xffff);
+                if (!RerankStaticPipePQ(rerankVIDs, rawQuery, p_index, queryResults,
+                                        &p_exWorkSpace->m_postingProbeStats, rerankIOContext)) {
+                    return ErrorCode::DiskIOFail;
+                }
+
+                p_exWorkSpace->m_postingProbeStats.m_readPostings += postingListCount;
+                p_exWorkSpace->m_postingProbeStats.m_scannedVectors +=
+                    static_cast<std::uint64_t>((std::max)(listElements, 0));
+                p_exWorkSpace->m_postingProbeStats.m_adcScannedVectors +=
+                    static_cast<std::uint64_t>((std::max)(listElements, 0));
+                p_exWorkSpace->m_postingProbeStats.m_adcSurvivors += rerankVIDs.size();
+                p_exWorkSpace->m_postingProbeStats.m_postingPageReads += diskPages;
+                p_exWorkSpace->m_postingProbeStats.m_postingPhysicalBytes +=
+                    static_cast<std::uint64_t>(diskPages) * PageSize;
+                if (p_stats != nullptr) {
+                    const auto& probeStats = p_exWorkSpace->m_postingProbeStats;
+                    const std::uint64_t rerankPages =
+                        probeStats.m_rerankPhysicalBytes / static_cast<std::uint64_t>(PageSize);
+                    p_stats->m_totalListElementsCount = listElements;
+                    p_stats->m_diskIOCount = static_cast<int>(
+                        postingListCount + probeStats.m_rerankReadRequests);
+                    p_stats->m_diskAccessCount = static_cast<int>(diskPages + rerankPages);
+                }
+                queryResults.SetScanned(listElements);
+                return ErrorCode::Success;
+            }
 
             int LoadingHeadInfo(const std::string& p_file, int p_postingPageLimit, std::vector<ListInfo>& p_listInfos)
             {
@@ -1185,31 +2589,135 @@ namespace SPTAG
                 }
                 m_pCompressor = std::make_unique<Compressor>(); // no need compress level to decompress
 
-                int m_listCount;
-                int m_totalDocumentCount;
-                int m_listPageOffset;
-
-                if (ptr->ReadBinary(sizeof(m_listCount), reinterpret_cast<char*>(&m_listCount)) != sizeof(m_listCount)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
-                }
-                if (ptr->ReadBinary(sizeof(m_totalDocumentCount), reinterpret_cast<char*>(&m_totalDocumentCount)) != sizeof(m_totalDocumentCount)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
-                }
-                if (ptr->ReadBinary(sizeof(m_iDataDimension), reinterpret_cast<char*>(&m_iDataDimension)) != sizeof(m_iDataDimension)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
-                    throw std::runtime_error("Failed read file in LoadingHeadInfo");
-                }
-                if (ptr->ReadBinary(sizeof(m_listPageOffset), reinterpret_cast<char*>(&m_listPageOffset)) != sizeof(m_listPageOffset)) {
+                auto readInt = [&ptr](int& value) {
+                    return ptr->ReadBinary(sizeof(value), reinterpret_cast<char*>(&value)) == sizeof(value);
+                };
+                int firstHeaderValue = 0;
+                int m_listCount = 0;
+                int m_totalDocumentCount = 0;
+                int m_listPageOffset = 0;
+                if (!readInt(firstHeaderValue)) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
 
-                if (m_vectorInfoSize == 0) m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(int);
-                else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(int)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
-                    throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
+                const bool quantizedHeader =
+                    static_cast<std::uint32_t>(firstHeaderValue) == kStaticPipePQMagic;
+                const bool tailHeader =
+                    static_cast<std::uint32_t>(firstHeaderValue) == kStaticTailMagic;
+                const bool metadataHeader =
+                    static_cast<std::uint32_t>(firstHeaderValue) == kStaticMetadataMagic;
+                if (metadataHeader) {
+                    int version = 0;
+                    int recordBytes = 0;
+                    int numTagsPerVec = 0;
+                    int tailPageBudget = 0;
+                    if (!readInt(version) || !readInt(m_listCount) || !readInt(m_totalDocumentCount) ||
+                        !readInt(m_iDataDimension) || !readInt(recordBytes) ||
+                        !readInt(numTagsPerVec) || !readInt(tailPageBudget) ||
+                        !readInt(m_listPageOffset)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to read static metadata header!\n");
+                        throw std::runtime_error("Failed read static metadata header");
+                    }
+                    const int metadataBytes =
+                        static_cast<int>(sizeof(int) +
+                                         static_cast<size_t>(numTagsPerVec) * sizeof(uint32_t));
+                    const int expectedRecordBytes =
+                        m_iDataDimension * sizeof(ValueType) + metadataBytes;
+                    if (version != kStaticMetadataVersion || m_staticPipePQ || numTagsPerVec <= 0 ||
+                        recordBytes != expectedRecordBytes || tailPageBudget < -1) {
+                        SPTAGLIB_LOG(
+                            Helper::LogLevel::LL_Error,
+                            "Static metadata header mismatch: version=%d record=%d dim=%d tags=%d tailPages=%d\n",
+                            version, recordBytes, m_iDataDimension, numTagsPerVec, tailPageBudget);
+                        throw std::runtime_error("Static metadata header mismatch");
+                    }
+                    m_vectorInfoSize = recordBytes;
+                    m_staticHasMetadata = true;
+                    m_staticNumTagsPerVec = numTagsPerVec;
+                    m_staticMetadataBytes = metadataBytes;
+                    m_staticHasUnfilterTail = false;
+                    m_staticTailPageBudget = tailPageBudget;
+                }
+                else if (tailHeader) {
+                    m_staticHasMetadata = false;
+                    m_staticNumTagsPerVec = 0;
+                    m_staticMetadataBytes = sizeof(int);
+                    int version = 0;
+                    int recordBytes = 0;
+                    int tailPageBudget = 0;
+                    if (!readInt(version) || !readInt(m_listCount) || !readInt(m_totalDocumentCount) ||
+                        !readInt(m_iDataDimension) || !readInt(recordBytes) || !readInt(tailPageBudget) ||
+                        !readInt(m_listPageOffset)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to read static tail header!\n");
+                        throw std::runtime_error("Failed read static tail header");
+                    }
+                    const int rawRecordBytes = m_iDataDimension * sizeof(ValueType) + sizeof(int);
+                    if (version != kStaticTailVersion || m_staticPipePQ || recordBytes != rawRecordBytes ||
+                        tailPageBudget < -1) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static tail header mismatch: version=%d record=%d dim=%d tailPages=%d\n",
+                                     version, recordBytes, m_iDataDimension, tailPageBudget);
+                        throw std::runtime_error("Static tail header mismatch");
+                    }
+                    m_vectorInfoSize = recordBytes;
+                    m_staticHasUnfilterTail = false;
+                    m_staticTailPageBudget = tailPageBudget;
+                }
+                else if (quantizedHeader) {
+                    m_staticHasUnfilterTail = false;
+                    m_staticTailPageBudget = 0;
+                    m_staticHasMetadata = false;
+                    m_staticNumTagsPerVec = 0;
+                    m_staticMetadataBytes = sizeof(int);
+                    int version = 0;
+                    int recordBytes = 0;
+                    int codeBytes = 0;
+                    if (!readInt(version) || !readInt(m_listCount) || !readInt(m_totalDocumentCount) ||
+                        !readInt(m_iDataDimension) || !readInt(recordBytes) || !readInt(codeBytes) ||
+                        !readInt(m_listPageOffset)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read static PipePQ header!\n");
+                        throw std::runtime_error("Failed read static PipePQ header");
+                    }
+                    if (version != kStaticPipePQVersion || !m_staticPipePQ ||
+                        codeBytes != m_staticPipePQCodeBytes ||
+                        recordBytes != static_cast<int>(sizeof(int) + codeBytes) ||
+                        m_iDataDimension != m_staticPipePQDimension) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static PipePQ header mismatch: version=%d code=%d record=%d dim=%d\n",
+                                     version, codeBytes, recordBytes, m_iDataDimension);
+                        throw std::runtime_error("Static PipePQ header mismatch");
+                    }
+                    m_vectorInfoSize = recordBytes;
+                }
+                else {
+                    m_staticHasUnfilterTail = false;
+                    m_staticTailPageBudget = 0;
+                    m_staticHasMetadata = false;
+                    m_staticNumTagsPerVec = 0;
+                    m_staticMetadataBytes = sizeof(int);
+                    if (m_staticPipePQ) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static PipePQ was requested but %s has a legacy raw-vector header.\n",
+                                     p_file.c_str());
+                        throw std::runtime_error("Static PipePQ header missing");
+                    }
+                    m_listCount = firstHeaderValue;
+                    if (!readInt(m_totalDocumentCount) || !readInt(m_iDataDimension) ||
+                        !readInt(m_listPageOffset)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
+                        throw std::runtime_error("Failed read file in LoadingHeadInfo");
+                    }
+                    if (m_vectorInfoSize == 0) {
+                        m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(int);
+                    }
+                    else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(int)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to read head info file! DataDimension and ValueType are not match!\n");
+                        throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
+                    }
                 }
 
                 size_t totalListCount = p_listInfos.size();
@@ -1249,12 +2757,57 @@ namespace SPTAG
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file!\n");
                         throw std::runtime_error("Failed read file in LoadingHeadInfo");
                     }
+                    m_staticMaxListPageCount = (std::max)(
+                        m_staticMaxListPageCount, static_cast<int>(listInfo->listPageCount));
+                    listInfo->pureEleCount = listInfo->listEleCount;
+                    if (tailHeader || metadataHeader) {
+                        if (ptr->ReadBinary(sizeof(listInfo->pureEleCount),
+                                            reinterpret_cast<char*>(&(listInfo->pureEleCount))) !=
+                            sizeof(listInfo->pureEleCount)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Failed to read static tail pure count!\n");
+                            throw std::runtime_error("Failed read static tail pure count");
+                        }
+                        if (listInfo->pureEleCount < 0 || listInfo->pureEleCount > listInfo->listEleCount) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Invalid static tail pure count: pure=%d total=%d\n",
+                                         listInfo->pureEleCount, listInfo->listEleCount);
+                            throw std::runtime_error("Invalid static tail pure count");
+                        }
+                        if (listInfo->pureEleCount < listInfo->listEleCount) {
+                            m_staticHasUnfilterTail = true;
+                        }
+                        if (m_staticTailPageBudget > 0 && p_postingPageLimit > 0 &&
+                            listInfo->listPageCount > p_postingPageLimit) {
+                            SPTAGLIB_LOG(
+                                Helper::LogLevel::LL_Error,
+                                "Static tail posting needs %u pages but SearchPostingPageLimit is %d; "
+                                "refusing to truncate the tail.\n",
+                                listInfo->listPageCount, p_postingPageLimit);
+                            throw std::runtime_error("Static tail search page limit too small");
+                        }
+                    }
                     listInfo->listOffset = (static_cast<uint64_t>(m_listPageOffset + pageNum) << PageSizeEx);
                     if (!m_enableDataCompression)
                     {
                         listInfo->listTotalBytes = listInfo->listEleCount * m_vectorInfoSize;
-                        listInfo->listEleCount = min(listInfo->listEleCount, (min(static_cast<int>(listInfo->listPageCount), p_postingPageLimit) << PageSizeEx) / m_vectorInfoSize);
-                        listInfo->listPageCount = static_cast<std::uint16_t>(ceil((m_vectorInfoSize * listInfo->listEleCount + listInfo->pageOffset) * 1.0 / (1 << PageSizeEx)));
+                        if (m_staticTailPageBudget >= 0) {
+                            listInfo->listEleCount = min(
+                                listInfo->listEleCount,
+                                (min(static_cast<int>(listInfo->listPageCount), p_postingPageLimit) <<
+                                 PageSizeEx) /
+                                    m_vectorInfoSize);
+                            if (m_staticHasUnfilterTail &&
+                                listInfo->listEleCount < listInfo->pureEleCount) {
+                                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                             "Static tail load truncated pure prefix: pure=%d loaded=%d\n",
+                                             listInfo->pureEleCount, listInfo->listEleCount);
+                                throw std::runtime_error("Static tail pure prefix truncated");
+                            }
+                            listInfo->listPageCount = static_cast<std::uint16_t>(
+                                ceil((m_vectorInfoSize * listInfo->listEleCount + listInfo->pageOffset) *
+                                     1.0 / (1 << PageSizeEx)));
+                        }
                     }
                     totalListElementCount += listInfo->listEleCount;
                     int pageCount = listInfo->listPageCount;
@@ -1328,7 +2881,7 @@ namespace SPTAG
             inline void ParsePostingList(uint64_t& offsetVectorID, uint64_t& offsetVector, int i, int eleCount)
             {
                 offsetVectorID = m_vectorInfoSize * i;
-                offsetVector = offsetVectorID + sizeof(int);
+                offsetVector = offsetVectorID + m_staticMetadataBytes;
             }
 
             inline void ParseDeltaEncoding(std::shared_ptr<VectorIndex>& p_index, ListInfo* p_info, ValueType* vector)
@@ -1439,7 +2992,9 @@ namespace SPTAG
                 const std::unique_ptr<std::uint16_t[]>& p_postPageOffset,
                 const std::vector<int>& p_postingOrderInIndex,
                 std::shared_ptr<VectorSet> p_fullVectors,
-                size_t p_postingListOffset)
+                size_t p_postingListOffset,
+                const std::vector<int>* p_pureCounts,
+                int p_tailPageBudget)
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start output...\n");
 
@@ -1458,10 +3013,30 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed open file %s\n", p_outputFile.c_str());
                     throw std::runtime_error("Failed to open file for SSD index save");
                 }
-                // meta size of global info
-                std::uint64_t listOffset = sizeof(int) * 4;
+                const bool staticTailHeader = p_pureCounts != nullptr;
+                const bool staticMetadataHeader = m_staticHasMetadata;
+                if (staticTailHeader &&
+                    (m_staticPipePQ || p_pureCounts->size() != p_postingListSizes.size() ||
+                     p_tailPageBudget < -1)) {
+                    throw std::runtime_error("Invalid static tail output configuration");
+                }
+                if (staticMetadataHeader && !staticTailHeader) {
+                    throw std::runtime_error("Static metadata output requires pure-count metadata");
+                }
+                // The legacy format begins with four integers. Static PipePQ and
+                // static tail/metadata snapshots use versioned headers so record
+                // metadata is never inferred from the legacy vector-only layout.
+                std::uint64_t listOffset =
+                    staticMetadataHeader ? sizeof(int) * kStaticMetadataHeaderInts
+                                        : (staticTailHeader ? sizeof(int) * kStaticTailHeaderInts
+                                                            : (m_staticPipePQ
+                                                                   ? sizeof(int) * kStaticPipePQHeaderInts
+                                                                   : sizeof(int) * 4));
                 // meta size of the posting lists
                 listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t)) * p_postingListSizes.size();
+                if (staticTailHeader) {
+                    listOffset += sizeof(int) * p_postingListSizes.size();
+                }
                 // write listTotalBytes only when enabled data compression
                 if (p_enableDataCompression)
                 {
@@ -1488,32 +3063,48 @@ namespace SPTAG
                     listOffset += paddingSize;
                 }
 
-                // Number of posting lists
-                int i32Val = static_cast<int>(p_postingListSizes.size());
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                auto writeHeaderInt = [&ptr](int value) {
+                    if (ptr->WriteBinary(sizeof(value), reinterpret_cast<char*>(&value)) != sizeof(value)) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
+                        throw std::runtime_error("Failed to write SSDIndex header");
+                    }
+                };
+                if (staticMetadataHeader) {
+                    writeHeaderInt(static_cast<int>(kStaticMetadataMagic));
+                    writeHeaderInt(kStaticMetadataVersion);
+                    writeHeaderInt(static_cast<int>(p_postingListSizes.size()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Count()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Dimension()));
+                    writeHeaderInt(static_cast<int>(p_spacePerVector));
+                    writeHeaderInt(m_staticNumTagsPerVec);
+                    writeHeaderInt(p_tailPageBudget);
+                    writeHeaderInt(static_cast<int>(listOffset / PageSize));
                 }
-
-                // Number of vectors
-                i32Val = static_cast<int>(p_fullVectors->Count());
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                else if (staticTailHeader) {
+                    writeHeaderInt(static_cast<int>(kStaticTailMagic));
+                    writeHeaderInt(kStaticTailVersion);
+                    writeHeaderInt(static_cast<int>(p_postingListSizes.size()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Count()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Dimension()));
+                    writeHeaderInt(static_cast<int>(p_spacePerVector));
+                    writeHeaderInt(p_tailPageBudget);
+                    writeHeaderInt(static_cast<int>(listOffset / PageSize));
                 }
-
-                // Vector dimension
-                i32Val = static_cast<int>(p_fullVectors->Dimension());
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                else if (m_staticPipePQ) {
+                    writeHeaderInt(static_cast<int>(kStaticPipePQMagic));
+                    writeHeaderInt(kStaticPipePQVersion);
+                    writeHeaderInt(static_cast<int>(p_postingListSizes.size()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Count()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Dimension()));
+                    writeHeaderInt(static_cast<int>(p_spacePerVector));
+                    writeHeaderInt(m_staticPipePQCodeBytes);
+                    writeHeaderInt(static_cast<int>(listOffset / PageSize));
                 }
-
-                // Page offset of list content section
-                i32Val = static_cast<int>(listOffset / PageSize);
-                if (ptr->WriteBinary(sizeof(i32Val), reinterpret_cast<char*>(&i32Val)) != sizeof(i32Val)) {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
-                    throw std::runtime_error("Failed to write SSDIndex File");
+                else {
+                    writeHeaderInt(static_cast<int>(p_postingListSizes.size()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Count()));
+                    writeHeaderInt(static_cast<int>(p_fullVectors->Dimension()));
+                    writeHeaderInt(static_cast<int>(listOffset / PageSize));
                 }
 
                 // Meta of each posting list
@@ -1561,6 +3152,16 @@ namespace SPTAG
                     if (ptr->WriteBinary(sizeof(listPageCount), reinterpret_cast<char*>(&listPageCount)) != sizeof(listPageCount)) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write SSDIndex File!");
                         throw std::runtime_error("Failed to write SSDIndex File");
+                    }
+                    if (staticTailHeader) {
+                        const int pureCount = p_pureCounts->at(i);
+                        if (pureCount < 0 || pureCount > listEleCount ||
+                            ptr->WriteBinary(sizeof(pureCount), reinterpret_cast<const char*>(&pureCount)) !=
+                                sizeof(pureCount)) {
+                            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                         "Failed to write static tail pure count!\n");
+                            throw std::runtime_error("Failed to write static tail pure count");
+                        }
                     }
                 }
                 // compression dict
@@ -1753,6 +3354,34 @@ namespace SPTAG
             int m_totalListCount = 0;
 
             int m_listPerFile = 0;
+
+            bool m_staticPipePQ = false;
+            int m_staticPipePQCodeBytes = 0;
+            int m_staticPipePQDimension = 0;
+            bool m_staticHasUnfilterTail = false;
+            int m_staticTailPageBudget = 0;
+            int m_staticMaxListPageCount = 0;
+            bool m_staticHasMetadata = false;
+            int m_staticNumTagsPerVec = 0;
+            int m_staticMetadataBytes = sizeof(int);
+            std::vector<uint32_t> m_staticBuildTags;
+            int m_staticBuildNumTagsPerVec = 0;
+            std::vector<std::vector<SizeType>> m_staticNodeVectorAssignments;
+            std::vector<std::vector<SizeType>> m_staticPrimaryNodeVectorAssignments;
+            std::unordered_map<SizeType, int> m_staticHeadVectorOwners;
+            std::vector<int> m_staticBuildVectorOwners;
+            std::vector<int> m_staticBuildHeadOwners;
+            std::unique_ptr<PipePQTable> m_staticPipePQTable;
+            const std::uint8_t* m_staticPipePQCodes = nullptr;
+            size_t m_staticPipePQN = 0;
+#ifndef _MSC_VER
+            int m_staticPipePQCodeFd = -1;
+            void* m_staticPipePQCodeMap = nullptr;
+#endif
+            size_t m_staticPipePQCodeMapBytes = 0;
+            std::shared_ptr<Helper::DiskIO> m_staticRerankFile;
+            std::vector<std::shared_ptr<Helper::DiskIO>> m_staticRerankHandlers;
+            size_t m_staticRerankCount = 0;
         };
     } // namespace SPANN
 } // namespace SPTAG

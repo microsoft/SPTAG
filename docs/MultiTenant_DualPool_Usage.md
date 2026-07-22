@@ -1,5 +1,12 @@
 # Multi-Tenant Dual-Pool SPANN — Usage Modes
 
+> **Historical ablation reference.** These commands predate the native sectioned
+> INI workflow and use environment variables for controlled experiments. For
+> reproducible builds and searches, use
+> [Experiment_Workflow.md](Experiment_Workflow.md) plus
+> `Tools/benchmarks/run_spann_attr_build.sh <config.ini>`; keep build/search
+> parameters in the INI rather than exporting `SPTAG_*` overrides.
+
 This branch (`feature/filtered-head-unfiltered-tail`) extends SPANN with a
 multi-tenant, per-tag **dual-pool** head index. **All modes share one binary**
 (`_SPTAG.so`); behavior is selected entirely through environment variables and

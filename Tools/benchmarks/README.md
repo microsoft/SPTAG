@@ -1,5 +1,36 @@
 # Benchmark Scripts
 
+## STM1 Static Metadata Demo
+
+The native INI is the source of truth for build and search settings. The
+committed Float SIFT-1M fixture demonstrates node-pure STM1 postings, unbounded
+unfilter tails, and the exact member-OR posting prefilter:
+
+```bash
+cmake --build build --target spannbuilder spannaclbench -j
+
+CFG=Tools/benchmarks/build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded_prefilter.ini
+Tools/benchmarks/run_spann_attr_build.sh "$CFG"
+
+IDX=/datadisk/yfcc_fast/sptag_sift1m_tagged_vs_upstream/index_tagged_4node_static_fullfloat_tail_unbounded_prefilter
+QDIR=/home/v-mochengli/datasets/sift1m/multitenant/query
+
+Release/spannaclbench \
+  --index "$IDX" \
+  --queries "$QDIR/query_vectors.npy" \
+  --truth "$QDIR/groundtruth_project_local_ids.npy" \
+  --query-tags "$QDIR/query_tags.npy" \
+  --tag-column 3 \
+  --warmup 200 --max-queries 1000
+```
+
+`[SearchSSDIndex]` in the INI controls the persisted search behavior:
+`InternalResultNum`/`FixedNprobe`, `EnableUnfilterTail`, and
+`EnableHierPostingFilter`. Do not override these with `SPTAG_*` environment
+variables. The JSON output includes recall/QPS and loaded-posting contribution
+metrics when `CollectPostingContributionStats=true` is enabled in a diagnostic
+search overlay.
+
 ## Multi-Tenant Tag Cache Stress
 
 Files:

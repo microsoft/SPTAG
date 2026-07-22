@@ -41,8 +41,8 @@ read-time logic can truncate.
 
 * **Filtered query**: `maxBytes[i] = pure_count[h] * recSize` → tail blocks
   are never fetched from SSD; filtered cost stays at the baseline.
-* **Unfilter query** (`SPTAG_UNFILTER_TAIL=1`): `maxBytes[i] = 0` (no cap), so
-  the entire posting including tail is read and scored.
+* **Unfilter query** (`[SearchSSDIndex] EnableUnfilterTail=true`): the entire
+  posting including tail is read and scored.
 
 `FileIO::BlockController::ReadBlocks` honours the per-key cap by computing
 `ceil(min(addr[0], maxBytes[i]) / PageSize)` blocks per key.
@@ -82,13 +82,14 @@ only tail is discarded when it is below 10% occupied.
 | --- | --- | --- |
 | `TailReplicaCount` (`[BuildSSDIndex]`) | build-time SSD param (ini only) | number of tag-agnostic tail copies per vector |
 | `UnfilterTailBufferLength` (`[BuildSSDIndex]`) | build & search SSD param (ini only) | maximum extra physical tail pages beyond each posting's pure prefix |
-| `SPTAG_UNFILTER_TAIL` | search env, `0/1` | gate the truncated-MultiGet branch at query time |
+| `EnableUnfilterTail` (`[SearchSSDIndex]`) | persisted search param | enables tail reads for unfiltered queries |
 
 `UnfilterTailBufferLength` is a native SSD param persisted in `indexloader.ini`,
 so the same ini value sizes the on-disk mapping at build time and the in-memory
-workspace at search time. The ini is the single source of truth — there is no
-env override (`SPTAG_UNFILTER_TAIL_K_REPLICA` / `SPTAG_UNFILTER_TAIL_BUFFER_PAGES`
-have been removed).
+workspace at search time. `EnableUnfilterTail` is likewise persisted under
+`[SearchSSDIndex]`. The native ini is the single source of truth; legacy
+`SPTAG_UNFILTER_TAIL*` experiment environment variables are not part of the
+current demo contract.
 
 ## Tagged online inserts
 
@@ -273,8 +274,8 @@ drop later replicas. Sidecar `posting_pure_counts.bin` ≈ 111 KB.
 ## Reproduce
 
 ```bash
-# build with K_replica=4 and +5 tail pages
-# (set [BuildSSDIndex] TailReplicaCount=4 / UnfilterTailBufferLength=5 in the ini)
+# Historical reproduction: build with K_replica=4 and +5 tail pages.
+# Current native configs also persist [SearchSSDIndex] EnableUnfilterTail=true.
 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 \
 PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     /home/v-mochengli/test/build_tenant0_pertag.py \
@@ -283,9 +284,9 @@ PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     --unfilter-tail-k-replica 4 \
     -o /home/v-mochengli/test/tenant_index_huffman_pure_r069_ut4_extbuf
 
-# sweep with truncated unfilter read (tail buffer comes from the persisted ini)
+# Historical sweep; current native demo uses the persisted EnableUnfilterTail
+# setting and does not export SPTAG_UNFILTER_TAIL.
 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 \
-SPTAG_UNFILTER_TAIL=1 \
 PYTHONPATH=/home/v-mochengli/SPTAG python3 \
     /home/v-mochengli/test/huffman_sweeps/strong_sweep_fine.py \
     /home/v-mochengli/test/tenant_index_huffman_pure_r069_ut4_extbuf \

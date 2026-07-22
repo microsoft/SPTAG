@@ -24,6 +24,7 @@
 #include <map>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <cstring>
 #include <unordered_set>
 #include <unordered_map>
@@ -126,6 +127,99 @@ uint64_t GetPathSizeBytes(const std::string& path)
 
     closedir(dir);
     return totalBytes;
+}
+
+bool BuildStaticPostingHierMasks(const std::string& p_snapshotPath,
+                                 int p_expectedHeadCount,
+                                 int p_expectedTagCount,
+                                 std::vector<SPTAG::Cache::HierarchicalPostingMask>& p_masks)
+{
+    constexpr std::uint32_t kStaticMetadataMagic = 0x314D5453U; // "STM1"
+    constexpr int kHeaderIntCount = 9;
+    constexpr size_t kPageSize = 4096;
+
+    std::ifstream input(p_snapshotPath, std::ios::binary);
+    if (!input) {
+        fprintf(stderr, "[ERROR] Cannot open static snapshot %s for posting masks\n", p_snapshotPath.c_str());
+        return false;
+    }
+
+    std::int32_t header[kHeaderIntCount] = {};
+    if (!input.read(reinterpret_cast<char*>(header), sizeof(header))) {
+        fprintf(stderr, "[ERROR] Cannot read STM1 header from %s\n", p_snapshotPath.c_str());
+        return false;
+    }
+
+    const std::uint32_t magic = static_cast<std::uint32_t>(header[0]);
+    const int version = header[1];
+    const int listCount = header[2];
+    const int recordBytes = header[5];
+    const int tagCount = header[6];
+    const int listPageOffset = header[8];
+    const int metadataBytes = static_cast<int>(sizeof(std::int32_t) +
+                                               static_cast<size_t>(tagCount) * sizeof(std::uint32_t));
+    if (magic != kStaticMetadataMagic || version != 1 || listCount != p_expectedHeadCount ||
+        tagCount != p_expectedTagCount || tagCount <= 0 || recordBytes < metadataBytes ||
+        listPageOffset < 0) {
+        fprintf(stderr,
+                "[ERROR] Invalid STM1 header for posting masks: magic=%u version=%d lists=%d expected=%d "
+                "record=%d tags=%d expectedTags=%d pages=%d\n",
+                magic, version, listCount, p_expectedHeadCount, recordBytes, tagCount,
+                p_expectedTagCount, listPageOffset);
+        return false;
+    }
+
+    struct ListInfo {
+        std::int32_t pageNum = 0;
+        std::uint16_t pageOffset = 0;
+        std::int32_t elementCount = 0;
+        std::uint16_t pageCount = 0;
+        std::int32_t pureCount = 0;
+    };
+    std::vector<ListInfo> lists(static_cast<size_t>(listCount));
+    for (auto& list : lists) {
+        if (!input.read(reinterpret_cast<char*>(&list.pageNum), sizeof(list.pageNum)) ||
+            !input.read(reinterpret_cast<char*>(&list.pageOffset), sizeof(list.pageOffset)) ||
+            !input.read(reinterpret_cast<char*>(&list.elementCount), sizeof(list.elementCount)) ||
+            !input.read(reinterpret_cast<char*>(&list.pageCount), sizeof(list.pageCount)) ||
+            !input.read(reinterpret_cast<char*>(&list.pureCount), sizeof(list.pureCount)) ||
+            list.pageNum < 0 || list.pureCount < 0 || list.pureCount > list.elementCount) {
+            fprintf(stderr, "[ERROR] Invalid STM1 posting-list metadata in %s\n", p_snapshotPath.c_str());
+            return false;
+        }
+    }
+
+    p_masks.assign(static_cast<size_t>(listCount), SPTAG::Cache::HierarchicalPostingMask());
+    for (int postingId = 0; postingId < listCount; ++postingId) {
+        const auto& list = lists[static_cast<size_t>(postingId)];
+        if (list.pureCount == 0) continue;
+
+        const std::uint64_t recordOffset =
+            (static_cast<std::uint64_t>(listPageOffset) + static_cast<std::uint64_t>(list.pageNum)) *
+                kPageSize +
+            list.pageOffset;
+        const size_t bytes = static_cast<size_t>(list.pureCount) * static_cast<size_t>(recordBytes);
+        std::vector<char> records(bytes);
+        input.seekg(static_cast<std::streamoff>(recordOffset), std::ios::beg);
+        if (!input.read(records.data(), static_cast<std::streamsize>(records.size()))) {
+            fprintf(stderr, "[ERROR] Cannot read STM1 pure posting %d from %s\n",
+                    postingId, p_snapshotPath.c_str());
+            return false;
+        }
+
+        auto& mask = p_masks[static_cast<size_t>(postingId)];
+        for (int i = 0; i < list.pureCount; ++i) {
+            const char* record = records.data() + static_cast<size_t>(i) * static_cast<size_t>(recordBytes);
+            for (int tagColumn = 0; tagColumn < tagCount; ++tagColumn) {
+                std::uint32_t tag = 0;
+                std::memcpy(&tag, record + sizeof(std::int32_t) +
+                                      static_cast<size_t>(tagColumn) * sizeof(tag),
+                            sizeof(tag));
+                mask.Insert(tagColumn, tag);
+            }
+        }
+    }
+    return true;
 }
 
 uint64_t GetCurrentProcessRSSBytes()
@@ -4198,7 +4292,7 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
         return ok;
     }
 
-    // ── Non-FILEIO posting store (e.g. Storage=ROCKSDBIO) fast path ─────────
+    // ── Non-FILEIO posting store (e.g. Storage=STATIC/ROCKSDBIO) fast path ──
     // When the posting store is not a FILEIO block file, the ssdinfo / ssdmapping
     // / ssdmapping_postings artifacts the scan below reads do not exist on disk.
     // The posting-derived filter sidecars (PS / hierarchical masks / sparse_tags
@@ -4275,20 +4369,27 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
 
             // Per-posting member-OR hierarchical mask: the dense filtered path
             // (HeadPostingHierMaskMayIntersect) keeps a posting iff at least one
-            // of its member vectors MAY carry a query tag. The FILEIO path builds
-            // this by scanning the posting file; on a non-FILEIO ("slim") store
-            // the same membership lives in opq_slim.bin (per-head records of
-            // [VID(4) | Version(1) | Tags(N*4)]) indexed by opq_slim.idx (per-head
-            // byte offsets, postingNum+1 entries). Decode it here so the posting
-            // pre-filter is populated; without it every posting is rejected and
-            // filtered dense recall is 0.
+            // of its member vectors MAY carry a query tag. STATIC STM1 has these
+            // tags inline in each pure record; other non-FILEIO slim stores keep
+            // them in opq_slim.bin. Never leave an empty mask attached to a static
+            // snapshot: that would turn an enabled pre-filter into false negatives.
             std::vector<SPTAG::Cache::HierarchicalPostingMask> postingHierMasks;
             {
                 const std::string slimBinPath = workDir + "/opq_slim.bin";
                 const std::string slimIdxPath = workDir + "/opq_slim.idx";
-                std::ifstream idxIn(slimIdxPath, std::ios::binary);
-                std::ifstream binIn(slimBinPath, std::ios::binary);
-                if (idxIn && binIn) {
+                const std::string staticSnapshotPath = workDir + "/SPTAGFullList.bin";
+                struct stat staticSnapshotStat {};
+                if (stat(staticSnapshotPath.c_str(), &staticSnapshotStat) == 0) {
+                    if (!BuildStaticPostingHierMasks(staticSnapshotPath, numHeads, p_numTagsPerVec,
+                                                      postingHierMasks)) {
+                        return false;
+                    }
+                    fprintf(stderr, "[INFO] Tenant %d: built posting hier masks for %zu STM1 postings.\n",
+                            p_tenantId, postingHierMasks.size());
+                } else {
+                    std::ifstream idxIn(slimIdxPath, std::ios::binary);
+                    std::ifstream binIn(slimBinPath, std::ios::binary);
+                    if (idxIn && binIn) {
                     idxIn.seekg(0, std::ios::end);
                     std::streamoff idxBytes = idxIn.tellg();
                     idxIn.seekg(0, std::ios::beg);
@@ -4324,9 +4425,10 @@ bool TenantIndexManager::BuildSignatures(int p_tenantId, ByteArray p_tags, int p
                         fprintf(stderr, "[INFO] Tenant %d: built posting hier masks for %zu slim postings.\n",
                                 p_tenantId, numSlimPostings);
                     }
-                } else {
-                    fprintf(stderr, "[WARN] Tenant %d: opq_slim.bin/.idx missing; dense filtered "
-                            "posting pre-filter will be empty.\n", p_tenantId);
+                    } else {
+                        fprintf(stderr, "[WARN] Tenant %d: opq_slim.bin/.idx missing; dense filtered "
+                                "posting pre-filter will be empty.\n", p_tenantId);
+                    }
                 }
             }
 
@@ -5207,6 +5309,14 @@ std::shared_ptr<QueryResult> TenantIndexManager::SearchWithACL(
         if (it == m_tenantIndices.end()) return nullptr;
         indexPtr = it->second;
     }
+
+    // Unfiltered requests do not need ACL context, tag routing, selectivity
+    // estimation, or posting metadata. AnnIndex::Search already executes the
+    // PerTagBKT cross-edge unfilter path, so bypass the wrapper-only setup.
+    if (p_numTags == 0) {
+        return indexPtr->Search(p_queryVector, p_resultNum);
+    }
+
     auto _ck_c = s_wrapperTime ? std::chrono::high_resolution_clock::now()
                                : std::chrono::high_resolution_clock::time_point{};
 

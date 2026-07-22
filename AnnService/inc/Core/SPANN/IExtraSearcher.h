@@ -168,6 +168,8 @@ namespace SPTAG {
                 std::uint64_t m_prePSPostings = 0;
                 std::uint64_t m_scannedVectors = 0;
                 std::uint64_t m_matchedVectors = 0;
+                std::uint64_t m_uniqueMatchedPostings = 0;
+                std::uint64_t m_uniqueMatchedVectors = 0;
                 std::uint64_t m_primaryHeadCandidates = 0;
                 std::uint64_t m_postingPageReads = 0;
                 std::uint64_t m_postingLogicalBytes = 0;
@@ -185,6 +187,8 @@ namespace SPTAG {
                     m_prePSPostings = 0;
                     m_scannedVectors = 0;
                     m_matchedVectors = 0;
+                    m_uniqueMatchedPostings = 0;
+                    m_uniqueMatchedVectors = 0;
                     m_primaryHeadCandidates = 0;
                     m_postingPageReads = 0;
                     m_postingLogicalBytes = 0;
@@ -409,6 +413,23 @@ namespace SPTAG {
             virtual bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, 
                 std::shared_ptr<VectorIndex> p_index, 
                 Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap, SizeType upperBound = -1) = 0;
+
+            virtual void SetVectorTags(const uint32_t* /*p_tags*/, int /*p_numVectors*/,
+                                       int /*p_numTagsPerVec*/)
+            {
+            }
+            virtual void SetNodeVectorAssignments(
+                const std::vector<std::vector<SizeType>>& /*p_assignments*/)
+            {
+            }
+            virtual void SetPrimaryNodeVectorAssignments(
+                const std::vector<std::vector<SizeType>>& /*p_assignments*/)
+            {
+            }
+            virtual void SetHeadVectorOwners(
+                const std::unordered_map<SizeType, int>& /*p_owners*/)
+            {
+            }
 
             virtual void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) = 0;
 

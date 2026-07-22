@@ -93,6 +93,20 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
 
     std::vector<struct io_event> events(totalToSubmit);
     int totalDone = 0, totalSubmitted = 0, totalQueued = 0;
+    bool allSucceeded = true;
+    auto dispatchCompletions = [&](int p_begin, int p_end) {
+        for (int i = p_begin; i < p_end; ++i)
+        {
+            AsyncReadRequest* req = reinterpret_cast<AsyncReadRequest*>(events[i].data);
+            if (nullptr == req) continue;
+
+            const bool success =
+                events[i].res == static_cast<decltype(events[i].res)>(req->m_readSize);
+            req->m_success = success;
+            allSucceeded = allSucceeded && success;
+            if (req->m_callback) req->m_callback(success);
+        }
+    };
     std::unique_lock<std::mutex> sharedContextLock;
     for (const auto& diskHandler : handlers)
     {
@@ -130,14 +144,7 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
             }
         }
 
-        for (int i = totalQueued; i < totalDone; i++)
-        {
-            AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
-            if (nullptr != req)
-            {
-                req->m_callback(true);
-            }
-        }
+        dispatchCompletions(totalQueued, totalDone);
         totalQueued = totalDone;
 
         for (int i = 0; i < handlers.size(); i++)
@@ -157,15 +164,8 @@ bool BatchReadFileAsync(std::vector<std::shared_ptr<Helper::DiskIO>> &handlers, 
         }
     }
 
-    for (int i = totalQueued; i < totalDone; i++)
-    {
-        AsyncReadRequest *req = reinterpret_cast<AsyncReadRequest *>((events[i].data));
-        if (nullptr != req)
-        {
-            req->m_callback(true);
-        }
-    }
-    return true;
+    dispatchCompletions(totalQueued, totalDone);
+    return allSucceeded;
 }
 #else
 ULONGLONG GetCpuMasks(WORD group, DWORD numCpus)
