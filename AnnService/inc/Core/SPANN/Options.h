@@ -141,7 +141,6 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
-            int m_pinnedPostingTarget;
             int m_seedMaxCheck;
             bool m_collectPostingContributionStats;
             bool m_forceDenseTagSearch;

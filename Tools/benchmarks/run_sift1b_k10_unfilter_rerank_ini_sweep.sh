@@ -67,12 +67,11 @@ make_overlay() {
         -e "s/^RerankL=.*/RerankL=${rerank_l}/" \
         -e 's/^ForceDenseTagSearch=.*/ForceDenseTagSearch=true/' \
         -e "s/^SearchInternalResultNum=.*/SearchInternalResultNum=${SEARCH_INTERNAL_RESULT_NUM}/" \
-        -e "/^SearchInternalResultNum=/a PinnedPostingTarget=${SEARCH_INTERNAL_RESULT_NUM}\nSeedMaxCheck=0\nLogPhaseTime=${LOG_PHASE_TIME}" \
+        -e "/^SearchInternalResultNum=/a SeedMaxCheck=0\nLogPhaseTime=${LOG_PHASE_TIME}" \
         "$tenant_dir/indexloader.ini"
     grep -qx "RerankL=${rerank_l}" "$tenant_dir/indexloader.ini"
     grep -qx 'ForceDenseTagSearch=true' "$tenant_dir/indexloader.ini"
     grep -qx "SearchInternalResultNum=${SEARCH_INTERNAL_RESULT_NUM}" "$tenant_dir/indexloader.ini"
-    grep -qx "PinnedPostingTarget=${SEARCH_INTERNAL_RESULT_NUM}" "$tenant_dir/indexloader.ini"
     grep -qx 'SeedMaxCheck=0' "$tenant_dir/indexloader.ini"
     grep -qx "LogPhaseTime=${LOG_PHASE_TIME}" "$tenant_dir/indexloader.ini"
     printf '%s\n' "$overlay"

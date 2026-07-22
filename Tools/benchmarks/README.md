@@ -29,8 +29,7 @@ Release/spannaclbench \
 `EnableHierPostingFilter`. Do not override these with `SPTAG_*` environment
 variables. The JSON output includes recall/QPS and loaded-posting contribution
 metrics when `CollectPostingContributionStats=true` is enabled in a diagnostic
-search overlay. `PinnedPostingTarget` is available only when a benchmark must
-pin the physical posting target; it is not the normal nprobe setting.
+search overlay.
 
 ## Multi-Tenant Tag Cache Stress
 

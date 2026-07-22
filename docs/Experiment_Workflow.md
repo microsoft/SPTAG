@@ -163,8 +163,7 @@ The command emits one JSON object with recall/QPS plus posting-efficiency
 metrics. For a curve, create one native INI/`indexloader.ini` overlay per
 point; set `InternalResultNum` and tune `MaxCheck` as the graph
 candidate/check budget. Keep the index files immutable and use local overlays,
-as done by the benchmark artifacts under `Tools/benchmarks/`. Use
-`PinnedPostingTarget` only for an explicitly pinned benchmark control.
+as done by the benchmark artifacts under `Tools/benchmarks/`.
 
 ---
 

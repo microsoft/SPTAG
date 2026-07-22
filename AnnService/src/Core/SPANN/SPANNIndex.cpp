@@ -2468,25 +2468,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         }
     }
 
-    // PinnedPostingTarget is a benchmark-only native override. When positive,
-    // it pins the physical posting I/O target while remaining clamped to
-    // available postings.
-    {
-        int pinnedPostingTarget = m_options.m_pinnedPostingTarget;
-        if (pinnedPostingTarget > 0) {
-            SizeType cap = HasHeadBundleNodes() ? TotalHeadSampleCount() :
-                (m_index ? m_index->GetNumSamples() : pinnedPostingTarget);
-            if (!candidateNodes.empty()) {
-                SizeType candidateCap = 0;
-                for (int nodeId : candidateNodes) {
-                    candidateCap += m_headBundleNodes[static_cast<size_t>(nodeId)].postingCount;
-                }
-                if (candidateCap > 0) cap = candidateCap;
-            }
-            postingTarget = std::min(pinnedPostingTarget, static_cast<int>(cap));
-        }
-    }
-
     if (m_options.m_logAdaptiveNprobe && adaptiveFilteredNprobeEnabled) {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
             "AdaptiveNprobe: sel=%.4g topK=%d recallTarget=%.3g coverageExp=%.3g "
@@ -4753,8 +4734,9 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                     "FixedNprobe is deprecated; use PinnedPostingTarget for benchmark pins.\n");
-        return SetParameter("PinnedPostingTarget", p_value, "SearchSSDIndex");
+                     "Ignoring deprecated FixedNprobe=%s; use InternalResultNum.\n",
+                     p_value);
+        return ErrorCode::Success;
     }
 
     auto storeParameter = [](std::vector<std::pair<std::string, std::string>>& p_parameters,
@@ -4870,7 +4852,7 @@ template <typename T> std::string Index<T>::GetParameter(const char *p_param, co
 {
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
     {
-        return GetParameter("PinnedPostingTarget", "SearchSSDIndex");
+        return GetParameter("InternalResultNum", "SearchSSDIndex");
     }
 
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SearchSSDIndex"))

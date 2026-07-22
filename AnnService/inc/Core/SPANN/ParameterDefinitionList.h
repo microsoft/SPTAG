@@ -139,7 +139,6 @@ DefineSSDParameter(m_queryCountLimit, int, (std::numeric_limits<int>::max)(), "Q
 DefineSSDParameter(m_maxDistRatio, float, 10000, "MaxDistRatio")
 DefineSSDParameter(m_ioThreads, int, 4, "IOThreadsPerHandler") // Mutable
 DefineSSDParameter(m_searchInternalResultNum, int, 64, "SearchInternalResultNum") // Mutable; [SearchSSDIndex] InternalResultNum aliases here
-DefineSSDParameter(m_pinnedPostingTarget, int, 0, "PinnedPostingTarget") // Mutable; benchmark pin, 0 uses SearchInternalResultNum
 DefineSSDParameter(m_seedMaxCheck, int, 0, "SeedMaxCheck") // Mutable; 0 follows MaxCheck
 DefineSSDParameter(m_searchPostingPageLimit, int, 3, "SearchPostingPageLimit") // Mutable
 DefineSSDParameter(m_collectPostingContributionStats, bool, false, "CollectPostingContributionStats") // Mutable; diagnostic only
