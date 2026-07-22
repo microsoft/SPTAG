@@ -31,6 +31,22 @@ variables. The JSON output includes recall/QPS and loaded-posting contribution
 metrics when `CollectPostingContributionStats=true` is enabled in a diagnostic
 search overlay.
 
+## SIFT1B PipePQ ADC Demo
+
+The SIFT1B reference profile uses the official BKT construction settings with
+PerTagBKT routing, unbounded unfilter tails, and PipePQ32 ADC-only postings:
+
+```bash
+CFG=Tools/benchmarks/build_spann_attr_sift1b_pipepq32_r010_tail_unbounded.ini
+Tools/benchmarks/run_spann_attr_build.sh "$CFG"
+```
+
+It consumes the prepared `sift1b_tags5.u32`, group-tag routing file, PipePQ
+codes, and pivots referenced by the INI. `FullVectorFile` and `RerankL` are
+intentionally absent: this profile searches the in-posting PipePQ codes without
+exact rerank. Its FileIO pool budget and `InPlaceBuild=1` are required for the
+billion-scale disk layout.
+
 ## Multi-Tenant Tag Cache Stress
 
 Files:
