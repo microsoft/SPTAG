@@ -159,4 +159,4 @@ build+augment. It touches nothing else (bundles / cross_edges / meta / manifest)
 | `SPTAG_DUAL_POOL_AUGMENT` | enable U_extra augmentation pool |
 | `SPTAG_DUAL_POOL_EXTRA_RATIO` | U_extra fraction (e.g. 0.10) |
 | `SPTAG_DISABLE_CROSS_EDGES`, `SPTAG_CROSSEDGE_UNFILTER`, `SPTAG_FILTER_KEEP_CROSS` | cross-edge search toggles |
-| `SPTAG_FIXED_NPROBE`, `SPTAG_UNIFIED_NPROBE_BUDGET`, `SPTAG_MULTI_NODE_BUDGET_KEEP_RATIO` | nprobe control |
+| Native `[SearchSSDIndex] InternalResultNum`, `MaxCheck` | posting I/O and graph traversal control |

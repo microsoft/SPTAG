@@ -4731,14 +4731,6 @@ ErrorCode Index<T>::RefineIndex(const std::vector<std::shared_ptr<Helper::DiskIO
 
 template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, const char *p_value, const char *p_section)
 {
-    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
-    {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                     "Ignoring deprecated FixedNprobe=%s; use InternalResultNum.\n",
-                     p_value);
-        return ErrorCode::Success;
-    }
-
     auto storeParameter = [](std::vector<std::pair<std::string, std::string>>& p_parameters,
                              const char* p_name,
                              const char* p_newValue) {
@@ -4850,11 +4842,6 @@ template <typename T> ErrorCode Index<T>::SetParameter(const char *p_param, cons
 
 template <typename T> std::string Index<T>::GetParameter(const char *p_param, const char *p_section) const
 {
-    if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_param, "FixedNprobe"))
-    {
-        return GetParameter("InternalResultNum", "SearchSSDIndex");
-    }
-
     if (SPTAG::Helper::StrUtils::StrEqualIgnoreCase(p_section, "SearchSSDIndex"))
     {
         const char* canonicalParam = p_param;

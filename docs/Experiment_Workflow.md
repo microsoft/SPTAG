@@ -133,8 +133,8 @@ The 3M-scale sibling config is `Script_AE/iniFile/build_spann_attr_spacev_opq25.
 
 Build and search parameters are persisted in the same native `.ini`:
 `[SearchSSDIndex] InternalResultNum`, `MaxCheck`, `EnableUnfilterTail`,
-and `EnableHierPostingFilter`. Do **not** override them through
-`SPTAG_FIXED_NPROBE` or other `SPTAG_*` environment variables.
+and `EnableHierPostingFilter`. Do **not** override build or search parameters
+through environment variables.
 
 For the committed Float STM1 SIFT-1M fixture, build the native benchmark target
 and run it directly against `.npy` queries and local-ID groundtruth:
