@@ -39,21 +39,24 @@ Release/spannaclbench ... \
   --search-ini Tools/benchmarks/search_turbopuffer_sift1m_tenant0_n20.ini
 ```
 
-## SIFT1B PipePQ ADC Demo
+## SIFT1B Raw STM1 Recommendation
 
-The SIFT1B reference profile uses the official BKT construction settings with
-PerTagBKT routing, unbounded unfilter tails, and PipePQ32 ADC-only postings:
+The SIFT1B recommendation mirrors the current SIFT1M static STM1 topology:
+raw UInt8 vectors in postings, four ACL bundles, cross edges, unbounded
+unfilter tails, team/project ordered-page pruning, and U_extra disabled.
 
 ```bash
-CFG=Tools/benchmarks/build_spann_attr_sift1b_pipepq32_r010_tail_unbounded.ini
+CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_ordered_page.ini
 Tools/benchmarks/run_spann_attr_build.sh "$CFG"
 ```
 
-It consumes the prepared `sift1b_tags5.u32`, group-tag routing file, PipePQ
-codes, and pivots referenced by the INI. `FullVectorFile` and `RerankL` are
-intentionally absent: this profile searches the in-posting PipePQ codes without
-exact rerank. Its FileIO pool budget and `InPlaceBuild=1` are required for the
-billion-scale disk layout.
+It consumes `sift1b_tags5.u32` and the group-tag routing file, but no quantizer
+codes, quantizer pivots, `FullVectorFile`, or rerank source. Its 152-byte STM1
+records and unbounded tail replicas require multi-terabyte final storage.
+
+`build_spann_attr_sift1b_pipepq32_r010_tail_unbounded.ini` remains available
+only as a quantized PipePQ32 comparison control; it is not the raw-vector
+recommendation.
 
 ## Ordered ACL Page Starts for Static STM1
 
