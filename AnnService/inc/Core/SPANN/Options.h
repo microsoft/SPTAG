@@ -88,6 +88,8 @@ namespace SPTAG {
             int m_iSSDNumberOfThreads;
             bool m_enableDeltaEncoding;
             bool m_enablePostingListRearrange;
+            bool m_enableOrderedPageStart;
+            std::string m_orderedPageStartAttrs;
             bool m_enableDataCompression;
             bool m_enableDictTraining;
             int m_minDictTraingBufferSize;

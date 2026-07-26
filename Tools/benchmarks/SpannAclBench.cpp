@@ -1,5 +1,6 @@
 #include "inc/CoreInterface.h"
 #include "inc/Core/VectorIndex.h"
+#include "inc/Helper/SimpleIniReader.h"
 
 #include <algorithm>
 #include <chrono>
@@ -25,7 +26,9 @@ struct Options
     std::string queryFile;
     std::string truthFile;
     std::string queryTagsFile;
+    std::string searchIni;
     int tagColumn = -1;
+    std::vector<int> dnfAndColumns;
     int tenant = 0;
     int topk = 10;
     std::size_t warmup = 200;
@@ -45,6 +48,8 @@ void Usage(const char* p_program)
     std::cerr << "Usage: " << p_program
               << " --index <index-dir> --queries <query.npy> --truth <truth.npy>"
               << " [--query-tags <tags.npy> --tag-column <0..N-1>]"
+              << " [--dnf-and-cols <col[,col...]>]"
+              << " [--search-ini <native-search.ini>]"
               << " [--direct-search] [--tenant 0] [--topk 10]"
               << " [--warmup 200] [--max-queries N]\n";
 }
@@ -73,6 +78,27 @@ bool ParseInt(const char* p_text, int& p_value)
     return true;
 }
 
+bool ParseColumnList(const char* p_text, std::vector<int>& p_columns)
+{
+    if (p_text == nullptr || *p_text == '\0') return false;
+    p_columns.clear();
+    std::stringstream input(p_text);
+    std::string token;
+    while (std::getline(input, token, ',')) {
+        char* end = nullptr;
+        const long value = std::strtol(token.c_str(), &end, 10);
+        if (end == token.c_str() || *end != '\0' || value < 0 ||
+            value > static_cast<long>((std::numeric_limits<int>::max)())) {
+            return false;
+        }
+        if (std::find(p_columns.begin(), p_columns.end(), static_cast<int>(value)) != p_columns.end()) {
+            return false;
+        }
+        p_columns.push_back(static_cast<int>(value));
+    }
+    return !p_columns.empty();
+}
+
 bool ParseArgs(int p_argc, char** p_argv, Options& p_options)
 {
     for (int i = 1; i < p_argc; ++i) {
@@ -95,8 +121,12 @@ bool ParseArgs(int p_argc, char** p_argv, Options& p_options)
             p_options.truthFile = value;
         } else if (std::strcmp(arg, "--query-tags") == 0) {
             p_options.queryTagsFile = value;
+        } else if (std::strcmp(arg, "--search-ini") == 0) {
+            p_options.searchIni = value;
         } else if (std::strcmp(arg, "--tag-column") == 0) {
             if (!ParseInt(value, p_options.tagColumn)) return false;
+        } else if (std::strcmp(arg, "--dnf-and-cols") == 0) {
+            if (!ParseColumnList(value, p_options.dnfAndColumns)) return false;
         } else if (std::strcmp(arg, "--tenant") == 0) {
             if (!ParseInt(value, p_options.tenant)) return false;
         } else if (std::strcmp(arg, "--topk") == 0) {
@@ -111,9 +141,12 @@ bool ParseArgs(int p_argc, char** p_argv, Options& p_options)
     }
     return !p_options.indexDir.empty() && !p_options.queryFile.empty() &&
         !p_options.truthFile.empty() &&
-        ((p_options.tagColumn < 0 && p_options.queryTagsFile.empty()) ||
-         (p_options.tagColumn >= 0 && !p_options.queryTagsFile.empty())) &&
-        (!p_options.directSearch || p_options.tagColumn < 0);
+        ((p_options.tagColumn < 0 && p_options.dnfAndColumns.empty() && p_options.queryTagsFile.empty()) ||
+         ((p_options.tagColumn >= 0 || !p_options.dnfAndColumns.empty()) &&
+          !p_options.queryTagsFile.empty())) &&
+        !(p_options.tagColumn >= 0 && !p_options.dnfAndColumns.empty()) &&
+        (!p_options.directSearch ||
+         (p_options.tagColumn < 0 && p_options.dnfAndColumns.empty()));
 }
 
 bool ReadNpyHeader(std::ifstream& p_input, NpyHeader& p_header)
@@ -221,9 +254,12 @@ int main(int argc, char** argv)
     if (!ReadNpyMatrix(options.queryFile, "<f4", queries, queryCount, dimension) ||
         !ReadNpyMatrix(options.truthFile, "<i8", truth, truthCount, truthCols) ||
         truthCount != queryCount || truthCols < static_cast<std::size_t>(options.topk) ||
-        (options.tagColumn >= 0 &&
+        ((options.tagColumn >= 0 || !options.dnfAndColumns.empty()) &&
          (!ReadNpyMatrix(options.queryTagsFile, "<u4", queryTags, tagCount, tagCols) ||
-          tagCount != queryCount || static_cast<std::size_t>(options.tagColumn) >= tagCols))) {
+          tagCount != queryCount ||
+          (options.tagColumn >= 0 && static_cast<std::size_t>(options.tagColumn) >= tagCols) ||
+          std::any_of(options.dnfAndColumns.begin(), options.dnfAndColumns.end(),
+                      [tagCols](int column) { return static_cast<std::size_t>(column) >= tagCols; })))) {
         std::cerr << "Invalid query, truth, or tag npy input\n";
         return 1;
     }
@@ -234,6 +270,23 @@ int main(int argc, char** argv)
     if (measuredQueries == 0) return 1;
 
     TenantIndexManager manager(static_cast<DimensionType>(dimension), "SPANN", "Float");
+    if (!options.searchIni.empty()) {
+        Helper::IniReader searchIni;
+        if (searchIni.LoadIniFile(options.searchIni) != ErrorCode::Success ||
+            !searchIni.DoesSectionExist("SearchSSDIndex")) {
+            std::cerr << "Invalid native [SearchSSDIndex] INI: " << options.searchIni << "\n";
+            return 1;
+        }
+        const auto& parameters = searchIni.GetParameters("SearchSSDIndex");
+        if (parameters.empty()) {
+            std::cerr << "Empty native [SearchSSDIndex] INI: " << options.searchIni << "\n";
+            return 1;
+        }
+        for (const auto& parameter : parameters) {
+            manager.SetSearchParam(
+                parameter.first.c_str(), parameter.second.c_str(), "SearchSSDIndex");
+        }
+    }
     if (!manager.LoadAll(options.indexDir.c_str())) {
         std::cerr << "LoadAll failed: " << options.indexDir << "\n";
         return 1;
@@ -246,6 +299,26 @@ int main(int argc, char** argv)
             dimension * sizeof(float), false);
         if (options.directSearch) {
             return manager.Search(queryBytes, options.tenant, options.topk);
+        }
+        if (!options.dnfAndColumns.empty()) {
+            constexpr std::uint32_t kDNF3Magic = 0x444E4633U;
+            std::vector<std::uint32_t> dnf;
+            dnf.reserve(3 + options.dnfAndColumns.size() * 4);
+            dnf.push_back(kDNF3Magic);
+            dnf.push_back(1); // one OR clause
+            dnf.push_back(static_cast<std::uint32_t>(options.dnfAndColumns.size()));
+            for (int column : options.dnfAndColumns) {
+                dnf.push_back(0); // categorical
+                dnf.push_back(static_cast<std::uint32_t>(column));
+                dnf.push_back(SPTAG::Cache::DNF_EQ);
+                dnf.push_back(queryTags[p_queryIndex * tagCols + static_cast<std::size_t>(column)]);
+            }
+            const ByteArray dnfBytes(
+                reinterpret_cast<std::uint8_t*>(dnf.data()),
+                dnf.size() * sizeof(std::uint32_t),
+                false);
+            return manager.SearchWithACL(
+                queryBytes, options.tenant, options.topk, dnfBytes, -1);
         }
         std::uint32_t tag = options.tagColumn >= 0
             ? queryTags[p_queryIndex * tagCols + static_cast<std::size_t>(options.tagColumn)]
@@ -270,6 +343,9 @@ int main(int argc, char** argv)
     std::uint64_t scannedVectors = 0;
     std::uint64_t matchedVectorOccurrences = 0;
     std::uint64_t uniqueMatchedVectors = 0;
+    std::uint64_t postingPageReads = 0;
+    std::uint64_t postingLogicalBytes = 0;
+    std::uint64_t postingPhysicalBytes = 0;
     const auto start = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < measuredQueries; ++i) {
         const auto result = search(i);
@@ -280,6 +356,9 @@ int main(int argc, char** argv)
         scannedVectors += postingStats.m_scannedVectors;
         matchedVectorOccurrences += postingStats.m_matchedVectors;
         uniqueMatchedVectors += postingStats.m_uniqueMatchedVectors;
+        postingPageReads += postingStats.m_postingPageReads;
+        postingLogicalBytes += postingStats.m_postingLogicalBytes;
+        postingPhysicalBytes += postingStats.m_postingPhysicalBytes;
         if (result == nullptr) {
             ++failed;
             continue;
@@ -311,6 +390,7 @@ int main(int argc, char** argv)
               << "\"queries\":" << measuredQueries << ","
               << "\"search_api\":\"" << (options.directSearch ? "Search" : "SearchWithACL") << "\","
               << "\"filter_column\":" << options.tagColumn << ","
+              << "\"dnf_and_columns\":" << options.dnfAndColumns.size() << ","
               << "\"recall\":" << recall << ","
               << "\"qps\":" << static_cast<double>(measuredQueries) / elapsed << ","
               << "\"mean_latency_ms\":" << 1000.0 * elapsed / measuredQueries << ","
@@ -327,6 +407,9 @@ int main(int argc, char** argv)
               << ratio(uniqueMatchedVectors, uniqueMatchedPostings) << ","
               << "\"replica_occurrence_to_unique_ratio\":"
               << ratio(matchedVectorOccurrences, uniqueMatchedVectors) << ","
+              << "\"posting_page_reads_per_query\":" << perQuery(postingPageReads) << ","
+              << "\"posting_logical_bytes_per_query\":" << perQuery(postingLogicalBytes) << ","
+              << "\"posting_physical_bytes_per_query\":" << perQuery(postingPhysicalBytes) << ","
               << "\"failed_queries\":" << failed
               << "}\n";
     return 0;

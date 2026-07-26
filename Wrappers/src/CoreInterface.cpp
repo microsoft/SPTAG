@@ -2321,7 +2321,11 @@ bool TenantIndexManager::BuildFromData(ByteArray p_vectors, ByteArray p_metadata
         if (indexType == TenantIndexType::SPANN)
         {
             const char* skipPivotEnv = std::getenv("SPTAG_DISABLE_PIVOT_ESTIMATOR");
-            bool skipPivot = (skipPivotEnv != nullptr && skipPivotEnv[0] != '\0' && skipPivotEnv[0] != '0');
+            const bool skipPivot = skipPivotEnv != nullptr &&
+                (skipPivotEnv[0] == '1' ||
+                 SPTAG::Helper::StrUtils::StrEqualIgnoreCase(skipPivotEnv, "true") ||
+                 SPTAG::Helper::StrUtils::StrEqualIgnoreCase(skipPivotEnv, "yes") ||
+                 SPTAG::Helper::StrUtils::StrEqualIgnoreCase(skipPivotEnv, "on"));
             if (skipPivot) {
                 fprintf(stderr, "[INFO] Tenant %d: SPTAG_DISABLE_PIVOT_ESTIMATOR set, skipping node-aware planning\n", tenantId);
             }

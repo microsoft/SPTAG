@@ -81,6 +81,8 @@ DefineSSDParameter(m_buildSsdIndex, bool, false, "BuildSsdIndex")
 DefineSSDParameter(m_iSSDNumberOfThreads, int, 16, "NumberOfThreads") // Mutable
 DefineSSDParameter(m_enableDeltaEncoding, bool, false, "EnableDeltaEncoding")
 DefineSSDParameter(m_enablePostingListRearrange, bool, false, "EnablePostingListRearrange")
+DefineSSDParameter(m_enableOrderedPageStart, bool, false, "EnableOrderedPageStart")
+DefineSSDParameter(m_orderedPageStartAttrs, std::string, std::string(""), "OrderedPageStartAttrs")
 DefineSSDParameter(m_enableDataCompression, bool, false, "EnableDataCompression")
 DefineSSDParameter(m_enableDictTraining, bool, true, "EnableDictTraining")
 DefineSSDParameter(m_minDictTraingBufferSize, int, 10240000, "MinDictTrainingBufferSize")

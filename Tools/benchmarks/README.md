@@ -31,6 +31,14 @@ variables. The JSON output includes recall/QPS and loaded-posting contribution
 metrics when `CollectPostingContributionStats=true` is enabled in a diagnostic
 search overlay.
 
+For a reload-only sweep, pass a separate native runtime overlay instead of
+modifying the persisted index or using environment variables:
+
+```bash
+Release/spannaclbench ... \
+  --search-ini Tools/benchmarks/search_turbopuffer_sift1m_tenant0_n20.ini
+```
+
 ## SIFT1B PipePQ ADC Demo
 
 The SIFT1B reference profile uses the official BKT construction settings with
@@ -46,6 +54,50 @@ codes, and pivots referenced by the INI. `FullVectorFile` and `RerankL` are
 intentionally absent: this profile searches the in-posting PipePQ codes without
 exact rerank. Its FileIO pool budget and `InPlaceBuild=1` are required for the
 billion-scale disk layout.
+
+## Ordered ACL Page Starts for Static STM1
+
+`EnableOrderedPageStart=true` together with `OrderedPageStartAttrs` enables
+sparse static reads for ordered hierarchy filters. It sorts each STM1 pure
+posting prefix by the hierarchy tuple and persists `ordered_page_starts.bin`:
+one `int32` page-start signature ordinal per configured attribute per posting
+page.
+
+```ini
+[BuildSSDIndex]
+Storage=STATIC
+EnableOrderedPageStart=true
+OrderedPageStartAttrs=2,3
+```
+
+For the SIFT hierarchy, columns `2,3` are team and project. The directory is
+used only for a single-clause DNF AND query containing a categorical equality
+on team or project; project takes precedence when both are present. Unfilter,
+flat ACL queries, multi-clause DNF, and unordered facets retain the normal
+full-posting path. The configured attributes must remain globally monotonic
+after ACL tuple sorting; the builder rejects an incompatible schema rather than
+allowing a range lookup to drop matches.
+
+For an explicit no-order naive control, set
+`EnableOrderedPageStart=false`. The builder ignores `OrderedPageStartAttrs`,
+does not sort pure records, removes any stale `ordered_page_starts.bin`, and
+the query path cannot perform ordered page pruning.
+
+`build_spann_attr_sift1m_tagged_4node_static_fullfloat_tail_unbounded.ini`
+is the matching SIFT1M no-order control; it explicitly sets this parameter to
+`false`.
+
+The native benchmark can issue this DNF form directly:
+
+```bash
+Release/spannaclbench \
+  --index /path/to/index \
+  --queries "$QDIR/query_vectors.npy" \
+  --truth "$QDIR/groundtruth_project_local_ids.npy" \
+  --query-tags "$QDIR/query_tags.npy" \
+  --dnf-and-cols 2,3 \
+  --warmup 200 --max-queries 1000
+```
 
 ## Multi-Tenant Tag Cache Stress
 

@@ -309,6 +309,33 @@ namespace SPTAG {
                     },
                     "%.3lf");
 
+                if (p_opts.m_logPhaseTime)
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nPosting Retrieval Latency Distribution:\n");
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_diskReadLatency;
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nPosting Scan Latency Distribution:\n");
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [](const SPANN::SearchStats& ss) -> double
+                        {
+                            return ss.m_compLatency;
+                        },
+                        "%.3lf");
+
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nPosting Residual Latency Distribution:\n");
+                    PrintPercentiles<double, SPANN::SearchStats>(stats,
+                        [](const SPANN::SearchStats& ss) -> double
+                        {
+                            return (std::max)(0.0, ss.m_exLatency - ss.m_diskReadLatency - ss.m_compLatency);
+                        },
+                        "%.3lf");
+                }
+
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nTotal Latency Distribution:\n");
                 PrintPercentiles<double, SPANN::SearchStats>(stats,
                     [](const SPANN::SearchStats& ss) -> double

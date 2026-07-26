@@ -2297,8 +2297,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     int postingTarget = nprobeBase;
     const bool adaptiveFilteredNprobeEnabled = m_options.m_enableAdaptiveFilteredNprobe;
 
+    const bool useHeadBundleRuntime = !m_headBundleNodes.empty() &&
+        (m_metadataOnlyHeadStore || m_headBundleNodes.size() > 1);
     std::vector<int> candidateNodes;
-    if (!searchHeadBundleNodes.empty() && !m_headBundleNodes.empty())
+    if (useHeadBundleRuntime && !searchHeadBundleNodes.empty())
     {
         // Routed (filtered) queries restrict navigation to the bundle nodes
         // their tags map to. Single-bundle indexes (size==1) route to node 0
@@ -2319,7 +2321,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             candidateNodes.push_back(nodeId);
         }
     }
-    else if (searchHeadBundleNodes.empty() && !m_headBundleNodes.empty())
+    else if (useHeadBundleRuntime && searchHeadBundleNodes.empty())
     {
         // v5: unfilter (no tag scope) always routes through cross-edge unified
         // traversal across all per-bundle subgraphs. The global m_index is no
@@ -2597,12 +2599,16 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 ErrorCode nodeSearchStatus = ErrorCode::Fail;
                 if (usePostingMaskResultQueue)
                 {
-                    const auto resultFilter = [this, &localToGlobalHIDs, &tagAwareQueryMask](SizeType localHid) {
+                    const auto resultFilter = [this, &localToGlobalHIDs, &tagAwareQueryMask, queryDNF](SizeType localHid) {
                         if (localHid < 0 || static_cast<size_t>(localHid) >= localToGlobalHIDs.size()) {
                             return false;
                         }
-                        return m_index->HeadPostingHierMaskMayIntersect(
-                            localToGlobalHIDs[static_cast<size_t>(localHid)], tagAwareQueryMask);
+                        const SizeType globalHid = localToGlobalHIDs[static_cast<size_t>(localHid)];
+                        if (queryDNF != nullptr && !queryDNF->Empty()) {
+                            const auto* postingMask = m_index->GetHeadNodePostingHierMask(globalHid);
+                            return postingMask == nullptr || queryDNF->MayMatchHier(*postingMask);
+                        }
+                        return m_index->HeadPostingHierMaskMayIntersect(globalHid, tagAwareQueryMask);
                     };
                     if (auto* bkt = dynamic_cast<BKT::Index<T>*>(nodeIndex.get()))
                     {
@@ -2797,7 +2803,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             return MaxSize;
         };
         auto shouldKeepHeadResult = [&](SizeType localHid) -> bool {
-            if (!hasTagFilter) return true;
             // Intentionally uses HeadNodeMatchesQuery (with IsHeadNodeHeadOnly
             // gate) so that only ghost head-only vectors can be returned as
             // top-K results. For real heads (centroids of postings) the head
@@ -2805,6 +2810,20 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
             // posting members do; rejecting them here ensures top-K is sourced
             // only from posting scans (and the rare head-only ghost vectors).
             static const std::vector<uint8_t> kNoRouteMask;
+            if (queryDNF != nullptr && !queryDNF->Empty()) {
+                // Head-only metadata stores categorical own-tags only. A numeric
+                // predicate has no exact head-only representation, so it must not
+                // admit a coarse graph candidate into top-K.
+                if (queryDNF->HasNumericLiteral()) return false;
+                if (m_index == nullptr || !m_index->HasHeadNodeMeta() ||
+                    !m_index->IsHeadNodeHeadOnly(localHid)) {
+                    return false;
+                }
+                const auto* ownTags = m_index->GetHeadNodeHierMask(localHid);
+                return ownTags != nullptr &&
+                    queryDNF->Matches(ownTags->tag, SPTAG::Cache::HIER_LEVELS);
+            }
+            if (!hasTagFilter) return true;
             return m_index != nullptr &&
                    m_index->HasHeadNodeMeta() &&
                    m_index->HeadNodeMatchesQuery(localHid, queryHierMask, kNoRouteMask);

@@ -287,6 +287,19 @@ namespace SPTAG {
 
             std::vector<int> m_postingIDs;
 
+            struct PostingReadRange
+            {
+                int m_scanBegin = 0;
+                int m_scanEnd = -1;
+                int m_readStartPage = 0;
+                int m_readPageCount = 0;
+            };
+
+            // Query-local source/destination range for a selected posting. Static
+            // ordered ACL page directories populate this before issuing I/O; dynamic
+            // stores leave it unused.
+            std::vector<PostingReadRange> m_postingReadRanges;
+
             COMMON::OptHashPosVector m_deduper;
 
             Helper::RequestQueue m_processIocp;

@@ -532,6 +532,7 @@ int main(int argc, char** argv) {
             IniEnv(ini, "MultiTenant", "HierLevelWidths",         "SPTAG_HIER_LEVEL_WIDTHS");
             IniEnv(ini, "MultiTenant", "NumericCols",             "SPTAG_NUMERIC_COLS");
             IniEnv(ini, "MultiTenant", "PivotForceNodeCount",     "SPTAG_PIVOT_FORCE_NODE_COUNT");
+            IniEnv(ini, "MultiTenant", "DisablePivotEstimator",   "SPTAG_DISABLE_PIVOT_ESTIMATOR");
         }
     }
 
@@ -541,12 +542,12 @@ int main(int argc, char** argv) {
     const char* vecPath  = sVecPath.empty()  ? nullptr : sVecPath.c_str();
     const char* tagPath  = sTagPath.empty()  ? nullptr : sTagPath.c_str();
     const char* indexDir = sIndexDir.empty() ? nullptr : sIndexDir.c_str();
-    if (!vecPath || !tagPath || !indexDir) {
+    if (!vecPath || !indexDir) {
         fprintf(stderr,
             "usage: spannbuilder -c <config.ini>   (native SPANN ini, single source of truth)\n"
             "   or: spannbuilder --vectors <f> --vec-offset <b> --n <N> --dim <D> "
-            "--value-type Int8|UInt8|Float --tags <f> --tags-offset <b> "
-            "--num-tags-per-vec <K> --index-dir <out> [--tenant 0] "
+            "--value-type Int8|UInt8|Float [--tags <f> --tags-offset <b> "
+            "--num-tags-per-vec <K>] --index-dir <out> [--tenant 0] "
             "[--storage-backend FILEIO|ROCKSDBIO] [--build-signatures] "
             "[--with-meta-index] [--normalized] [--share-build-ownership] "
             "[--posting-quantizer None|RaBitQ|OPQ|PipePQ] [--posting-quant-m <B>] "
@@ -572,10 +573,11 @@ int main(int argc, char** argv) {
         ResolveFlag(argc, argv, "--share-build-ownership", ini, "Build", "ShareBuildOwnership");
     const std::string distCalcMethod =
         Resolve(argc, argv, "--dist-calc-method", ini, "Base", "DistCalcMethod", "Cosine");
+    const bool hasTags = tagPath != nullptr || numTagsPerVec > 0;
 
     const size_t valSize = ValueTypeSize(valueType);
-    if (valSize == 0 || dim <= 0 || numTagsPerVec <= 0) {
-        fprintf(stderr, "[spannbuilder] invalid value-type/dim/num-tags-per-vec\n");
+    if (valSize == 0 || dim <= 0 || (hasTags && (tagPath == nullptr || numTagsPerVec <= 0))) {
+        fprintf(stderr, "[spannbuilder] invalid value-type/dim/tag configuration\n");
         return 2;
     }
     if (shareBuildOwnership && !normalized &&
@@ -587,7 +589,7 @@ int main(int argc, char** argv) {
     }
 
     MappedFile vecMap, tagMap;
-    if (!vecMap.Map(vecPath) || !tagMap.Map(tagPath)) return 1;
+    if (!vecMap.Map(vecPath) || (hasTags && !tagMap.Map(tagPath))) return 1;
 
     // Infer N from the vector file if not given (file_size - offset) / (dim*valSize).
     long long n = nArg;
@@ -595,13 +597,13 @@ int main(int argc, char** argv) {
         n = (long long)((vecMap.length - vecOffset) / ((size_t)dim * valSize));
     }
     const size_t vecBytes = (size_t)n * dim * valSize;
-    const size_t tagBytes = (size_t)n * numTagsPerVec * sizeof(uint32_t);
+    const size_t tagBytes = hasTags ? (size_t)n * numTagsPerVec * sizeof(uint32_t) : 0;
     if (vecOffset + vecBytes > vecMap.length) {
         fprintf(stderr, "[spannbuilder] vector file too small: need %zu have %zu\n",
                 vecOffset + vecBytes, vecMap.length);
         return 1;
     }
-    if (tagOffset + tagBytes > tagMap.length) {
+    if (hasTags && tagOffset + tagBytes > tagMap.length) {
         fprintf(stderr, "[spannbuilder] tag file too small: need %zu have %zu\n",
                 tagOffset + tagBytes, tagMap.length);
         return 1;
@@ -612,14 +614,17 @@ int main(int argc, char** argv) {
         "               vectors=%s (+%zu, %.2f GB)  tags=%s (+%zu)\n"
         "               buildSignatures=%d index-dir=%s\n",
         n, dim, valueType.c_str(), numTagsPerVec, tenant, storageBackend.c_str(),
-        vecPath, vecOffset, vecBytes / 1e9, tagPath, tagOffset,
+        vecPath, vecOffset, vecBytes / 1e9, hasTags ? tagPath : "<none>", tagOffset,
         (int)buildSignatures, indexDir);
 
     // Zero-copy borrowed views over the mmapped regions (ownership=false).
     std::uint8_t* vecPtr = reinterpret_cast<std::uint8_t*>(vecMap.base) + vecOffset;
-    std::uint8_t* tagPtr = reinterpret_cast<std::uint8_t*>(tagMap.base) + tagOffset;
     ByteArray vectors(vecPtr, vecBytes, false);
-    ByteArray tags(tagPtr, tagBytes, false);
+    ByteArray tags;
+    if (hasTags) {
+        std::uint8_t* tagPtr = reinterpret_cast<std::uint8_t*>(tagMap.base) + tagOffset;
+        tags = ByteArray(tagPtr, tagBytes, false);
+    }
 
     // Single-tenant metadata: one integer tenant id per line ("<tenant>\n").
     std::string tline = std::to_string(tenant) + "\n";
@@ -747,8 +752,12 @@ int main(int argc, char** argv) {
         if (gfs) mgr.SetSSDBuildParam("GrowthFileSizeGB", gfs);
     }
 
-    fprintf(stderr, "[spannbuilder] BuildFromDataWithTags ...\n");
+    fprintf(stderr, "[spannbuilder] %s ...\n", hasTags ? "BuildFromDataWithTags" : "BuildFromData");
     if (ArgFlag(argc, argv, "--backfill-primary-head-csr")) {
+        if (!hasTags) {
+            fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR requires tags\n");
+            return 2;
+        }
         fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR: LoadAll(%s) ...\n", indexDir);
         if (!mgr.LoadAll(indexDir)) {
             fprintf(stderr, "[spannbuilder] PRIMARY-HEAD-CSR LoadAll FAILED\n");
@@ -763,6 +772,10 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (ArgFlag(argc, argv, "--build-signatures-only")) {
+        if (!hasTags) {
+            fprintf(stderr, "[spannbuilder] BUILD-SIGNATURES-ONLY requires tags\n");
+            return 2;
+        }
         if (!mgr.LoadAll(indexDir)) {
             fprintf(stderr, "[spannbuilder] BUILD-SIGNATURES-ONLY LoadAll FAILED\n");
             return 1;
@@ -777,6 +790,10 @@ int main(int argc, char** argv) {
     const bool routingOnly = ArgFlag(argc, argv, "--routing-only") ||
                              (std::getenv("SPTAG_ROUTING_ONLY") != nullptr);
     if (routingOnly) {
+        if (!hasTags) {
+            fprintf(stderr, "[spannbuilder] ROUTING-ONLY requires tags\n");
+            return 2;
+        }
         // Repair mode: the index store already exists on disk; only (re)generate
         // the query-time tag->bundle-node routing sidecar (tag_node_index.bin).
         // Skips the full SPANN rebuild and BuildSignatures' posting scan.
@@ -794,14 +811,21 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[spannbuilder] ROUTING-ONLY done.\n");
         return 0;
     }
-    bool ok = mgr.BuildFromDataWithTags(vectors, metadata, (SizeType)n,
-                                        tags, numTagsPerVec, withMetaIndex, normalized);
+    bool ok = hasTags
+        ? mgr.BuildFromDataWithTags(vectors, metadata, (SizeType)n,
+                                    tags, numTagsPerVec, withMetaIndex, normalized)
+        : mgr.BuildFromData(vectors, metadata, (SizeType)n, withMetaIndex, normalized);
     if (!ok) {
-        fprintf(stderr, "[spannbuilder] BuildFromDataWithTags FAILED\n");
+        fprintf(stderr, "[spannbuilder] %s FAILED\n",
+                hasTags ? "BuildFromDataWithTags" : "BuildFromData");
         return 1;
     }
 
     if (buildSignatures) {
+        if (!hasTags) {
+            fprintf(stderr, "[spannbuilder] BuildSignatures requires tags\n");
+            return 2;
+        }
         fprintf(stderr, "[spannbuilder] BuildSignatures (numeric quant) ...\n");
         if (!mgr.BuildSignatures(tenant, tags, (SizeType)n, numTagsPerVec)) {
             fprintf(stderr, "[spannbuilder] BuildSignatures FAILED\n");
