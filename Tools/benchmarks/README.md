@@ -44,8 +44,8 @@ Release/spannaclbench ... \
 The SIFT1B recommendation mirrors the current SIFT1M raw static STM1 posting
 layout: raw UInt8 vectors in postings, four ACL bundles, cross edges,
 unbounded unfilter tails, team/project ordered-page pruning, and U_extra
-disabled. It retains SIFT1B's documented BKT head construction rather than
-copying SIFT1M's KDT head graph.
+disabled. It retains SIFT1B's documented BKT head construction and search
+defaults rather than copying SIFT1M's KDT head graph or search budget.
 
 ```bash
 CFG=Tools/benchmarks/build_spann_attr_sift1b_raw_static_tail_unbounded_ordered_page.ini
