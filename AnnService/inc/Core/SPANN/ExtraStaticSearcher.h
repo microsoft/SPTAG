@@ -8,13 +8,17 @@
 #include "inc/Helper/AsyncFileReader.h"
 #include "IExtraSearcher.h"
 #include "inc/Core/Common/TruthSet.h"
+#include "inc/Core/Common/OfficialRaBitQ.h"
 #include "Compressor.h"
 
+#include <cstring>
+#include <filesystem>
 #include <map>
 #include <cmath>
 #include <climits>
 #include <future>
 #include <numeric>
+#include <optional>
 
 namespace SPTAG
 {
@@ -124,8 +128,8 @@ namespace SPTAG
             SizeType vectorID = *(reinterpret_cast<SizeType*>(p_postingListFullData + offsetVectorID));\
             if (p_exWorkSpace->Deduper().CheckAndSet(vectorID)) { listElements--; continue; } \
             (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
-            auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
-            queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim, false) : ByteArray::c_empty); \
+            auto distance2leaf = m_officialRaBitQ ? m_officialRaBitQ->Estimate(*officialQuery, reinterpret_cast<const std::uint8_t*>(p_postingListFullData + offsetVector)) : m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
+            queryResults.AddPoint(vectorID, distance2leaf, (!m_officialRaBitQ && queryResults.WithVec()) ? ByteArray((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim, false) : ByteArray::c_empty); \
         } \
 
 #define ProcessPostingOffset() \
@@ -176,9 +180,27 @@ namespace SPTAG
             }
 
             virtual bool LoadIndex(Options& p_opt) override {
+                m_opt = &p_opt;
+                m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
+                m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
+                m_enableDataCompression = p_opt.m_enableDataCompression;
+                m_enableDictTraining = p_opt.m_enableDictTraining;
+                if (UseOfficialRaBitQ()) {
+                    if (!ConfigureOfficialRaBitQRecordLayout() ||
+                        !InitializeOfficialRaBitQ(nullptr, false)) {
+                        return false;
+                    }
+                } else {
+                    m_metaDataSize = sizeof(SizeType);
+                    m_vectorDataSize = 0;
+                    m_vectorInfoSize = 0;
+                }
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile + "_" + std::to_string(m_layer);
-                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
+                const int recordSize = m_vectorInfoSize > 0
+                    ? m_vectorInfoSize
+                    : p_opt.m_dim * sizeof(ValueType) + sizeof(SizeType);
+                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * recordSize + PageSize - 1) / PageSize));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
@@ -211,12 +233,6 @@ namespace SPTAG
                 } while (fileexists(curFile.c_str()));
                 m_oneContext = (m_indexFiles.size() == 1);
 
-                m_opt = &p_opt;
-                m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
-                m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
-                m_enableDataCompression = p_opt.m_enableDataCompression;
-                m_enableDictTraining = p_opt.m_enableDictTraining;
-
                 if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
                 else m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingList;
                 if (m_enableDeltaEncoding) m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseDeltaEncoding;
@@ -241,12 +257,31 @@ namespace SPTAG
                 bool)
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+                if (postingListCount > p_exWorkSpace->m_pageBuffers.size() ||
+                    postingListCount > p_exWorkSpace->m_diskRequests.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static search workspace is too small: postings=%u buffers=%zu requests=%zu.\n",
+                                 postingListCount, p_exWorkSpace->m_pageBuffers.size(),
+                                 p_exWorkSpace->m_diskRequests.size());
+                    return ErrorCode::Fail;
+                }
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
- 
+                std::optional<COMMON::OfficialRaBitQ::QueryContext> officialQuery;
+                if (m_officialRaBitQ) {
+                    if (!m_officialRaBitQReady) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Official RaBitQ model is not initialized for static posting search.\n");
+                        return ErrorCode::Fail;
+                    }
+                    officialQuery.emplace(m_officialRaBitQ->PrepareQuery(
+                        reinterpret_cast<const float*>(queryResults.GetTarget())));
+                }
+
                 int diskRead = 0;
                 int diskIO = 0;
                 int listElements = 0;
+                int missingPostingIDs = 0;
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -257,6 +292,7 @@ namespace SPTAG
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                     auto it = m_globalVectorIDToHeadMap.find(curPostingID);
                     if (it == m_globalVectorIDToHeadMap.end()) {
+                        ++missingPostingIDs;
                         auto& request = p_exWorkSpace->m_diskRequests[pi];
                         request.m_readSize = 0;
                         request.m_success = false;
@@ -276,9 +312,17 @@ namespace SPTAG
                     listElements += listInfo->listEleCount;
 
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                    if (totalBytes > p_exWorkSpace->m_pageBuffers[pi].GetPageSize()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static posting %d requires %zu bytes but its workspace buffer has %zu bytes.\n",
+                                     curPostingID, totalBytes,
+                                     p_exWorkSpace->m_pageBuffers[pi].GetPageSize());
+                        return ErrorCode::DiskIOFail;
+                    }
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -286,7 +330,7 @@ namespace SPTAG
                     request.m_success = false;
 
 #ifdef BATCH_READ // async batch read
-                    request.m_callback = [&p_exWorkSpace, &queryResults, &request, &listElements, this](bool success)
+                    request.m_callback = [&p_exWorkSpace, &queryResults, &officialQuery, &request, &listElements, this](bool success)
                     {
                         char* buffer = request.m_buffer;
                         ListInfo* listInfo = (ListInfo*)(request.m_payload);
@@ -329,6 +373,12 @@ namespace SPTAG
 
                     ProcessPosting();
 #endif
+                }
+
+                if (missingPostingIDs > 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "Static search skipped %d of %u posting IDs that are absent from the head map.\n",
+                                 missingPostingIDs, postingListCount);
                 }
 
 #ifdef ASYNC_READ
@@ -402,6 +452,11 @@ namespace SPTAG
                 bool) override
             {
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
+                std::optional<COMMON::OfficialRaBitQ::QueryContext> officialQuery;
+                if (m_officialRaBitQ) {
+                    officialQuery.emplace(m_officialRaBitQ->PrepareQuery(
+                        reinterpret_cast<const float*>(queryResults.GetTarget())));
+                }
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
 
                 auto appendPosting = [&](char* buffer, ListInfo* listInfo) -> ErrorCode {
@@ -433,9 +488,11 @@ namespace SPTAG
                         if (p_exWorkSpace->Deduper().CheckAndSet(vectorID))
                             continue;
                         (this->*m_parseEncoding)(listInfo, (ValueType*)(p_postingListFullData + offsetVector));
-                        auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector);
+                        auto distance2leaf = m_officialRaBitQ
+                            ? m_officialRaBitQ->Estimate(*officialQuery, reinterpret_cast<const std::uint8_t*>(p_postingListFullData + offsetVector))
+                            : m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector);
                         p_results.emplace_back(vectorID, distance2leaf, ByteArray::c_empty,
-                            queryResults.WithVec() ? ByteArray::Alloc((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim) : ByteArray::c_empty);
+                            (!m_officialRaBitQ && queryResults.WithVec()) ? ByteArray::Alloc((std::uint8_t*)(p_postingListFullData + offsetVector), sizeof(ValueType) * m_opt->m_dim) : ByteArray::c_empty);
                     }
                     return ErrorCode::Success;
                 };
@@ -469,6 +526,7 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -570,6 +628,7 @@ namespace SPTAG
                     
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -746,7 +805,14 @@ namespace SPTAG
                     vectorID.append(reinterpret_cast<char *>(&vid), sizeof(SizeType));
 
                     ValueType *p_vector = reinterpret_cast<ValueType *>(p_fullVectors->GetVector(vid));
-                    if (p_enableDeltaEncoding)
+                    if (m_officialRaBitQ)
+                    {
+                        vector.resize(static_cast<size_t>(m_metaDataSize - sizeof(SizeType) + m_vectorDataSize), 0);
+                        m_officialRaBitQ->Encode(
+                            reinterpret_cast<const float*>(p_vector),
+                            reinterpret_cast<std::uint8_t*>(vector.data() + m_metaDataSize - sizeof(SizeType)));
+                    }
+                    else if (p_enableDeltaEncoding)
                     {
                         DimensionType n = p_fullVectors->Dimension();
                         std::vector<ValueType> p_vector_delta(n);
@@ -787,6 +853,20 @@ namespace SPTAG
                 }
 
                 m_opt = &p_opt;
+                m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
+                m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
+                m_enableDataCompression = p_opt.m_enableDataCompression;
+                m_enableDictTraining = p_opt.m_enableDictTraining;
+                if (UseOfficialRaBitQ()) {
+                    if (!ConfigureOfficialRaBitQRecordLayout() ||
+                        !InitializeOfficialRaBitQ(p_reader, true)) {
+                        return false;
+                    }
+                } else {
+                    m_metaDataSize = sizeof(SizeType);
+                    m_vectorDataSize = 0;
+                    m_vectorInfoSize = 0;
+                }
                 int numThreads = p_opt.m_iSSDNumberOfThreads;
                 int candidateNum = p_opt.m_internalResultNum;
                 std::unordered_map<SizeType, SizeType> headVectorIDS;
@@ -811,7 +891,11 @@ namespace SPTAG
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
-                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
+                    if (!m_officialRaBitQ) {
+                        m_vectorDataSize = fullVectors->PerVectorDataSize();
+                        m_vectorInfoSize = m_metaDataSize + m_vectorDataSize;
+                    }
+                    vectorInfoSize = m_vectorInfoSize;
                 }
                 if (upperBound > 0) fullCount = upperBound;
 
@@ -1238,8 +1322,15 @@ namespace SPTAG
                     throw std::runtime_error("Failed read file in LoadingHeadInfo");
                 }
 
-                if (m_vectorInfoSize == 0) m_vectorInfoSize = m_iDataDimension * sizeof(ValueType) + sizeof(SizeType);
-                else if (m_vectorInfoSize != m_iDataDimension * sizeof(ValueType) + sizeof(SizeType)) {
+                const int expectedVectorInfoSize = m_officialRaBitQ
+                    ? m_metaDataSize + m_vectorDataSize
+                    : m_iDataDimension * sizeof(ValueType) + sizeof(SizeType);
+                if (m_officialRaBitQ && m_iDataDimension != m_opt->m_dim) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read official RaBitQ posting dimension.\n");
+                    throw std::runtime_error("Official RaBitQ posting dimension mismatch");
+                }
+                if (m_vectorInfoSize == 0) m_vectorInfoSize = expectedVectorInfoSize;
+                else if (m_vectorInfoSize != expectedVectorInfoSize) {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read head info file! DataDimension and ValueType are not match!\n");
                     throw std::runtime_error("DataDimension and ValueType don't match in LoadingHeadInfo");
                 }
@@ -1366,7 +1457,7 @@ namespace SPTAG
             inline void ParsePostingList(uint64_t& offsetVectorID, uint64_t& offsetVector, int i, int eleCount)
             {
                 offsetVectorID = m_vectorInfoSize * i;
-                offsetVector = offsetVectorID + sizeof(SizeType);
+                offsetVector = offsetVectorID + m_metaDataSize;
             }
 
             inline void ParseDeltaEncoding(ListInfo* p_info, ValueType* vector)
@@ -1497,9 +1588,9 @@ namespace SPTAG
                     throw std::runtime_error("Failed to open file for SSD index save");
                 }
                 // meta size of global info
-                std::uint64_t listOffset = sizeof(int) * 4;
+                std::uint64_t listOffset = sizeof(SizeType) * 3 + sizeof(int);
                 // meta size of the posting lists
-                listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t)) * p_postingListSizes.size();
+                listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t) + sizeof(SizeType)) * p_postingListSizes.size();
                 // write listTotalBytes only when enabled data compression
                 if (p_enableDataCompression)
                 {
@@ -1796,12 +1887,121 @@ namespace SPTAG
 
             int m_vectorInfoSize = 0;
             int m_iDataDimension = 0;
+            int m_metaDataSize = sizeof(SizeType);
+            int m_vectorDataSize = 0;
+            std::unique_ptr<COMMON::OfficialRaBitQ> m_officialRaBitQ;
+            bool m_officialRaBitQReady = false;
 
             int m_totalListCount = 0;
 
             int m_listPerFile = 0;
 
             std::unordered_map<SizeType, SizeType> m_globalVectorIDToHeadMap;
+
+            bool UseOfficialRaBitQ() const
+            {
+                return Helper::StrUtils::StrEqualIgnoreCase(
+                    m_opt->m_postingQuantizer.c_str(), "RaBitQOfficial");
+            }
+
+            std::string OfficialRaBitQModelPath() const
+            {
+                if (!m_opt->m_postingQuantizerFile.empty()) {
+                    return m_opt->m_postingQuantizerFile;
+                }
+                return m_opt->m_indexDirectory + FolderSep + "official_rabitq.model";
+            }
+
+            bool ConfigureOfficialRaBitQRecordLayout()
+            {
+                if (m_opt->m_storage != Storage::STATIC ||
+                    m_opt->m_valueType != VectorValueType::Float ||
+                    m_opt->m_postingQuantBits < 1 || m_opt->m_postingQuantBits > 8) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static RaBitQOfficial requires Float vectors and PostingQuantBits in [1, 8].\n");
+                    return false;
+                }
+                if (!COMMON::OfficialRaBitQ::IsSupportedDimension(m_opt->m_dim) ||
+                    !COMMON::OfficialRaBitQ::IsSupportedPlatform()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static RaBitQOfficial requires an AVX2/FMA CPU and dimensions in [64, 4095].\n");
+                    return false;
+                }
+                if (m_opt->m_enableDeltaEncoding || m_opt->m_enablePostingListRearrange ||
+                    m_opt->m_enableDataCompression || m_opt->m_rerank != 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static RaBitQOfficial does not support delta, rearrange, compression, or reranking.\n");
+                    return false;
+                }
+
+                m_officialRaBitQ = std::make_unique<COMMON::OfficialRaBitQ>(
+                    m_opt->m_dim, m_opt->m_postingQuantBits);
+                m_metaDataSize = sizeof(SizeType) + sizeof(std::uint32_t);
+                const int codeBytes = static_cast<int>(m_officialRaBitQ->CodeBytes());
+                m_vectorDataSize = (codeBytes + static_cast<int>(alignof(std::uint64_t)) - 1) &
+                    ~(static_cast<int>(alignof(std::uint64_t)) - 1);
+                m_vectorInfoSize = m_metaDataSize + m_vectorDataSize;
+                return true;
+            }
+
+            bool InitializeOfficialRaBitQ(const std::shared_ptr<Helper::VectorSetReader>& p_reader,
+                                          bool p_allowTraining)
+            {
+                if (!m_officialRaBitQ) {
+                    return false;
+                }
+                if (m_officialRaBitQReady) {
+                    return true;
+                }
+
+                const std::string modelPath = OfficialRaBitQModelPath();
+                if (fileexists(modelPath.c_str())) {
+                    if (m_officialRaBitQ->Load(modelPath) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to load official RaBitQ model %s.\n", modelPath.c_str());
+                        return false;
+                    }
+                } else {
+                    if (!p_allowTraining || !p_reader) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Official RaBitQ model %s is missing for static search/load.\n", modelPath.c_str());
+                        return false;
+                    }
+
+                    const SizeType trainingCount = (std::min)(
+                        p_reader->GetVectorSet()->Count(),
+                        static_cast<SizeType>(m_opt->m_postingQuantizerTrainingSamples));
+                    auto trainingVectors = p_reader->GetVectorSet(0, trainingCount);
+                    if (!trainingVectors || trainingVectors->GetValueType() != VectorValueType::Float ||
+                        trainingVectors->Count() <= 0 ||
+                        m_officialRaBitQ->Train(trainingVectors) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to train official RaBitQ on %lld vectors.\n",
+                                     static_cast<std::int64_t>(trainingCount));
+                        return false;
+                    }
+
+                    const std::filesystem::path path(modelPath);
+                    if (!path.parent_path().empty()) {
+                        std::filesystem::create_directories(path.parent_path());
+                    }
+                    if (m_officialRaBitQ->Save(modelPath) != ErrorCode::Success) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Failed to save official RaBitQ model %s.\n", modelPath.c_str());
+                        return false;
+                    }
+                }
+
+                if (m_officialRaBitQ->Dimension() != m_opt->m_dim ||
+                    m_officialRaBitQ->TotalBits() != m_opt->m_postingQuantBits) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Official RaBitQ model does not match Dim=%d PostingQuantBits=%d.\n",
+                                 m_opt->m_dim, m_opt->m_postingQuantBits);
+                    return false;
+                }
+                m_officialRaBitQReady = true;
+                return true;
+            }
         };
     } // namespace SPANN
 } // namespace SPTAG

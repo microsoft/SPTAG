@@ -15,6 +15,7 @@
 #include "inc/Core/Common/Checksum.h"
 #include "PersistentBuffer.h"
 #include "inc/Core/Common/PostingSizeRecord.h"
+#include "inc/Core/Common/OfficialRaBitQ.h"
 #include "inc/Core/Common/IVersionMap.h"
 #include "inc/Core/Common/LocalVersionMap.h"
 #include "inc/Core/Common/TiKVVersionMap.h"
@@ -36,6 +37,8 @@
 #include <random>
 #include <deque>
 #include <condition_variable>
+#include <filesystem>
+#include <optional>
 
 #ifdef SPDK
 #include "ExtraSPDKController.h"
@@ -211,6 +214,8 @@ namespace SPTAG::SPANN {
 
         SPANN::Index<ValueType>* m_headIndex;
         std::unique_ptr<COMMON::IVersionMap> m_versionMap;
+        std::unique_ptr<COMMON::OfficialRaBitQ> m_officialRaBitQ;
+        bool m_officialRaBitQReady = false;
         Options* m_opt;
         int m_layer;
 
@@ -293,14 +298,148 @@ namespace SPTAG::SPANN {
             return shouldLog;
         }
 
+        bool UseOfficialRaBitQ() const
+        {
+            return Helper::StrUtils::StrEqualIgnoreCase(
+                m_opt->m_postingQuantizer.c_str(), "RaBitQOfficial");
+        }
+
+        std::string OfficialRaBitQModelPath() const
+        {
+            if (!m_opt->m_postingQuantizerFile.empty()) {
+                return m_opt->m_postingQuantizerFile;
+            }
+            return m_opt->m_indexDirectory + FolderSep + "official_rabitq.model";
+        }
+
+        bool ConfigureOfficialRaBitQRecordLayout()
+        {
+            if (m_opt->m_storage != Storage::FILEIO) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "PostingQuantizer=RaBitQOfficial currently supports Storage=FILEIO only.\n");
+                return false;
+            }
+            if (m_opt->m_valueType != VectorValueType::Float ||
+                m_opt->m_postingQuantBits < 1 || m_opt->m_postingQuantBits > 8) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "RaBitQOfficial requires Float vectors and PostingQuantBits in [1, 8].\n");
+                return false;
+            }
+            if (!COMMON::OfficialRaBitQ::IsSupportedDimension(m_opt->m_dim) ||
+                !COMMON::OfficialRaBitQ::IsSupportedPlatform()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "RaBitQOfficial requires an AVX2/FMA CPU and dimensions in [64, 4095].\n");
+                return false;
+            }
+
+            m_officialRaBitQ = std::make_unique<COMMON::OfficialRaBitQ>(
+                m_opt->m_dim, m_opt->m_postingQuantBits);
+            m_metaDataSize = sizeof(SizeType) + sizeof(std::uint8_t) + 3;
+            const int codeBytes = static_cast<int>(m_officialRaBitQ->CodeBytes());
+            m_vectorDataSize = (codeBytes + static_cast<int>(alignof(std::uint64_t)) - 1) &
+                ~(static_cast<int>(alignof(std::uint64_t)) - 1);
+            m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
+            return true;
+        }
+
+        bool InitializeOfficialRaBitQ(const std::shared_ptr<Helper::VectorSetReader>& p_reader,
+                                      bool p_allowTraining)
+        {
+            if (!m_officialRaBitQ) {
+                return false;
+            }
+            if (m_officialRaBitQReady) {
+                return true;
+            }
+
+            const std::string modelPath = OfficialRaBitQModelPath();
+            if (fileexists(modelPath.c_str())) {
+                const ErrorCode ret = m_officialRaBitQ->Load(modelPath);
+                if (ret != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to load official RaBitQ model %s.\n", modelPath.c_str());
+                    return false;
+                }
+            } else {
+                if (!p_allowTraining || !p_reader) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Official RaBitQ model %s is missing for search/load.\n", modelPath.c_str());
+                    return false;
+                }
+
+                const SizeType trainingCount = (std::min)(
+                    p_reader->GetVectorSet()->Count(),
+                    static_cast<SizeType>(m_opt->m_postingQuantizerTrainingSamples));
+                auto trainingVectors = p_reader->GetVectorSet(0, trainingCount);
+                if (!trainingVectors || trainingVectors->GetValueType() != VectorValueType::Float ||
+                    trainingVectors->Count() <= 0 ||
+                    m_officialRaBitQ->Train(trainingVectors) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to train official RaBitQ on %lld vectors.\n",
+                                 static_cast<std::int64_t>(trainingCount));
+                    return false;
+                }
+
+                const std::filesystem::path path(modelPath);
+                if (!path.parent_path().empty()) {
+                    std::filesystem::create_directories(path.parent_path());
+                }
+                if (m_officialRaBitQ->Save(modelPath) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to save official RaBitQ model %s.\n", modelPath.c_str());
+                    return false;
+                }
+            }
+
+            if (m_officialRaBitQ->Dimension() != m_opt->m_dim ||
+                m_officialRaBitQ->TotalBits() != m_opt->m_postingQuantBits) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Official RaBitQ model does not match Dim=%d PostingQuantBits=%d.\n",
+                             m_opt->m_dim, m_opt->m_postingQuantBits);
+                return false;
+            }
+            m_officialRaBitQReady = true;
+            return true;
+        }
+
+        void SerializePosting(char* p_destination,
+                              SizeType p_vectorID,
+                              std::uint8_t p_version,
+                              const void* p_vector)
+        {
+            std::memcpy(p_destination, &p_vectorID, sizeof(p_vectorID));
+            std::memcpy(p_destination + sizeof(p_vectorID), &p_version, sizeof(p_version));
+            if (m_officialRaBitQ) {
+                std::memset(p_destination + sizeof(p_vectorID) + sizeof(p_version), 0,
+                            m_metaDataSize - sizeof(p_vectorID) - sizeof(p_version));
+                m_officialRaBitQ->Encode(
+                    static_cast<const float*>(p_vector),
+                    reinterpret_cast<std::uint8_t*>(p_destination + m_metaDataSize));
+                const size_t codeBytes = m_officialRaBitQ->CodeBytes();
+                if (m_vectorDataSize > static_cast<int>(codeBytes)) {
+                    std::memset(
+                        p_destination + m_metaDataSize + codeBytes, 0,
+                        static_cast<size_t>(m_vectorDataSize) - codeBytes);
+                }
+            } else {
+                std::memcpy(p_destination + m_metaDataSize, p_vector, m_vectorDataSize);
+            }
+        }
+
     public:
         ExtraDynamicSearcher(SPANN::Options& p_opt, int layer, SPANN::Index<ValueType>* headIndex, std::shared_ptr<Helper::KeyValueIO> p_db) {
             m_opt = &p_opt;
             m_layer = layer;
             m_headIndex = headIndex;
-            m_metaDataSize = sizeof(SizeType) + sizeof(uint8_t);
-            m_vectorDataSize = sizeof(ValueType) * m_opt->m_dim;
-            m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
+            if (UseOfficialRaBitQ()) {
+                if (!ConfigureOfficialRaBitQRecordLayout()) {
+                    return;
+                }
+            } else {
+                m_metaDataSize = sizeof(SizeType) + sizeof(std::uint8_t);
+                m_vectorDataSize = sizeof(ValueType) * m_opt->m_dim;
+                m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
+            }
             p_opt.m_postingPageLimit = max(p_opt.m_postingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * m_vectorInfoSize + PageSize - 1) / PageSize));
             p_opt.m_searchPostingPageLimit = p_opt.m_postingPageLimit;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Setting index with posting page limit:%d\n", p_opt.m_postingPageLimit);
@@ -428,6 +567,10 @@ namespace SPTAG::SPANN {
         }
 
         inline void Serialize(char* ptr, SizeType VID, std::uint8_t version, const void* vector) {
+            if (m_officialRaBitQ) {
+                SerializePosting(ptr, VID, version, vector);
+                return;
+            }
             memcpy(ptr, &VID, sizeof(VID));
             memcpy(ptr + sizeof(VID), &version, sizeof(version));
             memcpy(ptr + m_metaDataSize, vector, m_vectorDataSize);
@@ -452,6 +595,11 @@ namespace SPTAG::SPANN {
         // TODO
         ErrorCode RefineIndex() override
         {
+            if (UseOfficialRaBitQ()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "RaBitQOfficial does not support dynamic refinement.\n");
+                return ErrorCode::Undefined;
+            }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Begin RefineIndex\n");
 
             int iterations = 0;
@@ -1265,6 +1413,15 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            if (!m_splitThreadPool) {
+                bool expected = false;
+                if (m_warnedMissingAsyncMergePool.compare_exchange_strong(expected, true)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "AsyncMergeInSearch requested without an update worker pool; skipping async merges.\n");
+                }
+                return;
+            }
+
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 auto res = m_mergeList.insert(headID);
@@ -1795,6 +1952,14 @@ namespace SPTAG::SPANN {
 
         bool LoadIndex(Options& p_opt) override {
             m_opt = &p_opt;
+            if (UseOfficialRaBitQ() && !InitializeOfficialRaBitQ(nullptr, false)) {
+                return false;
+            }
+            if (UseOfficialRaBitQ() && m_opt->m_recovery) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "RaBitQOfficial does not support WAL recovery.\n");
+                return false;
+            }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "DataBlockSize: %lld, Capacity: %lld\n", (std::int64_t)(m_opt->m_datasetRowsInBlock), (std::int64_t)(m_opt->m_datasetCapacity));
             std::string versionmapPath = m_opt->m_indexDirectory + FolderSep + m_opt->m_deleteIDFile + "_" + std::to_string(m_layer);
             if (m_opt->m_recovery) {
@@ -1808,6 +1973,11 @@ namespace SPTAG::SPANN {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Current vector num: %lld.\n", (std::int64_t)(m_versionMap->Count()));
             } else if (m_opt->m_storage == Storage::SPDKIO || m_opt->m_storage == Storage::FILEIO) {
 		        if (fileexists((m_opt->m_indexDirectory + FolderSep + m_opt->m_ssdIndex + "_" + std::to_string(m_layer)).c_str())) {
+                    if (UseOfficialRaBitQ()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "RaBitQOfficial does not support static-to-FileIO conversion.\n");
+                        return false;
+                    }
                     m_versionMap->DeleteAll();
 			        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Copying data from static to SPDK\n");
 			        std::shared_ptr<IExtraSearcher> storeExtraSearcher;
@@ -1948,6 +2118,16 @@ namespace SPTAG::SPANN {
             auto layerTotalStart = std::chrono::high_resolution_clock::now();
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
+            std::optional<COMMON::OfficialRaBitQ::QueryContext> officialQuery;
+            if (m_officialRaBitQ) {
+                if (!m_officialRaBitQReady) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Official RaBitQ model is not initialized for posting search.\n");
+                    return ErrorCode::Fail;
+                }
+                officialQuery.emplace(m_officialRaBitQ->PrepareQuery(
+                    reinterpret_cast<const float*>(queryResults.GetTarget())));
+            }
 
             int diskRead = 0;
             int diskIO = 0;
@@ -2003,7 +2183,12 @@ namespace SPTAG::SPANN {
                         listElements--;
                         continue;
                     }
-                    auto distance2leaf = m_headIndex->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
+                    const float distance2leaf = m_officialRaBitQ
+                        ? m_officialRaBitQ->Estimate(
+                              *officialQuery,
+                              reinterpret_cast<const std::uint8_t*>(vectorInfo + m_metaDataSize))
+                        : m_headIndex->ComputeDistance(
+                              queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf, queryResults.WithVec()? ByteArray::Alloc((std::uint8_t*)(vectorInfo + m_metaDataSize), m_vectorDataSize) : ByteArray::c_empty);
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
@@ -2245,6 +2430,9 @@ namespace SPTAG::SPANN {
 
         bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) override {
             m_opt = &p_opt;
+            if (UseOfficialRaBitQ() && !InitializeOfficialRaBitQ(p_reader, true)) {
+                return false;
+            }
 
             int numThreads = m_opt->m_iSSDNumberOfThreads;
             int candidateNum = m_opt->m_internalResultNum;
@@ -2262,8 +2450,10 @@ namespace SPTAG::SPANN {
             {
                 auto fullVectors = p_reader->GetVectorSet();
                 fullCount = fullVectors->Count();
-                m_metaDataSize = sizeof(SizeType) + sizeof(uint8_t);
-                m_vectorDataSize = fullVectors->PerVectorDataSize();
+                if (!m_officialRaBitQ) {
+                    m_metaDataSize = sizeof(SizeType) + sizeof(std::uint8_t);
+                    m_vectorDataSize = fullVectors->PerVectorDataSize();
+                }
                 m_vectorInfoSize = m_vectorDataSize + m_metaDataSize;
             }
             if (upperBound > 0) fullCount = upperBound;
@@ -2706,7 +2896,7 @@ namespace SPTAG::SPANN {
                             // if (id == 0) SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "ID: %lld\n", (std::int64_t)fullID);
                             uint8_t version = m_versionMap->GetVersion(fullID);
                             // First Vector ID, then version, then Vector
-                            Serialize(ptr, fullID, version, p_fullVectors->GetVector(localID));
+                            SerializePosting(ptr, fullID, version, p_fullVectors->GetVector(localID));
                             ptr += m_vectorInfoSize;
                         }
                         if (!hasHead) {
@@ -2714,7 +2904,11 @@ namespace SPTAG::SPANN {
                                 postinglist.append(m_vectorInfoSize, '\0');
                                 postingSizes[index]++;
                             }
-                            Serialize(postinglist.data() + m_vectorInfoSize * (postingSizes[index].load() - 1), postingID, m_versionMap->GetVersion(postingID), p_headIndex->GetSample(index));
+                            SerializePosting(
+                                postinglist.data() + m_vectorInfoSize * (postingSizes[index].load() - 1),
+                                postingID,
+                                m_versionMap->GetVersion(postingID),
+                                p_headIndex->GetSample(index));
                         }
 
                         ErrorCode tmp;
@@ -2726,7 +2920,9 @@ namespace SPTAG::SPANN {
                             ret = tmp;
                             return;
                         }
-                        CheckCentroid(postingID, postinglist, "WriteDownAllPostingToDB");
+                        if (!m_officialRaBitQ) {
+                            CheckCentroid(postingID, postinglist, "WriteDownAllPostingToDB");
+                        }
                     }
                     else
                     {
@@ -2742,6 +2938,11 @@ namespace SPTAG::SPANN {
 
         ErrorCode AddIndex(ExtraWorkSpace* p_exWorkSpace, std::shared_ptr<VectorSet>& p_vectorSet,
             SizeType begin, bool disableSplit = false) override {
+            if (UseOfficialRaBitQ()) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "RaBitQOfficial does not support online insertion or reassignment.\n");
+                return ErrorCode::Undefined;
+            }
 
             // Phase 1: RNGSelection + serialize + WAL for each vector, group by headID
             std::unordered_map<SizeType, std::string> headAppends;
@@ -3069,6 +3270,7 @@ namespace SPTAG::SPANN {
 
         int m_mergeThreshold = 10;
         ErrorCode m_asyncStatus = ErrorCode::Success;
+        std::atomic_bool m_warnedMissingAsyncMergePool{ false };
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

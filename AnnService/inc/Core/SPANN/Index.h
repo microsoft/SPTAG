@@ -96,6 +96,14 @@ namespace SPTAG
 
             ~Index() {}
 
+            void SetQuantizerADC(bool p_enableADC) override
+            {
+                VectorIndex::SetQuantizerADC(p_enableADC);
+                if (m_topIndex) {
+                    m_topIndex->SetQuantizerADC(p_enableADC);
+                }
+            }
+
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) const
             {
                 if (clear) {

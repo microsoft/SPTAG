@@ -3,9 +3,12 @@
 
 set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
+set(RaBitQOfficial ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficial)
 
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
+include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
+include_directories(${RaBitQOfficial}/include)
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
 file(GLOB_RECURSE SRC_FILES ${AnnService}/src/Core/*.cpp ${AnnService}/src/Helper/*.cpp)
@@ -67,13 +70,67 @@ add_library (DistanceUtils STATIC
     )
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -mavx512f -mavx512bw -mavx512dq -fPIC)
+    target_compile_options(DistanceUtils PRIVATE -mavx2 -mavx -msse -msse2 -fPIC)
+endif()
+
+set(RABITQ_OFFICIAL_COMMON_SOURCES
+    ${RaBitQOfficial}/src/utils/cpu_features.cpp
+    ${RaBitQOfficial}/src/simd/dispatch.cpp
+    )
+set(RABITQ_OFFICIAL_AVX2_SOURCES
+    ${RaBitQOfficial}/src/simd/pack_excode_avx2.cpp
+    ${RaBitQOfficial}/src/simd/space_excode_avx2.cpp
+    ${RaBitQOfficial}/src/simd/space_avx2.cpp
+    ${RaBitQOfficial}/src/simd/fastscan_avx2.cpp
+    ${RaBitQOfficial}/src/simd/warmup_avx2.cpp
+    ${RaBitQOfficial}/src/simd/rotator_avx2.cpp
+    ${RaBitQOfficial}/src/index/hnsw_search_avx2.cpp
+    )
+set(RABITQ_OFFICIAL_AVX512_SOURCES
+    ${RaBitQOfficial}/src/simd/pack_excode_avx512.cpp
+    ${RaBitQOfficial}/src/simd/space_excode_avx512.cpp
+    ${RaBitQOfficial}/src/simd/space_avx512.cpp
+    ${RaBitQOfficial}/src/simd/fastscan_avx512.cpp
+    ${RaBitQOfficial}/src/simd/rotator_avx512.cpp
+    ${RaBitQOfficial}/src/index/hnsw_search_avx512_core.cpp
+    )
+set(RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES
+    ${RaBitQOfficial}/src/simd/warmup_avx512.cpp
+    ${RaBitQOfficial}/src/index/hnsw_search_avx512_popcnt.cpp
+    )
+
+set(RABITQ_OFFICIAL_SOURCES
+    ${RABITQ_OFFICIAL_COMMON_SOURCES}
+    ${RABITQ_OFFICIAL_AVX2_SOURCES}
+    )
+if(NOT MSVC)
+    list(APPEND RABITQ_OFFICIAL_SOURCES
+        ${RABITQ_OFFICIAL_AVX512_SOURCES}
+        ${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES})
+endif()
+
+add_library(RaBitQOfficialCore STATIC ${RABITQ_OFFICIAL_SOURCES})
+target_include_directories(RaBitQOfficialCore PUBLIC ${RaBitQOfficial}/include)
+set_target_properties(RaBitQOfficialCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
+    target_compile_options(RaBitQOfficialCore PRIVATE -fopenmp)
+    set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
+        PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+    set_source_files_properties(${RABITQ_OFFICIAL_AVX512_SOURCES}
+        PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mfma")
+    set_source_files_properties(${RABITQ_OFFICIAL_AVX512_POPCNT_SOURCES}
+        PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mavx512vpopcntdq -mfma")
+elseif(MSVC)
+    target_compile_definitions(RaBitQOfficialCore PRIVATE RABITQ_NO_AVX512=1)
+    target_compile_options(RaBitQOfficialCore PRIVATE /openmp)
+    set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
+        PROPERTIES COMPILE_FLAGS "/arch:AVX2")
 endif()
 
 add_library (SPTAGLib SHARED ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLib DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLib DistanceUtils RaBitQOfficialCore ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_shared ${NUMA_LIBRARY} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 add_library (SPTAGLibStatic STATIC ${SRC_FILES} ${HDR_FILES} ${TiKV_PROTO_SOURCES})
-target_link_libraries (SPTAGLibStatic DistanceUtils ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
+target_link_libraries (SPTAGLibStatic DistanceUtils RaBitQOfficialCore ${RocksDB_LIBRARIES} ${uring_LIBRARIES} libzstd_static ${NUMA_LIBRARY_STATIC} ${TBB_LIBRARIES} ${SPDK_LIBRARIES} ${TiKV_LIBRARIES})
 
 if (MSVC)
     # SPANNIndex.cpp can exceed COFF section limits in Debug without /bigobj.

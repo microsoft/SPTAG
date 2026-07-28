@@ -2,6 +2,7 @@
 #include <inc/Core/Common/DistanceUtils.h>
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Core/Common/RaBitQQuantizer.h>
 
 #include <memory>
 #include <inc/Core/VectorSet.h>
@@ -148,4 +149,16 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     }
     mythreads.clear();
     return codebooks;
+}
+
+template <typename T>
+std::shared_ptr<COMMON::RaBitQQuantizer<T>> TrainRaBitQQuantizer(
+    const std::shared_ptr<QuantizerOptions>& options,
+    const std::shared_ptr<VectorSet>& raw_vectors)
+{
+    const int bits = options->m_quantizedDim > 0 ? options->m_quantizedDim : 2;
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer<T>>(
+        raw_vectors->Dimension(), bits, options->m_normalized);
+    quantizer->Train(raw_vectors);
+    return quantizer;
 }

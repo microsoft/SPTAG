@@ -720,12 +720,21 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
     COMMON::OptHashPosVector resultDedup;
     resultDedup.Init(m_options.m_maxCheck, m_options.m_hashExp);
     COMMON::QueryResultSet<T> localResults((const T *)p_query.GetTarget(), m_options.m_searchInternalResultNum, p_query.WithMeta(), p_query.WithVec());
+    std::vector<BasicResult> headCandidates;
+    headCandidates.reserve(m_options.m_searchInternalResultNum);
+    if (m_pQuantizer && p_query.HasQuantizedTarget())
+    {
+        localResults.SetTarget((const T *)p_query.GetTarget(), m_pQuantizer);
+    }
     for (int i = 0, j = 0; i < p_queryResults->GetResultNum(); ++i)
     {
         auto res = p_queryResults->GetResult(i);
         if (res->VID == -1) break;
 
-        if (j < m_options.m_searchInternalResultNum) *(localResults.GetResult(j++)) = *res;
+        if (j < m_options.m_searchInternalResultNum) {
+            *(localResults.GetResult(j++)) = *res;
+            headCandidates.emplace_back(*res);
+        }
     }
     p_queryResults->Reset();
 
@@ -766,6 +775,10 @@ ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, 
                 p_stats->m_layerSetupLatency[layer] += setupLatency;
             }
         }
+    }
+
+    for (const auto& head : headCandidates) {
+        localResults.AddPoint(head.VID, head.Dist, head.Vec);
     }
 
     for (int i = 0; i < m_options.m_searchInternalResultNum; ++i)
@@ -1846,6 +1859,13 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
         return ErrorCode::Fail;
+    }
+    if (Helper::StrUtils::StrEqualIgnoreCase(
+            m_options.m_postingQuantizer.c_str(), "RaBitQOfficial"))
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "RaBitQOfficial does not support online insertion or reassignment.\n");
+        return ErrorCode::Undefined;
     }
 
     if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0)
