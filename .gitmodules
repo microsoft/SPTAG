@@ -11,3 +11,6 @@
 [submodule "ThirdParty/RocksDB"]
 	path = ThirdParty/RocksDB
 	url = https://github.com/PtilopsisL/rocksdb
+[submodule "ThirdParty/RaBitQOfficial"]
+	path = ThirdParty/RaBitQOfficial
+	url = https://github.com/VectorDB-NTU/RaBitQ-Library.git

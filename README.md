@@ -59,6 +59,18 @@ git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
 git config --global filter.lfs.process "git-lfs filter-process --skip"
 ```
 
+If the repository was cloned without `--recurse-submodules`, initialize every
+dependency before configuring CMake:
+
+```bash
+git submodule update --init --recursive
+```
+
+`ThirdParty/RaBitQOfficial` is pinned to the official RaBitQ source as a
+submodule. SPTAG-specific portability overlays live in
+`ThirdParty/RaBitQOfficialPatches`; do not edit the submodule checkout to apply
+those patches manually.
+
 ### **Install**
 
 > For Linux:

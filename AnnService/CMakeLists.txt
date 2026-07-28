@@ -4,10 +4,16 @@
 set(AnnService ${PROJECT_SOURCE_DIR}/AnnService)
 set(Zstd ${PROJECT_SOURCE_DIR}/ThirdParty/zstd)
 set(RaBitQOfficial ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficial)
+set(RaBitQOfficialPatches ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQOfficialPatches)
+
+if(NOT EXISTS ${RaBitQOfficial}/include/rabitqlib/defines.hpp)
+    message(FATAL_ERROR "RaBitQOfficial submodule is missing. Run: git submodule update --init --recursive")
+endif()
 
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
 include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
+include_directories(${RaBitQOfficialPatches}/include)
 include_directories(${RaBitQOfficial}/include)
 
 file(GLOB_RECURSE HDR_FILES ${AnnService}/inc/Core/*.h  ${AnnService}/inc/Helper/*.h)
@@ -74,8 +80,8 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 endif()
 
 set(RABITQ_OFFICIAL_COMMON_SOURCES
-    ${RaBitQOfficial}/src/utils/cpu_features.cpp
-    ${RaBitQOfficial}/src/simd/dispatch.cpp
+    ${RaBitQOfficialPatches}/src/utils/cpu_features.cpp
+    ${RaBitQOfficialPatches}/src/simd/dispatch.cpp
     )
 set(RABITQ_OFFICIAL_AVX2_SOURCES
     ${RaBitQOfficial}/src/simd/pack_excode_avx2.cpp
@@ -110,7 +116,9 @@ if(NOT MSVC)
 endif()
 
 add_library(RaBitQOfficialCore STATIC ${RABITQ_OFFICIAL_SOURCES})
-target_include_directories(RaBitQOfficialCore PUBLIC ${RaBitQOfficial}/include)
+target_include_directories(RaBitQOfficialCore PUBLIC
+    ${RaBitQOfficialPatches}/include
+    ${RaBitQOfficial}/include)
 set_target_properties(RaBitQOfficialCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     target_compile_options(RaBitQOfficialCore PRIVATE -fopenmp)
@@ -122,7 +130,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
         PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512bw -mavx512dq -mavx512vpopcntdq -mfma")
 elseif(MSVC)
     target_compile_definitions(RaBitQOfficialCore PRIVATE RABITQ_NO_AVX512=1)
-    target_compile_options(RaBitQOfficialCore PRIVATE /openmp)
+    target_compile_options(RaBitQOfficialCore PRIVATE
+        /openmp
+        "/FI${RaBitQOfficialPatches}/include/rabitqlib/utils/compiler_compat.hpp")
     set_source_files_properties(${RABITQ_OFFICIAL_AVX2_SOURCES}
         PROPERTIES COMPILE_FLAGS "/arch:AVX2")
 endif()
@@ -134,8 +144,12 @@ target_link_libraries (SPTAGLibStatic DistanceUtils RaBitQOfficialCore ${RocksDB
 
 if (MSVC)
     # SPANNIndex.cpp can exceed COFF section limits in Debug without /bigobj.
-    target_compile_options(SPTAGLib PRIVATE /bigobj)
-    target_compile_options(SPTAGLibStatic PRIVATE /bigobj)
+    target_compile_options(SPTAGLib PRIVATE
+        /bigobj
+        "/FI${RaBitQOfficialPatches}/include/rabitqlib/utils/compiler_compat.hpp")
+    target_compile_options(SPTAGLibStatic PRIVATE
+        /bigobj
+        "/FI${RaBitQOfficialPatches}/include/rabitqlib/utils/compiler_compat.hpp")
 endif()
 
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")

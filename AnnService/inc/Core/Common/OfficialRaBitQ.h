@@ -6,6 +6,7 @@
 #include "inc/Core/Common.h"
 #include "inc/Core/VectorSet.h"
 
+#include "rabitqlib/utils/compiler_compat.hpp"
 #include "rabitqlib/index/estimator.hpp"
 #include "rabitqlib/index/query.hpp"
 #include "rabitqlib/quantization/rabitq.hpp"

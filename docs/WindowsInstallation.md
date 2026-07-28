@@ -29,13 +29,15 @@ On the off chance of needing to build boost, because you encountered this messag
 
 ## Build
 
-1. git clone [microsoft/SPTAG](https://github.com/microsoft/SPTAG/)
-2. Go the folder location where you cloned the repo in the command prompt and execute the following commands:
+1. `git clone --recurse-submodules https://github.com/microsoft/SPTAG.git`
+2. If the repository was cloned without `--recurse-submodules`, run
+   `git submodule update --init --recursive` from the repository root.
+3. Go the folder location where you cloned the repo in the command prompt and execute the following commands:
 ```
 mkdir build
 cd build
 cmake -A x64 ..
 ```
-5. From the build folder, open SPTAGLib.sln solution in Visual Studio and compile all projects
+4. From the build folder, open SPTAGLib.sln solution in Visual Studio and compile all projects
 
-6. [..]/build/release contains now all components needed, add this path to PYTHONPATH environment variable to reference the required modules
+5. [..]/build/release contains now all components needed, add this path to PYTHONPATH environment variable to reference the required modules

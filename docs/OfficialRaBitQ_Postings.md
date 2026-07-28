@@ -4,6 +4,11 @@
 `VectorDB-NTU/RaBitQ-Library` split-code estimator. It is the recommended
 RaBitQ integration for SPANN.
 
+The official source is pinned as `ThirdParty/RaBitQOfficial` submodule. Run
+`git submodule update --init --recursive` before configuring CMake. SPTAG
+keeps its compatibility overlay in `ThirdParty/RaBitQOfficialPatches`, so the
+submodule itself remains at the pristine official commit.
+
 The BKT head graph remains raw Float vectors. During `BuildSSDIndex`, SPTAG
 trains or loads the official FHT/Kac rotation and centroid, then encodes each
 posting record as the official `[bin | ex]` split representation. Queries stay
