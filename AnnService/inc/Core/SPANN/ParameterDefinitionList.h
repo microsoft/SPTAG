@@ -123,6 +123,7 @@ DefineSSDParameter(m_enableWAL, bool, false, "EnableWAL")
 DefineSSDParameter(m_disableCheckpoint, bool, false, "DisableCheckpoint")
 DefineSSDParameter(m_headRoleFile, std::string, std::string("head_role.bin"), "HeadRoleFile")
 DefineSSDParameter(m_numTagsPerVec, int, 0, "NumTagsPerVec")
+DefineSSDParameter(m_staticACLTagCols, int, 0, "StaticACLTagCols")
 
 // GPU Building
 DefineSSDParameter(m_gpuSSDNumTrees, int, 100, "GPUSSDNumTrees")

@@ -318,6 +318,7 @@ public:
             std::vector<uint32_t> m_queryTags;
             float m_filterSelectivity = 1.0f;
             std::vector<SizeType> m_directPostingIDs;
+            std::vector<SizeType> m_directHeadLocalIDs;
             std::vector<int> m_searchHeadBundleNodes;
             // Per-level minimum tag value (ascending, disjoint ranges) persisted at
             // build time as tag_level_offsets.bin. Used to map a raw tag value to its
@@ -336,6 +337,7 @@ public:
                 m_queryTags.clear();
                 m_filterSelectivity = 1.0f;
                 m_directPostingIDs.clear();
+                m_directHeadLocalIDs.clear();
                 m_searchHeadBundleNodes.clear();
                 m_tagLevelOffsets.clear();
                 m_dnf.Clear();

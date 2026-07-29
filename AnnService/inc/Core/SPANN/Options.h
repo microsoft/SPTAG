@@ -124,6 +124,9 @@ namespace SPTAG {
 
             // Per-vector tags embedded in posting metadata
             int m_numTagsPerVec;
+            // Number of leading tag columns used by static ACL filtering.
+            // Zero preserves the legacy behavior of using every tag column.
+            int m_staticACLTagCols;
 
             // GPU building
             int m_gpuSSDNumTrees;
