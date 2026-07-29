@@ -1028,6 +1028,10 @@ namespace SPTAG
                     read = end;
                 }
                 p_selections.m_selections.swap(pureSelections);
+                // The old selection vector may contain dropped replicas. Release it
+                // before tail collection instead of carrying both copies through
+                // Phase 4.
+                std::vector<Edge>().swap(pureSelections);
                 p_selections.m_start = 0;
                 p_selections.m_end = p_selections.m_selections.size();
                 p_selections.m_totalsize = p_selections.m_end;
@@ -1237,42 +1241,55 @@ namespace SPTAG
                 for (int t = 0; t < threadCount; ++t) workers.emplace_back(collectTailCandidates);
                 for (auto& worker : workers) worker.join();
 
-                std::vector<Edge> admittedTails;
+                size_t admittedTailCount = 0;
                 for (SizeType head = 0; head < headCount; ++head) {
                     auto& candidates = tailCandidatesByHead[static_cast<size_t>(head)];
                     std::sort(candidates.begin(), candidates.end(), tailCandidateLess);
-                    admittedTails.insert(admittedTails.end(), candidates.begin(), candidates.end());
+                    admittedTailCount += candidates.size();
                 }
-                std::vector<std::vector<Edge>>().swap(tailCandidatesByHead);
 
                 std::vector<Edge> mergedSelections;
-                mergedSelections.reserve(pureSelectionCount + admittedTails.size());
+                mergedSelections.reserve(pureSelectionCount + admittedTailCount);
                 size_t pureRead = 0;
-                size_t tailRead = 0;
-                while (pureRead < pure.size() || tailRead < admittedTails.size()) {
-                    const SizeType pureHead = pureRead < pure.size() ? pure[pureRead].node : MaxSize;
-                    const SizeType tailHead =
-                        tailRead < admittedTails.size() ? admittedTails[tailRead].node : MaxSize;
-                    const SizeType head = (std::min)(pureHead, tailHead);
-
-                    size_t pureEnd = pureRead;
-                    while (pureEnd < pure.size() && pure[pureEnd].node == head) ++pureEnd;
-                    size_t tailEnd = tailRead;
-                    while (tailEnd < admittedTails.size() && admittedTails[tailEnd].node == head) ++tailEnd;
-
+                for (SizeType head = 0; head < headCount; ++head) {
+                    const size_t pureBegin = pureRead;
+                    while (pureRead < pure.size() && pure[pureRead].node == head) ++pureRead;
                     mergedSelections.insert(
-                        mergedSelections.end(), pure.begin() + pureRead, pure.begin() + pureEnd);
-                    for (size_t i = tailRead; i < tailEnd; ++i) {
-                        Edge tail = admittedTails[i];
+                        mergedSelections.end(), pure.begin() + pureBegin, pure.begin() + pureRead);
+
+                    auto& candidates = tailCandidatesByHead[static_cast<size_t>(head)];
+                    for (const Edge& candidate : candidates) {
+                        Edge tail = candidate;
                         tail.distance = (std::numeric_limits<float>::max)();
                         mergedSelections.push_back(tail);
                     }
                     p_postingListSize[static_cast<size_t>(head)] =
-                        static_cast<int>((pureEnd - pureRead) + (tailEnd - tailRead));
-                    pureRead = pureEnd;
-                    tailRead = tailEnd;
+                        static_cast<int>((pureRead - pureBegin) + candidates.size());
+                    std::vector<Edge>().swap(candidates);
                 }
-                std::vector<Edge>().swap(admittedTails);
+                std::vector<std::vector<Edge>>().swap(tailCandidatesByHead);
+                if (pureRead != pure.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static tail merge encountered an invalid pure posting ID.\n");
+                    return false;
+                }
+
+                if (unboundedTail) {
+                    p_selections.m_selections.swap(mergedSelections);
+                    p_selections.m_start = 0;
+                    p_selections.m_end = p_selections.m_selections.size();
+                    p_selections.m_totalsize = p_selections.m_end;
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Static Phase 4 done: pure=%zu tail=%zu skippedDuplicate=%zu "
+                        "skippedCapacity=%zu trimmed=0 final=%zu cap=unbounded\n",
+                        pureSelectionCount,
+                        p_selections.m_selections.size() - pureSelectionCount,
+                        skippedDuplicate.load(),
+                        skippedCapacity.load(),
+                        p_selections.m_selections.size());
+                    return true;
+                }
 
                 std::vector<Edge> trimmedSelections;
                 trimmedSelections.reserve(mergedSelections.size());
