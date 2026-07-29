@@ -4,6 +4,7 @@
 #include "inc/Core/Common/CommonUtils.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
+#include "inc/Core/KDT/Index.h"
 #include "inc/Core/SPANN/Index.h"
 #include "inc/Core/SPANN/ExtraDynamicSearcher.h"
 #include "inc/Core/SPANN/SPANNResultIterator.h"
@@ -1208,6 +1209,118 @@ BOOST_AUTO_TEST_CASE(TestInsertAndSearch)
     loadedOnce = nullptr;
 
     std::filesystem::remove_all("insert_test_index");
+}
+
+BOOST_AUTO_TEST_CASE(StaticBundleMetadataRootBuildAndReload)
+{
+    constexpr SizeType baseCount = 128;
+    constexpr DimensionType dimension = 8;
+    constexpr int tagCount = 4;
+    const std::string indexDirectory = "static_bundle_metadata_root_index";
+    std::filesystem::remove_all(indexDirectory);
+    std::filesystem::create_directories(indexDirectory);
+
+    ByteArray bytes = ByteArray::Alloc(
+        sizeof(float) * static_cast<size_t>(baseCount) * static_cast<size_t>(dimension));
+    auto* data = reinterpret_cast<float*>(bytes.Data());
+    std::vector<std::uint32_t> tags(static_cast<size_t>(baseCount) * tagCount);
+    std::vector<std::vector<SizeType>> nodeAssignments(2);
+    for (SizeType row = 0; row < baseCount; ++row) {
+        const int node = static_cast<int>(row % 2);
+        nodeAssignments[static_cast<size_t>(node)].push_back(row);
+        for (DimensionType dim = 0; dim < dimension; ++dim) {
+            data[static_cast<size_t>(row) * dimension + dim] =
+                static_cast<float>(node * 100 + row / 2 + dim);
+        }
+        for (int tag = 0; tag < tagCount; ++tag) {
+            tags[static_cast<size_t>(row) * tagCount + tag] =
+                static_cast<std::uint32_t>(node * 10 + tag);
+        }
+    }
+    auto vectors = std::make_shared<BasicVectorSet>(
+        bytes, VectorValueType::Float, dimension, baseCount);
+
+    auto index = VectorIndex::CreateInstance(IndexAlgoType::SPANN, VectorValueType::Float);
+    BOOST_REQUIRE(index != nullptr);
+    const auto set = [&](const char* section, const char* key, const std::string& value) {
+        BOOST_REQUIRE(index->SetParameter(key, value.c_str(), section) == ErrorCode::Success);
+    };
+    set("Base", "DistCalcMethod", "L2");
+    set("Base", "IndexAlgoType", "BKT");
+    set("Base", "ValueType", "Float");
+    set("Base", "Dim", std::to_string(dimension));
+    set("Base", "IndexDirectory", indexDirectory);
+    set("SelectHead", "isExecute", "true");
+    set("SelectHead", "SelectHeadType", "BKT");
+    set("SelectHead", "Ratio", "0.25");
+    set("SelectHead", "NumberOfThreads", "1");
+    set("SelectHead", "SelectThreshold", "0");
+    set("SelectHead", "SplitFactor", "0");
+    set("SelectHead", "SplitThreshold", "0");
+    set("BuildHead", "isExecute", "true");
+    set("BuildHead", "NumberOfThreads", "1");
+    set("BuildSSDIndex", "isExecute", "true");
+    set("BuildSSDIndex", "BuildSsdIndex", "true");
+    set("BuildSSDIndex", "Storage", "STATIC");
+    set("BuildSSDIndex", "InternalResultNum", "8");
+    set("BuildSSDIndex", "SearchInternalResultNum", "8");
+    set("BuildSSDIndex", "NumberOfThreads", "1");
+    set("BuildSSDIndex", "PostingPageLimit", "1");
+    set("BuildSSDIndex", "SearchPostingPageLimit", "1");
+    set("BuildSSDIndex", "SSDIndexFileNum", "1");
+    set("BuildSSDIndex", "ReplicaCount", "2");
+    set("BuildSSDIndex", "TailReplicaCount", "1");
+    set("BuildSSDIndex", "EnableUnfilterTail", "true");
+    set("BuildSSDIndex", "UnfilterTailBufferLength", "-1");
+    set("BuildSSDIndex", "ExcludeHead", "true");
+    set("BuildSSDIndex", "NumTagsPerVec", std::to_string(tagCount));
+    set("BuildSSDIndex", "StaticACLTagCols", std::to_string(tagCount));
+
+    auto* spann = dynamic_cast<SPANN::ISPANNIndex*>(index.get());
+    BOOST_REQUIRE(spann != nullptr);
+    spann->SetVectorTags(tags.data(), baseCount, tagCount);
+    spann->SetNodeVectorAssignments(nodeAssignments);
+    spann->SetPrimaryNodeVectorAssignments(nodeAssignments);
+    BOOST_REQUIRE(index->BuildIndex(vectors, nullptr, true, false, false) == ErrorCode::Success);
+
+    auto root = spann->GetMemoryIndex();
+    auto* metadataRoot = dynamic_cast<KDT::Index<float>*>(root.get());
+    BOOST_REQUIRE(metadataRoot != nullptr);
+    BOOST_CHECK(metadataRoot->IsMetadataOnly());
+    BOOST_CHECK_GT(metadataRoot->GetNumSamples(), 1);
+    BOOST_CHECK(!std::filesystem::exists(indexDirectory + "/SPTAGHeadVectors.bin"));
+    BOOST_CHECK(std::filesystem::exists(indexDirectory + "/HeadIndex/node_0/vectors.bin"));
+    BOOST_CHECK(std::filesystem::exists(indexDirectory + "/HeadIndex/node_1/vectors.bin"));
+
+    COMMON::QueryResultSet<float> query(data, 10);
+    BOOST_REQUIRE(index->SearchIndex(query) == ErrorCode::Success);
+    BOOST_CHECK_GE(query.GetResult(0)->VID, 0);
+
+    // STATIC snapshots deliberately reject arbitrary metadata callbacks, but the
+    // empty callback still exercises the metadata-root all-bundle routing fallback.
+    COMMON::QueryResultSet<float> genericRoutingQuery(data, 10);
+    std::function<bool(const ByteArray&)> noMetadataFilter;
+    BOOST_REQUIRE(index->SearchIndexWithFilter(
+                      genericRoutingQuery,
+                      noMetadataFilter,
+                      0) == ErrorCode::Success);
+    BOOST_CHECK_GE(genericRoutingQuery.GetResult(0)->VID, 0);
+
+    BOOST_REQUIRE(index->SaveIndex(indexDirectory) == ErrorCode::Success);
+    index.reset();
+    std::shared_ptr<VectorIndex> reloaded;
+    BOOST_REQUIRE(VectorIndex::LoadIndex(indexDirectory, reloaded) == ErrorCode::Success);
+    auto* reloadedSpann = dynamic_cast<SPANN::ISPANNIndex*>(reloaded.get());
+    BOOST_REQUIRE(reloadedSpann != nullptr);
+    auto* reloadedRoot = dynamic_cast<KDT::Index<float>*>(
+        reloadedSpann->GetMemoryIndex().get());
+    BOOST_REQUIRE(reloadedRoot != nullptr);
+    BOOST_CHECK(reloadedRoot->IsMetadataOnly());
+
+    COMMON::QueryResultSet<float> reloadedQuery(data, 10);
+    BOOST_REQUIRE(reloaded->SearchIndex(reloadedQuery) == ErrorCode::Success);
+    BOOST_CHECK_GE(reloadedQuery.GetResult(0)->VID, 0);
+    std::filesystem::remove_all(indexDirectory);
 }
 
 BOOST_AUTO_TEST_CASE(TaggedPureTailUpdate)

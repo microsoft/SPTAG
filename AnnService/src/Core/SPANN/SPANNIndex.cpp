@@ -315,6 +315,68 @@ bool CopyMetadataOnlyHeadStore(const std::string& sourcePath, const std::string&
     return true;
 }
 
+bool WriteMetadataOnlyHeadStore(const std::string& targetPath,
+                                SizeType totalHeads,
+                                DimensionType dimension)
+{
+    if (totalHeads < 0) return false;
+
+    const std::string temporaryPath = targetPath + ".tmp";
+    std::ofstream target(temporaryPath, std::ios::binary | std::ios::trunc);
+    const std::uint32_t magic = 0x484D4F31u; // 'HMO1'
+    const std::int32_t version = 1;
+    const std::int64_t persistedHeadCount = static_cast<std::int64_t>(totalHeads);
+    const std::int32_t persistedDimension = static_cast<std::int32_t>(dimension);
+    const bool written = target &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&magic), sizeof(magic))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&version), sizeof(version))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&persistedHeadCount),
+                                       sizeof(persistedHeadCount))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&persistedHeadCount),
+                                       sizeof(persistedHeadCount))) &&
+        static_cast<bool>(target.write(reinterpret_cast<const char*>(&persistedDimension),
+                                       sizeof(persistedDimension)));
+    target.close();
+    if (!written || !target || std::rename(temporaryPath.c_str(), targetPath.c_str()) != 0) {
+        std::remove(temporaryPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool WriteSelectedHeadIDs(const std::vector<SizeType>& selected,
+                          const std::string& idFilePath)
+{
+    std::shared_ptr<Helper::DiskIO> outputIDs = SPTAG::f_createIO();
+    if (outputIDs == nullptr ||
+        !outputIDs->Initialize(idFilePath.c_str(), std::ios::binary | std::ios::out)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to create head selection ID file: %s\n",
+                     idFilePath.c_str());
+        return false;
+    }
+
+    const SizeType count = static_cast<SizeType>(selected.size());
+    const DimensionType dimensions = 1;
+    if (outputIDs->WriteBinary(sizeof(count), reinterpret_cast<const char*>(&count)) != sizeof(count) ||
+        outputIDs->WriteBinary(sizeof(dimensions), reinterpret_cast<const char*>(&dimensions)) !=
+            sizeof(dimensions)) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write head selection ID header.\n");
+        return false;
+    }
+
+    for (SizeType vid : selected) {
+        const std::uint64_t storedVid = static_cast<std::uint64_t>(vid);
+        if (outputIDs->WriteBinary(sizeof(storedVid), reinterpret_cast<const char*>(&storedVid)) !=
+            sizeof(storedVid)) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Failed to write selected head ID %d.\n", vid);
+            return false;
+        }
+    }
+    return true;
+}
+
 template <typename InternalDataType>
 bool WriteSelectedHeadFiles(const COMMON::Dataset<InternalDataType>& data,
                             const std::vector<SizeType>& selected,
@@ -749,6 +811,10 @@ template <typename T> ErrorCode Index<T>::InitializeHeadBundleRuntime(const std:
     m_headBundleLocalByB.clear();
     m_headCrossEdgesLoaded.store(false, std::memory_order_release);
     m_headCrossEdgesDirty.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> mapLock(m_globalVIDToBundleLocMutex);
+        m_globalVIDToBundleLoc.clear();
+    }
 
     if (!m_headBundleNodes.empty())
     {
@@ -771,6 +837,15 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
     const auto& nodeInfo = m_headBundleNodes[static_cast<size_t>(p_nodeId)];
     if (nodeInfo.headCount == 0) {
         return ErrorCode::Success;
+    }
+    const bool isMonolithicDefaultBundle =
+        !m_metadataOnlyHeadStore && p_nodeId == 0 && m_headBundleNodes.size() == 1 &&
+        nodeInfo.headIndexRelativePath == m_options.m_headIndexFolder &&
+        nodeInfo.headCount == m_index->GetNumSamples();
+    if (isMonolithicDefaultBundle) {
+        // The root index is already this bundle. Let the caller use the direct
+        // root search path instead of trying to load HeadIndex/HeadIndex.
+        return ErrorCode::Fail;
     }
 
     std::lock_guard<std::mutex> lock(m_headBundleLoadLock);
@@ -811,8 +886,8 @@ template <typename T> ErrorCode Index<T>::EnsureHeadBundleNodeLoaded(int p_nodeI
         COMMON::Dataset<std::uint64_t> nodeHeadIDs;
         nodeHeadIDs.SetName("HeadBundleNodeIDs");
         if (nodeHeadIDs.Load(nodeDir + FolderSep + m_options.m_headIDFile,
-                             m_index->m_iDataBlockSize,
-                             m_index->m_iDataCapacity) != ErrorCode::Success)
+                             m_options.m_datasetRowsInBlock,
+                             m_options.m_datasetCapacity) != ErrorCode::Success)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
                          "Failed to load head bundle IDs for node %d from %s\n",
@@ -937,7 +1012,12 @@ template <typename T> ErrorCode Index<T>::SetupMetadataOnlyHeadStore(const std::
     // Eager-load every bundle node so the globalVID -> (node, local) reverse map is
     // fully populated before any search-time H1 GetSample resolution.
     for (size_t nodeId = 0; nodeId < m_headBundleNodes.size(); ++nodeId) {
-        EnsureHeadBundleNodeLoaded(static_cast<int>(nodeId));
+        if (EnsureHeadBundleNodeLoaded(static_cast<int>(nodeId)) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Metadata-only head root failed to load bundle node %zu.\n",
+                         nodeId);
+            return ErrorCode::Fail;
+        }
     }
 
     kdt->SetMetadataOnly(total, h1Split_);
@@ -1676,6 +1756,22 @@ template <typename T> ErrorCode Index<T>::LoadConfig(Helper::IniReader &p_reader
         SetParameter(entry.first.c_str(), entry.second.c_str(), "SearchSSDIndex");
     }
 
+    const std::string metadataRootSidecar = JoinPath(
+        JoinPath(m_options.m_indexDirectory, m_options.m_headIndexFolder),
+        "head_metaonly.bin");
+    if (fileexists(metadataRootSidecar.c_str()))
+    {
+        // The parent SPANN configuration retains the original BKT algorithm so bundle
+        // graphs reload as BKT. The persisted root itself is intentionally a tiny KDT.
+        auto metadataRoot = CreateInstance(IndexAlgoType::KDT, valueType);
+        if (metadataRoot == nullptr)
+            return ErrorCode::FailedParseValue;
+        metadataRoot->SetParameter(
+            "DistCalcMethod",
+            SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+        m_index = std::move(metadataRoot);
+    }
+
     if (m_pQuantizer)
     {
         m_pQuantizer->SetEnableADC(m_options.m_enableADC);
@@ -2136,6 +2232,9 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     const std::vector<SizeType>& directPostingIDs = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->m_directPostingIDs
         : kEmptyDirectPostingIDs;
+    const std::vector<SizeType>& directHeadLocalIDs = threadLocalSearchContext != nullptr
+        ? threadLocalSearchContext->m_directHeadLocalIDs
+        : kEmptyDirectPostingIDs;
     const uint32_t* queryTags = threadLocalSearchContext != nullptr
         ? threadLocalSearchContext->QueryTags()
         : nullptr;
@@ -2159,6 +2258,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
     // ═══ Sparse tag fast path: skip graph search, read postings directly ═══
     if (!directPostingIDs.empty() && m_extraSearcher != nullptr)
     {
+        if (directPostingIDs.size() > static_cast<size_t>((std::numeric_limits<int>::max)()) ||
+            directHeadLocalIDs.size() > static_cast<size_t>((std::numeric_limits<int>::max)())) {
+            return ErrorCode::Fail;
+        }
         auto workSpace = m_workSpaceFactory->GetWorkSpace();
         if (!workSpace) {
             workSpace.reset(new ExtraWorkSpace());
@@ -2176,9 +2279,73 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
         const int directPostingCount = static_cast<int>(directPostingIDs.size());
         if (directPostingCount > m_options.m_searchInternalResultNum) {
-            int maxPages = (std::max(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
-                           + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
-            workSpace->Clear(directPostingCount, maxPages, true, m_options.m_enableDataCompression);
+            const bool isStaticStorage = m_options.m_storage == Storage::STATIC;
+            const int maxPages = isStaticStorage
+                ? (std::max)(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit + 1) << PageSizeEx
+                : ((std::max)(m_options.m_postingPageLimit, m_options.m_searchPostingPageLimit)
+                    + m_options.m_bufferLength + m_options.m_unfilterTailBufferLength) << PageSizeEx;
+            // ExtraStaticSearcher indexes m_diskRequests by posting ordinal, so
+            // its workspace must retain one request per posting rather than the
+            // dynamic block-I/O request layout.
+            workSpace->Clear(directPostingCount, maxPages, !isStaticStorage,
+                             m_options.m_enableDataCompression);
+            // Clear() may have allocated new requests; initialize their static
+            // I/O context IDs before the scan.
+            m_extraSearcher->InitWorkSpace(workSpace.get(), true);
+        }
+
+        const int directResultNum = (std::max)(
+            m_options.m_searchInternalResultNum,
+            static_cast<int>(directHeadLocalIDs.size()));
+        COMMON::QueryResultSet<T> *p_queryResults;
+        if (p_query.GetResultNum() >= directResultNum)
+            p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
+        else
+            p_queryResults = new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(), directResultNum);
+
+        if (!directHeadLocalIDs.empty() && m_index != nullptr)
+        {
+            const bool hasTagFilter = queryTags != nullptr && numQueryTags > 0;
+            SPTAG::Cache::HierarchicalPostingMask queryHierMask;
+            if (hasTagFilter) {
+                queryHierMask.Clear();
+                for (int i = 0; i < numQueryTags; ++i) {
+                    queryHierMask.Insert(TagLevelFromId(queryTags[i]), queryTags[i]);
+                }
+            }
+
+            auto translateHeadVID = [&](SizeType localHid) -> SizeType {
+                if (localHid < 0 || localHid >= m_index->GetNumSamples()) return MaxSize;
+                if (m_index->HasHeadNodeMeta()) {
+                    SizeType metaVID = m_index->GetHeadNodeGlobalVID(localHid);
+                    if (metaVID != MaxSize) return metaVID;
+                }
+                if (localHid < static_cast<SizeType>(m_vectorTranslateMap.R()))
+                    return static_cast<SizeType>(*(m_vectorTranslateMap[localHid]));
+                return MaxSize;
+            };
+            auto shouldKeepHeadResult = [&](SizeType localHid) -> bool {
+                if (!hasTagFilter) return true;
+                static const std::vector<uint8_t> kNoRouteMask;
+                return m_index->HasHeadNodeMeta() &&
+                    m_index->HeadNodeMatchesQuery(localHid, queryHierMask, kNoRouteMask);
+            };
+
+            for (SizeType localHid : directHeadLocalIDs) {
+                if (localHid < 0 || localHid >= m_index->GetNumSamples() ||
+                    !shouldKeepHeadResult(localHid)) {
+                    continue;
+                }
+                const void* headSample = m_index->GetSample(localHid);
+                const SizeType globalVID = translateHeadVID(localHid);
+                if (headSample == nullptr || globalVID == MaxSize || m_versionMap.Deleted(globalVID) ||
+                    workSpace->m_deduper.CheckAndSet(globalVID)) {
+                    continue;
+                }
+                const float distance = m_index->ComputeDistance(
+                    p_queryResults->GetQuantizedTarget(), headSample);
+                p_queryResults->AddPoint(globalVID, distance);
+            }
         }
 
         // Directly inject all target posting IDs for sparse brute-force.
@@ -2189,14 +2356,6 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
                 workSpace->m_postingIDs.emplace_back(pid);
             }
         }
-
-        // Initialize result set — head vectors stay empty (no graph search)
-        COMMON::QueryResultSet<T> *p_queryResults;
-        if (p_query.GetResultNum() >= m_options.m_searchInternalResultNum)
-            p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
-        else
-            p_queryResults = new COMMON::QueryResultSet<T>((const T *)p_query.GetTarget(),
-                                                           m_options.m_searchInternalResultNum);
 
         // Read postings and scan with inline tag filter
         ErrorCode ret = m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults,
@@ -2222,6 +2381,7 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
         if (ret == ErrorCode::Success &&
             queryTags != nullptr &&
             numQueryTags > 0 &&
+            directHeadLocalIDs.empty() &&
             m_index != nullptr)
         {
             // Build hierarchical query mask for head-only vectors
@@ -2676,10 +2836,10 @@ template <typename T> ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool
 
     if (!usedHeadBundleGraphSearch)
     {
-        // No graph-level filter — pure distance-based greedy navigation.
         // In the dual-pool slim head store the root index physically holds only the
         // U_extra heads, so its tree cannot navigate H1; skip this dead fallback.
-        if (!m_metadataOnlyHeadStore && (ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
+        if (!m_metadataOnlyHeadStore &&
+            (ret = m_index->SearchIndex(*p_queryResults)) != ErrorCode::Success)
             return ret;
     }
 
@@ -3006,6 +3166,11 @@ ErrorCode Index<T>::SearchIndexIterative(QueryResult &p_headQuery, QueryResult &
 {
     if (!m_bReady)
         return ErrorCode::EmptyIndex;
+    if (m_metadataOnlyHeadStore) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "ITERATIVE NOT SUPPORT FOR METADATA-ONLY SPANN HEAD ROOT\n");
+        return ErrorCode::Undefined;
+    }
 
     COMMON::QueryResultSet<T> *p_headQueryResults = (COMMON::QueryResultSet<T> *)&p_headQuery;
     COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
@@ -3127,7 +3292,78 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
     COMMON::QueryResultSet<T> headResults((const T*)p_query.GetQuantizedTarget(), headSearchNum);
 
     // Step 1: Search HeadIndex for posting routing
-    m_index->SearchIndex(headResults);
+    ErrorCode headSearchStatus = ErrorCode::Fail;
+    if (m_metadataOnlyHeadStore) {
+        std::vector<int> candidateNodes;
+        candidateNodes.reserve(m_headBundleNodes.size());
+        for (const auto& node : m_headBundleNodes) {
+            candidateNodes.push_back(node.nodeId);
+        }
+        if (candidateNodes.empty()) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Metadata-only head root has no bundle nodes for generic filtering.\n");
+            return ErrorCode::Fail;
+        }
+
+        headResults.Reset();
+        int scanned = 0;
+        const bool canUseCrossSubgraph =
+            !m_headCrossEdgesDirty.load(std::memory_order_acquire) &&
+            candidateNodes.size() > 1 &&
+            LoadHeadCrossEdges() == ErrorCode::Success &&
+            !m_headCrossEdgeTargetsB.empty() &&
+            !m_options.m_disableCrossSubgraph;
+        if (canUseCrossSubgraph) {
+            headSearchStatus = CrossSubgraphGraphSearch(
+                p_query, &headResults, candidateNodes, nullptr, 0, headSearchNum, scanned);
+        } else {
+            headSearchStatus = ErrorCode::Success;
+            for (int nodeId : candidateNodes) {
+                if (EnsureHeadBundleNodeLoaded(nodeId) != ErrorCode::Success) {
+                    headSearchStatus = ErrorCode::Fail;
+                    break;
+                }
+                const auto& nodeIndex =
+                    m_loadedHeadBundleIndexes[static_cast<size_t>(nodeId)];
+                const auto& localToGlobal =
+                    m_headBundleLocalToGlobalHIDs[static_cast<size_t>(nodeId)];
+                if (nodeIndex == nullptr || localToGlobal.empty()) {
+                    headSearchStatus = ErrorCode::Fail;
+                    break;
+                }
+
+                COMMON::QueryResultSet<T> nodeResults(
+                    static_cast<const T*>(p_query.GetTarget()),
+                    (std::min)(headSearchNum, static_cast<int>(localToGlobal.size())));
+                if (nodeIndex->SearchIndex(nodeResults) != ErrorCode::Success) {
+                    headSearchStatus = ErrorCode::Fail;
+                    break;
+                }
+                scanned += nodeResults.GetScanned();
+                for (int i = 0; i < nodeResults.GetResultNum(); ++i) {
+                    BasicResult* result = nodeResults.GetResult(i);
+                    if (result == nullptr || result->VID == -1) break;
+                    if (result->VID < 0 ||
+                        static_cast<size_t>(result->VID) >= localToGlobal.size()) {
+                        continue;
+                    }
+                    headResults.AddPoint(
+                        localToGlobal[static_cast<size_t>(result->VID)], result->Dist);
+                }
+            }
+            if (headSearchStatus == ErrorCode::Success) {
+                headResults.SortResult();
+            }
+        }
+        if (headSearchStatus == ErrorCode::Success) {
+            headResults.SetScanned(scanned);
+        }
+    } else {
+        headSearchStatus = m_index->SearchIndex(headResults);
+    }
+    if (headSearchStatus != ErrorCode::Success) {
+        return headSearchStatus;
+    }
 
     auto workSpace = m_workSpaceFactory->GetWorkSpace();
     if (!workSpace)
@@ -3959,11 +4195,35 @@ bool Index<T>::SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader> &p_re
         if (m_pendingHeadRoles.empty()) {
             std::sort(selected.begin(), selected.end());
         }
-        if (!WriteSelectedHeadFiles(data,
-                                    std::vector<SizeType>(selected.begin(), selected.end()),
-                                    m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile,
-                                    m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile))
-        {
+        const bool hasBundleUExtra = std::any_of(
+            m_pendingNodeUExtraSelections.begin(),
+            m_pendingNodeUExtraSelections.end(),
+            [](const std::vector<SizeType>& p_selection) { return !p_selection.empty(); });
+        const bool buildMetadataOnlyBundleRoot =
+            m_options.m_storage == Storage::STATIC &&
+            !m_pendingNodeHeadSelections.empty() &&
+            m_pQuantizer == nullptr &&
+            !m_options.m_enableDeltaEncoding &&
+            !hasBundleUExtra;
+        if (buildMetadataOnlyBundleRoot) {
+            for (auto& nodeHeads : m_pendingNodeHeadSelections) {
+                std::sort(nodeHeads.begin(), nodeHeads.end());
+            }
+        }
+        if (buildMetadataOnlyBundleRoot) {
+            if (!WriteSelectedHeadIDs(
+                    selected,
+                    m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile)) {
+                return false;
+            }
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Info,
+                "Bundle STATIC build: wrote top-level head IDs only; bundle vectors are the sole head-vector source.\n");
+        } else if (!WriteSelectedHeadFiles(
+                       data,
+                       std::vector<SizeType>(selected.begin(), selected.end()),
+                       m_options.m_indexDirectory + FolderSep + m_options.m_headVectorFile,
+                       m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile)) {
             return false;
         }
 
@@ -4195,6 +4455,17 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             return true;
         };
 
+        const bool hasBundleUExtra = std::any_of(
+            m_pendingNodeUExtraSelections.begin(),
+            m_pendingNodeUExtraSelections.end(),
+            [](const std::vector<SizeType>& p_selection) { return !p_selection.empty(); });
+        const bool buildMetadataOnlyBundleRoot =
+            m_options.m_storage == Storage::STATIC &&
+            !m_pendingNodeHeadSelections.empty() &&
+            m_pQuantizer == nullptr &&
+            !m_options.m_enableDeltaEncoding &&
+            !hasBundleUExtra;
+        if (!buildMetadataOnlyBundleRoot) {
         m_index = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, valueType);
         m_index->SetParameter("DistCalcMethod", SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
         m_index->SetQuantizer(headQuant ? m_pQuantizer : nullptr);
@@ -4275,6 +4546,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot load head index from %s!\n",
                          (m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder).c_str());
         }
+        }
 
         if (!m_pendingNodeHeadSelections.empty())
         {
@@ -4331,6 +4603,103 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         {
             InitializeDefaultHeadBundle();
         }
+
+        if (buildMetadataOnlyBundleRoot)
+        {
+            const SizeType totalHeads = TotalHeadSampleCount();
+            if (totalHeads <= 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Bundle metadata root requires at least one selected head.\n");
+                return ErrorCode::Fail;
+            }
+
+            auto metadataRoot = SPTAG::VectorIndex::CreateInstance(
+                SPTAG::IndexAlgoType::KDT, valueType);
+            if (metadataRoot == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to create KDT metadata root for bundle build.\n");
+                return ErrorCode::Fail;
+            }
+            metadataRoot->SetParameter(
+                "DistCalcMethod",
+                SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
+            metadataRoot->SetQuantizer(nullptr);
+
+            const SizeType physicalCount = 1;
+            ByteArray rootBytes = ByteArray::Alloc(
+                static_cast<size_t>(physicalCount) * static_cast<size_t>(dims) * sizeof(T));
+            std::memset(rootBytes.Data(), 0, rootBytes.Length());
+            auto rootVectors = std::make_shared<BasicVectorSet>(
+                rootBytes, valueType, static_cast<DimensionType>(dims), physicalCount);
+            if (metadataRoot->BuildIndex(rootVectors, nullptr, false, true, true) != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to build KDT metadata root for bundle build.\n");
+                return ErrorCode::Fail;
+            }
+
+            const std::string headDir =
+                m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+            if (metadataRoot->SaveIndex(headDir) != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to save KDT metadata root to %s.\n", headDir.c_str());
+                return ErrorCode::Fail;
+            }
+            m_index = std::move(metadataRoot);
+
+            std::shared_ptr<Helper::DiskIO> headIDs = SPTAG::f_createIO();
+            if (headIDs == nullptr ||
+                !headIDs->Initialize(
+                    (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
+                    std::ios::binary | std::ios::in) ||
+                m_vectorTranslateMap.Load(
+                    headIDs,
+                    m_options.m_datasetRowsInBlock,
+                    m_options.m_datasetCapacity) !=
+                    ErrorCode::Success ||
+                m_vectorTranslateMap.R() != totalHeads) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to load the bundle metadata root head-ID map.\n");
+                return ErrorCode::Fail;
+            }
+
+            if (!WriteMetadataOnlyHeadStore(
+                    headDir + FolderSep + "head_metaonly.bin",
+                    totalHeads,
+                    static_cast<DimensionType>(dims))) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to write bundle metadata-root sidecar.\n");
+                return ErrorCode::Fail;
+            }
+
+            auto* metadataKDT = dynamic_cast<KDT::Index<T>*>(m_index.get());
+            if (metadataKDT == nullptr) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "KDT metadata root has an unexpected value type.\n");
+                return ErrorCode::Fail;
+            }
+            metadataKDT->SetMetadataOnly(totalHeads, totalHeads);
+            m_metadataOnlyHeadStore = true;
+
+            if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to initialize bundle metadata-root runtime.\n");
+                return ErrorCode::Fail;
+            }
+            for (const auto& node : m_headBundleNodes) {
+                if (EnsureHeadBundleNodeLoaded(node.nodeId) != ErrorCode::Success) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Failed to load bundle node %d for static placement.\n",
+                                 node.nodeId);
+                    return ErrorCode::Fail;
+                }
+            }
+
+            SPTAGLIB_LOG(
+                Helper::LogLevel::LL_Info,
+                "Bundle STATIC build: skipped global head graph; using KDT metadata root "
+                "for %d logical heads.\n",
+                static_cast<int>(totalHeads));
+        }
     }
     auto t3 = std::chrono::high_resolution_clock::now();
     double buildHeadTime = std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count();
@@ -4385,8 +4754,17 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                 m_extraSearcher->SetPrimaryNodeVectorAssignments(
                     m_pendingPrimaryNodeVectorAssignments);
             }
-            if (!m_pendingHeadVectorOwners.empty()) {
-                m_extraSearcher->SetHeadVectorOwners(m_pendingHeadVectorOwners);
+            if (auto* staticSearcher =
+                    dynamic_cast<ExtraStaticSearcher<T>*>(m_extraSearcher.get())) {
+                staticSearcher->SetHeadVectorOwnersView(&m_pendingHeadVectorOwners);
+                if (m_metadataOnlyHeadStore) {
+                    staticSearcher->SetHeadBundleBuildView(
+                        m_loadedHeadBundleIndexes,
+                        &m_headBundleLocalToGlobalHIDs,
+                        &m_pendingNodeHeadSelections);
+                }
+            } else if (!m_pendingHeadVectorOwners.empty()) {
+                    m_extraSearcher->SetHeadVectorOwners(m_pendingHeadVectorOwners);
             }
             auto* eds = dynamic_cast<ExtraDynamicSearcher<T>*>(m_extraSearcher.get());
             if (eds) {
@@ -4398,7 +4776,7 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             }
         }
 
-       {
+       if (m_vectorTranslateMap.R() == 0) {
             std::shared_ptr<Helper::DiskIO> ptr = SPTAG::f_createIO();
             if (ptr == nullptr ||
                 !ptr->Initialize((m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str(),
@@ -4408,7 +4786,10 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
                              (m_options.m_indexDirectory + FolderSep + m_options.m_headIDFile).c_str());
                 return ErrorCode::Fail;
             }
-            m_vectorTranslateMap.Load(ptr, m_index->m_iDataBlockSize, m_index->m_iDataCapacity);
+            m_vectorTranslateMap.Load(
+                ptr,
+                m_options.m_datasetRowsInBlock,
+                m_options.m_datasetCapacity);
         }
 
         if (m_options.m_buildSsdIndex)
@@ -4421,6 +4802,12 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             if (!m_extraSearcher->BuildIndex(p_reader, m_index, m_options, m_versionMap, m_vectorTranslateMap))
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "BuildSSDIndex Failed!\n");
+                return ErrorCode::Fail;
+            }
+            if (m_metadataOnlyHeadStore &&
+                SetupMetadataOnlyHeadStore(m_options.m_indexDirectory) != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                             "Failed to bind bundle samples to metadata-only head root.\n");
                 return ErrorCode::Fail;
             }
 
@@ -4484,7 +4871,8 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
     // totalHeads/h1Split/dim. h1Split is set to totalHeads so no real head vector is
     // physically stored in the root. This removes the obsolete full global head graph
     // from the persisted index.
-    if (!m_pendingNodeHeadSelections.empty() && m_index != nullptr)
+    if (!m_pendingNodeHeadSelections.empty() && m_index != nullptr &&
+        !m_metadataOnlyHeadStore && m_pQuantizer == nullptr)
     {
         SizeType total = m_vectorTranslateMap.R();
         SizeType n_h1 = total;
@@ -4507,18 +4895,19 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         }
         if (rolesOk)
         {
-            auto slimValueType = m_pQuantizer ? SPTAG::VectorValueType::UInt8 : m_options.m_valueType;
-            auto slimDims = m_pQuantizer ? m_pQuantizer->GetNumSubvectors() : m_options.m_dim;
+            auto slimValueType = m_options.m_valueType;
+            auto slimDims = m_options.m_dim;
             SizeType physCount = 1; // compatibility dummy only; real heads live in bundles
             ByteArray slimBytes = ByteArray::Alloc(
                 static_cast<size_t>(physCount) * static_cast<size_t>(slimDims) * sizeof(T));
             std::memset(slimBytes.Data(), 0, slimBytes.Length());
             auto slimVecSet = std::make_shared<BasicVectorSet>(
                 slimBytes, slimValueType, static_cast<DimensionType>(slimDims), physCount);
-            auto slim = SPTAG::VectorIndex::CreateInstance(m_options.m_indexAlgoType, slimValueType);
+            auto slim = SPTAG::VectorIndex::CreateInstance(
+                SPTAG::IndexAlgoType::KDT, slimValueType);
             slim->SetParameter("DistCalcMethod",
                 SPTAG::Helper::Convert::ConvertToString(m_options.m_distCalcMethod));
-            slim->SetQuantizer(m_pQuantizer);
+            slim->SetQuantizer(nullptr);
             for (const auto& iter : m_headParameters)
                 slim->SetParameter(iter.first.c_str(), iter.second.c_str());
             if (slim->BuildIndex(slimVecSet, nullptr, false, true, true) != ErrorCode::Success)
@@ -4531,29 +4920,15 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
             // KDT::SaveIndexData serializes m_pSamples (physical), so this persists the
             // metadata-only root. Full H1 resolution is restored on load via the sidecar.
             m_index = slim;
-            std::string headDir = m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
-            std::string sidecar = headDir + FolderSep + "head_metaonly.bin";
-            FILE* sfp = std::fopen(sidecar.c_str(), "wb");
-            if (sfp == nullptr)
+            const std::string headDir =
+                m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder;
+            if (!WriteMetadataOnlyHeadStore(
+                    headDir + FolderSep + "head_metaonly.bin",
+                    total,
+                    static_cast<DimensionType>(slimDims)))
             {
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                    "Slim head root: cannot write sidecar %s\n", sidecar.c_str());
-                return ErrorCode::Fail;
-            }
-            std::uint32_t magic = 0x484D4F31u; // 'HMO1'
-            std::int32_t version = 1;
-            std::int64_t totalHeads = total, h1Split = n_h1;
-            std::int32_t dim = static_cast<std::int32_t>(slimDims);
-            bool wok = std::fwrite(&magic, sizeof(magic), 1, sfp) == 1
-                    && std::fwrite(&version, sizeof(version), 1, sfp) == 1
-                    && std::fwrite(&totalHeads, sizeof(totalHeads), 1, sfp) == 1
-                    && std::fwrite(&h1Split, sizeof(h1Split), 1, sfp) == 1
-                    && std::fwrite(&dim, sizeof(dim), 1, sfp) == 1;
-            std::fclose(sfp);
-            if (!wok)
-            {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                    "Slim head root: failed writing sidecar %s\n", sidecar.c_str());
+                    "Slim head root: failed writing metadata sidecar.\n");
                 return ErrorCode::Fail;
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
@@ -4571,9 +4946,25 @@ template <typename T> ErrorCode Index<T>::BuildIndexInternal(std::shared_ptr<Hel
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save head bundle manifest.\n");
         return ErrorCode::Fail;
     }
-    if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success)
-    {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to initialize head bundle runtime.\n");
+    if (!m_metadataOnlyHeadStore) {
+        if (InitializeHeadBundleRuntime(m_options.m_indexDirectory) != ErrorCode::Success)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to initialize head bundle runtime.\n");
+            return ErrorCode::Fail;
+        }
+        const std::string metadataRootSidecar =
+            m_options.m_indexDirectory + FolderSep + m_options.m_headIndexFolder +
+            FolderSep + "head_metaonly.bin";
+        if (fileexists(metadataRootSidecar.c_str()) &&
+            SetupMetadataOnlyHeadStore(m_options.m_indexDirectory) != ErrorCode::Success) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "Failed to initialize metadata-only head root.\n");
+            return ErrorCode::Fail;
+        }
+    } else if (m_metaOnlyHeadVectorPtrs.empty() &&
+               SetupMetadataOnlyHeadStore(m_options.m_indexDirectory) != ErrorCode::Success) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                     "Failed to initialize metadata-only head root.\n");
         return ErrorCode::Fail;
     }
 

@@ -242,6 +242,23 @@ namespace SPTAG
                 const std::unordered_map<SizeType, int>& p_owners) override
             {
                 m_staticHeadVectorOwners = p_owners;
+                m_staticHeadVectorOwnersView = nullptr;
+            }
+
+            void SetHeadVectorOwnersView(
+                const std::unordered_map<SizeType, int>* p_owners) override
+            {
+                m_staticHeadVectorOwnersView = p_owners;
+            }
+
+            void SetHeadBundleBuildView(
+                const std::vector<std::shared_ptr<VectorIndex>>& p_indexes,
+                const std::vector<std::vector<SizeType>>* p_localToGlobalHIDs,
+                const std::vector<std::vector<SizeType>>* p_nodeHeadVectorIDs) override
+            {
+                m_staticHeadBundleIndexes = p_indexes;
+                m_staticHeadBundleLocalToGlobalHIDs = p_localToGlobalHIDs;
+                m_staticHeadBundleNodeHeadVectorIDs = p_nodeHeadVectorIDs;
             }
 
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
@@ -269,11 +286,13 @@ namespace SPTAG
 
             virtual bool LoadIndex(Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap,  std::shared_ptr<VectorIndex> m_index) {
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
+                m_opt = &p_opt;
                 if (!ConfigureStaticPipePQ(p_opt, 0, false)) {
                     return false;
                 }
                 m_staticHasMetadata = false;
                 m_staticNumTagsPerVec = 0;
+                m_staticACLTagCols = 0;
                 m_staticMetadataBytes = sizeof(int);
                 m_staticMaxListPageCount = 0;
                 std::string curFile = m_extraFullGraphFile;
@@ -340,7 +359,6 @@ namespace SPTAG
                 }
                 m_oneContext = (m_indexFiles.size() == 1);
 
-                m_opt = &p_opt;
                 if (m_staticHasMetadata && p_opt.m_numTagsPerVec > 0 &&
                     p_opt.m_numTagsPerVec != m_staticNumTagsPerVec) {
                     SPTAGLIB_LOG(
@@ -1045,15 +1063,26 @@ namespace SPTAG
                 };
 
                 const std::vector<Edge>& pure = p_selections.m_selections;
-                const bool useCrossBundleRNGTail =
+                const bool haveCrossBundleOwners =
                     m_staticBuildVectorOwners.size() == static_cast<size_t>(p_fullCount) &&
                     m_staticBuildHeadOwners.size() == static_cast<size_t>(headCount);
+                const bool useBundleFanoutRNGTail =
+                    haveCrossBundleOwners &&
+                    m_staticHeadBundleLocalToGlobalHIDs != nullptr &&
+                    m_staticHeadBundleIndexes.size() == m_staticHeadBundleLocalToGlobalHIDs->size() &&
+                    !m_staticHeadBundleIndexes.empty();
+                const bool useGlobalRNGTail =
+                    haveCrossBundleOwners && !useBundleFanoutRNGTail;
+                const auto& headOwners = m_staticHeadVectorOwnersView != nullptr
+                    ? *m_staticHeadVectorOwnersView
+                    : m_staticHeadVectorOwners;
                 SPTAGLIB_LOG(
                     Helper::LogLevel::LL_Info,
                     "Static Phase 4 (unfilter-tail): K_replica=%d, source=%s, recordBytes=%d, "
                     "extraTailPages=%d, scanning %d base vectors against %d heads\n",
                     replicaCount,
-                    useCrossBundleRNGTail ? "global-RNG-cross-bundle" : "nearest-head",
+                    useBundleFanoutRNGTail ? "bundle-fanout-RNG-cross-bundle" :
+                        (useGlobalRNGTail ? "global-RNG-cross-bundle" : "nearest-head"),
                     recordBytes, extraTailPages, p_fullCount, headCount);
                 std::atomic_size_t nextVector(0);
                 std::atomic_size_t skippedDuplicate(0);
@@ -1130,12 +1159,41 @@ namespace SPTAG
                     while (true) {
                         const SizeType vectorID = nextVector.fetch_add(1);
                         if (vectorID >= p_fullCount) break;
-                        if (p_headVectorIDs.count(vectorID) != 0) continue;
+                        if (headOwners.count(vectorID) != 0 ||
+                            p_headVectorIDs.count(vectorID) != 0) {
+                            continue;
+                        }
 
                         const ValueType* vector = static_cast<const ValueType*>(
                             p_fullVectors->GetVector(vectorID));
                         if (vector == nullptr) continue;
-                        if (useCrossBundleRNGTail) {
+                        if (useBundleFanoutRNGTail) {
+                            int globalCount = 0;
+                            const int vectorOwner =
+                                m_staticBuildVectorOwners[static_cast<size_t>(vectorID)];
+                            if (!StaticBundleFanoutRNGSelection(
+                                    globalSelections,
+                                    vector,
+                                    vectorID,
+                                    vectorOwner,
+                                    globalCount)) {
+                                continue;
+                            }
+                            for (int rank = 0;
+                                 rank < globalCount && rank < replicaCount;
+                                 ++rank) {
+                                const Edge& candidate =
+                                    globalSelections[static_cast<size_t>(rank)];
+                                if (candidate.node < 0 || candidate.node >= headCount ||
+                                    m_staticBuildHeadOwners[static_cast<size_t>(candidate.node)] ==
+                                        vectorOwner) {
+                                    continue;
+                                }
+                                offerTailCandidate(vectorID, candidate.node, candidate.distance);
+                            }
+                            continue;
+                        }
+                        if (useGlobalRNGTail) {
                             int globalCount = 0;
                             if (!StaticGlobalRNGSelection(
                                     globalSelections,
@@ -1347,6 +1405,71 @@ namespace SPTAG
                 return true;
             }
 
+            bool StaticBundleRNGSelection(
+                std::vector<Edge>& p_selections,
+                const ValueType* p_queryVector,
+                VectorIndex* p_index,
+                const std::vector<SizeType>& p_localToGlobalHIDs,
+                const std::vector<SizeType>& p_nodeHeadVectorIDs,
+                SizeType p_fullID,
+                int& p_replicaCount)
+            {
+                if (p_queryVector == nullptr || p_index == nullptr || p_index->m_pQuantizer != nullptr ||
+                    p_localToGlobalHIDs.size() != p_nodeHeadVectorIDs.size()) {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Error,
+                        "Bundle-aware static placement requires aligned unquantized bundle head vectors.\n");
+                    return false;
+                }
+
+                p_replicaCount = 0;
+                std::vector<const void*> selectedHeadVectors;
+                selectedHeadVectors.reserve(p_selections.size());
+                auto addCandidate = [&](SizeType p_localHeadID, float p_distance) {
+                    if (p_replicaCount >= static_cast<int>(p_selections.size()) ||
+                        p_localHeadID < 0 ||
+                        static_cast<size_t>(p_localHeadID) >= p_localToGlobalHIDs.size()) {
+                        return;
+                    }
+                    const void* candidateSample = p_index->GetSample(p_localHeadID);
+                    if (candidateSample == nullptr) return;
+                    for (const void* selectedSample : selectedHeadVectors) {
+                        const float headDistance = p_index->ComputeDistance(candidateSample, selectedSample);
+                        if (m_opt->m_rngFactor * headDistance <= p_distance) {
+                            return;
+                        }
+                    }
+
+                    Edge& selection = p_selections[static_cast<size_t>(p_replicaCount)];
+                    selection.node = p_localToGlobalHIDs[static_cast<size_t>(p_localHeadID)];
+                    selection.tonode = p_fullID;
+                    selection.distance = p_distance;
+                    selectedHeadVectors.push_back(candidateSample);
+                    ++p_replicaCount;
+                };
+
+                const auto self = std::lower_bound(
+                    p_nodeHeadVectorIDs.begin(), p_nodeHeadVectorIDs.end(), p_fullID);
+                if (self != p_nodeHeadVectorIDs.end() && *self == p_fullID) {
+                    if (m_opt->m_excludehead) return true;
+                    addCandidate(static_cast<SizeType>(self - p_nodeHeadVectorIDs.begin()), 0.0f);
+                }
+
+                COMMON::QueryResultSet<ValueType> queryResults(
+                    p_queryVector, (std::max)(1, m_opt->m_internalResultNum));
+                if (p_index->SearchIndex(queryResults) != ErrorCode::Success) {
+                    return false;
+                }
+
+                for (int i = 0; i < queryResults.GetResultNum() &&
+                                p_replicaCount < static_cast<int>(p_selections.size()); ++i) {
+                    BasicResult* result = queryResults.GetResult(i);
+                    if (result == nullptr || result->VID == -1) break;
+                    addCandidate(result->VID, result->Dist);
+                }
+                return true;
+            }
+
             bool StaticGlobalRNGSelection(std::vector<Edge>& p_selections,
                                           const ValueType* p_queryVector,
                                           VectorIndex* p_index,
@@ -1389,6 +1512,103 @@ namespace SPTAG
                 return true;
             }
 
+            bool StaticBundleFanoutRNGSelection(
+                std::vector<Edge>& p_selections,
+                const ValueType* p_queryVector,
+                SizeType p_fullID,
+                int p_vectorOwner,
+                int& p_replicaCount)
+            {
+                if (p_queryVector == nullptr || p_vectorOwner < 0 ||
+                    m_staticHeadBundleLocalToGlobalHIDs == nullptr ||
+                    m_staticHeadBundleIndexes.size() != m_staticHeadBundleLocalToGlobalHIDs->size()) {
+                    return false;
+                }
+
+                struct Candidate {
+                    float distance;
+                    SizeType globalHeadID;
+                    const void* sample;
+                    VectorIndex* index;
+                };
+
+                std::vector<Candidate> candidates;
+                const int candidateCount = (std::max)(1, m_opt->m_internalResultNum);
+                for (size_t nodeId = 0; nodeId < m_staticHeadBundleIndexes.size(); ++nodeId) {
+                    const auto& nodeIndex = m_staticHeadBundleIndexes[nodeId];
+                    const auto& localToGlobal =
+                        (*m_staticHeadBundleLocalToGlobalHIDs)[nodeId];
+                    if (nodeIndex == nullptr || localToGlobal.empty() ||
+                        nodeIndex->m_pQuantizer != nullptr) {
+                        return false;
+                    }
+
+                    COMMON::QueryResultSet<ValueType> nodeResults(
+                        p_queryVector,
+                        (std::min)(candidateCount, static_cast<int>(localToGlobal.size())));
+                    if (nodeIndex->SearchIndex(nodeResults) != ErrorCode::Success) {
+                        return false;
+                    }
+                    for (int i = 0; i < nodeResults.GetResultNum(); ++i) {
+                        BasicResult* result = nodeResults.GetResult(i);
+                        if (result == nullptr || result->VID == -1) break;
+                        if (result->VID < 0 ||
+                            static_cast<size_t>(result->VID) >= localToGlobal.size()) {
+                            continue;
+                        }
+                        const void* sample = nodeIndex->GetSample(result->VID);
+                        if (sample == nullptr) continue;
+                        candidates.push_back(
+                            { result->Dist,
+                              localToGlobal[static_cast<size_t>(result->VID)],
+                              sample,
+                              nodeIndex.get() });
+                    }
+                }
+
+                std::sort(candidates.begin(), candidates.end(),
+                          [](const Candidate& p_left, const Candidate& p_right) {
+                              return p_left.distance == p_right.distance
+                                  ? p_left.globalHeadID < p_right.globalHeadID
+                                  : p_left.distance < p_right.distance;
+                          });
+
+                p_replicaCount = 0;
+                std::vector<const void*> selectedHeadVectors;
+                selectedHeadVectors.reserve(p_selections.size());
+                for (const Candidate& candidate : candidates) {
+                    if (p_replicaCount >= static_cast<int>(p_selections.size())) break;
+
+                    bool accepted = true;
+                    for (const void* selectedSample : selectedHeadVectors) {
+                        const float headDistance =
+                            candidate.index->ComputeDistance(candidate.sample, selectedSample);
+                        if (m_opt->m_rngFactor * headDistance <= candidate.distance) {
+                            accepted = false;
+                            break;
+                        }
+                    }
+                    if (!accepted) continue;
+
+                    bool duplicate = false;
+                    for (int i = 0; i < p_replicaCount; ++i) {
+                        if (p_selections[static_cast<size_t>(i)].node == candidate.globalHeadID) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (duplicate) continue;
+
+                    Edge& selection = p_selections[static_cast<size_t>(p_replicaCount)];
+                    selection.node = candidate.globalHeadID;
+                    selection.tonode = p_fullID;
+                    selection.distance = candidate.distance;
+                    selectedHeadVectors.push_back(candidate.sample);
+                    ++p_replicaCount;
+                }
+                return true;
+            }
+
             bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::VersionLabel& p_versionMap, COMMON::Dataset<std::uint64_t>& p_vectorTranslateMap, SizeType upperBound = -1) {
                 std::string outputFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 if (outputFile.empty())
@@ -1407,12 +1627,6 @@ namespace SPTAG
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Not found VectorIDTranslate!\n");
                     return false;
                 }
-
-                for (int i = 0; i < p_vectorTranslateMap.R(); i++)
-                {
-                    headVectorIDS[static_cast<SizeType>(*(p_vectorTranslateMap[i]))] = i;
-                }
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded %u Vector IDs\n", static_cast<uint32_t>(headVectorIDS.size()));
 
                 SizeType fullCount = 0;
                 size_t vectorInfoSize = 0;
@@ -1479,6 +1693,49 @@ namespace SPTAG
                     }
                 }
 
+                bool useBundleLocalNodeAwareBuild = useNodeAwareBuild &&
+                    m_staticHeadBundleLocalToGlobalHIDs != nullptr &&
+                    m_staticHeadBundleNodeHeadVectorIDs != nullptr &&
+                    m_staticHeadBundleIndexes.size() == plannedNodeVectors.size() &&
+                    m_staticHeadBundleLocalToGlobalHIDs->size() == plannedNodeVectors.size() &&
+                    m_staticHeadBundleNodeHeadVectorIDs->size() == plannedNodeVectors.size();
+                if (useBundleLocalNodeAwareBuild) {
+                    for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId) {
+                        const auto& localToGlobal =
+                            (*m_staticHeadBundleLocalToGlobalHIDs)[nodeId];
+                        const auto& nodeHeadVectorIDs =
+                            (*m_staticHeadBundleNodeHeadVectorIDs)[nodeId];
+                        if (m_staticHeadBundleIndexes[nodeId] == nullptr ||
+                            localToGlobal.empty() ||
+                            localToGlobal.size() != nodeHeadVectorIDs.size() ||
+                            !std::is_sorted(nodeHeadVectorIDs.begin(), nodeHeadVectorIDs.end())) {
+                            useBundleLocalNodeAwareBuild = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (!useBundleLocalNodeAwareBuild) {
+                    for (int i = 0; i < p_vectorTranslateMap.R(); i++) {
+                        headVectorIDS[static_cast<SizeType>(*(p_vectorTranslateMap[i]))] = i;
+                    }
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Loaded %u Vector IDs for global static placement\n",
+                        static_cast<uint32_t>(headVectorIDS.size()));
+                } else {
+                    SPTAGLIB_LOG(
+                        Helper::LogLevel::LL_Info,
+                        "Using bundle-local BKT placement; skipping global head-ID hash and masks.\n");
+                }
+                const auto& staticHeadOwners = m_staticHeadVectorOwnersView != nullptr
+                    ? *m_staticHeadVectorOwnersView
+                    : m_staticHeadVectorOwners;
+                const auto isHeadVector = [&](SizeType p_vectorID) {
+                    return headVectorIDS.count(p_vectorID) != 0 ||
+                        staticHeadOwners.count(p_vectorID) != 0;
+                };
+
                 Selection selections(
                     (useNodeAwareBuild ? plannedAssignmentCount : static_cast<size_t>(fullCount)) *
                         p_opt.m_replicaCount,
@@ -1499,40 +1756,63 @@ namespace SPTAG
                     }
 
                     std::vector<int> headToNode(p_headIndex->GetNumSamples(), -1);
-                    for (const auto& pair : headVectorIDS) {
-                        if (pair.first < 0 || pair.first >= fullCount) continue;
-                        int owner = -1;
-                        auto ownerIt = m_staticHeadVectorOwners.find(pair.first);
-                        if (ownerIt != m_staticHeadVectorOwners.end()) {
-                            owner = ownerIt->second;
-                        } else {
-                            owner = vectorOwner[static_cast<size_t>(pair.first)];
+                    std::vector<std::vector<uint8_t>> allowedHeadMasks;
+                    std::vector<SizeType> allowedHeadCounts;
+                    if (useBundleLocalNodeAwareBuild) {
+                        for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId) {
+                            const auto& localToGlobal =
+                                (*m_staticHeadBundleLocalToGlobalHIDs)[nodeId];
+                            for (SizeType globalHeadID : localToGlobal) {
+                                if (globalHeadID < 0 ||
+                                    globalHeadID >= p_headIndex->GetNumSamples() ||
+                                    headToNode[static_cast<size_t>(globalHeadID)] != -1) {
+                                    SPTAGLIB_LOG(
+                                        Helper::LogLevel::LL_Error,
+                                        "Bundle-aware static placement has an invalid or duplicate global head ID.\n");
+                                    return false;
+                                }
+                                headToNode[static_cast<size_t>(globalHeadID)] =
+                                    static_cast<int>(nodeId);
+                            }
                         }
-                        if (owner < 0 || owner >= static_cast<int>(plannedNodeVectors.size())) {
-                            SPTAGLIB_LOG(
-                                Helper::LogLevel::LL_Error,
-                                "Node-aware static placement cannot resolve owner for head vector %d.\n",
-                                pair.first);
-                            return false;
+                    } else {
+                        for (const auto& pair : headVectorIDS) {
+                            if (pair.first < 0 || pair.first >= fullCount) continue;
+                            int owner = -1;
+                            const auto ownerIt = staticHeadOwners.find(pair.first);
+                            if (ownerIt != staticHeadOwners.end()) {
+                                owner = ownerIt->second;
+                            } else {
+                                owner = vectorOwner[static_cast<size_t>(pair.first)];
+                            }
+                            if (owner < 0 || owner >= static_cast<int>(plannedNodeVectors.size())) {
+                                SPTAGLIB_LOG(
+                                    Helper::LogLevel::LL_Error,
+                                    "Node-aware static placement cannot resolve owner for head vector %d.\n",
+                                    pair.first);
+                                return false;
+                            }
+                            headToNode[static_cast<size_t>(pair.second)] = owner;
                         }
-                        headToNode[static_cast<size_t>(pair.second)] = owner;
-                    }
-                    m_staticBuildVectorOwners = vectorOwner;
-                    m_staticBuildHeadOwners = headToNode;
 
-                    std::vector<std::vector<uint8_t>> allowedHeadMasks(
-                        plannedNodeVectors.size(),
-                        std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
-                    std::vector<SizeType> allowedHeadCounts(plannedNodeVectors.size(), 0);
-                    for (SizeType head = 0; head < p_headIndex->GetNumSamples(); ++head) {
-                        const int owner = headToNode[static_cast<size_t>(head)];
-                        if (owner >= 0 && owner < static_cast<int>(allowedHeadMasks.size())) {
-                            allowedHeadMasks[static_cast<size_t>(owner)][static_cast<size_t>(head)] = 1;
-                            ++allowedHeadCounts[static_cast<size_t>(owner)];
+                        allowedHeadMasks.assign(
+                            plannedNodeVectors.size(),
+                            std::vector<uint8_t>(p_headIndex->GetNumSamples(), 0));
+                        allowedHeadCounts.assign(plannedNodeVectors.size(), 0);
+                        for (SizeType head = 0; head < p_headIndex->GetNumSamples(); ++head) {
+                            const int owner = headToNode[static_cast<size_t>(head)];
+                            if (owner >= 0 && owner < static_cast<int>(allowedHeadMasks.size())) {
+                                allowedHeadMasks[static_cast<size_t>(owner)][static_cast<size_t>(head)] = 1;
+                                ++allowedHeadCounts[static_cast<size_t>(owner)];
+                            }
                         }
                     }
                     for (size_t nodeId = 0; nodeId < plannedNodeVectors.size(); ++nodeId) {
-                        if (!plannedNodeVectors[nodeId].empty() && allowedHeadCounts[nodeId] == 0) {
+                        const SizeType headCount = useBundleLocalNodeAwareBuild
+                            ? static_cast<SizeType>(
+                                (*m_staticHeadBundleLocalToGlobalHIDs)[nodeId].size())
+                            : allowedHeadCounts[nodeId];
+                        if (!plannedNodeVectors[nodeId].empty() && headCount == 0) {
                             SPTAGLIB_LOG(
                                 Helper::LogLevel::LL_Error,
                                 "Node-aware static placement node %zu has vectors but no heads.\n",
@@ -1567,32 +1847,50 @@ namespace SPTAG
                                 replicaCount[static_cast<size_t>(vectorId)] = 0;
                                 int assignedCount = 0;
 
-                                const auto headIt = headVectorIDS.find(vectorId);
-                                if (headIt != headVectorIDS.end() && p_opt.m_excludehead) {
-                                    continue;
-                                }
-                                if (!p_opt.m_excludehead && headIt != headVectorIDS.end() &&
-                                    headToNode[static_cast<size_t>(headIt->second)] == nodeId) {
-                                    Edge& self = selections.m_selections[selectionOffset];
-                                    self.node = headIt->second;
-                                    self.tonode = vectorId;
-                                    self.distance = 0.0f;
-                                    ++postingListSize[static_cast<size_t>(self.node)];
-                                    ++replicaCount[static_cast<size_t>(vectorId)];
-                                    assignedCount = 1;
-                                }
-
                                 std::fill(localSelections.begin(), localSelections.end(), Edge());
                                 int localCount = 0;
-                                if (!StaticRNGSelection(
-                                        localSelections,
-                                        static_cast<const ValueType*>(fullVectors->GetVector(vectorId)),
-                                        p_headIndex.get(),
-                                        vectorId,
-                                        localCount,
-                                        allowedHeadMasks[static_cast<size_t>(nodeId)],
-                                        allowedHeadCounts[static_cast<size_t>(nodeId)])) {
-                                    continue;
+                                if (useBundleLocalNodeAwareBuild) {
+                                    const auto& nodeIndex =
+                                        m_staticHeadBundleIndexes[static_cast<size_t>(nodeId)];
+                                    const auto& localToGlobal =
+                                        (*m_staticHeadBundleLocalToGlobalHIDs)[static_cast<size_t>(nodeId)];
+                                    const auto& nodeHeadVectorIDs =
+                                        (*m_staticHeadBundleNodeHeadVectorIDs)[static_cast<size_t>(nodeId)];
+                                    if (!StaticBundleRNGSelection(
+                                            localSelections,
+                                            static_cast<const ValueType*>(fullVectors->GetVector(vectorId)),
+                                            nodeIndex.get(),
+                                            localToGlobal,
+                                            nodeHeadVectorIDs,
+                                            vectorId,
+                                            localCount)) {
+                                        continue;
+                                    }
+                                } else {
+                                    const auto headIt = headVectorIDS.find(vectorId);
+                                    if (headIt != headVectorIDS.end() && p_opt.m_excludehead) {
+                                        continue;
+                                    }
+                                    if (!p_opt.m_excludehead && headIt != headVectorIDS.end() &&
+                                        headToNode[static_cast<size_t>(headIt->second)] == nodeId) {
+                                        Edge& self = selections.m_selections[selectionOffset];
+                                        self.node = headIt->second;
+                                        self.tonode = vectorId;
+                                        self.distance = 0.0f;
+                                        ++postingListSize[static_cast<size_t>(self.node)];
+                                        ++replicaCount[static_cast<size_t>(vectorId)];
+                                        assignedCount = 1;
+                                    }
+                                    if (!StaticRNGSelection(
+                                            localSelections,
+                                            static_cast<const ValueType*>(fullVectors->GetVector(vectorId)),
+                                            p_headIndex.get(),
+                                            vectorId,
+                                            localCount,
+                                            allowedHeadMasks[static_cast<size_t>(nodeId)],
+                                            allowedHeadCounts[static_cast<size_t>(nodeId)])) {
+                                        continue;
+                                    }
                                 }
                                 for (int i = 0; i < localCount &&
                                                 assignedCount < p_opt.m_replicaCount; ++i) {
@@ -1617,6 +1915,8 @@ namespace SPTAG
                         });
                     }
                     for (auto& thread : threads) thread.join();
+                    m_staticBuildVectorOwners = std::move(vectorOwner);
+                    m_staticBuildHeadOwners = std::move(headToNode);
                     SPTAGLIB_LOG(
                         Helper::LogLevel::LL_Info,
                         "Node-aware static candidate search finished with %zu assignments across %zu nodes.\n",
@@ -1729,7 +2029,7 @@ namespace SPTAG
                     std::vector<int> replicaCountDist(p_opt.m_replicaCount + 1, 0);
                     for (int i = 0; i < replicaCount.size(); ++i)
                     {
-                        if (headVectorIDS.count(i) > 0) continue;
+                        if (isHeadVector(i)) continue;
                         ++replicaCountDist[replicaCount[i]];
                     }
 
@@ -1790,7 +2090,7 @@ namespace SPTAG
                     }
                     for (int i = 0; i < replicaCount.size(); ++i)
                     {
-                        if (headVectorIDS.count(i) > 0) continue;
+                        if (isHeadVector(i)) continue;
 
                         ++replicaCountDist[replicaCount[i]];
 
@@ -2659,7 +2959,10 @@ namespace SPTAG
                     }
                     return false;
                 }
-                for (int ti = 0; ti < m_staticNumTagsPerVec; ++ti) {
+                const int filterTagCols = m_staticACLTagCols > 0
+                    ? m_staticACLTagCols
+                    : m_staticNumTagsPerVec;
+                for (int ti = 0; ti < filterTagCols; ++ti) {
                     std::uint32_t vectorTag = 0;
                     std::memcpy(&vectorTag, tags + static_cast<size_t>(ti) * sizeof(vectorTag),
                                 sizeof(vectorTag));
@@ -2831,6 +3134,7 @@ namespace SPTAG
             {
                 m_staticHasMetadata = false;
                 m_staticNumTagsPerVec = 0;
+                m_staticACLTagCols = 0;
                 m_staticMetadataBytes = sizeof(int);
                 if (p_opt.m_numTagsPerVec <= 0) return true;
 
@@ -2858,6 +3162,15 @@ namespace SPTAG
 
                 m_staticHasMetadata = true;
                 m_staticNumTagsPerVec = p_opt.m_numTagsPerVec;
+                m_staticACLTagCols = p_opt.m_staticACLTagCols > 0
+                    ? p_opt.m_staticACLTagCols
+                    : m_staticNumTagsPerVec;
+                if (m_staticACLTagCols > m_staticNumTagsPerVec) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "StaticACLTagCols=%d exceeds NumTagsPerVec=%d.\n",
+                                 m_staticACLTagCols, m_staticNumTagsPerVec);
+                    return false;
+                }
                 m_staticMetadataBytes = static_cast<int>(
                     sizeof(int) + static_cast<size_t>(m_staticNumTagsPerVec) * sizeof(uint32_t));
                 return true;
@@ -3191,6 +3504,16 @@ namespace SPTAG
                     m_vectorInfoSize = recordBytes;
                     m_staticHasMetadata = true;
                     m_staticNumTagsPerVec = numTagsPerVec;
+                    m_staticACLTagCols =
+                        m_opt != nullptr && m_opt->m_staticACLTagCols > 0
+                        ? m_opt->m_staticACLTagCols
+                        : m_staticNumTagsPerVec;
+                    if (m_staticACLTagCols > m_staticNumTagsPerVec) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "StaticACLTagCols=%d exceeds STM1 tag count=%d.\n",
+                                     m_staticACLTagCols, m_staticNumTagsPerVec);
+                        throw std::runtime_error("Static ACL tag-column count mismatch");
+                    }
                     m_staticMetadataBytes = metadataBytes;
                     m_staticHasUnfilterTail = false;
                     m_staticTailPageBudget = tailPageBudget;
@@ -3198,6 +3521,7 @@ namespace SPTAG
                 else if (tailHeader) {
                     m_staticHasMetadata = false;
                     m_staticNumTagsPerVec = 0;
+                    m_staticACLTagCols = 0;
                     m_staticMetadataBytes = sizeof(int);
                     int version = 0;
                     int recordBytes = 0;
@@ -3226,6 +3550,7 @@ namespace SPTAG
                     m_staticTailPageBudget = 0;
                     m_staticHasMetadata = false;
                     m_staticNumTagsPerVec = 0;
+                    m_staticACLTagCols = 0;
                     m_staticMetadataBytes = sizeof(int);
                     int version = 0;
                     int recordBytes = 0;
@@ -3252,6 +3577,7 @@ namespace SPTAG
                     m_staticTailPageBudget = 0;
                     m_staticHasMetadata = false;
                     m_staticNumTagsPerVec = 0;
+                    m_staticACLTagCols = 0;
                     m_staticMetadataBytes = sizeof(int);
                     if (m_staticPipePQ) {
                         SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
@@ -3978,6 +4304,7 @@ namespace SPTAG
             int m_staticMaxListPageCount = 0;
             bool m_staticHasMetadata = false;
             int m_staticNumTagsPerVec = 0;
+            int m_staticACLTagCols = 0;
             int m_staticMetadataBytes = sizeof(int);
             std::vector<int> m_orderedPageStartAttrs;
             std::vector<std::uint32_t> m_orderedPageStartBases;
@@ -3988,6 +4315,10 @@ namespace SPTAG
             std::vector<std::vector<SizeType>> m_staticNodeVectorAssignments;
             std::vector<std::vector<SizeType>> m_staticPrimaryNodeVectorAssignments;
             std::unordered_map<SizeType, int> m_staticHeadVectorOwners;
+            const std::unordered_map<SizeType, int>* m_staticHeadVectorOwnersView = nullptr;
+            std::vector<std::shared_ptr<VectorIndex>> m_staticHeadBundleIndexes;
+            const std::vector<std::vector<SizeType>>* m_staticHeadBundleLocalToGlobalHIDs = nullptr;
+            const std::vector<std::vector<SizeType>>* m_staticHeadBundleNodeHeadVectorIDs = nullptr;
             std::vector<int> m_staticBuildVectorOwners;
             std::vector<int> m_staticBuildHeadOwners;
             std::unique_ptr<PipePQTable> m_staticPipePQTable;

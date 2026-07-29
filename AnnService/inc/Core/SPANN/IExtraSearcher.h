@@ -443,6 +443,21 @@ namespace SPTAG {
                 const std::unordered_map<SizeType, int>& /*p_owners*/)
             {
             }
+            // Static bundle builds only need this map while assigning postings. Borrowing
+            // the Index-owned map avoids a second billion-scale head-owner hash table.
+            virtual void SetHeadVectorOwnersView(
+                const std::unordered_map<SizeType, int>* /*p_owners*/)
+            {
+            }
+            // Supplies already-built bundle graphs and their local-to-global head maps
+            // to static placement. It is intentionally build-only: query routing keeps
+            // using Index's runtime bundle state.
+            virtual void SetHeadBundleBuildView(
+                const std::vector<std::shared_ptr<VectorIndex>>& /*p_indexes*/,
+                const std::vector<std::vector<SizeType>>* /*p_localToGlobalHIDs*/,
+                const std::vector<std::vector<SizeType>>* /*p_nodeHeadVectorIDs*/)
+            {
+            }
 
             virtual void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) = 0;
 
