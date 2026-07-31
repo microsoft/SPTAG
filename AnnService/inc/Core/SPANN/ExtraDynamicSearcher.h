@@ -1395,8 +1395,16 @@ namespace SPTAG::SPANN {
                         first = (k == 0) ? 0 : args.counts[0];
                         newPostingLists[k].resize(args.counts[k] * m_vectorInfoSize);
                         char* ptr = (char*)(newPostingLists[k].c_str());
+                        // Recompute hasHead per-cluster: whether headID's own
+                        // vector already landed in this child.  Ported from
+                        // qiazh dd7f7913 "fix Split-SameHead missing issue" --
+                        // without this reset hasHead is stale from the source
+                        // scan and the isSameHead child may drop or duplicate
+                        // the head vector.
+                        hasHead = false;
                         for (int j = 0; j < args.counts[k]; j++, ptr += m_vectorInfoSize) {
                             memcpy(ptr, postingList.c_str() + localIndices[first + j] * m_vectorInfoSize, m_vectorInfoSize);
+                            if (*((SizeType*)(ptr)) == headID) hasHead = true;
                         }
                         if (plans[k].isSameHead && !hasHead) {
                             newPostingLists[k] += *headVec;

@@ -177,7 +177,7 @@ namespace SPTAG
 
     const float MinDist = (std::numeric_limits<float>::min)();
     const float MaxDist = (std::numeric_limits<float>::max)() / 10;
-    const float Epsilon = 0.000001f;
+    const float Epsilon = 0.000000001f;
     const std::uint16_t PageSize = 4096;
     const int PageSizeEx = 12;
     const std::chrono::microseconds MaxTimeout = (std::chrono::microseconds::max)();
