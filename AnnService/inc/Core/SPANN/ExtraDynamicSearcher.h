@@ -36,6 +36,7 @@
 #include <random>
 #include <deque>
 #include <condition_variable>
+#include <filesystem>
 
 #ifdef SPDK
 #include "ExtraSPDKController.h"
@@ -1265,6 +1266,15 @@ namespace SPTAG::SPANN {
 
         inline void MergeAsync(SizeType headID, std::function<void()> p_callback = nullptr)
         {
+            if (!m_splitThreadPool) {
+                bool expected = false;
+                if (m_warnedMissingAsyncMergePool.compare_exchange_strong(expected, true)) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "AsyncMergeInSearch requested without an update worker pool; skipping async merges.\n");
+                }
+                return;
+            }
+
             {
                 std::shared_lock<std::shared_timed_mutex> tmplock(m_mergeListLock);
                 auto res = m_mergeList.insert(headID);
@@ -1948,7 +1958,6 @@ namespace SPTAG::SPANN {
             auto layerTotalStart = std::chrono::high_resolution_clock::now();
 
             COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*) & p_queryResults);
-
             int diskRead = 0;
             int diskIO = 0;
             int listElements = 0;
@@ -2245,7 +2254,6 @@ namespace SPTAG::SPANN {
 
         bool BuildIndex(std::shared_ptr<Helper::VectorSetReader>& p_reader, std::shared_ptr<VectorIndex> p_headIndex, Options& p_opt, COMMON::Dataset<SizeType>& p_headToLocal, Helper::Concurrent::ConcurrentMap<SizeType, SizeType>& p_headGlobaltoLocal, COMMON::Dataset<SizeType>& p_localToGlobal, SizeType upperBound = -1) override {
             m_opt = &p_opt;
-
             int numThreads = m_opt->m_iSSDNumberOfThreads;
             int candidateNum = m_opt->m_internalResultNum;
             if (m_opt->m_headIDFile.empty()) {
@@ -3068,6 +3076,7 @@ namespace SPTAG::SPANN {
 
         int m_mergeThreshold = 10;
         ErrorCode m_asyncStatus = ErrorCode::Success;
+        std::atomic_bool m_warnedMissingAsyncMergePool{ false };
 
         std::shared_ptr<SPDKThreadPool> m_splitThreadPool;
         std::shared_ptr<SPDKThreadPool> m_reassignThreadPool;

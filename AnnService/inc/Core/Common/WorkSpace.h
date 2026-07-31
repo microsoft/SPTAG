@@ -146,17 +146,23 @@ namespace SPTAG
 
             inline void DoubleSize()
             {
-                std::uint64_t new_poolSize = ((m_poolSize + 1) << 1) - 1; 
-                SizeType* new_hashTable = new SizeType[(new_poolSize + 1) * 2];
-                memset(new_hashTable, 0, sizeof(SizeType) * (new_poolSize + 1) * 2);
-
+                const std::uint64_t oldPoolSize = m_poolSize;
+                const bool hadSecondHash = m_secondHash;
+                auto oldHashTable = std::move(m_hashTable);
+                const std::uint64_t newPoolSize = ((oldPoolSize + 1) << 1) - 1;
+                m_hashTable.reset(new SizeType[(newPoolSize + 1) * 2]);
+                memset(m_hashTable.get(), 0, sizeof(SizeType) * (newPoolSize + 1) * 2);
                 m_secondHash = false;
-                for (std::uint64_t i = 0; i <= new_poolSize; i++)
-                    if (m_hashTable[i]) _CheckAndSet(new_hashTable, new_poolSize, true, m_hashTable[i]);
-
+                m_poolSize = newPoolSize;
+                for (std::uint64_t i = 0; i <= oldPoolSize; ++i) {
+                    if (oldHashTable[i]) {
+                        _CheckAndSet(m_hashTable.get(), m_poolSize, true, oldHashTable[i]);
+                    }
+                    if (hadSecondHash && oldHashTable[oldPoolSize + 1 + i]) {
+                        _CheckAndSet(m_hashTable.get(), m_poolSize, true, oldHashTable[oldPoolSize + 1 + i]);
+                    }
+                }
                 m_exp++;
-                m_poolSize = new_poolSize;
-                m_hashTable.reset(new_hashTable);
             }
 
             inline int _CheckAndSet(SizeType *hashTable, std::uint64_t poolSize, bool isFirstTable, SizeType idx)
