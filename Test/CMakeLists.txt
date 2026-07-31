@@ -24,7 +24,6 @@ if (NOT LIBRARYONLY)
     file(GLOB TEST_HDR_FILES ${PROJECT_SOURCE_DIR}/Test/inc/Test.h)
     file(GLOB TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/Test/src/*.cpp)
     add_executable(SPTAGTest ${TEST_SRC_FILES} ${TEST_HDR_FILES})
-    target_include_directories(SPTAGTest PRIVATE ${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
     target_link_libraries(SPTAGTest SPTAGLibStatic ssdservingLib ${Boost_LIBRARIES})
 
     install(TARGETS SPTAGTest

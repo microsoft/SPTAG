@@ -12,7 +12,6 @@ endif()
 
 include_directories(${AnnService})
 include_directories(${Zstd}/lib)
-include_directories(${PROJECT_SOURCE_DIR}/ThirdParty/RaBitQ)
 include_directories(${RaBitQOfficialPatches}/include)
 include_directories(${RaBitQOfficial}/include)
 

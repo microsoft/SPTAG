@@ -243,56 +243,6 @@ int main(int argc, char *argv[])
 
         break;
     }
-    case QuantizerType::RaBitQQuantizer: {
-        std::shared_ptr<COMMON::IQuantizer> quantizer;
-        auto fp_load = SPTAG::f_createIO();
-        if (fp_load == nullptr ||
-            !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
-        {
-            const auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
-            if (!set || set->Count() <= 0) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "No vectors available to train RaBitQ.\n");
-                exit(1);
-            }
-            switch (options->m_inputValueType)
-            {
-#define DefineVectorValueType(Name, Type)                                                                              \
-    case VectorValueType::Name:                                                                                        \
-        quantizer = TrainRaBitQQuantizer<Type>(options, set);                                                         \
-        break;
-
-#include "inc/Core/DefinitionList.h"
-#undef DefineVectorValueType
-            default:
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Undefined RaBitQ input value type.\n");
-                exit(1);
-            }
-
-            auto output = SPTAG::f_createIO();
-            if (output == nullptr ||
-                !output->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out) ||
-                quantizer->SaveQuantizer(output) != ErrorCode::Success) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save RaBitQ quantizer.\n");
-                exit(1);
-            }
-        }
-        else
-        {
-            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
-            if (!quantizer) {
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load RaBitQ quantizer.\n");
-                exit(1);
-            }
-        }
-
-        quantizer->SetEnableADC(false);
-        QuantizeAndSave(vectorReader, options, quantizer);
-        auto metadataSet = vectorReader->GetMetadataSet();
-        if (metadataSet) {
-            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
-        }
-        break;
-    }
     default: {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read quantizer type.\n");
         exit(1);
