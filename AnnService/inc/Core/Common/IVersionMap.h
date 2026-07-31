@@ -30,30 +30,6 @@ namespace SPTAG
 
             virtual void DeleteAll() = 0;
 
-            /// One-time per-layer setup performed at the end of BuildIndex.
-            ///   size      total VID count for this layer (== m_opt->m_vectorSize)
-            ///   blockSize/capacity  hints for array-backed legacy maps; ignored
-            ///                       by hashmap / TiKV implementations
-            ///   globalIDs (optional) set of GLOBAL VIDs that are alive on
-            ///                       this layer. Layers whose "default
-            ///                       version" semantics treat unknown VIDs as
-            ///                       DELETED (e.g. TiKV layer >0, hashmap
-            ///                       LocalVersionMap) MUST persist an
-            ///                       explicit alive byte for each globalID;
-            ///                       otherwise MergePostings'
-            ///                       Deleted()/version-mismatch filter
-            ///                       eats every base entry on the first
-            ///                       async merge and corrupts the head index.
-            /// Default impl: just bump the internal count via SetR.
-            virtual void Initialize(SizeType size, SizeType blockSize, SizeType capacity,
-                                    COMMON::Dataset<SizeType>* globalIDs = nullptr)
-            {
-                (void)blockSize;
-                (void)capacity;
-                (void)globalIDs;
-                SetR(size);
-            }
-
             virtual SizeType Count() = 0;
             virtual SizeType GetDeleteCount() = 0;
             virtual std::uint64_t BufferSize() = 0;
@@ -74,7 +50,7 @@ namespace SPTAG
             /// Default impl is a per-VID loop. TiKV-backed maps override this
             /// to group writes by chunk so N records in the same chunk only
             /// trigger 1 ReadChunk + 1 WriteChunk RPC pair
-            virtual void SetVersionBatch(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions)
+            virtual void BatchSetVersions(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions)
             {
                 size_t n = std::min(vids.size(), versions.size());
                 for (size_t i = 0; i < n; i++) {
@@ -93,15 +69,7 @@ namespace SPTAG
             virtual ErrorCode Load(std::shared_ptr<Helper::DiskIO> input, SizeType blockSize, SizeType capacity) = 0;
             virtual ErrorCode Load(const std::string& filename, SizeType blockSize, SizeType capacity) = 0;
 
-            /// Batch version check for a set of VIDs.
-            /// Returns a vector of versions (0xfe = deleted) in the same order as vids.
-            /// Default implementation does per-VID lookup.
-            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions)
-            {
-                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
-            }
-
-            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy)
+            virtual void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy = VersionReadPolicy::UseCache)
             {
                 versions.resize(vids.size());
                 for (size_t i = 0; i < vids.size(); i++) {

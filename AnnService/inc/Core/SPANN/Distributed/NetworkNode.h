@@ -56,7 +56,6 @@ namespace SPTAG::SPANN {
 
             m_localNodeIndex = localNodeIdx;
             m_nodeAddrs = nodeAddrs;
-            m_vnodeCount = vnodeCount;
 
             // Start with empty hash ring
             std::atomic_store(&m_hashRing,
@@ -286,7 +285,6 @@ namespace SPTAG::SPANN {
 
         bool m_enabled;
         int m_localNodeIndex;
-        int m_vnodeCount = 150;
 
         // Compute-role accounting. Set by subclass Initialize().
         // m_workerNodeIndex == -1 means this node has no local data shard

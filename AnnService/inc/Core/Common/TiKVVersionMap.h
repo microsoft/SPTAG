@@ -214,81 +214,6 @@ namespace SPTAG
 
             std::shared_ptr<Helper::KeyValueIO> GetDB() const { return m_db; }
 
-            void Initialize(SizeType size, SizeType blockSize, SizeType capacity, COMMON::Dataset<SizeType>* globalIDs = nullptr) override
-            {
-                (void)blockSize;
-                (void)capacity;
-
-                m_count = size;
-
-                if (m_layer > 0 && globalIDs != nullptr && globalIDs->R() > 0) {
-                    m_defaultVersion = DefaultVersionForLayer();
-                    std::unordered_set<SizeType> aliveIDs;
-                    aliveIDs.reserve(static_cast<size_t>(globalIDs->R()));
-                    for (SizeType i = 0; i < globalIDs->R(); i++) {
-                        SizeType globalID = *(globalIDs->At(i));
-                        if (globalID >= 0 && globalID < size) {
-                            aliveIDs.insert(globalID);
-                        }
-                    }
-
-                    m_deleted = size;
-                    SaveMetadata();
-
-                    // Batch the alive-marker writes via MultiPut so they
-                    // can be grouped per TiKV region and issued in parallel.
-                    // Serial PutByte was the build-time hotspot (~1-2ms
-                    // per write × ~200K alive heads at 1M-vector scale).
-                    std::vector<SizeType> aliveSorted;
-                    aliveSorted.reserve(aliveIDs.size());
-                    for (SizeType id : aliveIDs) aliveSorted.push_back(id);
-                    std::sort(aliveSorted.begin(), aliveSorted.end());
-
-                    SizeType written = 0;
-                    constexpr size_t kBatchSize = 4096;
-                    std::vector<std::string> keys;
-                    std::vector<std::string> values;
-                    keys.reserve(kBatchSize);
-                    values.reserve(kBatchSize);
-                    const std::string aliveByte(1, static_cast<char>(0xff));
-                    for (size_t i = 0; i < aliveSorted.size(); i++) {
-                        keys.push_back(VersionKey(aliveSorted[i]));
-                        values.push_back(aliveByte);
-                        if (keys.size() >= kBatchSize || i + 1 == aliveSorted.size()) {
-                            auto ret = m_db->MultiPut(keys, values, MaxTimeout, nullptr);
-                            if (ret == ErrorCode::Success) {
-                                written += static_cast<SizeType>(keys.size());
-                            } else if (ret == ErrorCode::Undefined) {
-                                // Backend lacks MultiPut: fall back to serial PutByte.
-                                for (const auto& k : keys) {
-                                    if (PutByte(k, 0xff) == ErrorCode::Success) written++;
-                                }
-                            } else {
-                                SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
-                                    "TiKVVersionMap::Initialize: MultiPut batch failed layer=%d ret=%d size=%zu; falling back to serial PutByte for this batch.\n",
-                                    m_layer, static_cast<int>(ret), keys.size());
-                                for (const auto& k : keys) {
-                                    if (PutByte(k, 0xff) == ErrorCode::Success) written++;
-                                }
-                            }
-                            keys.clear();
-                            values.clear();
-                        }
-                    }
-                    m_deleted = size - written;
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=deleted, alive=%d, written=%d, deleted=%d\n",
-                        m_layer, size, static_cast<int>(aliveIDs.size()), written, m_deleted.load());
-                } else {
-                    m_defaultVersion = DefaultVersionForLayer();
-                    m_deleted = (m_defaultVersion == 0xfe) ? size : 0;
-                    SaveMetadata();
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
-                        "TiKVVersionMap::Initialize layer=%d: per-VID mode, size=%d, default=%s, deleted=%d\n",
-                        m_layer, size, (m_defaultVersion == 0xfe) ? "deleted" : "alive", m_deleted.load());
-                }
-            }
-
             ErrorCode GetContainedIDs(std::vector<SizeType>& globalIDs) override
             {
                 globalIDs.clear();
@@ -416,7 +341,7 @@ namespace SPTAG
             // GetDeleteCount() returns 0 for the TiKV-backed version map so
             // this approximation is acceptable. Callers that need precise
             // accounting can call SetVersion() per-VID instead.
-            void SetVersionBatch(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
+            void BatchSetVersions(const std::vector<SizeType>& vids, const std::vector<uint8_t>& versions) override
             {
                 size_t n = std::min(vids.size(), versions.size());
                 if (n == 0) return;
@@ -555,12 +480,7 @@ namespace SPTAG
                 return LoadMetadataFromTiKV();
             }
 
-            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions) override
-            {
-                BatchGetVersions(vids, versions, VersionReadPolicy::UseCache);
-            }
-
-            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy) override
+            void BatchGetVersions(const std::vector<SizeType>& vids, std::vector<uint8_t>& versions, VersionReadPolicy policy = VersionReadPolicy::UseCache) override
             {
                 (void)policy;
                 versions.assign(vids.size(), 0xfe);
