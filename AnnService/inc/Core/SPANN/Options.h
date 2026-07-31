@@ -99,10 +99,6 @@ namespace SPTAG {
             int m_samples;
             bool m_excludehead;
             int m_postingVectorLimit;
-            std::string m_postingQuantizer;
-            std::string m_postingQuantizerFile;
-            int m_postingQuantBits;
-            int m_postingQuantizerTrainingSamples;
             std::string m_fullDeletedIDFile;
             Storage m_storage;
             std::string m_KVFile;
