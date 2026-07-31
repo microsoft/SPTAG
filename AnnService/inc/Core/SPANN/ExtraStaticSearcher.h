@@ -10,6 +10,7 @@
 #include "inc/Core/Common/TruthSet.h"
 #include "Compressor.h"
 
+#include <cstring>
 #include <map>
 #include <cmath>
 #include <climits>
@@ -176,9 +177,15 @@ namespace SPTAG
             }
 
             virtual bool LoadIndex(Options& p_opt) override {
+                m_opt = &p_opt;
+                m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
+                m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
+                m_enableDataCompression = p_opt.m_enableDataCompression;
+                m_enableDictTraining = p_opt.m_enableDictTraining;
+
                 m_extraFullGraphFile = p_opt.m_indexDirectory + FolderSep + p_opt.m_ssdIndex;
                 std::string curFile = m_extraFullGraphFile + "_" + std::to_string(m_layer);
-                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(int)) + PageSize - 1) / PageSize));
+                p_opt.m_searchPostingPageLimit = max(p_opt.m_searchPostingPageLimit, static_cast<int>((p_opt.m_postingVectorLimit * (p_opt.m_dim * sizeof(ValueType) + sizeof(SizeType)) + PageSize - 1) / PageSize));
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Load index with posting page limit:%d\n", p_opt.m_searchPostingPageLimit);
                 do {
                     auto curIndexFile = f_createAsyncIO();
@@ -211,12 +218,6 @@ namespace SPTAG
                 } while (fileexists(curFile.c_str()));
                 m_oneContext = (m_indexFiles.size() == 1);
 
-                m_opt = &p_opt;
-                m_enableDeltaEncoding = p_opt.m_enableDeltaEncoding;
-                m_enablePostingListRearrange = p_opt.m_enablePostingListRearrange;
-                m_enableDataCompression = p_opt.m_enableDataCompression;
-                m_enableDictTraining = p_opt.m_enableDictTraining;
-
                 if (m_enablePostingListRearrange) m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingListRearrange;
                 else m_parsePosting = &ExtraStaticSearcher<ValueType>::ParsePostingList;
                 if (m_enableDeltaEncoding) m_parseEncoding = &ExtraStaticSearcher<ValueType>::ParseDeltaEncoding;
@@ -241,12 +242,20 @@ namespace SPTAG
                 bool)
             {
                 const uint32_t postingListCount = static_cast<uint32_t>(p_exWorkSpace->m_postingIDs.size());
+                if (postingListCount > p_exWorkSpace->m_pageBuffers.size() ||
+                    postingListCount > p_exWorkSpace->m_diskRequests.size()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                 "Static search workspace is too small: postings=%u buffers=%zu requests=%zu.\n",
+                                 postingListCount, p_exWorkSpace->m_pageBuffers.size(),
+                                 p_exWorkSpace->m_diskRequests.size());
+                    return ErrorCode::Fail;
+                }
 
                 COMMON::QueryResultSet<ValueType>& queryResults = *((COMMON::QueryResultSet<ValueType>*)&p_queryResults);
- 
                 int diskRead = 0;
                 int diskIO = 0;
                 int listElements = 0;
+                int missingPostingIDs = 0;
 
 #if defined(ASYNC_READ) && !defined(BATCH_READ)
                 int unprocessed = 0;
@@ -257,6 +266,7 @@ namespace SPTAG
                     auto curPostingID = p_exWorkSpace->m_postingIDs[pi];
                     auto it = m_globalVectorIDToHeadMap.find(curPostingID);
                     if (it == m_globalVectorIDToHeadMap.end()) {
+                        ++missingPostingIDs;
                         auto& request = p_exWorkSpace->m_diskRequests[pi];
                         request.m_readSize = 0;
                         request.m_success = false;
@@ -276,9 +286,17 @@ namespace SPTAG
                     listElements += listInfo->listEleCount;
 
                     size_t totalBytes = (static_cast<size_t>(listInfo->listPageCount) << PageSizeEx);
+                    if (totalBytes > p_exWorkSpace->m_pageBuffers[pi].GetPageSize()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                                     "Static posting %d requires %zu bytes but its workspace buffer has %zu bytes.\n",
+                                     curPostingID, totalBytes,
+                                     p_exWorkSpace->m_pageBuffers[pi].GetPageSize());
+                        return ErrorCode::DiskIOFail;
+                    }
 
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -329,6 +347,12 @@ namespace SPTAG
 
                     ProcessPosting();
 #endif
+                }
+
+                if (missingPostingIDs > 0) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Warning,
+                                 "Static search skipped %d of %u posting IDs that are absent from the head map.\n",
+                                 missingPostingIDs, postingListCount);
                 }
 
 #ifdef ASYNC_READ
@@ -469,6 +493,7 @@ namespace SPTAG
 
 #ifdef ASYNC_READ
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -570,6 +595,7 @@ namespace SPTAG
                     
 #ifdef ASYNC_READ       
                     auto& request = p_exWorkSpace->m_diskRequests[pi];
+                    request.m_buffer = reinterpret_cast<char*>(p_exWorkSpace->m_pageBuffers[pi].GetBuffer());
                     request.m_offset = listInfo->listOffset;
                     request.m_readSize = totalBytes;
                     request.m_status = (fileid << 16) | (request.m_status & 0xffff);
@@ -811,7 +837,7 @@ namespace SPTAG
                 {
                     auto fullVectors = p_reader->GetVectorSet();
                     fullCount = fullVectors->Count();
-                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(int);
+                    vectorInfoSize = fullVectors->PerVectorDataSize() + sizeof(SizeType);
                 }
                 if (upperBound > 0) fullCount = upperBound;
 
@@ -1497,9 +1523,9 @@ namespace SPTAG
                     throw std::runtime_error("Failed to open file for SSD index save");
                 }
                 // meta size of global info
-                std::uint64_t listOffset = sizeof(int) * 4;
+                std::uint64_t listOffset = sizeof(SizeType) * 3 + sizeof(int);
                 // meta size of the posting lists
-                listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t)) * p_postingListSizes.size();
+                listOffset += (sizeof(int) + sizeof(std::uint16_t) + sizeof(int) + sizeof(std::uint16_t) + sizeof(SizeType)) * p_postingListSizes.size();
                 // write listTotalBytes only when enabled data compression
                 if (p_enableDataCompression)
                 {
@@ -1796,12 +1822,12 @@ namespace SPTAG
 
             int m_vectorInfoSize = 0;
             int m_iDataDimension = 0;
-
             int m_totalListCount = 0;
 
             int m_listPerFile = 0;
 
             std::unordered_map<SizeType, SizeType> m_globalVectorIDToHeadMap;
+
         };
     } // namespace SPANN
 } // namespace SPTAG

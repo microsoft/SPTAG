@@ -95,6 +95,10 @@ DefineSSDParameter(m_rngFactor, float, 1.0f, "RNGFactor")
 DefineSSDParameter(m_samples, int, 100, "RecallTestSampleNumber")
 DefineSSDParameter(m_excludehead, bool, true, "ExcludeHead")
 DefineSSDParameter(m_postingVectorLimit, int, 118, "PostingVectorLimit")
+DefineSSDParameter(m_postingQuantizer, std::string, std::string("None"), "PostingQuantizer")
+DefineSSDParameter(m_postingQuantizerFile, std::string, std::string(""), "PostingQuantizerFile")
+DefineSSDParameter(m_postingQuantBits, int, 3, "PostingQuantBits")
+DefineSSDParameter(m_postingQuantizerTrainingSamples, int, 1000000, "PostingQuantizerTrainingSamples")
 DefineSSDParameter(m_fullDeletedIDFile, std::string, std::string("fulldeleted"), "FullDeletedIDFile")
 DefineSSDParameter(m_storage, SPTAG::Storage, SPTAG::Storage::STATIC, "Storage")
 DefineSSDParameter(m_spdkBatchSize, int, 64, "SpdkBatchSize")
@@ -214,7 +218,7 @@ DefineSSDParameter(m_growthFileSize, int, 10, "GrowthFileSizeGB")
 DefineSSDParameter(m_growThreshold, float, 0.05F, "GrowthThreshold")
 DefineSSDParameter(m_fDeletePercentageForRefine, float, 0.4F, "DeletePercentageForRefine") // Mutable
 DefineSSDParameter(m_oneClusterCutMax, bool, false, "OneClusterCutMax") // Mutable
-DefineSSDParameter(m_asyncMergeInSearch, bool, true, "AsyncMergeInSearch") // Mutable
+DefineSSDParameter(m_asyncMergeInSearch, bool, false, "AsyncMergeInSearch") // Mutable
 DefineSSDParameter(m_consistencyCheck, bool, false, "ConsistencyCheck") // Mutable
 DefineSSDParameter(m_checksumCheck, bool, false, "ChecksumCheck") // Mutable
 DefineSSDParameter(m_checksumInRead, bool, false, "ChecksumInRead") // Mutable

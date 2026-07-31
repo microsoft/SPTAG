@@ -29,9 +29,11 @@ void QuantizeAndSave(std::shared_ptr<SPTAG::Helper::VectorSetReader> &vectorRead
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Normalizing vectors.\n");
             set->Normalize(options->m_threadNum);
         }
-        ByteArray PQ_vector_array = ByteArray::Alloc(sizeof(std::uint8_t) * options->m_quantizedDim * set->Count());
+        const DimensionType quantizedDim = quantizer->GetNumSubvectors();
+        ByteArray PQ_vector_array = ByteArray::Alloc(
+            sizeof(std::uint8_t) * quantizedDim * set->Count());
         quantized_vectors = std::make_shared<BasicVectorSet>(PQ_vector_array, VectorValueType::UInt8,
-                                                             options->m_quantizedDim, set->Count());
+                                                             quantizedDim, set->Count());
         {
             std::vector<std::thread> mythreads;
             mythreads.reserve(options->m_threadNum);
@@ -239,6 +241,53 @@ int main(int argc, char *argv[])
             metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
         }
 
+        break;
+    }
+    case QuantizerType::RaBitQQuantizer: {
+        if (options->m_inputValueType != VectorValueType::Float) {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RaBitQ global quantization requires Float input vectors.\n");
+            exit(1);
+        }
+
+        std::shared_ptr<COMMON::IQuantizer> quantizer;
+        auto fp_load = SPTAG::f_createIO();
+        if (fp_load == nullptr ||
+            !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
+        {
+            const auto set = vectorReader->GetVectorSet(0, options->m_trainingSamples);
+            if (!set || set->Count() <= 0) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "No vectors available to train RaBitQ.\n");
+                exit(1);
+            }
+            quantizer = TrainRaBitQQuantizer(options, set);
+            if (!quantizer) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to train RaBitQ quantizer.\n");
+                exit(1);
+            }
+
+            auto output = SPTAG::f_createIO();
+            if (output == nullptr ||
+                !output->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::out) ||
+                quantizer->SaveQuantizer(output) != ErrorCode::Success) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to save RaBitQ quantizer.\n");
+                exit(1);
+            }
+        }
+        else
+        {
+            quantizer = SPTAG::COMMON::IQuantizer::LoadIQuantizer(fp_load);
+            if (!quantizer || quantizer->GetQuantizerType() != QuantizerType::RaBitQQuantizer) {
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to load RaBitQ quantizer.\n");
+                exit(1);
+            }
+        }
+
+        quantizer->SetEnableADC(false);
+        QuantizeAndSave(vectorReader, options, quantizer);
+        auto metadataSet = vectorReader->GetMetadataSet();
+        if (metadataSet) {
+            metadataSet->SaveMetadata(options->m_outputMetadataFile, options->m_outputMetadataIndexFile);
+        }
         break;
     }
     default: {

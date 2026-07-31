@@ -2,6 +2,7 @@
 #include <inc/Core/Common/DistanceUtils.h>
 #include <inc/Core/Common/IQuantizer.h>
 #include <inc/Core/Common/PQQuantizer.h>
+#include <inc/Core/Common/RaBitQQuantizer.h>
 
 #include <memory>
 #include <inc/Core/VectorSet.h>
@@ -148,4 +149,21 @@ std::unique_ptr<T[]> TrainPQQuantizer(std::shared_ptr<QuantizerOptions> options,
     }
     mythreads.clear();
     return codebooks;
+}
+
+inline std::shared_ptr<COMMON::RaBitQQuantizer> TrainRaBitQQuantizer(
+    const std::shared_ptr<QuantizerOptions>& options,
+    const std::shared_ptr<VectorSet>& raw_vectors)
+{
+    const int bits = options->m_quantizedDim > 0 ? options->m_quantizedDim : 2;
+    if (bits < 1 || bits > 8) {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "RaBitQ bits must be in [1, 8].\n");
+        return nullptr;
+    }
+    auto quantizer = std::make_shared<COMMON::RaBitQQuantizer>(
+        raw_vectors->Dimension(), bits, options->m_normalized);
+    if (quantizer->Train(raw_vectors) != ErrorCode::Success) {
+        return nullptr;
+    }
+    return quantizer;
 }
