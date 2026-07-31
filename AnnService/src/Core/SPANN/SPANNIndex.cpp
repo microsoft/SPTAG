@@ -1860,14 +1860,6 @@ ErrorCode Index<T>::AddIndex(const void *p_data, SizeType p_vectorNum, Dimension
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Only Support KV Extra Update\n");
         return ErrorCode::Fail;
     }
-    if (Helper::StrUtils::StrEqualIgnoreCase(
-            m_options.m_postingQuantizer.c_str(), "RaBitQOfficial"))
-    {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
-                     "RaBitQOfficial does not support online insertion or reassignment.\n");
-        return ErrorCode::Undefined;
-    }
-
     if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0)
         return ErrorCode::EmptyData;
     if (p_dimension != GetFeatureDim())

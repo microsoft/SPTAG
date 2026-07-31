@@ -239,43 +239,16 @@ MaxDistRatio=8.0
 SearchPostingPageLimit=12
 ```
 
-### **Official RaBitQ Posting Build**
+### **Global RaBitQ Quantizer**
 
-Official RaBitQ is configured as a native SPANN posting quantizer, analogous
-to OPQ/PipePQ posting modes. Keep BKT heads as raw Float vectors and configure
-the posting path in `[BuildSSDIndex]`:
+RaBitQ is a global `IQuantizer`, not a SPANN posting quantizer. Train the
+official scalar model and encode base vectors with `Release/quantizer`, then
+use the generated model through `QuantizerFilePath` in the normal SPANN
+workflow. For 128-dimensional SIFT vectors, the encoded `UInt8` vectors use
+`Dim=136` (128 scalar bytes plus two Float reconstruction factors).
 
-```ini
-PostingQuantizer=RaBitQOfficial
-PostingQuantizerFile=/path/to/official_rabitq3.model
-PostingQuantBits=3
-PostingQuantizerTrainingSamples=1000000
-Rerank=0
-```
-
-`PostingQuantizer` explicitly selects the implementation; the model-file path
-alone does not identify OPQ versus RaBitQ. If the RaBitQ model file is absent,
-the builder trains it from the configured samples and saves it before writing
-postings. Queries remain raw Float vectors and use the official asymmetric
-estimator.
-
-For the SIFT1M static example, build first:
-
-```bash
-Release/ssdserving Script_AE/iniFile/build_SPANN_sift1m_official_rabitq3_posting_static.ini
-```
-
-Then run a search-only INI in a new process:
-
-```bash
-Release/ssdserving Script_AE/iniFile/search_SPANN_sift1m_official_rabitq3_static_n20.ini
-```
-
-The FileIO example is
-`Script_AE/iniFile/build_SPANN_sift1m_official_rabitq3_posting.ini`. SIFT1M
-examples pin `BKTLambdaFactor=0.01` in both SelectHead and BuildHead. See
-[`OfficialRaBitQ_Postings.md`](OfficialRaBitQ_Postings.md) for format,
-storage-mode, and parameter details.
+See [`RaBitQ_Global_Quantizer.md`](RaBitQ_Global_Quantizer.md) and
+`Script_AE/iniFile/build_SPANN_sift1m_rabitq3_global.ini`.
 
 ### **Quantizer Training and Quantizing Vectors**
 > Use Quantizer.exe to train PQQuantizer and output quantizer & quantized vectors:
